@@ -2,7 +2,7 @@
 
 from nicegui import ui
 
-from app.core import storage, parser, parse_cache
+from app.core import storage, parser, parse_cache, searching
 from app.utils.auth import is_deployer
 
 # 层级竖线颜色（每级不同色，现代柔和配色）
@@ -18,174 +18,6 @@ _LEVEL_LINE_COLORS = [
 ]
 
 _LEVEL_TEXT_COLORS = ["dark", "grey-9", "grey-8", "grey-7", "grey-6"]
-
-_TREE_ASSETS_SENT = False
-
-_TREE_ASSETS = """
-<style>
-/* ===== Tree Container ===== */
-.fav-tree {
-    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-    line-height: 1.4;
-    user-select: none;
-    overflow-x: auto;
-}
-
-/* ===== Node Row ===== */
-.fav-tree .tree-row {
-    display: flex;
-    align-items: center;
-    height: 30px;
-    padding: 0 12px 0 6px;
-    border-radius: 4px;
-    cursor: default;
-    transition: background 0.1s ease;
-    gap: 0;
-    margin: 0;
-    box-sizing: border-box;
-}
-.fav-tree .tree-row:hover {
-    background: rgba(0, 0, 0, 0.04);
-}
-
-/* Eliminate ui.html wrapper div interference in flex layout */
-.fav-tree .tree-row > div {
-    display: contents;
-}
-
-/* ===== Alternating depth backgrounds ===== */
-.fav-tree .tree-row.depth-even {
-    background: transparent;
-}
-.fav-tree .tree-row.depth-odd {
-    background: rgba(0, 0, 0, 0.015);
-}
-.fav-tree .tree-row.depth-even:hover {
-    background: rgba(0, 0, 0, 0.05);
-}
-.fav-tree .tree-row.depth-odd:hover {
-    background: rgba(0, 0, 0, 0.055);
-}
-
-/* ===== Indent Cell ===== */
-.fav-tree .indent-cell {
-    width: 20px;
-    align-self: stretch;
-    position: relative;
-    flex-shrink: 0;
-}
-.fav-tree .indent-cell .guide-line {
-    position: absolute;
-    left: 50%;
-    top: -1px;
-    bottom: -1px;
-    width: 2px;
-    transform: translateX(-50%);
-    border-radius: 1px;
-    opacity: 0.45;
-    transition: opacity 0.15s ease;
-}
-.fav-tree .tree-row:hover .indent-cell .guide-line {
-    opacity: 0.72;
-}
-
-/* ===== Toggle Arrow (CSS triangle) ===== */
-.fav-tree .toggle-btn {
-    width: 20px;
-    align-self: stretch;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    cursor: pointer;
-    border-radius: 3px;
-    transition: background 0.1s ease;
-    outline: none;
-}
-.fav-tree .toggle-btn:hover {
-    background: rgba(0, 0, 0, 0.08);
-}
-.fav-tree .toggle-btn::before {
-    content: '';
-    display: block;
-    width: 0;
-    height: 0;
-    border-left: 5px solid #888;
-    border-top: 3.5px solid transparent;
-    border-bottom: 3.5px solid transparent;
-    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.15s ease;
-}
-.fav-tree .toggle-btn:hover::before {
-    border-left-color: #444;
-}
-.fav-tree .toggle-btn.expanded::before {
-    transform: rotate(90deg);
-}
-
-/* ===== Leaf Marker ===== */
-.fav-tree .leaf-marker {
-    width: 20px;
-    align-self: stretch;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-.fav-tree .leaf-marker::after {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #bbb;
-    transition: background 0.12s ease;
-}
-.fav-tree .tree-row:hover .leaf-marker::after {
-    background: #777;
-}
-
-/* ===== Favorite Star ===== */
-.fav-tree .fav-star {
-    flex-shrink: 0;
-    transition: color 0.15s, transform 0.12s ease;
-}
-.fav-tree .fav-star:hover {
-    transform: scale(1.35);
-}
-
-/* ===== Label Text ===== */
-.fav-tree .tree-label {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.fav-tree .lbl-0 { font-weight: 600; font-size: 0.94rem; letter-spacing: -0.01em; }
-.fav-tree .lbl-1 { font-weight: 500; font-size: 0.89rem; }
-.fav-tree .lbl-2 { font-weight: 500; font-size: 0.85rem; }
-.fav-tree .lbl-3 { font-weight: 400; font-size: 0.82rem; }
-
-.fav-tree .val-text {
-    color: #1565C0;
-    opacity: 0.75;
-    font-size: 0.9em;
-}
-
-/* ===== Node Key ===== */
-.fav-tree .node-key {
-    color: inherit;
-}
-
-/* ===== Children Container ===== */
-.fav-tree .children-wrap {
-    overflow: hidden;
-    margin: 0 !important;
-    padding: 0 !important;
-    transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-</style>
-"""
 
 
 def _build_row_prefix_html(depth: int, has_children: bool, is_expanded: bool) -> str:
@@ -208,7 +40,7 @@ def _build_row_prefix_html(depth: int, has_children: bool, is_expanded: bool) ->
     return ''.join(parts)
 
 
-def render_file_viewer(filename: str, deployer: bool, session_tabs: list, session_active_tab: dict):
+def render_file_viewer(filename: str, deployer: bool, session_tabs: list, session_active_tab: dict, search_keyword: str | None = None):
     """渲染文件解析查看器"""
     source_path = storage.get_config_path(filename)
     tree = parse_cache.load_tree(source_path)
@@ -224,27 +56,7 @@ def render_file_viewer(filename: str, deployer: bool, session_tabs: list, sessio
             return
         parse_cache.save_tree(source_path, tree)
 
-    global _TREE_ASSETS_SENT
-    if not _TREE_ASSETS_SENT:
-        ui.add_head_html(_TREE_ASSETS)
-        ui.run_javascript("""
-            window.mct = function(el) {
-                var row = el.closest('.tree-row');
-                if (!row) return;
-                var kids = row.nextElementSibling;
-                if (!kids || !kids.classList.contains('children-wrap')) return;
-                if (kids.style.maxHeight === '0px') {
-                    kids.style.maxHeight = 'none';
-                    el.classList.remove('collapsed');
-                    el.classList.add('expanded');
-                } else {
-                    kids.style.maxHeight = '0px';
-                    el.classList.add('collapsed');
-                    el.classList.remove('expanded');
-                }
-            };
-        """)
-        _TREE_ASSETS_SENT = True
+    tree_full = tree
 
     # 预加载收藏状态：区分"直接收藏"和"被父级包含"
     favorites = storage.load_favorites()
@@ -261,15 +73,35 @@ def render_file_viewer(filename: str, deployer: bool, session_tabs: list, sessio
                 if child_path != fav["path"]:
                     fav_covered.add(child_path)
 
+    show_note = False
+    note_map = {}
+    kw = (search_keyword or "").strip()
+    if kw:
+        note_map = searching.build_note_map(favorites, filename)
+        filtered = searching.filter_tree(tree, kw, note_map)
+        if not filtered or not filtered.get("children"):
+            with ui.row().classes("items-center q-mb-md"):
+                ui.badge(filename, color="blue")
+                ui.label(f'搜索: "{kw}"').classes("text-caption text-grey q-ml-sm")
+            ui.label("未找到匹配项").classes("text-caption text-grey")
+            return
+        tree = filtered
+        show_note = True
+
     # 文件信息栏
     with ui.row().classes("items-center q-mb-md"):
         ui.badge(filename, color="blue")
         update_date = storage.get_file_update_date(filename)
         if update_date:
             ui.label(f"更新: {update_date}").classes("text-caption text-grey")
+        if kw:
+            ui.label(f'搜索: "{kw}"').classes("text-caption text-grey q-ml-sm")
         ui.space()
         ui.button("版本历史", icon="history",
                   on_click=lambda: _open_history_tab(filename, session_tabs, session_active_tab)
+                  ).props("flat dense")
+        ui.button("修改记录", icon="history_edu",
+                  on_click=lambda: _open_records_tab(filename, session_tabs, session_active_tab)
                   ).props("flat dense")
         ui.button("版本对比", icon="compare",
                   on_click=lambda: _open_comparison_tab(filename, session_tabs, session_active_tab)
@@ -279,11 +111,11 @@ def render_file_viewer(filename: str, deployer: bool, session_tabs: list, sessio
     with ui.column().classes("w-full fav-tree q-pa-sm"):
         for child in tree.get("children", []):
             _render_node(child, filename, fav_direct, fav_covered, fav_entry_map,
-                        tree, depth=0, expand_state={})
+                        tree_full, depth=0, expand_state={}, note_map=note_map, show_note=show_note)
 
 
 def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
-                 fav_entry_map: dict, tree: dict, depth: int, expand_state: dict):
+                 fav_entry_map: dict, tree: dict, depth: int, expand_state: dict, note_map: dict | None = None, show_note: bool = False):
     """递归渲染单个树节点"""
     label = node["label"]
     value = node.get("value")
@@ -310,6 +142,12 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
                 f'{label} <span class="val-text">= {value}</span></span>',
                 sanitize=False
             )
+            if show_note:
+                note = ""
+                if isinstance(note_map, dict):
+                    note = (node.get("note") or note_map.get(node_path, "") or "").strip()
+                if note:
+                    ui.label(note).classes("text-caption text-grey q-ml-sm")
         elif has_children:
             ui.html(
                 f'<span class="text-body2 text-weight-medium text-{txt_color} {lbl_class} tree-label node-key">'
@@ -328,7 +166,7 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
         with children_wrap:
             for child in children:
                 _render_node(child, filename, fav_direct, fav_covered, fav_entry_map,
-                            tree, depth + 1, expand_state)
+                            tree, depth + 1, expand_state, note_map=note_map, show_note=show_note)
 
 
 def _serialize_subtree(node: dict) -> list:
@@ -478,14 +316,49 @@ def _open_history_tab(filename: str, session_tabs: list, session_active_tab: dic
     for tab in session_tabs:
         if tab["name"] == tab_name:
             session_active_tab["name"] = tab_name
+            try:
+                from app.core import tabs_state
+                tabs_state.save_current(session_tabs, session_active_tab["name"])
+            except Exception:
+                pass
             return
+    from app.core import tab_manager, tabs_state
+    tab_manager.ensure_opened_at(session_tabs)
     session_tabs.append({
         "name": tab_name,
         "label": f"历史: {filename}",
         "type": "history",
         "filename": filename,
+        "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
     })
     session_active_tab["name"] = tab_name
+    tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], 15)
+    tabs_state.save_current(session_tabs, session_active_tab["name"])
+
+
+def _open_records_tab(filename: str, session_tabs: list, session_active_tab: dict):
+    tab_name = f"records:{filename}"
+    for tab in session_tabs:
+        if tab["name"] == tab_name:
+            session_active_tab["name"] = tab_name
+            try:
+                from app.core import tabs_state
+                tabs_state.save_current(session_tabs, session_active_tab["name"])
+            except Exception:
+                pass
+            return
+    from app.core import tab_manager, tabs_state
+    tab_manager.ensure_opened_at(session_tabs)
+    session_tabs.append({
+        "name": tab_name,
+        "label": f"修改记录: {filename}",
+        "type": "records",
+        "filename": filename,
+        "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
+    })
+    session_active_tab["name"] = tab_name
+    tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], 15)
+    tabs_state.save_current(session_tabs, session_active_tab["name"])
 
 
 def _open_comparison_tab(filename: str, session_tabs: list, session_active_tab: dict):
@@ -494,11 +367,21 @@ def _open_comparison_tab(filename: str, session_tabs: list, session_active_tab: 
     for tab in session_tabs:
         if tab["name"] == tab_name:
             session_active_tab["name"] = tab_name
+            try:
+                from app.core import tabs_state
+                tabs_state.save_current(session_tabs, session_active_tab["name"])
+            except Exception:
+                pass
             return
+    from app.core import tab_manager, tabs_state
+    tab_manager.ensure_opened_at(session_tabs)
     session_tabs.append({
         "name": tab_name,
         "label": f"对比: {filename}",
         "type": "comparison",
         "filename": filename,
+        "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
     })
     session_active_tab["name"] = tab_name
+    tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], 15)
+    tabs_state.save_current(session_tabs, session_active_tab["name"])

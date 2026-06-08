@@ -1,23 +1,47 @@
 """版本对比页面"""
 
+import json
+
 from nicegui import ui
 
 from app.core import storage
 from app.core.differ import compare_versions, compare_with_uploaded
+
+_DIFF_PREVIEW_LIMIT = 200
 
 
 def render_comparison_page(tab: dict, deployer: bool):
     """渲染版本对比页面"""
     filename = tab.get("filename", "")
 
-    ui.label(f"版本对比 - {filename}").classes("text-h6 q-mb-md")
+    ui.label(f"版本对比 - {filename}").classes("mc-page-title q-mb-md")
 
     versions = storage.list_archived_versions(filename)
     version_options = [v["filename"] for v in versions]
 
     mode = {"value": "current_vs_history"}
 
-    with ui.row().classes("w-full items-center q-mb-md"):
+    diff_container = ui.column().classes("w-full")
+
+    def setup_compare_ui():
+        diff_container.clear()
+        with diff_container:
+            result_container = ui.column().classes("w-full q-mt-md")
+            if mode["value"] == "current_vs_history":
+                _render_current_vs_history(filename, version_options, result_container)
+            elif mode["value"] == "history_vs_history":
+                _render_history_vs_history(filename, version_options, result_container)
+            elif mode["value"] == "upload_vs_current":
+                _render_upload_vs_current(filename, result_container)
+            elif mode["value"] == "upload_vs_history":
+                _render_upload_vs_history(filename, version_options, result_container)
+
+    def on_mode_change(e):
+        mode["value"] = e.value
+        setup_compare_ui()
+
+    with ui.card().classes("w-full q-pa-md q-mb-md"):
+        ui.label("对比方式").classes("mc-section-title q-mb-sm")
         ui.select(
             {
                 "current_vs_history": "当前版本 vs 历史版本",
@@ -26,109 +50,149 @@ def render_comparison_page(tab: dict, deployer: bool):
                 "upload_vs_history": "上传文件 vs 历史版本",
             },
             value="current_vs_history",
-            on_change=lambda e: mode.update(value=e.value),
-        ).props("dense outlined").classes("w-80")
-
-    diff_container = ui.column().classes("w-full")
-
-    def setup_compare_ui():
-        diff_container.clear()
-        with diff_container:
-            if mode["value"] == "current_vs_history":
-                _render_current_vs_history(filename, version_options, diff_container)
-            elif mode["value"] == "history_vs_history":
-                _render_history_vs_history(filename, version_options, diff_container)
-            elif mode["value"] == "upload_vs_current":
-                _render_upload_vs_current(filename, diff_container)
-            elif mode["value"] == "upload_vs_history":
-                _render_upload_vs_history(filename, version_options, diff_container)
+            on_change=on_mode_change,
+        ).props("dense outlined").classes("w-full md:w-96")
 
     setup_compare_ui()
 
 
-def _render_current_vs_history(filename: str, version_options: list, container):
+def _render_current_vs_history(filename: str, version_options: list, result_container):
     """当前版本 vs 历史版本"""
     if not version_options:
-        ui.label("无历史版本可对比").classes("text-warning")
+        with ui.card().classes("w-full q-pa-md"):
+            ui.label("无历史版本可对比").classes("text-warning")
         return
 
     selected = {"value": version_options[0]}
-    with ui.row().classes("items-center q-mb-md"):
-        ui.select(version_options, value=selected["value"],
-                  on_change=lambda e: selected.update(value=e.value)
-                  ).props("dense outlined").classes("w-64")
-        ui.button("对比",
-                  on_click=lambda: _run_current_vs_history(filename, selected["value"], container)
-                  ).props("color=primary dense")
+    with ui.card().classes("w-full q-pa-md"):
+        ui.label("选择历史版本").classes("mc-section-title q-mb-sm")
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.select(
+                version_options,
+                value=selected["value"],
+                on_change=lambda e: selected.update(value=e.value),
+            ).props("dense outlined").classes("w-full md:w-96")
+            ui.button(
+                "对比",
+                icon="compare_arrows",
+                on_click=lambda: _run_current_vs_history(filename, selected["value"], result_container),
+            ).props("color=primary dense")
 
 
-def _render_history_vs_history(filename: str, version_options: list, container):
+def _render_history_vs_history(filename: str, version_options: list, result_container):
     """历史版本 vs 历史版本"""
     if len(version_options) < 2:
-        ui.label("需要至少2个历史版本").classes("text-warning")
+        with ui.card().classes("w-full q-pa-md"):
+            ui.label("需要至少2个历史版本").classes("text-warning")
         return
 
     selected_a = {"value": version_options[0]}
     selected_b = {"value": version_options[1] if len(version_options) > 1 else ""}
 
-    with ui.row().classes("items-center q-mb-md"):
-        ui.select(version_options, value=selected_a["value"],
-                  on_change=lambda e: selected_a.update(value=e.value)
-                  ).props("dense outlined").classes("w-56")
-        ui.label("vs")
-        ui.select(version_options, value=selected_b["value"],
-                  on_change=lambda e: selected_b.update(value=e.value)
-                  ).props("dense outlined").classes("w-56")
-        ui.button("对比",
-                  on_click=lambda: _run_history_vs_history(filename, selected_a["value"], selected_b["value"], container)
-                  ).props("color=primary dense")
+    with ui.card().classes("w-full q-pa-md"):
+        ui.label("选择两个历史版本").classes("mc-section-title q-mb-sm")
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.select(
+                version_options,
+                value=selected_a["value"],
+                on_change=lambda e: selected_a.update(value=e.value),
+            ).props("dense outlined").classes("w-full md:w-72")
+            ui.label("vs").classes("mc-muted")
+            ui.select(
+                version_options,
+                value=selected_b["value"],
+                on_change=lambda e: selected_b.update(value=e.value),
+            ).props("dense outlined").classes("w-full md:w-72")
+            ui.button(
+                "对比",
+                icon="compare_arrows",
+                on_click=lambda: _run_history_vs_history(
+                    filename,
+                    selected_a["value"],
+                    selected_b["value"],
+                    result_container,
+                ),
+            ).props("color=primary dense")
 
 
-def _render_upload_vs_current(filename: str, container):
+def _render_upload_vs_current(filename: str, result_container):
     """上传文件 vs 当前版本"""
-    uploaded = {"data": None}
+    uploaded = {"data": None, "name": None}
 
-    ui.label("请上传文件:").classes("text-subtitle2")
-    ui.upload(
-        label="上传文件",
-        auto_upload=True,
-        on_upload=lambda e: uploaded.update(data=e.content.read()),
-    ).props("dense").classes("w-full")
+    with ui.card().classes("w-full q-pa-md"):
+        ui.label("上传文件并与当前版本对比").classes("mc-section-title q-mb-sm")
+        status = ui.label("未选择文件").classes("mc-muted text-caption q-mb-sm")
 
-    ui.button("对比",
-              on_click=lambda: _run_upload_vs_current(filename, uploaded, container)
-              ).props("color=primary dense")
+        def update_status():
+            status.text = uploaded["name"] if uploaded.get("name") else "未选择文件"
+
+        def clear_upload():
+            uploaded["data"] = None
+            uploaded["name"] = None
+            update_status()
+
+        def open_upload():
+            _open_upload_dialog(uploaded, on_uploaded=update_status)
+
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.button("上传文件", icon="upload_file", on_click=open_upload).props("color=primary outline dense")
+            ui.button("清除", icon="close", on_click=clear_upload).props("flat dense")
+            ui.space()
+            ui.button(
+                "对比",
+                icon="compare_arrows",
+                on_click=lambda: _run_upload_vs_current(filename, uploaded, result_container),
+            ).props("color=primary dense")
 
 
-def _render_upload_vs_history(filename: str, version_options: list, container):
+def _render_upload_vs_history(filename: str, version_options: list, result_container):
     """上传文件 vs 历史版本"""
     if not version_options:
-        ui.label("无历史版本").classes("text-warning")
+        with ui.card().classes("w-full q-pa-md"):
+            ui.label("无历史版本").classes("text-warning")
         return
 
-    uploaded = {"data": None}
+    uploaded = {"data": None, "name": None}
     selected = {"value": version_options[0]}
 
-    ui.label("请上传文件:").classes("text-subtitle2")
-    ui.upload(
-        label="上传文件",
-        auto_upload=True,
-        on_upload=lambda e: uploaded.update(data=e.content.read()),
-    ).props("dense").classes("w-full")
+    with ui.card().classes("w-full q-pa-md"):
+        ui.label("上传文件并选择历史版本对比").classes("mc-section-title q-mb-sm")
+        status = ui.label("未选择文件").classes("mc-muted text-caption q-mb-sm")
 
-    with ui.row().classes("items-center q-mt-md"):
-        ui.select(version_options, value=selected["value"],
-                  on_change=lambda e: selected.update(value=e.value)
-                  ).props("dense outlined").classes("w-56")
-        ui.button("对比",
-                  on_click=lambda: _run_upload_vs_history(filename, selected["value"], uploaded, container)
-                  ).props("color=primary dense")
+        def update_status():
+            status.text = uploaded["name"] if uploaded.get("name") else "未选择文件"
+
+        def clear_upload():
+            uploaded["data"] = None
+            uploaded["name"] = None
+            update_status()
+
+        def open_upload():
+            _open_upload_dialog(uploaded, on_uploaded=update_status)
+
+        with ui.row().classes("w-full items-center gap-2 q-mb-sm"):
+            ui.button("上传文件", icon="upload_file", on_click=open_upload).props("color=primary outline dense")
+            ui.button("清除", icon="close", on_click=clear_upload).props("flat dense")
+            ui.space()
+
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.select(
+                version_options,
+                value=selected["value"],
+                on_change=lambda e: selected.update(value=e.value),
+            ).props("dense outlined").classes("w-full md:w-96")
+            ui.button(
+                "对比",
+                icon="compare_arrows",
+                on_click=lambda: _run_upload_vs_history(filename, selected["value"], uploaded, result_container),
+            ).props("color=primary dense")
 
 
 # ===================== 对比执行函数 =====================
 
 
 def _run_current_vs_history(filename: str, archive_filename: str, container):
+    container.clear()
     current_content = storage.load_config_file(filename)
     archive_content = storage.load_archived_file(filename, archive_filename)
     if current_content is None or archive_content is None:
@@ -140,6 +204,7 @@ def _run_current_vs_history(filename: str, archive_filename: str, container):
 
 
 def _run_history_vs_history(filename: str, archive_a: str, archive_b: str, container):
+    container.clear()
     content_a = storage.load_archived_file(filename, archive_a)
     content_b = storage.load_archived_file(filename, archive_b)
     if content_a is None or content_b is None:
@@ -151,6 +216,7 @@ def _run_history_vs_history(filename: str, archive_a: str, archive_b: str, conta
 
 
 def _run_upload_vs_current(filename: str, uploaded: dict, container):
+    container.clear()
     if uploaded.get("data") is None:
         ui.notify("请先上传文件", type="warning")
         return
@@ -163,6 +229,7 @@ def _run_upload_vs_current(filename: str, uploaded: dict, container):
 
 
 def _run_upload_vs_history(filename: str, archive_filename: str, uploaded: dict, container):
+    container.clear()
     if uploaded.get("data") is None:
         ui.notify("请先上传文件", type="warning")
         return
@@ -181,34 +248,90 @@ def _render_diff_result(result: dict, container):
     """渲染对比结果"""
     with container:
         if not result["has_changes"]:
-            ui.label("两个版本内容相同，无差异").classes("text-positive text-h6")
+            with ui.card().classes("w-full q-pa-md"):
+                with ui.row().classes("items-center gap-2"):
+                    ui.icon("check_circle", color="positive")
+                    ui.label("两个版本内容相同，无差异").classes("text-positive text-h6")
             return
 
         struct = result.get("structural_diff", {})
         summary = struct.get("summary", {})
 
         # 摘要统计
-        with ui.row().classes("q-mb-md"):
-            ui.badge(f"新增: {summary.get('added_count', 0)}", color="green")
-            ui.badge(f"删除: {summary.get('removed_count', 0)}", color="red")
-            ui.badge(f"修改: {summary.get('modified_count', 0)}", color="orange")
+        with ui.row().classes("q-mb-md gap-2"):
+            ui.label(f"新增 {summary.get('added_count', 0)}").classes("mc-chip mc-chip-success")
+            ui.label(f"删除 {summary.get('removed_count', 0)}").classes("mc-chip mc-chip-danger")
+            ui.label(f"修改 {summary.get('modified_count', 0)}").classes("mc-chip mc-chip-warning")
             if summary.get("bound_count", 0) > 0:
-                ui.badge(f"绑定变量: {summary.get('bound_count', 0)}", color="purple")
+                ui.label(f"绑定变量 {summary.get('bound_count', 0)}").classes("mc-chip")
 
         # 结构化差异
         if struct.get("type") == "structural":
-            _render_structural_diff(struct)
+            with ui.card().classes("w-full q-pa-md q-mb-md"):
+                ui.label("结构化差异").classes("mc-section-title q-mb-sm")
+                _render_structural_diff(struct)
 
         # 文本差异
         diff_lines = result.get("unified_diff", [])
         if diff_lines:
-            ui.separator().classes("q-my-md")
-            ui.label("文本差异 (unified diff)").classes("text-subtitle1 q-mb-sm")
-            with ui.card().classes("w-full bg-grey-2"):
-                diff_text = "\n".join(diff_lines[:200])
-                if len(diff_lines) > 200:
-                    diff_text += f"\n... (共 {len(diff_lines)} 行差异)"
-                ui.code(diff_text, language="diff").classes("w-full")
+            _render_unified_diff(diff_lines)
+
+
+def _open_upload_dialog(uploaded: dict, on_uploaded=None):
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("上传文件").classes("text-h6")
+        ui.label("上传后会用于当前页面对比，不会自动覆盖服务端文件").classes("text-caption mc-muted q-mb-md")
+
+        async def handle_upload(e):
+            uploaded["data"] = await e.file.read()
+            uploaded["name"] = e.file.name
+            if on_uploaded:
+                on_uploaded()
+            dialog.close()
+
+        ui.upload(label="选择文件", auto_upload=True, on_upload=handle_upload).props("dense").classes("w-full")
+
+        with ui.row().classes("w-full justify-end q-mt-md"):
+            ui.button("关闭", on_click=dialog.close).props("flat")
+
+        dialog.open()
+
+
+def _render_unified_diff(diff_lines: list[str]) -> None:
+    full_text = "\n".join(diff_lines)
+    preview_lines = diff_lines[:_DIFF_PREVIEW_LIMIT]
+    preview_text = "\n".join(preview_lines)
+    is_truncated = len(diff_lines) > _DIFF_PREVIEW_LIMIT
+
+    def copy_all():
+        js_text = json.dumps(full_text)
+        ui.run_javascript(f"navigator.clipboard.writeText({js_text});")
+        ui.notify("已复制到剪贴板", type="positive")
+
+    def open_full_dialog():
+        with ui.dialog() as dialog, ui.card().classes("w-11/12 max-w-6xl"):
+            with ui.row().classes("w-full items-center no-wrap q-mb-sm"):
+                ui.label(f"文本差异 (unified diff) · 共 {len(diff_lines)} 行").classes("mc-section-title")
+                ui.space()
+                ui.button(icon="content_copy", on_click=copy_all).props("flat round dense").tooltip("复制")
+                ui.button(icon="close", on_click=dialog.close).props("flat round dense").tooltip("关闭")
+            ui.code(full_text, language="diff").classes("w-full mc-diff-code mc-diff-code--dialog")
+        dialog.open()
+
+    with ui.card().classes("w-full mc-diff-card"):
+        with ui.row().classes("w-full items-center no-wrap mc-diff-toolbar"):
+            ui.label("文本差异 (unified diff)").classes("mc-section-title")
+            ui.space()
+            ui.label(f"{len(diff_lines)} 行").classes("text-caption mc-muted")
+            ui.button(icon="content_copy", on_click=copy_all).props("flat round dense").tooltip("复制")
+            if is_truncated:
+                ui.button(icon="open_in_full", on_click=open_full_dialog).props("flat round dense").tooltip("展开全部")
+
+        if is_truncated:
+            preview_text_with_hint = preview_text + f"\n... (预览 {_DIFF_PREVIEW_LIMIT} 行 / 共 {len(diff_lines)} 行)"
+        else:
+            preview_text_with_hint = preview_text
+        ui.code(preview_text_with_hint, language="diff").classes("w-full mc-diff-code")
 
 
 def _render_structural_diff(struct: dict):

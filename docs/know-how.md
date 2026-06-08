@@ -20,6 +20,7 @@
 
 ## 3. Development Notes
 - NiceGUI 的 `app.storage.user` 基于浏览器会话
+- 若需要 `app.storage.user` 在刷新后仍可用，需要在 `ui.run()` 里设置 `storage_secret`（本项目默认自动生成）
 - NiceGUI 的 `app.storage.general` 用于全局持久化
 - 使用 `ui.run(host='0.0.0.0')` 允许内网访问
 - 文件上传使用 `ui.upload` 组件，通过 `e.content.read()` 获取内容

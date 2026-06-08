@@ -11,13 +11,14 @@ logger = logging.getLogger(__name__)
 def _get_cache_dir() -> str:
     from . import storage
     storage._ensure_dirs()
-    return storage.PARSE_CACHE_DIR
+    return storage.get_parse_cache_dir()
 
 
 def _is_archive_path(source_path: str) -> bool:
     from . import storage
     try:
-        return os.path.commonpath([os.path.abspath(source_path), os.path.abspath(storage.ARCHIVE_DIR)]) == os.path.abspath(storage.ARCHIVE_DIR)
+        archive_root = os.path.abspath(storage.get_archive_root_dir())
+        return os.path.commonpath([os.path.abspath(source_path), archive_root]) == archive_root
     except ValueError:
         return False
 

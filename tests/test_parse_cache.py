@@ -14,6 +14,7 @@ TEST_DATA_DIR = tempfile.mkdtemp()
 def setup_test_env(monkeypatch):
     import app.core.storage as storage_mod
     monkeypatch.setattr(storage_mod, "DATA_DIR", TEST_DATA_DIR)
+    monkeypatch.setattr(storage_mod, "PROFILES_DIR", os.path.join(TEST_DATA_DIR, "profiles"))
     monkeypatch.setattr(storage_mod, "CONFIGS_DIR", os.path.join(TEST_DATA_DIR, "configs"))
     monkeypatch.setattr(storage_mod, "ARCHIVE_DIR", os.path.join(TEST_DATA_DIR, "archive"))
     monkeypatch.setattr(storage_mod, "CACHE_DIR", os.path.join(TEST_DATA_DIR, "cache"))

@@ -12,13 +12,21 @@ def setup_env(monkeypatch):
     tmp = tempfile.mkdtemp()
     import app.core.storage as s
     monkeypatch.setattr(s, "DATA_DIR", tmp)
+    monkeypatch.setattr(s, "PROFILES_DIR", os.path.join(tmp, "profiles"))
     monkeypatch.setattr(s, "CONFIGS_DIR", os.path.join(tmp, "configs"))
     monkeypatch.setattr(s, "ARCHIVE_DIR", os.path.join(tmp, "archive"))
+    monkeypatch.setattr(s, "CACHE_DIR", os.path.join(tmp, "cache"))
+    monkeypatch.setattr(s, "PARSE_CACHE_DIR", os.path.join(tmp, "cache", "parse_tree"))
     monkeypatch.setattr(s, "MAPPING_FILE", os.path.join(tmp, "config_mapping.json"))
     monkeypatch.setattr(s, "FAVORITES_FILE", os.path.join(tmp, "favorites.json"))
     monkeypatch.setattr(s, "BINDINGS_FILE", os.path.join(tmp, "bindings.json"))
     monkeypatch.setattr(s, "TOOLS_FILE", os.path.join(tmp, "tools.json"))
     monkeypatch.setattr(s, "SCHEDULE_FILE", os.path.join(tmp, "schedule.json"))
+    monkeypatch.setattr(s, "LEGACY_MAPPING_FILE", s.MAPPING_FILE)
+    monkeypatch.setattr(s, "LEGACY_FAVORITES_FILE", s.FAVORITES_FILE)
+    monkeypatch.setattr(s, "LEGACY_BINDINGS_FILE", s.BINDINGS_FILE)
+    monkeypatch.setattr(s, "LEGACY_TOOLS_FILE", s.TOOLS_FILE)
+    monkeypatch.setattr(s, "LEGACY_SCHEDULE_FILE", s.SCHEDULE_FILE)
     s._ensure_dirs()
     yield
     import shutil

@@ -24,16 +24,20 @@ MCChecker/
 │   ├── __init__.py
 │   ├── core/
 │   │   ├── __init__.py
+│   │   ├── device_models.py  # 机型配置空间管理
 │   │   ├── parser.py        # XML/JSON 解析引擎
 │   │   ├── storage.py       # 数据持久化层
 │   │   ├── scheduler.py     # 定时任务管理
 │   │   ├── differ.py        # 版本对比引擎
-│   │   └── downloader.py    # 文件下载器
+│   │   ├── downloader.py    # 文件下载器
+│   │   ├── dltool.py        # DL 快捷计算引擎与持久化
+│   │   ├── favorites_live.py# 收藏速览数据解析
+│   │   └── parse_cache.py   # 解析树缓存
 │   ├── pages/
 │   │   ├── __init__.py
 │   │   ├── home.py          # 主页(速览面板、搜索)
 │   │   ├── viewer.py        # 文件解析查看页
-│   │   ├── management.py    # 全量配置管理页
+│   │   ├── management.py    # 更新设置页
 │   │   ├── comparison.py    # 版本对比页
 │   │   ├── bindings.py      # 变量绑定配置页
 │   │   └── tools.py         # 工具菜单配置页
@@ -45,12 +49,8 @@ MCChecker/
 │       └── css/
 │           └── style.css    # 全局自定义样式
 ├── data/
-│   ├── configs/             # 当前配置文件存储
-│   ├── archive/             # 历史版本归档
-│   ├── app_state.json       # 应用持久化状态
-│   ├── bindings.json        # 变量绑定关系
-│   ├── favorites.json       # 收藏变量
-│   └── tools.json           # 工具菜单配置
+│   ├── profiles/            # 各机型的数据空间根目录（按 model_id 分目录）
+│   └── device_models.json   # 机型列表（用于顶部导航栏切换）
 └── tests/
     ├── test_parser.py
     ├── test_storage.py
@@ -60,8 +60,9 @@ MCChecker/
 
 ## 4. Core Modules
 - **parser.py**: 解析 XML/JSON 为统一的树形结构，支持折叠展开
-- **storage.py**: 管理所有持久化数据（配置映射、收藏、绑定、工具）
-- **scheduler.py**: APScheduler 定时任务，支持按小时/天自动更新
+- **storage.py**: 管理所有持久化数据，并支持机型维度的隔离存储
+- **device_models.py**: 机型列表管理（新增/删除/切换）
+- **scheduler.py**: APScheduler 定时任务，支持按机型读取各自的定时配置
 - **differ.py**: 基于 difflib 的版本对比，支持变量绑定标注
 - **downloader.py**: 从 URL 下载文件，支持重试
 

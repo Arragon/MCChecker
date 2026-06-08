@@ -8,11 +8,21 @@ import os
 import logging
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
+import math
+
+from . import storage
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
-DLTOOL_FILE = os.path.join(DATA_DIR, "dltool_config.json")
+DLTOOL_FILE = os.path.join(storage.DATA_DIR, "dltool_config.json")
+
+
+def _get_config_file() -> str:
+    profile = storage.get_active_profile()
+    target = os.path.join(storage.get_profile_data_dir(profile), "dltool_config.json")
+    if profile == storage.DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(DLTOOL_FILE):
+        return DLTOOL_FILE
+    return target
 
 DEFAULT_COEFFS: Dict[str, float] = {
     f"k{i}": 0.0 for i in range(1, 9)
@@ -57,10 +67,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 def load_config() -> Dict[str, Any]:
     """加载 DL 工具配置"""
-    if not os.path.exists(DLTOOL_FILE):
+    cfg_file = _get_config_file()
+    if not os.path.exists(cfg_file):
         return deepcopy(DEFAULT_CONFIG)
     try:
-        with open(DLTOOL_FILE, "r", encoding="utf-8") as f:
+        with open(cfg_file, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         # 补齐缺失字段
         _ensure_defaults(cfg)
@@ -96,10 +107,11 @@ def _ensure_defaults(cfg: dict):
 
 def save_config(cfg: Dict[str, Any]):
     """保存 DL 工具配置"""
-    os.makedirs(os.path.dirname(DLTOOL_FILE), exist_ok=True)
+    cfg_file = _get_config_file()
+    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
     # 去除运行时字段（_inputs 等不可序列化的 UI 引用）
     clean = {k: v for k, v in cfg.items() if not k.startswith("_")}
-    with open(DLTOOL_FILE, "w", encoding="utf-8") as f:
+    with open(cfg_file, "w", encoding="utf-8") as f:
         json.dump(clean, f, ensure_ascii=False, indent=2)
 
 
@@ -110,6 +122,20 @@ def poly_eval(x: float, coeffs: Dict[str, float]) -> float:
         ki = coeffs.get(f"k{i}", 0.0)
         if ki != 0.0:
             result += ki * (x ** i)
+    return result
+
+
+def pp_energy_from_y(y: float, trans_coeff: float, power_conv_coeff: float) -> float:
+    if power_conv_coeff == 0:
+        raise ZeroDivisionError("power_conv_coeff cannot be 0")
+    result = float(y) * float(trans_coeff) / float(power_conv_coeff)
+    logger.info(
+        "PP能量计算: y=%s trans_coeff=%s power_conv_coeff=%s -> pp_energy=%s",
+        y,
+        trans_coeff,
+        power_conv_coeff,
+        result,
+    )
     return result
 
 
@@ -239,6 +265,101 @@ def batch_reverse(y_values: List[float], coeffs: Dict[str, float],
         })
 
     return results
+
+
+def detect_multi_solutions(
+    coeffs: Dict[str, float],
+    x_range: tuple = None,
+    y_range: tuple = None,
+    search_range: tuple = (-100.0, 100.0),
+    x_samples: int = 800,
+    y_samples: int = 21,
+    max_cases: int = 8,
+    max_points: int = 60,
+    root_samples: int = 4000,
+) -> Dict[str, Any]:
+    x_min, x_max = x_range if x_range else (None, None)
+    y_min, y_max = y_range if y_range else (None, None)
+    search_min, search_max = search_range
+
+    if x_min is not None and x_max is not None and x_min >= x_max:
+        return {"has_multi": False, "error": "x_range_invalid"}
+    if y_min is not None and y_max is not None and y_min >= y_max:
+        return {"has_multi": False, "error": "y_range_invalid"}
+
+    effective_x_min = x_min if x_min is not None else search_min
+    effective_x_max = x_max if x_max is not None else search_max
+    if effective_x_min >= effective_x_max:
+        return {"has_multi": False, "error": "search_range_invalid"}
+
+    x_samples = max(int(x_samples or 0), 50)
+    ys: List[float] = []
+    for i in range(x_samples + 1):
+        x = effective_x_min + (effective_x_max - effective_x_min) * i / x_samples
+        try:
+            y = float(poly_eval(x, coeffs))
+        except Exception:
+            continue
+        if math.isfinite(y):
+            ys.append(y)
+    if not ys:
+        return {"has_multi": False, "cases": [], "points": []}
+
+    observed_min = min(ys)
+    observed_max = max(ys)
+    check_y_min = y_min if y_min is not None else observed_min
+    check_y_max = y_max if y_max is not None else observed_max
+    if check_y_min > check_y_max:
+        return {"has_multi": False, "cases": [], "points": [], "y_span": (check_y_min, check_y_max)}
+
+    y_targets: List[float] = []
+    if y_samples <= 1 or check_y_min == check_y_max:
+        y_targets = [check_y_min]
+    else:
+        y_samples = max(int(y_samples), 5)
+        for i in range(y_samples):
+            y_targets.append(check_y_min + (check_y_max - check_y_min) * i / (y_samples - 1))
+    if check_y_min <= 0.0 <= check_y_max:
+        y_targets.append(0.0)
+
+    seen = set()
+    unique_targets: List[float] = []
+    for y in y_targets:
+        ky = round(float(y), 12)
+        if ky in seen:
+            continue
+        seen.add(ky)
+        unique_targets.append(float(y))
+    y_targets = unique_targets
+
+    cases: List[Dict[str, Any]] = []
+    points: List[Dict[str, float]] = []
+
+    for y_target in y_targets:
+        roots = poly_find_x(y_target, coeffs, effective_x_min, effective_x_max, samples=root_samples)
+        filtered: List[float] = []
+        for x in roots:
+            if x_min is not None and x < x_min:
+                continue
+            if x_max is not None and x > x_max:
+                continue
+            filtered.append(x)
+        if len(filtered) > 1:
+            cases.append({"y": y_target, "x_values": filtered})
+            for x in filtered:
+                points.append({"x": x, "y": y_target})
+                if len(points) >= max_points:
+                    break
+        if len(cases) >= max_cases or len(points) >= max_points:
+            break
+
+    return {
+        "has_multi": bool(cases),
+        "cases": cases,
+        "points": points,
+        "x_span": (effective_x_min, effective_x_max),
+        "y_span": (check_y_min, check_y_max),
+    }
 
 
 def parse_coeffs_from_data(data: dict, field_map: Dict[str, str]) -> Dict[str, float]:

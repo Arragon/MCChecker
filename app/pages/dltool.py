@@ -16,119 +16,17 @@ _COEFF_LABELS = [
 
 _ITEM_IDS = ["pp_energy", "rp_energy", "rp_width"]
 
-_PAGE_CSS = """
-<style>
-.dl-page {
-    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-    max-width: 1000px;
-    margin: 0 auto;
-}
-.dl-page .dl-card {
-    border-radius: 10px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    border: 1px solid #e8e8e8;
-    transition: box-shadow 0.2s;
-}
-.dl-page .dl-card:hover {
-    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
-}
-/* ---- 系数网格 ---- */
-.dl-page .coeff-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px 16px;
-}
-.dl-page .coeff-grid .coeff-cell {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-}
-.dl-page .coeff-grid .coeff-cell label {
-    font-size: 0.78rem;
-    color: #666;
-    white-space: nowrap;
-    min-width: 24px;
-}
-.dl-page .coeff-grid .coeff-cell .q-field {
-    flex: 1;
-    min-width: 0;
-}
-.dl-page .coeff-grid input {
-    text-align: center;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.88rem !important;
-}
-.dl-page .readonly input {
-    background: #f8f8f8 !important;
-    color: #555 !important;
-}
-.dl-page .calc-section {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-.dl-page .result-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.88rem;
-}
-.dl-page .result-table th {
-    background: #f5f5f5;
-    padding: 6px 12px;
-    text-align: left;
-    font-weight: 600;
-    border-bottom: 2px solid #ddd;
-}
-.dl-page .result-table td {
-    padding: 5px 12px;
-    border-bottom: 1px solid #eee;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-}
-.dl-page .result-table tr:hover td {
-    background: #fafafa;
-}
-.dl-page .alert-badge {
-    display: inline-block;
-    background: #FFF3E0;
-    color: #E65100;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.78rem;
-    font-weight: 500;
-}
-.dl-page .calc-panel {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 12px;
-}
-.dl-page .calc-panel .calc-title {
-    font-weight: 600;
-    font-size: 0.92rem;
-}
-/* ---- 淡化提示文本 ---- */
-.dl-page ::placeholder {
-    color: #bbb !important;
-    opacity: 0.7;
-}
-.dl-page .q-field__label {
-    color: #bbb !important;
-}
-</style>
-"""
-
 
 def render_dltool_page(on_refresh=None):
     """渲染 DL 快捷计算工具页面"""
     cfg = engine.load_config()
     cfg["_inputs"] = []
 
-    ui.add_head_html(_PAGE_CSS)
-
     with ui.column().classes("dl-page w-full q-pa-md"):
         # ---- 页面标题 + 控制按钮 ----
         with ui.row().classes("items-center q-mb-md"):
             ui.icon("functions", size="md", color="blue-8").classes("q-mr-sm")
-            ui.label("DL 快捷计算").classes("text-h5 font-bold")
+            ui.label("DL 快捷计算").classes("mc-page-title")
             ui.space()
             _render_edit_buttons(cfg, on_refresh)
 
@@ -299,6 +197,114 @@ def _try_extract_coeffs_for_item(cfg: dict, item_id: str):
     item["coeffs"].update(coeffs)
 
 
+def _refresh_coeffs_for_item(cfg: dict, item_id: str, on_refresh=None):
+    item = cfg["items"][item_id]
+    binding = item.get("binding", {})
+    if not binding.get("source_file"):
+        ui.notify("未设置系数绑定，无法刷新", type="warning")
+        return
+
+    before = dict(item.get("coeffs", {}))
+    _try_extract_coeffs_for_item(cfg, item_id)
+    after = item.get("coeffs", {})
+    engine.save_config(cfg)
+
+    for inp in cfg.get("_inputs", []):
+        if getattr(inp, "_coeff_section", "") != f"items.{item_id}.coeffs":
+            continue
+        k = getattr(inp, "_coeff_key", None)
+        if not k:
+            continue
+        if k in after:
+            try:
+                inp.value = after[k]
+                inp.update()
+            except Exception:
+                pass
+
+    if before == after:
+        ui.notify("系数未变化（已是最新）", type="info")
+    else:
+        ui.notify("系数已刷新", type="positive")
+
+    res = _detect_multi_for_item(item_id, item)
+    if res and res.get("has_multi"):
+        _show_multi_solution_dialog(res)
+
+    if on_refresh and not cfg.get("editing", False):
+        on_refresh()
+
+
+def _detect_multi_for_item(item_id: str, item: dict) -> dict | None:
+    coeffs = _get_item_coeffs(item)
+    xr = (item.get("x_min"), item.get("x_max"))
+    yr = (item.get("y_min"), item.get("y_max"))
+    search_min = xr[0] if xr[0] is not None else -100.0
+    search_max = xr[1] if xr[1] is not None else 100.0
+
+    effective_yr = yr
+    scale = 1.0
+    if item_id == "pp_energy":
+        info = _pp_scale_info(item)
+        if not info:
+            return None
+        scale = info["scale"]
+        y_min, y_max = yr
+        base_min = _pp_to_base_y(y_min, scale) if y_min is not None else None
+        base_max = _pp_to_base_y(y_max, scale) if y_max is not None else None
+        effective_yr = (base_min, base_max)
+
+    res = engine.detect_multi_solutions(
+        coeffs=coeffs,
+        x_range=xr,
+        y_range=effective_yr,
+        search_range=(search_min, search_max),
+    )
+
+    if item_id == "pp_energy" and scale != 1.0 and res.get("has_multi"):
+        res = {
+            **res,
+            "cases": [
+                {"y": float(c.get("y", 0.0)) * scale, "x_values": c.get("x_values") or []}
+                for c in (res.get("cases") or [])
+            ],
+            "points": [
+                {"x": p.get("x"), "y": float(p.get("y", 0.0)) * scale}
+                for p in (res.get("points") or [])
+            ],
+        }
+    return res
+
+
+def _show_multi_solution_dialog(res: dict):
+    cases = res.get("cases") or []
+    if not cases:
+        return
+    with ui.dialog() as dlg, ui.card().classes("w-[760px] max-w-[95vw]"):
+        with ui.row().classes("items-start justify-between w-full q-mb-sm"):
+            with ui.column().classes("q-gutter-xs"):
+                ui.label("多解提示").classes("text-h6")
+                ui.label("检测到 y→x 存在一对多，多解可能导致反向求解结果不唯一。").classes("text-caption text-grey")
+            ui.button(icon="close", on_click=dlg.close).props("flat round dense")
+
+        with ui.card().classes("w-full q-pa-sm").style("border: 1px solid #fb923c; background: #fff7ed"):
+            with ui.row().classes("items-center no-wrap"):
+                ui.icon("warning", color="orange-9").classes("q-mr-sm")
+                ui.label("建议缩小 x / y 范围，或在“反向求解结果”弹窗中选择最优解以确保唯一性。").classes("text-body2 text-orange-9")
+
+        ui.label(f"多解点位（最多展示 {min(len(cases), 8)} 组 y 值）").classes("mc-section-title q-mt-md q-mb-sm")
+        ui.html('<table class="result-table"><thead><tr><th>目标 y</th><th>解 x（同一 y 对应多个 x）</th></tr></thead><tbody>', sanitize=False)
+        for c in cases[:8]:
+            xs = c.get("x_values") or []
+            x_str = ", ".join(str(round(float(x), 10)) for x in xs)
+            ui.html(f"<tr><td>{round(float(c.get('y', 0.0)), 10)}</td><td>{x_str}</td></tr>", sanitize=False)
+        ui.html("</tbody></table>", sanitize=False)
+
+        with ui.row().classes("w-full justify-end q-mt-md"):
+            ui.button("知道了", on_click=dlg.close).props("color=primary")
+    dlg.open()
+
+
 def _find_variable_data(tree: dict, path: str):
     node = _find_node_in_tree(tree, path)
     if node is None:
@@ -352,6 +358,10 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
             binding = item.get("binding", {})
             if binding.get("source_file"):
                 ui.label(f"已绑定: {binding['source_file']}").classes("text-caption text-blue-8 q-mr-sm")
+                ui.button(
+                    icon="refresh",
+                    on_click=lambda iid=item_id: _refresh_coeffs_for_item(cfg, iid, on_refresh),
+                ).props("flat round dense size=sm color=blue-7").tooltip("手动刷新系数（从绑定源重新提取）")
             ui.button("绑定", icon="link",
                       on_click=lambda iid=item_id: _open_binding_dialog(cfg, iid, on_refresh)) \
                 .props("flat dense size=sm color=blue-7").tooltip("从配置文件提取系数")
@@ -360,7 +370,11 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
             # ---- 系数网格 ----
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("tune", size="xs", color="grey-6").classes("q-mr-xs")
-                ui.label("函数系数").classes("text-body2 font-bold text-grey-7")
+                ui.label("函数系数").classes("mc-section-title")
+
+            coeff_inputs = []
+            range_inputs = {}
+            extra_inputs = {}
 
             with ui.element("div").classes("coeff-grid w-full q-mb-md"):
                 for key, title in _COEFF_LABELS:
@@ -375,6 +389,7 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                         inp._coeff_key = key
                         inp._coeff_section = f"items.{item_id}.coeffs"
                         cfg["_inputs"].append(inp)
+                        coeff_inputs.append(inp)
 
             if item_id == "pp_energy":
                 with ui.row().classes("q-mb-md q-gutter-sm items-center"):
@@ -390,6 +405,7 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                     trans_inp._coeff_key = "trans_coeff"
                     trans_inp._coeff_section = f"items.{item_id}"
                     cfg["_inputs"].append(trans_inp)
+                    extra_inputs["trans_coeff"] = trans_inp
 
                     power_conv_inp = ui.number(
                         value=item.get("power_conv_coeff", 1.0),
@@ -401,6 +417,7 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                     power_conv_inp._coeff_key = "power_conv_coeff"
                     power_conv_inp._coeff_section = f"items.{item_id}"
                     cfg["_inputs"].append(power_conv_inp)
+                    extra_inputs["power_conv_coeff"] = power_conv_inp
 
             # ---- 范围设置 ----
             with ui.row().classes("q-mt-md q-mb-md q-gutter-sm items-center"):
@@ -413,6 +430,7 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                 x_min_inp._coeff_key = "x_min"
                 x_min_inp._coeff_section = f"items.{item_id}"
                 cfg["_inputs"].append(x_min_inp)
+                range_inputs["x_min"] = x_min_inp
 
                 x_max_inp = ui.number(value=item.get("x_max"), label="x max",
                                       format="%.4g").props("dense outlined size=sm").classes("w-20")
@@ -421,6 +439,7 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                 x_max_inp._coeff_key = "x_max"
                 x_max_inp._coeff_section = f"items.{item_id}"
                 cfg["_inputs"].append(x_max_inp)
+                range_inputs["x_max"] = x_max_inp
 
                 ui.label("y").classes("text-caption text-grey-7 q-ml-sm")
                 y_min_inp = ui.number(value=item.get("y_min"), label="y min",
@@ -430,6 +449,7 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                 y_min_inp._coeff_key = "y_min"
                 y_min_inp._coeff_section = f"items.{item_id}"
                 cfg["_inputs"].append(y_min_inp)
+                range_inputs["y_min"] = y_min_inp
 
                 y_max_inp = ui.number(value=item.get("y_max"), label="y max",
                                       format="%.4g").props("dense outlined size=sm").classes("w-20")
@@ -438,6 +458,96 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                 y_max_inp._coeff_key = "y_max"
                 y_max_inp._coeff_section = f"items.{item_id}"
                 cfg["_inputs"].append(y_max_inp)
+                range_inputs["y_max"] = y_max_inp
+
+            warn_container = ui.column().classes("w-full q-mb-md")
+
+            def _num(v, default=None):
+                if v is None or v == "":
+                    return default
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    return default
+
+            def run_multi_check():
+                coeffs = {}
+                for k in engine.DEFAULT_COEFFS:
+                    coeffs[k] = 0.0
+                for inp in coeff_inputs:
+                    k = getattr(inp, "_coeff_key", None)
+                    if k:
+                        coeffs[k] = _num(inp.value, 0.0) or 0.0
+
+                xr = (_num(range_inputs["x_min"].value, None), _num(range_inputs["x_max"].value, None))
+                yr = (_num(range_inputs["y_min"].value, None), _num(range_inputs["y_max"].value, None))
+                search_min = xr[0] if xr[0] is not None else -100.0
+                search_max = xr[1] if xr[1] is not None else 100.0
+
+                display_item = dict(item)
+                if "trans_coeff" in extra_inputs:
+                    display_item["trans_coeff"] = _num(extra_inputs["trans_coeff"].value, 1.0) or 1.0
+                if "power_conv_coeff" in extra_inputs:
+                    display_item["power_conv_coeff"] = _num(extra_inputs["power_conv_coeff"].value, 1.0) or 1.0
+
+                effective_yr = yr
+                scale = 1.0
+                if item_id == "pp_energy":
+                    info = _pp_scale_info(display_item)
+                    if not info:
+                        warn_container.clear()
+                        return {"has_multi": False}
+                    scale = info["scale"]
+                    y_min, y_max = yr
+                    base_min = _pp_to_base_y(y_min, scale) if y_min is not None else None
+                    base_max = _pp_to_base_y(y_max, scale) if y_max is not None else None
+                    effective_yr = (base_min, base_max)
+
+                res = engine.detect_multi_solutions(
+                    coeffs=coeffs,
+                    x_range=xr,
+                    y_range=effective_yr,
+                    search_range=(search_min, search_max),
+                )
+
+                warn_container.clear()
+                if not res.get("has_multi"):
+                    return res
+
+                if item_id == "pp_energy" and scale != 1.0:
+                    res = {
+                        **res,
+                        "cases": [
+                            {"y": float(c.get("y", 0.0)) * scale, "x_values": c.get("x_values") or []}
+                            for c in (res.get("cases") or [])
+                        ],
+                        "points": [
+                            {"x": p.get("x"), "y": float(p.get("y", 0.0)) * scale}
+                            for p in (res.get("points") or [])
+                        ],
+                    }
+
+                with warn_container:
+                    with ui.card().classes("w-full q-pa-sm").style("border: 1px solid #fb923c; background: #fff7ed"):
+                        with ui.row().classes("items-center no-wrap"):
+                            ui.icon("warning", color="orange-9").classes("q-mr-sm")
+                            ui.label("检测到多解：当前系数与范围组合存在 y→x 的一对多场景").classes("text-body2 text-orange-9")
+                        cases = res.get("cases") or []
+                        ui.label(f"多解点位（最多展示 {len(cases)} 组 y 值）").classes("text-caption text-orange-9 q-mt-sm")
+                        ui.html('<table class="result-table"><thead><tr><th>目标 y</th><th>解 x（同一 y 对应多个 x）</th></tr></thead><tbody>', sanitize=False)
+                        for c in cases:
+                            xs = c.get("x_values") or []
+                            x_str = ", ".join(str(round(float(x), 10)) for x in xs)
+                            ui.html(f"<tr><td>{round(float(c.get('y', 0.0)), 10)}</td><td>{x_str}</td></tr>", sanitize=False)
+                        ui.html("</tbody></table>", sanitize=False)
+                return res
+
+            for inp in list(coeff_inputs) + list(range_inputs.values()) + list(extra_inputs.values()):
+                inp.on("blur", lambda e=None: run_multi_check())
+                inp.on("change", lambda e=None: run_multi_check())
+
+            if binding.get("source_file"):
+                run_multi_check()
 
             ui.separator().classes("q-mb-md")
 
@@ -488,16 +598,30 @@ def _parse_number_list(text: str) -> list:
     return values
 
 
-def _scale_coeffs_for_item(item_id: str, item: dict, coeffs: dict) -> dict:
-    if item_id != "pp_energy":
-        return coeffs
+def _pp_scale_info(item: dict) -> dict | None:
     trans_coeff = item.get("trans_coeff", 1.0) or 1.0
     power_conv_coeff = item.get("power_conv_coeff", 1.0) or 1.0
     if power_conv_coeff == 0:
         ui.notify("功率转换系数不能为 0", type="warning")
-        return {}
-    scale = trans_coeff / power_conv_coeff
-    return {k: v * scale for k, v in coeffs.items()}
+        return None
+    return {
+        "trans_coeff": float(trans_coeff),
+        "power_conv_coeff": float(power_conv_coeff),
+        "scale": float(trans_coeff) / float(power_conv_coeff),
+    }
+
+
+def _pp_to_base_y(y: float, scale: float) -> float:
+    if scale == 0:
+        return float(y)
+    return float(y) / float(scale)
+
+
+def _pp_from_base_y(y: float, item: dict) -> float:
+    info = _pp_scale_info(item)
+    if not info:
+        return float(y)
+    return engine.pp_energy_from_y(float(y), info["trans_coeff"], info["power_conv_coeff"])
 
 
 def _do_forward_calc(item_id: str, item: dict, input_el):
@@ -511,13 +635,26 @@ def _do_forward_calc(item_id: str, item: dict, input_el):
         return
 
     coeffs = _get_item_coeffs(item)
-    coeffs = _scale_coeffs_for_item(item_id, item, coeffs)
-    if not coeffs:
-        return
     x_range = (item.get("x_min"), item.get("x_max"))
     y_range = (item.get("y_min"), item.get("y_max"))
-    results = engine.batch_calc(x_vals, coeffs, x_range, y_range)
-    _show_results(results, "forward")
+
+    effective_y_range = y_range
+    pp_info = None
+    if item_id == "pp_energy":
+        pp_info = _pp_scale_info(item)
+        if not pp_info:
+            return
+        y_min, y_max = y_range
+        base_min = _pp_to_base_y(y_min, pp_info["scale"]) if y_min is not None else None
+        base_max = _pp_to_base_y(y_max, pp_info["scale"]) if y_max is not None else None
+        effective_y_range = (base_min, base_max)
+
+    results = engine.batch_calc(x_vals, coeffs, x_range, effective_y_range)
+    if item_id == "pp_energy":
+        for r in results:
+            r["y_base"] = r.get("y")
+            r["y"] = round(_pp_from_base_y(r.get("y", 0.0), item), 10)
+    _show_results(results, "forward", item_id=item_id, item=item, pp_info=pp_info)
 
 
 def _do_reverse_calc(item_id: str, item: dict, input_el):
@@ -531,9 +668,6 @@ def _do_reverse_calc(item_id: str, item: dict, input_el):
         return
 
     coeffs = _get_item_coeffs(item)
-    coeffs = _scale_coeffs_for_item(item_id, item, coeffs)
-    if not coeffs:
-        return
     x_range = (item.get("x_min"), item.get("x_max"))
     y_range = (item.get("y_min"), item.get("y_max"))
     # 反解时在配置的 x 范围内搜索根；未设置则用默认 ±100
@@ -541,54 +675,138 @@ def _do_reverse_calc(item_id: str, item: dict, input_el):
     x_max = item.get("x_max") if item.get("x_max") is not None else 100.0
     search_range = (x_min, x_max)
 
-    results = engine.batch_reverse(y_vals, coeffs, x_range, y_range, search_range)
-    _show_results(results, "reverse")
+    effective_y_vals = y_vals
+    effective_y_range = y_range
+    pp_info = None
+    if item_id == "pp_energy":
+        pp_info = _pp_scale_info(item)
+        if not pp_info:
+            return
+        effective_y_vals = [_pp_to_base_y(v, pp_info["scale"]) for v in y_vals]
+        y_min, y_max = y_range
+        base_min = _pp_to_base_y(y_min, pp_info["scale"]) if y_min is not None else None
+        base_max = _pp_to_base_y(y_max, pp_info["scale"]) if y_max is not None else None
+        effective_y_range = (base_min, base_max)
+
+    results = engine.batch_reverse(effective_y_vals, coeffs, x_range, effective_y_range, search_range)
+    if item_id == "pp_energy":
+        for idx, r in enumerate(results):
+            r["y_base"] = r.get("y")
+            r["y"] = y_vals[idx] if idx < len(y_vals) else r.get("y")
+    _show_results(results, "reverse", item_id=item_id, item=item, pp_info=pp_info)
 
 
 def _get_item_coeffs(item: dict) -> dict:
     return {k: item["coeffs"].get(k, 0.0) for k in engine.DEFAULT_COEFFS}
 
 
-def _show_results(results: list, mode: str):
+def _show_results(results: list, mode: str, *, item_id: str, item: dict, pp_info: dict | None = None):
     if not results:
         ui.notify("无有效结果（可能被范围过滤或无解）", type="warning")
         return
 
-    with ui.dialog() as dlg, ui.card().classes("w-[700px] max-h-[500px] overflow-auto"):
-        title = "正向计算 结果" if mode == "forward" else "反向求解 结果"
-        ui.label(f"{title} ({len(results)} 条)").classes("text-h6 q-mb-md")
+    with ui.dialog() as dlg, ui.card().classes("w-[920px] max-w-[95vw] max-h-[80vh] overflow-auto"):
+        title = "正向计算结果" if mode == "forward" else "反向求解结果"
+        with ui.row().classes("items-start justify-between w-full q-mb-sm"):
+            with ui.column().classes("q-gutter-xs"):
+                ui.label(title).classes("text-h6")
+                ui.label(f"共 {len(results)} 条").classes("text-caption text-grey")
+            ui.button(icon="close", on_click=dlg.close).props("flat round dense")
 
-        has_multi = any(r.get("multiple") for r in results)
+        if item_id == "pp_energy" and pp_info:
+            with ui.card().classes("w-full q-pa-sm q-mb-md").style("border: 1px solid rgba(37, 99, 235, 0.22)"):
+                with ui.row().classes("items-center q-gutter-md"):
+                    ui.html('<span class="mc-chip">PP能量 = Y × 传输系数 ÷ 功率转换系数</span>', sanitize=False)
+                    ui.html(f'<span class="mc-chip">传输效率 {pp_info["scale"]:.6g}</span>', sanitize=False)
+                    ui.html(f'<span class="mc-chip">传输系数 {pp_info["trans_coeff"]:.6g}</span>', sanitize=False)
+                    ui.html(f'<span class="mc-chip">功率转换系数 {pp_info["power_conv_coeff"]:.6g}</span>', sanitize=False)
 
-        with ui.column().classes("w-full"):
-            head = ('<thead><tr><th>输入 x</th><th>输出 y = f(x)</th></tr></thead>'
-                    if mode == "forward" else
-                    '<thead><tr><th>目标 y</th><th>解 x</th></tr></thead>')
-            ui.html(f'<table class="result-table">{head}<tbody>', sanitize=False)
-
-            for r in results:
-                if mode == "forward":
-                    ui.html(f'<tr><td>{r["x"]}</td><td>{r["y"]}</td></tr>', sanitize=False)
-                else:
-                    x_vals = r["x_values"]
+        with ui.card().classes("w-full q-pa-md"):
+            if mode == "forward":
+                ui.label("核心结果").classes("mc-section-title q-mb-sm")
+                head = '<thead><tr><th>输入 x</th><th>输出 Y</th></tr></thead>'
+                ui.html(f'<table class="result-table">{head}<tbody>', sanitize=False)
+                for r in results:
+                    ui.html(f'<tr><td>{r.get("x")}</td><td>{r.get("y")}</td></tr>', sanitize=False)
+                ui.html("</tbody></table>", sanitize=False)
+            else:
+                ui.label("核心结果").classes("mc-section-title q-mb-sm")
+                head = '<thead><tr><th>目标 Y</th><th>解 x</th></tr></thead>'
+                ui.html(f'<table class="result-table">{head}<tbody>', sanitize=False)
+                for r in results:
+                    yv = r.get("y")
+                    x_vals = r.get("x_values") or []
                     if not x_vals:
-                        ui.html(f'<tr><td>{r["y"]}</td>'
-                                f'<td><span style="color:#E65100">无实数解</span></td></tr>',
-                                sanitize=False)
-                    elif r["multiple"]:
+                        ui.html(f'<tr><td>{yv}</td><td><span style="color:#E65100">无实数解</span></td></tr>', sanitize=False)
+                    elif r.get("multiple"):
                         x_str = ", ".join(str(x) for x in x_vals)
-                        ui.html(f'<tr><td>{r["y"]}</td><td>{x_str} '
-                                f'<span class="alert-badge">一对多({len(x_vals)}解)</span></td></tr>',
-                                sanitize=False)
+                        ui.html(
+                            f'<tr><td>{yv}</td><td>{x_str} <span class="alert-badge">一对多({len(x_vals)}解)</span></td></tr>',
+                            sanitize=False,
+                        )
                     else:
-                        ui.html(f'<tr><td>{r["y"]}</td><td>{x_vals[0]}</td></tr>', sanitize=False)
+                        ui.html(f'<tr><td>{yv}</td><td>{x_vals[0]}</td></tr>', sanitize=False)
+                ui.html("</tbody></table>", sanitize=False)
 
-            ui.html('</tbody></table>', sanitize=False)
+        if mode == "reverse" and any(r.get("multiple") for r in results):
+            ui.label("多解确认").classes("mc-section-title q-mt-md q-mb-sm")
+            ui.label("当存在一对多时，请选择你认为最优的解（会生成唯一解结果）。").classes("mc-page-subtitle q-mb-sm")
+            chosen = {}
+            chosen_container = ui.column().classes("w-full")
 
-        if has_multi:
-            ui.label("存在一对多结果，请核对期望的输出范围").classes("text-caption text-orange-8 q-mt-sm")
+            with ui.column().classes("w-full q-gutter-sm"):
+                for idx, r in enumerate(results):
+                    if not r.get("multiple"):
+                        continue
+                    yv = r.get("y")
+                    xs = r.get("x_values") or []
+                    if not xs:
+                        continue
+                    default_x = min(xs, key=lambda v: abs(float(v)))
+                    chosen[idx] = default_x
+                    with ui.row().classes("items-center q-gutter-sm w-full"):
+                        ui.label(f"目标 Y: {yv}").classes("text-caption text-grey")
+                        ui.select(
+                            options=[str(x) for x in xs],
+                            value=str(default_x),
+                            on_change=lambda e, i=idx: chosen.__setitem__(i, float(e.value)),
+                        ).props("dense outlined").classes("w-56")
 
-        with ui.row().classes("w-full justify-end q-mt-md"):
-            ui.button("关闭", on_click=dlg.close).props("flat")
+            def apply_choice():
+                chosen_container.clear()
+                with chosen_container:
+                    ui.label("唯一解结果").classes("mc-section-title q-mb-sm")
+                    ui.html('<table class="result-table"><thead><tr><th>目标 Y</th><th>确认的 x</th></tr></thead><tbody>', sanitize=False)
+                    for i, r in enumerate(results):
+                        yv = r.get("y")
+                        xs = r.get("x_values") or []
+                        if not xs:
+                            ui.html(f'<tr><td>{yv}</td><td><span style="color:#E65100">无实数解</span></td></tr>', sanitize=False)
+                        elif r.get("multiple"):
+                            ui.html(f"<tr><td>{yv}</td><td>{chosen.get(i)}</td></tr>", sanitize=False)
+                        else:
+                            ui.html(f"<tr><td>{yv}</td><td>{xs[0]}</td></tr>", sanitize=False)
+                    ui.html("</tbody></table>", sanitize=False)
+
+            ui.button("应用选择", icon="check", on_click=apply_choice).props("color=primary dense q-mb-md")
+            apply_choice()
+
+        with ui.expansion("参数明细", value=False).classes("w-full q-mt-md"):
+            coeffs = item.get("coeffs") or {}
+            rows = []
+            for i in range(1, 9):
+                rows.append((f"k{i}", coeffs.get(f'k{i}', 0.0)))
+            rows.append(("b", coeffs.get("b", 0.0)))
+            ui.html('<table class="result-table"><thead><tr><th>参数</th><th>值</th></tr></thead><tbody>', sanitize=False)
+            if item_id == "pp_energy":
+                ui.html(f"<tr><td>传输系数</td><td>{item.get('trans_coeff', 1.0)}</td></tr>", sanitize=False)
+                ui.html(f"<tr><td>功率转换系数</td><td>{item.get('power_conv_coeff', 1.0)}</td></tr>", sanitize=False)
+            ui.html(f"<tr><td>x_min</td><td>{item.get('x_min')}</td></tr>", sanitize=False)
+            ui.html(f"<tr><td>x_max</td><td>{item.get('x_max')}</td></tr>", sanitize=False)
+            ui.html(f"<tr><td>y_min</td><td>{item.get('y_min')}</td></tr>", sanitize=False)
+            ui.html(f"<tr><td>y_max</td><td>{item.get('y_max')}</td></tr>", sanitize=False)
+            for k, v in rows:
+                ui.html(f"<tr><td>{k}</td><td>{v}</td></tr>", sanitize=False)
+            ui.html("</tbody></table>", sanitize=False)
 
     dlg.open()

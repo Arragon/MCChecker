@@ -15,6 +15,7 @@ def setup_test_env(monkeypatch):
     """每个测试前设置临时数据目录"""
     import app.core.storage as storage_mod
     monkeypatch.setattr(storage_mod, "DATA_DIR", TEST_DATA_DIR)
+    monkeypatch.setattr(storage_mod, "PROFILES_DIR", os.path.join(TEST_DATA_DIR, "profiles"))
     monkeypatch.setattr(storage_mod, "CONFIGS_DIR", os.path.join(TEST_DATA_DIR, "configs"))
     monkeypatch.setattr(storage_mod, "ARCHIVE_DIR", os.path.join(TEST_DATA_DIR, "archive"))
     monkeypatch.setattr(storage_mod, "CACHE_DIR", os.path.join(TEST_DATA_DIR, "cache"))
@@ -24,6 +25,11 @@ def setup_test_env(monkeypatch):
     monkeypatch.setattr(storage_mod, "BINDINGS_FILE", os.path.join(TEST_DATA_DIR, "bindings.json"))
     monkeypatch.setattr(storage_mod, "TOOLS_FILE", os.path.join(TEST_DATA_DIR, "tools.json"))
     monkeypatch.setattr(storage_mod, "SCHEDULE_FILE", os.path.join(TEST_DATA_DIR, "schedule.json"))
+    monkeypatch.setattr(storage_mod, "LEGACY_MAPPING_FILE", storage_mod.MAPPING_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_FAVORITES_FILE", storage_mod.FAVORITES_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_BINDINGS_FILE", storage_mod.BINDINGS_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_TOOLS_FILE", storage_mod.TOOLS_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_SCHEDULE_FILE", storage_mod.SCHEDULE_FILE)
     storage_mod._ensure_dirs()
     yield
     # 清理
@@ -39,6 +45,7 @@ class TestConfigMapping:
         assert len(mapping) == 1
         assert mapping[0]["name"] == "test.xml"
         assert mapping[0]["url"] == "http://example.com/test.xml"
+        assert mapping[0].get("record_url", "") == ""
 
     def test_add_duplicate_updates(self):
         from app.core.storage import add_config_mapping, load_config_mapping
@@ -47,6 +54,7 @@ class TestConfigMapping:
         mapping = load_config_mapping()
         assert len(mapping) == 1
         assert mapping[0]["url"] == "http://new.com/test.xml"
+        assert mapping[0].get("record_url", "") == ""
 
     def test_remove_mapping(self):
         from app.core.storage import add_config_mapping, remove_config_mapping, load_config_mapping
@@ -54,6 +62,62 @@ class TestConfigMapping:
         remove_config_mapping("test.xml")
         mapping = load_config_mapping()
         assert len(mapping) == 0
+
+    def test_update_mapping_rename_migrates_files_and_refs(self):
+        from app.core import storage
+
+        storage.add_config_mapping("a.xml", "http://old.local/a.xml")
+        storage.save_config_file("a.xml", b"v1")
+        storage.save_config_file("a.xml", b"v2")
+
+        storage.add_favorite("/root/x", "x", "1", "a.xml", "备注")
+        storage.add_binding("g1", [{"file": "a.xml", "path": "/root/x"}])
+
+        ok = storage.update_config_mapping("a.xml", "b.xml", "http://new.local/b.xml", migrate_files=True)
+        assert ok is True
+
+        mapping = storage.load_config_mapping()
+        assert mapping == [{"name": "b.xml", "url": "http://new.local/b.xml", "record_url": ""}]
+
+        assert os.path.exists(storage.get_config_path("b.xml")) is True
+        assert os.path.exists(storage.get_config_path("a.xml")) is False
+
+        assert os.path.exists(os.path.join(storage.get_archive_root_dir(), "a.xml")) is False
+        assert os.path.exists(os.path.join(storage.get_archive_root_dir(), "b.xml")) is True
+
+        favs = storage.load_favorites()
+        assert favs and favs[0]["source_file"] == "b.xml"
+
+        bindings = storage.load_bindings()
+        assert bindings and bindings[0]["variables"][0]["file"] == "b.xml"
+
+    def test_delete_mapping_only_removes_mapping(self):
+        from app.core import storage
+
+        storage.add_config_mapping("c.xml", "http://example.com/c.xml")
+        storage.save_config_file("c.xml", b"v1")
+
+        ok = storage.delete_config_mapping("c.xml", delete_files=False)
+        assert ok is True
+        assert storage.load_config_mapping() == []
+        assert os.path.exists(storage.get_config_path("c.xml")) is True
+
+    def test_delete_mapping_with_files_cleans_refs(self):
+        from app.core import storage
+
+        storage.add_config_mapping("d.xml", "http://example.com/d.xml")
+        storage.save_config_file("d.xml", b"v1")
+        storage.save_config_file("d.xml", b"v2")
+        storage.add_favorite("/root/x", "x", "1", "d.xml", "备注")
+        storage.add_binding("g1", [{"file": "d.xml", "path": "/root/x"}])
+
+        ok = storage.delete_config_mapping("d.xml", delete_files=True)
+        assert ok is True
+        assert storage.load_config_mapping() == []
+        assert os.path.exists(storage.get_config_path("d.xml")) is False
+        assert os.path.exists(os.path.join(storage.get_archive_root_dir(), "d.xml")) is False
+        assert storage.load_favorites() == []
+        assert storage.load_bindings() == []
 
 
 class TestConfigFileStorage:
@@ -87,6 +151,48 @@ class TestConfigFileStorage:
         files = list_config_files()
         assert "a.xml" in files
         assert "b.json" in files
+
+
+class TestRecordStorage:
+    def test_save_and_list_records(self):
+        from app.core import storage
+
+        p1 = storage.save_record_file("a.xml", b"record_v1", source_url="http://example.com/record.txt")
+        assert os.path.exists(p1) is True
+        versions = storage.list_record_versions("a.xml")
+        assert versions
+        assert versions[0]["filename"].startswith("record_")
+        loaded = storage.load_record_file("a.xml", versions[0]["filename"])
+        assert loaded == b"record_v1"
+
+    def test_archive_diff_generated(self):
+        from app.core.storage import save_config_file, list_archived_versions
+
+        v1 = b"<root><a>1</a></root>"
+        v2 = b"<root><a>2</a><b>3</b></root>"
+        save_config_file("test.xml", v1)
+        save_config_file("test.xml", v2)
+
+        versions = list_archived_versions("test.xml")
+        assert versions
+        diff = versions[0].get("diff")
+        assert diff is not None
+        assert diff.get("has_changes") is True
+        summary = diff.get("summary") or {}
+        assert (summary.get("added_count", 0) + summary.get("removed_count", 0) + summary.get("modified_count", 0)) > 0
+
+    def test_archive_diff_no_change(self):
+        from app.core.storage import save_config_file, list_archived_versions
+
+        v1 = b"<root><a>1</a></root>"
+        save_config_file("test.xml", v1)
+        save_config_file("test.xml", v1)
+
+        versions = list_archived_versions("test.xml")
+        assert versions
+        diff = versions[0].get("diff")
+        assert diff is not None
+        assert diff.get("has_changes") is False
 
 
 class TestFavorites:

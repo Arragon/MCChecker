@@ -1,4 +1,4 @@
-"""全量配置管理页面"""
+"""更新设置页面"""
 
 from nicegui import ui
 
@@ -7,45 +7,55 @@ from app.utils.auth import is_deployer
 
 
 def render_management_page(deployer: bool):
-    """渲染全量配置管理页面"""
-    ui.label("全量配置管理").classes("text-h6 q-mb-md")
-
+    """渲染更新设置页面"""
+    ui.label("更新设置").classes("mc-page-title q-mb-sm")
     if not deployer:
-        ui.label("访客仅可查看配置映射表，无法修改").classes("text-warning q-mb-md")
+        ui.label("访客仅可查看配置映射表，无法修改").classes("text-warning mc-page-subtitle q-mb-sm")
 
-    # 映射表
-    mapping = storage.load_config_mapping()
-    columns = [
-        {"name": "name", "label": "文件名", "field": "name", "align": "left"},
-        {"name": "url", "label": "下载链接", "field": "url", "align": "left"},
-        {"name": "actions", "label": "操作", "field": "actions", "align": "center"},
-    ]
-    rows = [{"name": m["name"], "url": m["url"]} for m in mapping]
+    ui.label("更新链接管理").classes("mc-section-title q-mb-xs")
+    ui.label("为每个配置文件维护独立的下载链接，并支持单条刷新与编辑。").classes("mc-page-subtitle q-mb-sm")
 
-    with ui.table(columns=columns, rows=rows).classes("w-full") as table:
-        table.props("flat bordered dense")
+    status_state: dict = {}
+    mapping_container = ui.column().classes("w-full q-gutter-sm")
 
-    # 添加映射
+    def refresh_mapping_list():
+        mapping_container.clear()
+        mapping = storage.load_config_mapping()
+        if not mapping:
+            with mapping_container:
+                ui.label("暂无更新链接配置").classes("text-caption text-grey")
+            return
+
+        with mapping_container:
+            for item in mapping:
+                _render_mapping_item(item, deployer, status_state, refresh_mapping_list)
+
+    refresh_mapping_list()
+
     if deployer:
-        with ui.row().classes("items-center q-mt-md"):
-            name_input = ui.input(placeholder="文件名 (例: config.xml)").props("dense outlined").classes("w-48")
-            url_input = ui.input(placeholder="下载链接").props("dense outlined").classes("w-96")
-            ui.button("添加", icon="add",
-                      on_click=lambda: _add_mapping(name_input.value, url_input.value)
-                      ).props("color=primary dense")
+        with ui.card().classes("w-full q-mt-md q-pa-sm"):
+            ui.label("新增更新链接").classes("text-subtitle2 font-bold q-mb-sm")
+            with ui.row().classes("items-center q-gutter-sm w-full"):
+                name_input = ui.input(placeholder="文件名 (例: config.xml)").props("dense outlined").classes("w-48")
+                url_input = ui.input(placeholder="下载链接").props("dense outlined").classes("w-full")
+                ui.button(
+                    "添加",
+                    icon="add",
+                    on_click=lambda: _add_mapping(name_input.value, url_input.value, refresh_mapping_list),
+                ).props("color=primary dense")
 
     ui.separator().classes("q-my-md")
 
     # 全量更新
     with ui.row().classes("items-center q-mb-md"):
         ui.button("全量更新", icon="cloud_download",
-                  on_click=lambda: _run_full_update()
+                  on_click=lambda: _run_full_update(status_state, refresh_mapping_list)
                   ).props("color=primary")
-        ui.label("从所有配置链接爬取最新版本文件").classes("text-caption text-grey")
+        ui.label("从所有配置链接爬取最新版本文件").classes("mc-page-subtitle")
 
     # 定时配置
     if deployer:
-        ui.label("定时更新配置").classes("text-subtitle1 q-mt-md")
+        ui.label("定时更新配置").classes("mc-section-title q-mt-md")
         schedule_config = storage.load_schedule()
         with ui.row().classes("items-center"):
             enabled_switch = ui.switch("启用定时更新", value=schedule_config.get("enabled", False))
@@ -59,7 +69,54 @@ def render_management_page(deployer: bool):
                       ).props("dense color=primary")
 
 
-def _add_mapping(name: str, url: str):
+def _render_mapping_item(item: dict, deployer: bool, status_state: dict, refresh_cb):
+    name = item.get("name", "")
+    url = item.get("url", "")
+    file_time = storage.get_file_update_date(name) if name else None
+    status_info = status_state.get(name) or {}
+    status = status_info.get("status")
+    status_label = status_info.get("label")
+    status_color = status_info.get("color")
+    status_reason = status_info.get("reason")
+
+    with ui.card().classes("w-full q-pa-sm"):
+        with ui.row().classes("items-start justify-between w-full q-gutter-sm"):
+            with ui.column().classes("q-gutter-xs"):
+                with ui.row().classes("items-center q-gutter-xs"):
+                    ui.badge(name or "-", color="blue")
+                    if file_time:
+                        ui.label(f"本地更新时间: {file_time}").classes("text-caption text-grey")
+                if url:
+                    ui.label(url).classes("text-body2 break-all")
+                else:
+                    ui.label("未配置下载链接").classes("text-caption text-grey")
+                if status and status_label:
+                    with ui.row().classes("items-center q-gutter-xs"):
+                        ui.badge(status_label, color=status_color or "grey")
+                        if status_reason:
+                            ui.label(status_reason).classes("text-caption text-grey")
+
+            if deployer:
+                with ui.row().classes("items-center justify-end q-gutter-xs wrap"):
+                    ui.button(
+                        icon="refresh",
+                        on_click=lambda n=name: _run_single_update(n, status_state, refresh_cb),
+                    ).props("flat round dense color=primary")
+                    ui.button(
+                        icon="edit",
+                        on_click=lambda it=item: _show_edit_mapping_dialog(it, status_state, refresh_cb),
+                    ).props("flat round dense color=primary")
+                    ui.button(
+                        icon="history",
+                        on_click=lambda it=item: _show_record_link_dialog(it),
+                    ).props("flat round dense")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda n=name: _show_delete_mapping_dialog(n, status_state, refresh_cb),
+                    ).props("flat round dense color=red")
+
+
+def _add_mapping(name: str, url: str, refresh_cb):
     if not name or not url:
         ui.notify("文件名和链接不能为空", type="warning")
         return
@@ -68,14 +125,149 @@ def _add_mapping(name: str, url: str):
         return
     storage.add_config_mapping(name, url)
     ui.notify(f"已添加: {name}", type="positive")
+    refresh_cb()
 
 
-def _run_full_update():
+def _format_update_status(result: dict) -> dict:
+    status = result.get("status")
+    if status == "success":
+        return {"status": status, "label": "刷新成功", "color": "green"}
+    if status == "skipped":
+        return {"status": status, "label": "已跳过", "color": "grey", "reason": result.get("reason")}
+    if status == "not_found":
+        return {"status": status, "label": "未找到", "color": "grey"}
+    if status == "download_failed":
+        return {"status": status, "label": "下载失败", "color": "red"}
+    if status == "error":
+        return {"status": status, "label": "刷新失败", "color": "red", "reason": result.get("reason")}
+    return {"status": status, "label": "未知状态", "color": "grey"}
+
+
+def _run_single_update(name: str, status_state: dict, refresh_cb):
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+    ui.notify(f"开始刷新: {name}", type="info")
+    result = sched.run_single_update(name)
+    status_state[name] = _format_update_status(result)
+    if result.get("status") == "success":
+        ui.notify(f"刷新成功: {name}", type="positive")
+    else:
+        ui.notify(f"刷新完成: {name}", type="warning")
+    refresh_cb()
+
+
+def _run_full_update(status_state: dict, refresh_cb):
     if not is_deployer():
         ui.notify("权限不足", type="negative")
         return
     result = sched.run_full_update()
+    for d in result.get("details", []):
+        n = d.get("name")
+        if not n:
+            continue
+        status_state[n] = _format_update_status(d)
     ui.notify(f"更新完成: 成功 {result['success']}, 失败 {result['failed']}", type="info")
+    refresh_cb()
+
+
+def _show_edit_mapping_dialog(item: dict, status_state: dict, refresh_cb):
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+
+    original_name = item.get("name", "")
+    with ui.dialog() as dialog, ui.card().classes("w-[600px] max-w-[95vw]"):
+        ui.label("修改更新链接").classes("text-h6 q-mb-sm")
+        name_input = ui.input(value=original_name, placeholder="文件名 (例: config.xml)").props("dense outlined").classes("w-full")
+        url_input = ui.input(value=item.get("url", ""), placeholder="下载链接").props("dense outlined").classes("w-full")
+        migrate_switch = ui.switch("同时迁移本地文件与归档目录（改名时）", value=True)
+
+        def do_save():
+            new_name = (name_input.value or "").strip()
+            new_url = (url_input.value or "").strip()
+            if not new_name or not new_url:
+                ui.notify("文件名和链接不能为空", type="warning")
+                return
+            try:
+                ok = storage.update_config_mapping(
+                    original_name,
+                    new_name,
+                    new_url,
+                    migrate_files=bool(migrate_switch.value),
+                )
+            except Exception as e:
+                ui.notify(str(e) or "保存失败", type="negative")
+                return
+            if not ok:
+                ui.notify("未找到对应映射项", type="warning")
+                return
+            if original_name in status_state and new_name != original_name:
+                status_state[new_name] = status_state.pop(original_name)
+            ui.notify("已保存", type="positive")
+            dialog.close()
+            refresh_cb()
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=do_save).props("color=primary")
+
+        dialog.open()
+
+
+def _show_delete_mapping_dialog(name: str, status_state: dict, refresh_cb):
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("删除更新链接").classes("text-h6")
+        ui.label(f"将从映射表移除: {name}").classes("text-body2 q-mb-sm")
+        ui.label("仅删除链接配置，不会删除本地已缓存文件与归档版本。").classes("text-caption text-grey q-mb-sm")
+
+        def do_delete():
+            ok = storage.delete_config_mapping(name, delete_files=False)
+            if not ok:
+                ui.notify("删除失败或条目不存在", type="warning")
+                return
+            status_state.pop(name, None)
+            ui.notify("已删除", type="positive")
+            dialog.close()
+            refresh_cb()
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("删除", icon="delete", on_click=do_delete).props("color=negative")
+
+        dialog.open()
+
+
+def _show_record_link_dialog(item: dict):
+    name = item.get("name", "")
+    with ui.dialog() as dialog, ui.card().classes("w-[600px] max-w-[95vw]"):
+        ui.label("修改记录爬取链接").classes("text-h6 q-mb-sm")
+        ui.label(f"配置文件: {name}").classes("text-caption text-grey q-mb-sm")
+        record_input = ui.input(
+            value=item.get("record_url", ""),
+            placeholder="用于拉取修改记录的链接（http/https）",
+        ).props("dense outlined").classes("w-full")
+
+        def do_save():
+            if not is_deployer():
+                ui.notify("权限不足", type="negative")
+                return
+            ok = storage.update_config_record_url(name, record_input.value or "")
+            if not ok:
+                ui.notify("未找到对应映射项", type="warning")
+                return
+            ui.notify("已保存", type="positive")
+            dialog.close()
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=do_save).props("color=primary")
+
+        dialog.open()
 
 
 def _save_schedule(enabled: bool, interval: float):

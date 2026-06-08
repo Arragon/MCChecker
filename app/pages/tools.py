@@ -8,10 +8,10 @@ from app.utils.auth import is_deployer
 
 def render_tools_page(deployer: bool):
     """渲染工具菜单配置页面"""
-    ui.label("工具菜单配置").classes("text-h6 q-mb-md")
+    ui.label("工具菜单配置").classes("mc-page-title q-mb-md")
 
     if not deployer:
-        ui.label("访客仅可查看工具列表，无法修改").classes("text-warning q-mb-md")
+        ui.label("访客仅可查看工具列表，无法修改").classes("text-warning mc-page-subtitle q-mb-md")
 
     tools = storage.load_tools()
 
@@ -36,7 +36,7 @@ def render_tools_page(deployer: bool):
 
     if deployer:
         ui.separator().classes("q-my-md")
-        ui.label("添加工具").classes("text-subtitle1")
+        ui.label("添加工具").classes("mc-section-title")
         name_input = ui.input(placeholder="工具名称").props("dense outlined").classes("w-64")
         desc_input = ui.input(placeholder="工具介绍/备注").props("dense outlined").classes("w-96")
         url_input = ui.input(placeholder="访问地址").props("dense outlined").classes("w-96")

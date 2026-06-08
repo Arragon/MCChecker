@@ -1,8 +1,11 @@
 """主页渲染模块"""
 
-from nicegui import ui
+from nicegui import app, ui
 
 from app.core import storage
+from app.core import device_models
+from app.core import tab_manager
+from app.core import tabs_state
 from app.core.favorites_live import resolve_overview_favorites
 from app.utils.auth import is_deployer
 from app.pages.viewer import render_file_viewer
@@ -12,23 +15,45 @@ from app.pages.tools import render_tools_page
 from app.pages.comparison import render_comparison_page
 from app.pages.history import render_history_page
 from app.pages.dltool import render_dltool_page
+from app.pages.search import render_search_page
+from app.pages.records import render_records_page
+from app.pages.theme import ensure_theme
 
-# 模块级引用，用于取消收藏时触发 UI 刷新
-_session_ref = {"tab": None}
-_OVERVIEW_ASSETS_SENT = False
+_TAB_LIMIT = 15
 
 
 def render_home_page():
     """渲染主页"""
+    ensure_theme()
+
+    selected_model = device_models.normalize_selected(app.storage.user.get("device_model"))
+    app.storage.user["device_model"] = selected_model
+    storage.set_active_profile(selected_model)
+
     deployer = is_deployer()
 
     session_tabs = []
     session_active_tab = {"name": "overview"}
     session_tab_history = []
-    _session_ref["tab"] = session_active_tab
+
+    _restore_tabs_state(selected_model, session_tabs, session_active_tab, session_tab_history)
+    for t in session_tabs:
+        if t.get("type") == "management":
+            t["label"] = "更新设置"
+
+    left_drawer = ui.left_drawer(bordered=True).props("show-if-above").classes("w-[320px] max-w-[45vw] q-pa-sm")
+    with left_drawer:
+        _render_sidebar(session_tabs, session_active_tab, session_tab_history)
+
+    right_drawer = ui.right_drawer(bordered=True).props("show-if-above").classes("w-72 q-pa-sm")
+    with right_drawer:
+        _render_tools_sidebar(session_tabs, session_active_tab)
 
     # ---- 顶部导航栏 ----
-    with ui.header().classes("items-center no-wrap bg-primary q-px-sm q-py-none"):
+    with ui.header().classes("items-center no-wrap q-px-sm q-py-none mc-header"):
+        ui.button(icon="menu", on_click=left_drawer.toggle).props("flat round dense color=white").classes("lt-md") \
+            .tooltip("打开/关闭菜单")
+
         # 左: 返回 + 标题
         ui.button(icon="home", on_click=lambda: _go_home(session_active_tab)
                   ).props("flat round dense color=white").tooltip("返回主页")
@@ -39,15 +64,15 @@ def render_home_page():
                   ).props("flat round dense color=white size=sm").tooltip("上传文件")
         ui.button(icon="cloud_download", on_click=lambda: _show_url_dialog(session_tabs, session_active_tab, session_tab_history)
                   ).props("flat round dense color=white size=sm").tooltip("URL下载")
-        ui.button(icon="search", on_click=lambda: _show_search_dialog(session_tabs)
+        ui.button(icon="search", on_click=lambda: _show_search_dialog(session_tabs, session_active_tab, session_tab_history)
                   ).props("flat round dense color=white size=sm").tooltip("全局搜索")
 
         ui.label("|").classes("text-white text-weight-light q-mx-xs")
 
         # 管理功能（仅部署者）
         if deployer:
-            ui.button(icon="settings", on_click=lambda: _switch_to_tab("management", "全量配置管理", session_tabs, session_active_tab, session_tab_history)
-                      ).props("flat round dense color=white size=sm").tooltip("全量管理")
+            ui.button(icon="settings", on_click=lambda: _switch_to_tab("management", "更新设置", session_tabs, session_active_tab, session_tab_history)
+                      ).props("flat round dense color=white size=sm").tooltip("更新设置")
             ui.button(icon="link", on_click=lambda: _switch_to_tab("bindings", "变量绑定配置", session_tabs, session_active_tab, session_tab_history)
                       ).props("flat round dense color=white size=sm").tooltip("变量绑定")
             ui.button(icon="build", on_click=lambda: _switch_to_tab("tools", "工具菜单", session_tabs, session_active_tab, session_tab_history)
@@ -55,30 +80,57 @@ def render_home_page():
 
         ui.space()
 
-    # ---- 左侧文件导航 ----
-    with ui.left_drawer(bordered=True).classes("w-48 bg-grey-1 q-pa-sm"):
-        _render_sidebar(session_tabs, session_active_tab, session_tab_history)
+        with ui.button(icon="devices").props("flat round dense color=white").tooltip("机型切换"):
+            with ui.menu():
+                models = device_models.load_models()
+                for m in models:
+                    mid = m.get("id")
+                    if not mid:
+                        continue
+                    label = m.get("name") or mid
+                    ui.item(label, on_click=lambda e=None, v=mid: _switch_device_model(v))
 
-    # ---- 右侧工具栏 ----
-    with ui.right_drawer(bordered=True).classes("w-56 bg-grey-1 q-pa-sm"):
-        _render_tools_sidebar(session_tabs, session_active_tab)
+                ui.separator()
+                ui.item("新增机型", on_click=lambda: _show_add_model_dialog(selected_model)).props("clickable")
+                if selected_model != device_models.DEFAULT_MODEL_ID:
+                    ui.item("删除当前机型", on_click=lambda: _show_delete_model_dialog(selected_model)).props("clickable")
+                ui.item("管理机型", on_click=lambda: _show_manage_models_dialog(selected_model)).props("clickable")
+
+        ui.label(device_models.get_model_name(selected_model)).classes("text-white text-caption q-ml-xs ellipsis gt-xs").style("max-width: 160px")
+
+        ui.button(icon="tune", on_click=right_drawer.toggle).props("flat round dense color=white").classes("lt-md") \
+            .tooltip("打开/关闭工具箱")
 
     # ---- 主内容区 ----
-    with ui.column().classes("w-full flex-1 p-4 overflow-auto"):
+    with ui.column().classes("w-full flex-1 p-4 overflow-auto mc-content"):
         _render_main_content(deployer, session_tabs, session_active_tab, session_tab_history)
 
 
 def _go_home(session_active_tab: dict):
     """返回主页"""
     session_active_tab["name"] = "overview"
+    _persist_tabs_state(storage.get_active_profile(), None, session_active_tab, None)
 
 
-def _go_back(session_active_tab: dict, session_tab_history: list):
+def _go_back(session_active_tab: dict, session_tab_history: list, session_tabs: list | None = None):
     """返回上一页面，无历史时返回概览"""
     if session_tab_history:
-        session_active_tab["name"] = session_tab_history.pop()
+        while session_tab_history:
+            prev = session_tab_history.pop()
+            if prev == "overview":
+                session_active_tab["name"] = "overview"
+                break
+            if session_tabs is None:
+                session_active_tab["name"] = prev
+                break
+            if any(t.get("name") == prev for t in session_tabs):
+                session_active_tab["name"] = prev
+                break
+        else:
+            session_active_tab["name"] = "overview"
     else:
         session_active_tab["name"] = "overview"
+    _persist_tabs_state(storage.get_active_profile(), None, session_active_tab, session_tab_history)
 
 
 def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_history: list):
@@ -87,7 +139,7 @@ def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_hi
     全量配置中的文件：显示配置名 + 灰色小字（真实文件名 + 更新时间）
     其他文件：直接显示文件名
     """
-    ui.label("文件列表").classes("text-body2 text-weight-bold text-grey-7 q-mb-sm")
+    ui.label("文件列表").classes("mc-section-title q-mb-sm")
 
     # 加载全量配置映射，建立 文件名->配置名 的关系
     mapping = storage.load_config_mapping()
@@ -103,32 +155,26 @@ def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_hi
             color = color_map.get(ext, "grey")
 
             with ui.card().classes(
-                "w-full cursor-pointer q-mb-xs q-pa-sm bg-white hover:bg-blue-50"
+                "w-full q-mb-xs q-pa-xs mc-nav-card"
             ).on("click", lambda f=fname: _open_file_tab(f, session_tabs, session_active_tab, session_tab_history)):
-                with ui.row().classes("items-center no-wrap"):
-                    ui.icon(icon, color=color, size="sm").classes("q-mr-sm")
-                    with ui.column().classes("q-ma-none q-pa-none"):
+                with ui.row().classes("items-start w-full"):
+                    ui.icon(icon, color=color, size="sm").classes("q-mr-sm q-mt-xs")
+                    with ui.column().classes("q-ma-none q-pa-none w-full"):
+                        ui.label(fname).classes("mc-nav-filename text-body2 text-weight-medium q-mb-none")
                         if fname in mapping_names:
-                            # 全量配置中的文件：显示配置记录的名称
-                            ui.label(fname).classes("text-body1 text-weight-medium q-mb-none")
-                            update_date = storage.get_file_update_date(fname) or ""
-                            sub_text = fname
+                            update_date = storage.get_file_update_date(fname)
                             if update_date:
-                                sub_text += "  |  " + update_date
-                            ui.label(sub_text).classes("text-caption text-grey q-mt-none")
-                        else:
-                            # 普通上传的文件：直接显示文件名
-                            ui.label(fname).classes("text-body1 text-weight-medium q-mb-none")
+                                ui.label(update_date).classes("text-caption text-grey q-mt-none")
     else:
         ui.label("暂无文件").classes("text-caption text-grey")
 
 
 def _render_tools_sidebar(session_tabs: list = None, session_active_tab: dict = None):
     """右侧工具栏：展示已配置的工具 + DL快捷计算入口"""
-    ui.label("工具箱").classes("text-caption text-weight-bold text-grey-7 q-mb-xs")
+    ui.label("工具箱").classes("mc-section-title q-mb-xs")
 
     # ---- DL 快捷计算 ----
-    with ui.card().classes("w-full cursor-pointer q-mb-xs q-pa-sm bg-white hover:bg-blue-50") \
+    with ui.card().classes("w-full q-mb-xs q-pa-sm mc-nav-card") \
             .on("click", lambda: _switch_to_tab("dltool", "DL快捷计算", session_tabs, session_active_tab, None)):
         with ui.row().classes("items-center"):
             ui.icon("functions", size="sm", color="blue-8").classes("q-mr-sm")
@@ -139,7 +185,7 @@ def _render_tools_sidebar(session_tabs: list = None, session_active_tab: dict = 
     tools = storage.load_tools()
     if tools:
         for tool in tools:
-            with ui.card().classes("w-full cursor-pointer q-mb-xs q-pa-sm bg-white").on(
+            with ui.card().classes("w-full q-mb-xs q-pa-sm mc-nav-card").on(
                 "click", lambda url=tool["url"]: ui.run_javascript(f'window.open("{url}", "_blank")')
             ):
                 ui.label(tool["name"]).classes("text-subtitle2 font-bold q-mb-none")
@@ -157,11 +203,23 @@ def _open_file_tab(filename: str, session_tabs: list, session_active_tab: dict, 
             if session_tab_history is not None:
                 session_tab_history.append(session_active_tab["name"])
             session_active_tab["name"] = tab["name"]
+            _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
             return
     if session_tab_history is not None:
         session_tab_history.append(session_active_tab["name"])
-    session_tabs.append({"name": f"file:{filename}", "label": filename, "type": "file", "filename": filename})
+    tab_manager.ensure_opened_at(session_tabs)
+    session_tabs.append({
+        "name": f"file:{filename}",
+        "label": filename,
+        "type": "file",
+        "filename": filename,
+        "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
+    })
     session_active_tab["name"] = f"file:{filename}"
+    removed = tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], _TAB_LIMIT)
+    if removed and session_tab_history is not None:
+        session_tab_history[:] = tab_manager.prune_history(session_tab_history, removed)
+    _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
 
 
 def _switch_to_tab(tab_name: str, tab_label: str, session_tabs: list, session_active_tab: dict, session_tab_history: list = None):
@@ -170,14 +228,26 @@ def _switch_to_tab(tab_name: str, tab_label: str, session_tabs: list, session_ac
             if session_tab_history is not None:
                 session_tab_history.append(session_active_tab["name"])
             session_active_tab["name"] = tab_name
+            _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
             return
     if session_tab_history is not None:
         session_tab_history.append(session_active_tab["name"])
-    session_tabs.append({"name": tab_name, "label": tab_label, "type": tab_name})
+    tab_manager.ensure_opened_at(session_tabs)
+    session_tabs.append({
+        "name": tab_name,
+        "label": tab_label,
+        "type": tab_name,
+        "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
+    })
     session_active_tab["name"] = tab_name
+    removed = tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], _TAB_LIMIT)
+    if removed and session_tab_history is not None:
+        session_tab_history[:] = tab_manager.prune_history(session_tab_history, removed)
+    _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
 
 
 def _render_main_content(deployer: bool, session_tabs: list, session_active_tab: dict, session_tab_history: list):
+    tabbar_container = ui.column().classes("w-full")
     overview_container = ui.column().classes("w-full")
     with overview_container:
         _render_overview_panel(deployer, session_tabs, session_active_tab)
@@ -189,9 +259,11 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
         active = session_active_tab["name"]
         if current != active:
             session_active_tab["_rendered"] = active
-            _update_tabs_display(session_tabs, session_active_tab, tabs_container, overview_container, deployer, session_tab_history)
+            _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
+            _update_tabs_display(session_tabs, session_active_tab, tabs_container, overview_container, deployer, session_tab_history, tabbar_container)
 
     ui.timer(0.3, refresh_tabs)
+    refresh_tabs()
 
     last_overview_sig = {"sig": None}
 
@@ -199,7 +271,7 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
         import os
         sig_parts = []
         try:
-            sig_parts.append(("fav", os.path.getmtime(storage.FAVORITES_FILE)))
+            sig_parts.append(("fav", os.path.getmtime(storage.get_favorites_file())))
         except OSError:
             sig_parts.append(("fav", 0))
         favorites = storage.load_favorites()
@@ -229,170 +301,7 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
 
 def _render_overview_panel(deployer: bool, session_tabs: list, session_active_tab: dict):
     """配置速览面板 - 每个收藏项一个卡片，卡片内展示层级结构"""
-    ui.label("配置速览").classes("text-h5 q-mb-md")
-
-    global _OVERVIEW_ASSETS_SENT
-    if not _OVERVIEW_ASSETS_SENT:
-        ui.add_head_html("""<style>
-.fav-card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 12px;
-}
-.fav-card {
-    border-left: 4px solid;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    transition: box-shadow 0.2s;
-    overflow: hidden;
-}
-.fav-card:hover {
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-}
-/* ---- card-internal tree ---- */
-.fav-card .card-tree {
-    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-    line-height: 1.4;
-    user-select: none;
-}
-.fav-card .card-tree .tree-row {
-    display: flex;
-    align-items: center;
-    height: 26px;
-    padding: 0 4px 0 0;
-    border-radius: 3px;
-    cursor: default;
-    transition: background 0.08s ease;
-    gap: 0;
-    margin: 0;
-    box-sizing: border-box;
-}
-.fav-card .card-tree .tree-row:hover {
-    background: rgba(0, 0, 0, 0.03);
-}
-.fav-card .card-tree .indent-cell {
-    width: 16px;
-    align-self: stretch;
-    position: relative;
-    flex-shrink: 0;
-}
-.fav-card .card-tree .indent-cell .guide-line {
-    position: absolute;
-    left: 50%;
-    top: -1px;
-    bottom: -1px;
-    width: 1.5px;
-    transform: translateX(-50%);
-    border-radius: 1px;
-    opacity: 0.35;
-    transition: opacity 0.12s ease;
-}
-.fav-card .card-tree .tree-row:hover .indent-cell .guide-line {
-    opacity: 0.60;
-}
-.fav-card .card-tree .toggle-btn {
-    width: 16px;
-    align-self: stretch;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    cursor: pointer;
-    border-radius: 2px;
-    transition: background 0.08s ease;
-    outline: none;
-}
-.fav-card .card-tree .toggle-btn:hover {
-    background: rgba(0, 0, 0, 0.06);
-}
-.fav-card .card-tree .toggle-btn::before {
-    content: '';
-    display: block;
-    width: 0;
-    height: 0;
-    border-left: 4px solid #999;
-    border-top: 2.8px solid transparent;
-    border-bottom: 2.8px solid transparent;
-    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.fav-card .card-tree .toggle-btn.expanded::before {
-    transform: rotate(90deg);
-}
-.fav-card .card-tree .leaf-marker {
-    width: 16px;
-    align-self: stretch;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-.fav-card .card-tree .leaf-marker::after {
-    content: '';
-    width: 3.5px;
-    height: 3.5px;
-    border-radius: 50%;
-    background: #bbb;
-}
-.fav-card .card-tree .tree-label {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 0.8rem;
-}
-.fav-card .card-tree .lbl-0 { font-weight: 600; font-size: 0.82rem; }
-.fav-card .card-tree .lbl-1 { font-weight: 500; font-size: 0.79rem; }
-.fav-card .card-tree .tree-label .val-text {
-    color: #1565C0;
-    opacity: 0.68;
-    font-size: 0.88em;
-}
-.fav-card .card-tree .children-wrap {
-    overflow: hidden;
-    margin: 0 !important;
-    padding: 0 !important;
-    transition: max-height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.fav-note-input .q-field__control {
-    min-height: 28px !important;
-    height: 28px !important;
-}
-.fav-note-input .q-field__marginal {
-    height: 28px !important;
-}
-.fav-group-header {
-    border-bottom: 1px solid #e8e8e8;
-}
-</style>""")
-
-        ui.add_head_html("""<style>
-.fav-group-deleted .q-expansion-item__header {
-    background: rgba(229, 115, 115, 0.08);
-}
-</style>""")
-
-        ui.run_javascript("""
-        if (!window.mct) {
-            window.mct = function(el) {
-                var row = el.closest('.tree-row');
-                if (!row) return;
-                var kids = row.nextElementSibling;
-                if (!kids || !kids.classList.contains('children-wrap')) return;
-                if (kids.style.maxHeight === '0px') {
-                    kids.style.maxHeight = 'none';
-                    el.classList.remove('collapsed');
-                    el.classList.add('expanded');
-                } else {
-                    kids.style.maxHeight = '0px';
-                    el.classList.add('collapsed');
-                    el.classList.remove('expanded');
-                }
-            };
-        }
-    """)
-        _OVERVIEW_ASSETS_SENT = True
+    ui.label("配置速览").classes("mc-page-title q-mb-md")
 
     # 树节点颜色（与 viewer 一致）
     _card_line_colors = [
@@ -421,13 +330,13 @@ def _render_overview_panel(deployer: bool, session_tabs: list, session_active_ta
                 if update_date:
                     ui.label(f"更新: {update_date}").classes("text-caption text-grey")
                 ui.button(icon="delete_sweep",
-                          on_click=lambda f=file_name: _remove_all_favs_for_file(f)
+                          on_click=lambda f=file_name, st=session_active_tab: _remove_all_favs_for_file(f, st)
                           ).props("flat round dense size=sm color=grey-5").tooltip("清空该文件所有收藏")
 
             with ui.column().classes("fav-card-grid w-full q-mt-sm"):
                 for idx, item in enumerate(items):
                     card_accent_idx = list(file_colors.keys()).index(file_name) + idx
-                    _render_fav_card(file_name, item, card_accent_idx, _card_line_colors)
+                    _render_fav_card(file_name, item, session_active_tab, card_accent_idx, _card_line_colors)
 
     if deleted_grouped:
         deleted_count = sum(len(v) for v in deleted_grouped.values())
@@ -443,7 +352,7 @@ def _render_overview_panel(deployer: bool, session_tabs: list, session_active_ta
                     with ui.column().classes("fav-card-grid w-full q-mt-sm"):
                         for idx, item in enumerate(items):
                             card_accent_idx = list(file_colors.keys()).index(file_name) + idx if file_name in file_colors else idx
-                            _render_fav_card(file_name, item, card_accent_idx, _card_line_colors)
+                            _render_fav_card(file_name, item, session_active_tab, card_accent_idx, _card_line_colors)
 
 
 # 卡片色彩列表：循环分配
@@ -461,7 +370,7 @@ _CARD_ACCENTS = [
 ]
 
 
-def _render_fav_card(file_name: str, item: dict, color_index: int = 0,
+def _render_fav_card(file_name: str, item: dict, session_active_tab: dict, color_index: int = 0,
                      line_colors: list = None):
     """渲染单个收藏卡片，内含完整层级树"""
     if line_colors is None:
@@ -489,7 +398,7 @@ def _render_fav_card(file_name: str, item: dict, color_index: int = 0,
                 ui.label("未检测到，请检查").classes("text-caption text-orange-8")
             ui.space()
             ui.button(icon="close",
-                      on_click=lambda p=item["path"], f=file_name: _quick_remove_fav(p, f)
+                      on_click=lambda p=item["path"], f=file_name, st=session_active_tab: _quick_remove_fav(p, f, st)
                       ).props("flat round dense size=xs color=grey-5").tooltip("取消收藏")
 
         # ---- 备注输入 ----
@@ -568,7 +477,7 @@ def _render_card_tree_node(node: dict, depth: int = 0, line_colors: list = None)
                 _render_card_tree_node(child, depth + 1, line_colors)
 
 
-def _quick_remove_fav(path: str, source_file: str):
+def _quick_remove_fav(path: str, source_file: str, session_active_tab: dict):
     """快捷取消收藏（不刷新页面，保留折叠状态）"""
     storage.remove_favorite(path, source_file)
     ui.notify("已取消收藏", type="info")
@@ -578,12 +487,11 @@ def _quick_remove_fav(path: str, source_file: str):
         if (m) {{ var c = m.closest('.q-card'); if (c) c.remove(); }}
     """)
     # 清除渲染标记，确保切页后数据一致
-    tab = _session_ref.get("tab")
-    if tab:
-        tab.pop("_rendered", None)
+    if session_active_tab is not None:
+        session_active_tab.pop("_rendered", None)
 
 
-def _remove_all_favs_for_file(source_file: str):
+def _remove_all_favs_for_file(source_file: str, session_active_tab: dict):
     """清空某文件下的所有收藏"""
     favorites = storage.load_favorites()
     new_favs = [f for f in favorites if f["source_file"] != source_file]
@@ -595,9 +503,8 @@ def _remove_all_favs_for_file(source_file: str):
             var m = document.querySelector('[data-fav-path="{fav['path']}"]');
             if (m) {{ var c = m.closest('.q-card'); if (c) c.remove(); }}
         """)
-    tab = _session_ref.get("tab")
-    if tab:
-        tab.pop("_rendered", None)
+    if session_active_tab is not None:
+        session_active_tab.pop("_rendered", None)
 
 
 def _save_fav_note(path: str, source_file: str, note: str):
@@ -605,7 +512,12 @@ def _save_fav_note(path: str, source_file: str, note: str):
     storage.update_favorite_note(path, source_file, note)
 
 
-def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overview_container, deployer, session_tab_history):
+def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overview_container, deployer, session_tab_history, tabbar_container):
+    if tabbar_container is not None:
+        tabbar_container.clear()
+        with tabbar_container:
+            _render_tab_bar(session_tabs, session_active_tab, session_tab_history, overview_container, tabs_container)
+
     if session_active_tab["name"] == "overview":
         overview_container.classes(remove="hidden")
         tabs_container.classes(add="hidden")
@@ -625,24 +537,29 @@ def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overv
 
     tabs_container.clear()
     with tabs_container:
-        with ui.row().classes("w-full items-center q-mb-md"):
-            ui.button(icon="arrow_back",
-                      on_click=lambda: _go_back(session_active_tab, session_tab_history)
-                      ).props("flat round dense").tooltip("返回上一页")
-            ui.label(active_tab["label"]).classes("text-h6 q-ml-sm")
-            ui.space()
-            if active_tab["type"] in ("file", "archive_view"):
-                search_input = ui.input(placeholder="搜索当前文件...").props("dense outlined").classes("w-64")
-                ui.button(icon="search",
-                          on_click=lambda: _do_local_search(search_input.value, active_tab.get("filename", ""))
-                          ).props("flat round dense")
-            ui.button(icon="close",
-                      on_click=lambda t=active_tab: _close_tab(t, session_tabs, session_active_tab, overview_container, tabs_container, session_tab_history)
-                      ).props("flat round dense").tooltip("关闭标签页")
+        if active_tab["type"] in ("file", "archive_view"):
+            with ui.row().classes("w-full items-center q-mb-md q-mt-sm"):
+                ui.label(active_tab["label"]).classes("mc-page-title")
+                ui.space()
+                if active_tab["type"] == "file":
+                    search_input = ui.input(placeholder="搜索当前文件...").props("dense outlined").classes("w-64")
+                    ui.button(icon="search",
+                              on_click=lambda: _do_local_search(search_input.value, active_tab, session_active_tab)
+                              ).props("flat round dense")
+                    if active_tab.get("search_keyword"):
+                        ui.button(icon="close",
+                                  on_click=lambda: _do_local_search("", active_tab, session_active_tab)
+                                  ).props("flat round dense").tooltip("清除筛选")
 
         tab_type = active_tab["type"]
         if tab_type == "file":
-            render_file_viewer(active_tab["filename"], deployer, session_tabs, session_active_tab)
+            render_file_viewer(
+                active_tab["filename"],
+                deployer,
+                session_tabs,
+                session_active_tab,
+                search_keyword=active_tab.get("search_keyword"),
+            )
         elif tab_type == "archive_view":
             _render_archive_viewer(active_tab, deployer)
         elif tab_type == "management":
@@ -655,10 +572,14 @@ def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overv
             render_comparison_page(active_tab, deployer)
         elif tab_type == "history":
             render_history_page(active_tab, deployer, session_tabs, session_active_tab)
+        elif tab_type == "records":
+            render_records_page(active_tab, deployer, session_tabs, session_active_tab)
         elif tab_type == "dltool":
             render_dltool_page(
                 on_refresh=lambda: session_active_tab.pop("_rendered", None)
             )
+        elif tab_type == "search":
+            render_search_page(active_tab)
 
 
 def _render_archive_viewer(tab: dict, deployer: bool):
@@ -684,15 +605,6 @@ def _render_archive_viewer(tab: dict, deployer: bool):
     with ui.row().classes("items-center q-mb-md"):
         ui.badge(archive_filename, color="grey")
         ui.label("(历史版本)").classes("text-caption text-grey")
-
-    ui.add_head_html("""<style>
-.fav-tree .depth-1 { padding-left: 20px; }
-.fav-tree .depth-2 { padding-left: 40px; }
-.fav-tree .depth-3 { padding-left: 60px; }
-.fav-tree .depth-4 { padding-left: 80px; }
-.fav-tree .fav-node-header { border-radius: 4px; padding: 2px 6px; margin: 1px 0; }
-.fav-tree .fav-node-header:hover { background: #f5f5f5; }
-</style>""")
 
     with ui.card().classes("w-full overflow-auto fav-tree"):
         for child in tree.get("children", []):
@@ -728,41 +640,272 @@ def _render_archive_node(node: dict, depth: int = 0):
 
 
 def _close_tab(tab, session_tabs, session_active_tab, overview_container, tabs_container, session_tab_history=None):
-    if tab in session_tabs:
-        session_tabs.remove(tab)
-    # Return to previous tab if available, otherwise go to overview
-    if session_tab_history and session_tabs:
-        # Find the most recent history entry that still exists
-        while session_tab_history:
-            prev = session_tab_history.pop()
-            if any(t["name"] == prev for t in session_tabs):
-                session_active_tab["name"] = prev
-                return
-    session_active_tab["name"] = "overview"
-    overview_container.classes(remove="hidden")
-    tabs_container.classes(add="hidden")
-
-
-def _do_local_search(keyword: str, filename: str):
-    from app.core import parser as parser_mod, parse_cache
-
-    if not keyword:
-        ui.notify("请输入搜索关键词", type="warning")
+    name = tab.get("name") if isinstance(tab, dict) else str(tab)
+    if not name:
         return
+    current_active = session_active_tab.get("name", "overview")
+    session_tabs[:], new_active = tab_manager.close_tab_adjacent(session_tabs, current_active, name)
+    if session_tab_history is not None:
+        session_tab_history[:] = tab_manager.prune_history(session_tab_history, [name])
+    session_active_tab["name"] = new_active
+    session_active_tab.pop("_rendered", None)
+    _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
+    _update_tabs_display(session_tabs, session_active_tab, tabs_container, overview_container, is_deployer(), session_tab_history, None)
+
+
+def _tabs_storage_key(profile_id: str) -> str:
+    return tabs_state.tabs_storage_key(profile_id)
+
+
+def _persist_tabs_state(profile_id: str, session_tabs: list | None, session_active_tab: dict, session_tab_history: list | None):
+    key = _tabs_storage_key(profile_id)
+    if session_tabs is None:
+        state = tabs_state.load_state(profile_id) or {}
+        tabs = state.get("tabs", [])
+    else:
+        tabs = session_tabs
+    active = session_active_tab.get("name", "overview")
+    history = list(session_tab_history or (tabs_state.load_state(profile_id) or {}).get("history", []))
     try:
-        source_path = storage.get_config_path(filename)
-        tree = parse_cache.load_tree(source_path)
-        if tree is None:
-            content = storage.load_config_file(filename)
-            if content is None:
+        tabs_state.save_state(profile_id, list(tabs), active, history)
+    except Exception:
+        app.storage.user[key] = {"tabs": list(tabs), "active": active, "history": history[-100:]}
+
+
+def _restore_tabs_state(profile_id: str, session_tabs: list, session_active_tab: dict, session_tab_history: list):
+    import os
+
+    state = tabs_state.load_state(profile_id)
+    if not isinstance(state, dict):
+        return
+    tabs = state.get("tabs", [])
+    if not isinstance(tabs, list):
+        return
+
+    restored = []
+    for t in tabs:
+        if not isinstance(t, dict) or not t.get("name"):
+            continue
+        tab_type = t.get("type")
+        if tab_type == "file":
+            fn = t.get("filename")
+            if not fn:
+                continue
+            if not os.path.exists(storage.get_config_path(fn)):
+                continue
+        if tab_type == "archive_view":
+            fn = t.get("filename")
+            afn = t.get("archive_filename")
+            if not fn or not afn:
+                continue
+            if not os.path.exists(storage.get_archived_path(fn, afn)):
+                continue
+        restored.append(t)
+
+    tab_manager.ensure_opened_at(restored)
+    session_tabs.extend(restored)
+
+    active = state.get("active", "overview")
+    if isinstance(active, str) and any(t.get("name") == active for t in session_tabs):
+        session_active_tab["name"] = active
+    else:
+        session_active_tab["name"] = "overview"
+
+    history = state.get("history", [])
+    if isinstance(history, list):
+        session_tab_history.extend([h for h in history if isinstance(h, str)])
+        existing = {t.get("name") for t in session_tabs if t.get("name")}
+        session_tab_history[:] = [h for h in session_tab_history if h == "overview" or h in existing]
+
+    removed = tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], _TAB_LIMIT)
+    if removed:
+        session_tab_history[:] = tab_manager.prune_history(session_tab_history, removed)
+
+
+def _render_tab_bar(session_tabs: list, session_active_tab: dict, session_tab_history: list, overview_container, tabs_container):
+    active = session_active_tab.get("name", "overview")
+    with ui.element("div").classes("mc-tabbar"):
+        with ui.row().classes("items-center no-wrap mc-tabbar-inner"):
+            ui.button(icon="arrow_back",
+                      on_click=lambda: _go_back(session_active_tab, session_tab_history, session_tabs)
+                      ).props("flat round dense").tooltip("返回上一页")
+            with ui.element("div").classes("mc-tabbar-tabs"):
+                is_overview = active == "overview"
+                overview_el = ui.element("div").classes("mc-tab" + (" mc-tab-active" if is_overview else ""))
+                overview_el.on("click", lambda e=None: _activate_tab("overview", session_tabs, session_active_tab, session_tab_history))
+                with overview_el:
+                    ui.label("主页").classes("mc-tab-label").tooltip("主页")
+
+                for t in session_tabs:
+                    name = t.get("name")
+                    label = t.get("label") or name
+                    is_active = name == active
+                    tab_el = ui.element("div").classes("mc-tab" + (" mc-tab-active" if is_active else ""))
+                    tab_el.on("click", lambda e=None, n=name: _activate_tab(n, session_tabs, session_active_tab, session_tab_history))
+                    with tab_el:
+                        ui.label(label).classes("mc-tab-label").tooltip(label)
+                        ui.button(icon="close").props("flat round dense size=xs").classes("mc-tab-close") \
+                            .on("click.stop", lambda e=None, n=name: _close_tab_by_name(n, session_tabs, session_active_tab, overview_container, tabs_container, session_tab_history)) \
+                            .tooltip("关闭")
+
+
+def _activate_tab(name: str, session_tabs: list, session_active_tab: dict, session_tab_history: list):
+    if name == session_active_tab.get("name"):
+        return
+    if session_tab_history is not None:
+        session_tab_history.append(session_active_tab.get("name", "overview"))
+    session_active_tab["name"] = name
+    _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
+
+
+def _close_tab_by_name(name: str, session_tabs: list, session_active_tab: dict, overview_container, tabs_container, session_tab_history: list):
+    tab = next((t for t in session_tabs if t.get("name") == name), None)
+    if not tab:
+        return
+    _close_tab(tab, session_tabs, session_active_tab, overview_container, tabs_container, session_tab_history)
+
+
+def _do_local_search(keyword: str, active_tab: dict, session_active_tab: dict):
+    kw = (keyword or "").strip()
+    if not kw:
+        active_tab.pop("search_keyword", None)
+        session_active_tab.pop("_rendered", None)
+        ui.notify("已清除搜索筛选", type="info")
+        return
+    active_tab["search_keyword"] = kw
+    session_active_tab.pop("_rendered", None)
+    ui.notify("已按关键词筛选当前文件", type="info")
+
+
+def _switch_device_model(model_id: str) -> None:
+    mid = device_models.normalize_selected(model_id)
+    app.storage.user["device_model"] = mid
+    storage.set_active_profile(mid)
+    ui.notify(f"已切换机型: {device_models.get_model_name(mid)}", type="info")
+    ui.run_javascript("location.reload()")
+
+
+def _show_add_model_dialog(current_model: str) -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("新增机型").classes("text-h6")
+        name_input = ui.input(placeholder="机型名称 (例: iPhone 15 Pro)").props("dense outlined").classes("w-full")
+        copy_switch = ui.switch("从当前机型复制配置", value=False)
+        ui.label("提示：不勾选将创建空白机型，确保与其他机型数据完全隔离").classes("text-caption text-grey q-mt-xs")
+
+        def do_add():
+            name = (name_input.value or "").strip()
+            if not name:
+                ui.notify("请输入机型名称", type="warning")
                 return
-            tree = parser_mod.parse_file(content, filename)
-            parse_cache.save_tree(source_path, tree)
-        flat = parser_mod.flatten_tree(tree)
-        matches = [n for n in flat if keyword.lower() in (n.get("label", "") + str(n.get("value", ""))).lower()]
-        ui.notify(f"找到 {len(matches)} 项匹配", type="info")
-    except ValueError:
-        ui.notify("解析失败", type="negative")
+            try:
+                mid = device_models.add_model(name, copy_from=current_model if copy_switch.value else None)
+            except Exception:
+                ui.notify("新增失败", type="negative")
+                return
+            try:
+                from app.core import scheduler as sched
+                sched.setup_scheduled_update()
+            except Exception:
+                pass
+            app.storage.user["device_model"] = mid
+            storage.set_active_profile(mid)
+            ui.notify(f"已新增机型: {device_models.get_model_name(mid)}", type="positive")
+            dialog.close()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("创建", icon="add", on_click=do_add).props("color=primary")
+
+        dialog.open()
+
+
+def _show_delete_model_dialog(model_id: str) -> None:
+    mid = device_models.normalize_selected(model_id)
+    if mid == device_models.DEFAULT_MODEL_ID:
+        ui.notify("默认机型无法删除", type="warning")
+        return
+
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("删除机型").classes("text-h6")
+        ui.label(f"将从机型列表移除: {device_models.get_model_name(mid)}").classes("text-body2 q-mb-sm")
+        delete_data = ui.switch("同时删除该机型的全部配置数据", value=False)
+
+        def do_delete():
+            ok = device_models.remove_model(mid, delete_data=delete_data.value)
+            if not ok:
+                ui.notify("删除失败", type="negative")
+                return
+            try:
+                from app.core import scheduler as sched
+                sched.setup_scheduled_update()
+            except Exception:
+                pass
+            app.storage.user["device_model"] = device_models.DEFAULT_MODEL_ID
+            storage.set_active_profile(device_models.DEFAULT_MODEL_ID)
+            ui.notify("机型已删除", type="positive")
+            dialog.close()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("删除", icon="delete", on_click=do_delete).props("color=negative")
+
+        dialog.open()
+
+
+def _show_rename_model_dialog(model_id: str) -> None:
+    mid = device_models.normalize_selected(model_id)
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("机型更名").classes("text-h6")
+        name_input = ui.input(
+            value=device_models.get_model_name(mid),
+            placeholder="新的机型名称",
+        ).props("dense outlined").classes("w-full")
+
+        def do_rename():
+            name = (name_input.value or "").strip()
+            if not name:
+                ui.notify("请输入新的机型名称", type="warning")
+                return
+            ok = device_models.rename_model(mid, name)
+            if not ok:
+                ui.notify("更名失败", type="negative")
+                return
+            ui.notify("机型名称已更新", type="positive")
+            dialog.close()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=do_rename).props("color=primary")
+
+        dialog.open()
+
+
+def _show_manage_models_dialog(current_model: str) -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[560px]"):
+        ui.label("机型管理").classes("text-h6 q-mb-sm")
+        ui.label(f"当前机型: {device_models.get_model_name(current_model)}").classes("text-caption text-grey q-mb-md")
+
+        with ui.column().classes("w-full"):
+            for m in device_models.load_models():
+                mid = m.get("id")
+                if not mid:
+                    continue
+                with ui.row().classes("w-full items-center no-wrap q-py-xs"):
+                    ui.label(m.get("name") or mid).classes("text-body2")
+                    ui.label(mid).classes("text-caption text-grey q-ml-sm")
+                    ui.space()
+                    ui.button("切换", on_click=lambda e=None, v=mid: _switch_device_model(v)).props("dense flat")
+                    ui.button("更名", on_click=lambda e=None, v=mid: _show_rename_model_dialog(v)).props("dense flat")
+                    if mid != device_models.DEFAULT_MODEL_ID:
+                        ui.button("删除", on_click=lambda e=None, v=mid: _show_delete_model_dialog(v)).props("dense flat color=negative")
+
+        with ui.row().classes("w-full justify-end q-mt-md"):
+            ui.button("关闭", on_click=dialog.close).props("flat")
+
+        dialog.open()
 
 
 def _show_upload_dialog(session_tabs: list, session_active_tab: dict, session_tab_history: list):
@@ -845,47 +988,19 @@ def _show_url_dialog(session_tabs: list, session_active_tab: dict, session_tab_h
         dialog.open()
 
 
-def _show_search_dialog(session_tabs: list):
-    from app.core import parser as parser_mod
+def _show_search_dialog(session_tabs: list, session_active_tab: dict, session_tab_history: list):
 
     with ui.dialog() as dialog, ui.card().classes("w-[600px]"):
         ui.label("全局搜索").classes("text-h6")
         search_input = ui.input(placeholder="输入搜索关键词...").props("dense outlined").classes("w-full")
-        results_container = ui.column().classes("w-full max-h-96 overflow-auto")
 
         def do_search():
-            keyword = search_input.value.strip()
+            keyword = (search_input.value or "").strip()
             if not keyword:
+                ui.notify("请输入搜索关键词", type="warning")
                 return
-            results_container.clear()
-            with results_container:
-                files = storage.list_config_files()
-                for fname in files:
-                    content = storage.load_config_file(fname)
-                    if content is None:
-                        continue
-                    try:
-                        tree = parser_mod.parse_file(content, fname)
-                        flat = parser_mod.flatten_tree(tree)
-                        matches = [n for n in flat if keyword.lower() in (n.get("label", "") + str(n.get("value", ""))).lower()]
-                        if matches:
-                            ui.label(f"{fname} ({len(matches)} 项匹配)").classes("text-subtitle2 q-mt-md")
-                            for m in matches[:20]:
-                                with ui.row().classes("items-center q-ml-md"):
-                                    ui.label(m["path"]).classes("font-mono text-body2")
-                                    if m.get("value"):
-                                        ui.label(f"= {m['value']}").classes("font-mono text-caption text-grey")
-                    except ValueError:
-                        pass
-
-                favorites = storage.load_favorites()
-                note_matches = [f for f in favorites if keyword.lower() in f.get("note", "").lower()]
-                if note_matches:
-                    ui.label(f"备注 ({len(note_matches)} 项匹配)").classes("text-subtitle2 q-mt-md")
-                    for fav in note_matches:
-                        with ui.row().classes("items-center q-ml-md"):
-                            ui.label(f"{fav['label']} ({fav['source_file']})").classes("text-body2")
-                            ui.label(f"备注: {fav['note']}").classes("text-caption text-grey")
+            _open_search_tab(keyword, session_tabs, session_active_tab, session_tab_history)
+            dialog.close()
 
         search_input.on("keydown.enter", do_search)
         ui.button("搜索", icon="search", on_click=do_search).props("color=primary")
@@ -893,3 +1008,23 @@ def _show_search_dialog(session_tabs: list):
             ui.button("关闭", on_click=dialog.close).props("flat")
 
         dialog.open()
+
+
+def _open_search_tab(keyword: str, session_tabs: list, session_active_tab: dict, session_tab_history: list):
+    tab_manager.ensure_opened_at(session_tabs)
+    opened_at = (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1)
+    name = f"search:{opened_at}"
+    session_tabs.append({
+        "name": name,
+        "label": f"搜索: {keyword}",
+        "type": "search",
+        "query": keyword,
+        "opened_at": opened_at,
+    })
+    if session_tab_history is not None:
+        session_tab_history.append(session_active_tab.get("name", "overview"))
+    session_active_tab["name"] = name
+    removed = tab_manager.enforce_tab_limit(session_tabs, session_active_tab["name"], _TAB_LIMIT)
+    if removed and session_tab_history is not None:
+        session_tab_history[:] = tab_manager.prune_history(session_tab_history, removed)
+    _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
