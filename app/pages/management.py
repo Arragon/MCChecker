@@ -68,6 +68,67 @@ def render_management_page(deployer: bool):
                       on_click=lambda: _save_schedule(enabled_switch.value, interval_input.value)
                       ).props("dense color=primary")
 
+    ui.separator().classes("q-my-lg")
+    ui.label("IP 对应表").classes("mc-section-title q-mb-xs")
+    ui.label("维护操作 IP 与实际使用人之间的映射，用于自动归属修改备注。").classes("mc-page-subtitle q-mb-sm")
+
+    ip_container = ui.column().classes("w-full q-gutter-sm")
+
+    def refresh_ip_mapping():
+        ip_container.clear()
+        items = storage.load_ip_mapping()
+        if not items:
+            with ip_container:
+                ui.label("暂无 IP 对应关系").classes("text-caption text-grey")
+            return
+        with ip_container:
+            for item in items:
+                _render_ip_mapping_item(item, deployer, refresh_ip_mapping)
+
+    refresh_ip_mapping()
+
+    if deployer:
+        with ui.card().classes("w-full q-mt-md q-pa-sm"):
+            ui.label("新增 IP 对应").classes("text-subtitle2 font-bold q-mb-sm")
+            with ui.row().classes("items-center q-gutter-sm w-full"):
+                ip_input = ui.input(placeholder="IP 地址").props("dense outlined").classes("w-48")
+                name_input = ui.input(placeholder="人员姓名").props("dense outlined").classes("w-48")
+                ui.button(
+                    "添加",
+                    icon="add",
+                    on_click=lambda: _add_ip_mapping(ip_input.value, name_input.value, refresh_ip_mapping),
+                ).props("color=primary dense")
+
+    ui.separator().classes("q-my-lg")
+    ui.label("管理员列表").classes("mc-section-title q-mb-xs")
+    ui.label("维护拥有审阅修改和文件删除权限的管理员名单。").classes("mc-page-subtitle q-mb-sm")
+
+    admin_container = ui.column().classes("w-full q-gutter-sm")
+
+    def refresh_admin_users():
+        admin_container.clear()
+        items = storage.load_admin_users()
+        if not items:
+            with admin_container:
+                ui.label("暂无管理员").classes("text-caption text-grey")
+            return
+        with admin_container:
+            for item in items:
+                _render_admin_user_item(item, deployer, refresh_admin_users)
+
+    refresh_admin_users()
+
+    if deployer:
+        with ui.card().classes("w-full q-mt-md q-pa-sm"):
+            ui.label("新增管理员").classes("text-subtitle2 font-bold q-mb-sm")
+            with ui.row().classes("items-center q-gutter-sm w-full"):
+                admin_input = ui.input(placeholder="管理员姓名").props("dense outlined").classes("w-48")
+                ui.button(
+                    "添加",
+                    icon="add",
+                    on_click=lambda: _add_admin_user(admin_input.value, refresh_admin_users),
+                ).props("color=primary dense")
+
 
 def _render_mapping_item(item: dict, deployer: bool, status_state: dict, refresh_cb):
     name = item.get("name", "")
@@ -276,3 +337,202 @@ def _save_schedule(enabled: bool, interval: float):
         return
     sched.update_schedule_config(enabled, interval)
     ui.notify("定时配置已保存", type="positive")
+
+
+def _render_ip_mapping_item(item: dict, deployer: bool, refresh_cb) -> None:
+    ip = item.get("ip", "")
+    name = item.get("name", "")
+    updated_at = item.get("updated_at", "")
+
+    with ui.card().classes("w-full q-pa-sm"):
+        with ui.row().classes("items-start justify-between w-full q-gutter-sm"):
+            with ui.column().classes("q-gutter-xs"):
+                with ui.row().classes("items-center q-gutter-xs"):
+                    ui.badge(ip or "-", color="indigo")
+                    if updated_at:
+                        ui.label(f"更新时间: {updated_at}").classes("text-caption text-grey")
+                ui.label(name or "-").classes("text-body2")
+
+            if deployer:
+                with ui.row().classes("items-center justify-end q-gutter-xs wrap"):
+                    ui.button(
+                        icon="edit",
+                        on_click=lambda entry=item: _show_edit_ip_mapping_dialog(entry, refresh_cb),
+                    ).props("flat round dense color=primary")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda value=ip: _show_delete_ip_mapping_dialog(value, refresh_cb),
+                    ).props("flat round dense color=red")
+
+
+def _add_ip_mapping(ip: str, name: str, refresh_cb) -> None:
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+    try:
+        storage.upsert_ip_mapping(ip, name)
+    except Exception as e:
+        ui.notify(str(e) or "保存失败", type="negative")
+        return
+    ui.notify("IP 对应已保存", type="positive")
+    refresh_cb()
+    ui.run_javascript("location.reload()")
+
+
+def _show_edit_ip_mapping_dialog(item: dict, refresh_cb) -> None:
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+
+    original_ip = item.get("ip", "")
+    with ui.dialog() as dialog, ui.card().classes("w-[520px] max-w-[95vw]"):
+        ui.label("编辑 IP 对应").classes("text-h6 q-mb-sm")
+        ip_input = ui.input(value=original_ip, placeholder="IP 地址").props("dense outlined").classes("w-full")
+        name_input = ui.input(value=item.get("name", ""), placeholder="人员姓名").props("dense outlined").classes("w-full")
+
+        def do_save():
+            new_ip = str(ip_input.value or "").strip()
+            new_name = str(name_input.value or "").strip()
+            if not new_ip or not new_name:
+                ui.notify("IP 和姓名不能为空", type="warning")
+                return
+            if new_ip != original_ip:
+                storage.remove_ip_mapping(original_ip)
+            try:
+                storage.upsert_ip_mapping(new_ip, new_name)
+            except Exception as e:
+                ui.notify(str(e) or "保存失败", type="negative")
+                return
+            ui.notify("已保存", type="positive")
+            dialog.close()
+            refresh_cb()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=do_save).props("color=primary")
+
+        dialog.open()
+
+
+def _show_delete_ip_mapping_dialog(ip: str, refresh_cb) -> None:
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("删除 IP 对应").classes("text-h6")
+        ui.label(f"确认删除 IP: {ip}").classes("text-body2 q-mb-sm")
+
+        def do_delete():
+            ok = storage.remove_ip_mapping(ip)
+            if not ok:
+                ui.notify("记录不存在", type="warning")
+                return
+            ui.notify("已删除", type="positive")
+            dialog.close()
+            refresh_cb()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("删除", icon="delete", on_click=do_delete).props("color=negative")
+
+        dialog.open()
+
+
+def _render_admin_user_item(item: dict, deployer: bool, refresh_cb) -> None:
+    name = item.get("name", "")
+    updated_at = item.get("updated_at", "")
+
+    with ui.card().classes("w-full q-pa-sm"):
+        with ui.row().classes("items-start justify-between w-full q-gutter-sm"):
+            with ui.column().classes("q-gutter-xs"):
+                with ui.row().classes("items-center q-gutter-xs"):
+                    ui.badge(name or "-", color="positive")
+                    if updated_at:
+                        ui.label(f"更新时间: {updated_at}").classes("text-caption text-grey")
+            if deployer:
+                with ui.row().classes("items-center justify-end q-gutter-xs wrap"):
+                    ui.button(
+                        icon="edit",
+                        on_click=lambda entry=item: _show_edit_admin_user_dialog(entry, refresh_cb),
+                    ).props("flat round dense color=primary")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda value=name: _show_delete_admin_user_dialog(value, refresh_cb),
+                    ).props("flat round dense color=red")
+
+
+def _add_admin_user(name: str, refresh_cb) -> None:
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+    try:
+        storage.upsert_admin_user(name)
+    except Exception as e:
+        ui.notify(str(e) or "保存失败", type="negative")
+        return
+    ui.notify("管理员已保存", type="positive")
+    refresh_cb()
+    ui.run_javascript("location.reload()")
+
+
+def _show_edit_admin_user_dialog(item: dict, refresh_cb) -> None:
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+
+    original_name = item.get("name", "")
+    with ui.dialog() as dialog, ui.card().classes("w-[520px] max-w-[95vw]"):
+        ui.label("编辑管理员").classes("text-h6 q-mb-sm")
+        name_input = ui.input(value=original_name, placeholder="管理员姓名").props("dense outlined").classes("w-full")
+
+        def do_save():
+            new_name = str(name_input.value or "").strip()
+            if not new_name:
+                ui.notify("管理员姓名不能为空", type="warning")
+                return
+            if new_name != original_name:
+                storage.remove_admin_user(original_name)
+            try:
+                storage.upsert_admin_user(new_name)
+            except Exception as e:
+                ui.notify(str(e) or "保存失败", type="negative")
+                return
+            ui.notify("已保存", type="positive")
+            dialog.close()
+            refresh_cb()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存", icon="save", on_click=do_save).props("color=primary")
+
+        dialog.open()
+
+
+def _show_delete_admin_user_dialog(name: str, refresh_cb) -> None:
+    if not is_deployer():
+        ui.notify("权限不足", type="negative")
+        return
+
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("删除管理员").classes("text-h6")
+        ui.label(f"确认删除管理员: {name}").classes("text-body2 q-mb-sm")
+
+        def do_delete():
+            ok = storage.remove_admin_user(name)
+            if not ok:
+                ui.notify("记录不存在", type="warning")
+                return
+            ui.notify("已删除", type="positive")
+            dialog.close()
+            refresh_cb()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("删除", icon="delete", on_click=do_delete).props("color=negative")
+
+        dialog.open()

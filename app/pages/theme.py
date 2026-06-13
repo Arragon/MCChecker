@@ -40,21 +40,36 @@ def ensure_theme() -> None:
     s.textContent = {json.dumps(css)};
     document.head.appendChild(s);
   }}
-  if (!window.mct) {{
-    window.mct = function (el) {{
-      var row = el.closest('.tree-row');
+  if (!window.mcSetTreeNode) {{
+    window.mcSetTreeNode = function (btn, expanded) {{
+      if (!btn) return;
+      var row = btn.closest('.tree-row');
       if (!row) return;
       var kids = row.nextElementSibling;
       if (!kids || !kids.classList.contains('children-wrap')) return;
-      if (kids.style.maxHeight === '0px') {{
-        kids.style.maxHeight = 'none';
-        el.classList.remove('collapsed');
-        el.classList.add('expanded');
-      }} else {{
-        kids.style.maxHeight = '0px';
-        el.classList.add('collapsed');
-        el.classList.remove('expanded');
+      kids.style.display = expanded ? 'block' : 'none';
+      btn.classList.toggle('is-expanded', expanded);
+      btn.classList.toggle('is-collapsed', !expanded);
+      btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      var icon = btn.querySelector('.mc-tree-toggle-icon');
+      if (icon) {{
+        icon.textContent = expanded ? '▾' : '▸';
       }}
+    }};
+  }}
+  if (!window.mcToggleTree) {{
+    window.mcToggleTree = function (btn) {{
+      var expanded = btn && btn.getAttribute('aria-expanded') === 'true';
+      window.mcSetTreeNode(btn, !expanded);
+    }};
+  }}
+  if (!window.mcTreeSetAll) {{
+    window.mcTreeSetAll = function (panelId, expanded) {{
+      var root = document.getElementById(panelId);
+      if (!root) return;
+      root.querySelectorAll('.tree-row .mc-tree-toggle').forEach(function (btn) {{
+        window.mcSetTreeNode(btn, expanded);
+      }});
     }};
   }}
 }})();

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG_ROOT xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" machineID="MACHINE_ID_01" softwareVersion="SOFTWARE_VER_GENERIC">
+  <SCENARIO_BLOCK type="SCENARIO_TYPE_A">
+    <header type="HEADER_TYPE_A">
+      <scenario_name type="string">SCENARIO_NAME_GENERIC</scenario_name>
+      <visible type="bool">true</visible>
+      <manual type="bool">true</manual>
+      <default_scenario_on_gui type="bool">true</default_scenario_on_gui>
+      <enable_overrule_inputs type="bool">false</enable_overrule_inputs>
+    </header>
+    <input type="INPUT_CONFIG_A">
+      <param_01 type="int32" description="参数描述占位符 A" default="1" min="0" incMin="true" max="255" incMax="true" editPrivilege="EDITABLE">1</param_01>
+      <param_02 type="int32" description="参数描述占位符 B" default="0" min="0" incMin="true" max="255" incMax="true" editPrivilege="EDITABLE">9</param_02>
+      <param_03 type="double" description="参数描述占位符 C" units="TIME_UNIT" default="5.00e+05" min="1.00e+02" incMin="true" max="9.90e+06" incMax="true" editPrivilege="EDITABLE" precisionLength="2">5.00e+05</param_03>
+      <param_04 type="double" description="参数描述占位符 D" units="TIME_UNIT" default="5.00e+05" min="1.00e+04" incMin="true" max="3.00e+08" incMax="true" editPrivilege="EDITABLE" precisionLength="2">5.00e+05</param_04>
+      <param_05 type="string" description="参数描述占位符 E" default="TIME_RANGE_GENERIC" editPrivilege="EDITABLE">0~30 min</param_05>
+      <param_06 type="bool" description="参数描述占位符 F" default="true" editPrivilege="EDITABLE">true</param_06>
+      <param_07 type="bool" description="参数描述占位符 G" default="true" editPrivilege="EDITABLE">true</param_07>
+      <param_08 type="bool" description="参数描述占位符 H" default="true" editPrivilege="EDITABLE">true</param_08>
+      <param_09 type="bool" description="参数描述占位符 I" default="true" editPrivilege="EDITABLE">true</param_09>
+      <param_10 type="double" description="参数描述占位符 J" units="ENERGY_UNIT" default="5.00e+00" min="1.00e+00" incMin="true" max="5.00e+01" incMax="true" editPrivilege="EDITABLE" precisionLength="2">5.00e+00</param_10>
+      <param_11 type="double" description="参数描述占位符 K" units="PERCENT_UNIT" default="1.00e-01" min="0.00e+00" incMin="true" max="1.00e+00" incMax="true" editPrivilege="EDITABLE" precisionLength="2">1.00e-01</param_11>
+      <param_12 type="double" description="参数描述占位符 L" units="TIME_UNIT" default="3.00e+02" min="4.00e+01" incMin="true" max="1.00e+03" incMax="true" editPrivilege="EDITABLE" precisionLength="2">3.00e+02</param_12>
+      <param_13 type="double" description="参数描述占位符 M" units="TIME_UNIT" default="3.00e+02" min="1.00e+02" incMin="true" max="1.00e+03" incMax="true" editPrivilege="EDITABLE" precisionLength="2">3.00e+02</param_13>
+      <param_14 type="double" description="参数描述占位符 N" units="TIME_UNIT" default="3.00e+02" min="1.00e+02" incMin="true" max="1.00e+03" incMax="true" editPrivilege="EDITABLE" precisionLength="2">3.00e+02</param_14>
+      <param_15 type="bool" description="参数描述占位符 O" default="true" editPrivilege="EDITABLE">true</param_15>
+      <param_16 type="bool" description="参数描述占位符 P" default="true" editPrivilege="EDITABLE">true</param_16>
+      <param_17 type="bool" description="参数描述占位符 Q" default="true" editPrivilege="EDITABLE">true</param_17>
+      <param_18 type="bool" description="参数描述占位符 R" default="true" editPrivilege="EDITABLE">true</param_18>
+      <param_19 type="bool" description="参数描述占位符 S" default="true" editPrivilege="EDITABLE">true</param_19>
+      <param_20 type="bool" description="参数描述占位符 T" default="true" editPrivilege="EDITABLE">true</param_20>
+      <param_21 type="bool" description="参数描述占位符 U" default="true" editPrivilege="EDITABLE">true</param_21>
+      <param_22 type="bool" description="参数描述占位符 V" default="true" editPrivilege="EDITABLE">true</param_22>
+      <param_23 type="bool" description="参数描述占位符 W" default="true" editPrivilege="EDITABLE">true</param_23>
+      <param_24 type="bool" description="参数描述占位符 X" default="true" editPrivilege="EDITABLE">true</param_24>
+      <param_25 type="bool" description="参数描述占位符 Y" default="false" editPrivilege="EDITABLE">false</param_25>
+      <param_26 type="bool" description="参数描述占位符 Z" default="false" editPrivilege="EDITABLE">false</param_26>
+    </input>
+  </SCENARIO_BLOCK>
+</CONFIG_ROOT>
+解释一下

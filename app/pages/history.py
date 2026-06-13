@@ -1,8 +1,15 @@
 """版本历史页面"""
 
+import os
+
 from nicegui import ui
 
 from app.core import storage, parser
+from app.pages.file_downloads import (
+    DOWNLOAD_KIND_ARCHIVE,
+    DOWNLOAD_KIND_CURRENT,
+    make_download_handler,
+)
 
 
 def render_history_page(tab: dict, deployer: bool, session_tabs: list, session_active_tab: dict):
@@ -20,11 +27,11 @@ def render_history_page(tab: dict, deployer: bool, session_tabs: list, session_a
             ui.space()
 
         current_diff = versions[0].get("diff") if versions else None
-        content = storage.load_config_file(filename)
+        source_path = storage.get_config_path(filename)
         node_count = None
-        if content:
+        if os.path.exists(source_path):
             try:
-                tree = parser.parse_file(content, filename)
+                tree = parser.parse_path(source_path, filename)
                 node_count = len(parser.flatten_tree(tree))
             except ValueError:
                 node_count = None
@@ -35,12 +42,18 @@ def render_history_page(tab: dict, deployer: bool, session_tabs: list, session_a
                     ui.label("当前版本").classes("mc-section-title")
                     ui.label(update_date or "未知").classes("mc-page-subtitle")
                 ui.space()
-                if versions:
+                with ui.row().classes("items-center q-gutter-xs"):
                     ui.button(
-                        "与上一版本对比",
-                        icon="compare",
-                        on_click=lambda fn=filename, af=versions[0]["filename"]: _compare_with_current(fn, af, session_tabs, session_active_tab),
-                    ).props("flat dense color=primary")
+                        "下载当前版本",
+                        icon="download",
+                        on_click=make_download_handler(DOWNLOAD_KIND_CURRENT, filename),
+                    ).props("flat dense color=primary").classes("mc-download-btn")
+                    if versions:
+                        ui.button(
+                            "与上一版本对比",
+                            icon="compare",
+                            on_click=lambda fn=filename, af=versions[0]["filename"]: _compare_with_current(fn, af, session_tabs, session_active_tab),
+                        ).props("flat dense color=primary")
             with ui.row().classes("items-center q-gutter-sm q-mt-sm"):
                 if node_count is not None:
                     ui.html(f'<span class="mc-chip">节点 {node_count}</span>', sanitize=False)
@@ -62,6 +75,11 @@ def render_history_page(tab: dict, deployer: bool, session_tabs: list, session_a
                     with ui.column().classes("items-end q-gutter-xs"):
                         ui.html(_render_diff_chips(v.get("diff")), sanitize=False)
                         with ui.row().classes("items-center q-gutter-xs"):
+                            ui.button(
+                                "下载版本",
+                                icon="download",
+                                on_click=make_download_handler(DOWNLOAD_KIND_ARCHIVE, filename, v["filename"]),
+                            ).props("flat dense color=primary").classes("mc-download-btn")
                             ui.button(
                                 "查看内容",
                                 icon="visibility",

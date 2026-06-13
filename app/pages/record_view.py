@@ -28,7 +28,7 @@ def record_view(request: Request):
     tree = parse_cache.load_tree(source_path)
     if tree is None:
         try:
-            tree = parser.parse_file(content, record_filename)
+            tree = parser.parse_path(source_path, record_filename)
             parse_cache.save_tree(source_path, tree)
         except ValueError:
             ui.label("该修改记录无法作为 XML/JSON 解析，已展示原始内容").classes("mc-page-subtitle q-mb-sm")

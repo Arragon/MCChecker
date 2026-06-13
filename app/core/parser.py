@@ -5,8 +5,13 @@
 """
 
 import json
+import os
+import io
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
+
+_LARGE_XML_BYTES_THRESHOLD = 200_000
+_LARGE_XML_ATTR_ALLOWLIST = {"description", "editPrivilege", "default", "min", "max", "incMin", "incMax"}
 
 
 def parse_file(content: bytes, filename: str) -> Dict[str, Any]:
@@ -26,6 +31,21 @@ def parse_file(content: bytes, filename: str) -> Dict[str, Any]:
         except ET.ParseError:
             pass
         raise ValueError(f"无法解析文件 {filename}: 不支持的格式或内容无效")
+
+
+def parse_path(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
+    if filename is None:
+        filename = os.path.basename(file_path)
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "xml":
+        return parse_xml_path(file_path, filename)
+    if ext == "json":
+        with open(file_path, "rb") as f:
+            return parse_json(f.read(), filename)
+    with open(file_path, "rb") as f:
+        content = f.read()
+    return parse_file(content, filename)
+
 
 
 def parse_json(content: bytes, filename: str) -> Dict[str, Any]:
@@ -62,23 +82,115 @@ def _preprocess_xml_namespaces(text: str) -> str:
         count=1,
     )
     return header + body
-def parse_xml(content: bytes, filename: str) -> Dict[str, Any]:
-    """解析 XML 文件为树形结构"""
-    text = content.decode("utf-8-sig")
-    try:
-        root = ET.fromstring(text)
-    except ET.ParseError as e:
-        if "unbound prefix" not in str(e):
-            raise
-        text = _preprocess_xml_namespaces(text)
-        root = ET.fromstring(text)
+
+
+def _parse_xml_iterparse(source: Any, filename: str, allowed_attr_names: Optional[set[str]] = None) -> Dict[str, Any]:
+    root_node: Optional[Dict[str, Any]] = None
+    stack: list[Dict[str, Any]] = []
+    path_stack: list[str] = []
+
+    for event, elem in ET.iterparse(source, events=("start", "end")):
+        tag = elem.tag
+        if event == "start":
+            parent_path = path_stack[-1] if path_stack else "root"
+            node_path = f"{parent_path}/{tag}"
+
+            node: Dict[str, Any] = {
+                "id": node_path,
+                "label": tag,
+                "value": None,
+                "children": [],
+                "attrs": {"type": "element"},
+                "_has_child_elements": False,
+            }
+
+            for attr_name, attr_value in elem.attrib.items():
+                if allowed_attr_names is not None and attr_name not in allowed_attr_names:
+                    continue
+                node["children"].append(
+                    {
+                        "id": f"{node_path}@{attr_name}",
+                        "label": f"@{attr_name}",
+                        "value": attr_value,
+                        "children": [],
+                        "attrs": {"type": "attribute"},
+                    }
+                )
+
+            if stack:
+                stack[-1]["_has_child_elements"] = True
+                stack[-1]["children"].append(node)
+
+            stack.append(node)
+            path_stack.append(node_path)
+        else:
+            node = stack.pop()
+            node_path = path_stack.pop()
+            text = (elem.text or "").strip()
+            if text:
+                if node.get("_has_child_elements"):
+                    node["children"].insert(
+                        0,
+                        {
+                            "id": f"{node_path}#text",
+                            "label": "#text",
+                            "value": text,
+                            "children": [],
+                            "attrs": {"type": "text"},
+                        },
+                    )
+                else:
+                    node["value"] = text
+            node.pop("_has_child_elements", None)
+            elem.clear()
+            if not stack:
+                root_node = node
+
+    if root_node is None:
+        raise ValueError(f"无法解析文件 {filename}: XML 内容为空")
+
     return {
         "id": "root",
         "label": filename,
         "value": None,
-        "children": [_xml_node_to_tree(root, "root")],
+        "children": [root_node],
         "attrs": {"type": "xml"},
     }
+
+
+def parse_xml_path(file_path: str, filename: str) -> Dict[str, Any]:
+    allowed = None
+    try:
+        if os.path.getsize(file_path) >= _LARGE_XML_BYTES_THRESHOLD:
+            allowed = set(_LARGE_XML_ATTR_ALLOWLIST)
+    except OSError:
+        allowed = None
+    try:
+        return _parse_xml_iterparse(file_path, filename, allowed_attr_names=allowed)
+    except ET.ParseError as e:
+        if "unbound prefix" not in str(e) and "junk after document element" not in str(e):
+            raise
+    with open(file_path, "rb") as f:
+        content = f.read()
+    return parse_xml(content, filename)
+
+
+def parse_xml(content: bytes, filename: str) -> Dict[str, Any]:
+    """解析 XML 文件为树形结构"""
+    allowed = set(_LARGE_XML_ATTR_ALLOWLIST) if len(content) >= _LARGE_XML_BYTES_THRESHOLD else None
+    try:
+        return _parse_xml_iterparse(io.BytesIO(content), filename, allowed_attr_names=allowed)
+    except ET.ParseError as e:
+        msg = str(e)
+        if "junk after document element" in msg:
+            cut = content.rfind(b">")
+            if cut >= 0:
+                return _parse_xml_iterparse(io.BytesIO(content[: cut + 1]), filename, allowed_attr_names=allowed)
+        if "unbound prefix" not in msg:
+            raise
+    text = content.decode("utf-8-sig")
+    text = _preprocess_xml_namespaces(text)
+    return _parse_xml_iterparse(io.BytesIO(text.encode("utf-8")), filename, allowed_attr_names=allowed)
 
 
 def _json_to_tree(data: Any, path: str) -> List[Dict[str, Any]]:

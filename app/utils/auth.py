@@ -1,7 +1,6 @@
-"""权限隔离模块
+"""权限隔离模块。
 
-基于客户端 IP 判断部署者权限。
-部署者（服务端本机）可修改服务端配置，其他用户仅可查看和临时上传。
+基于客户端 IP 识别部署者，并结合 IP 对应表与管理员名单识别当前用户身份。
 """
 
 import logging
@@ -69,6 +68,41 @@ def get_client_ip() -> str:
     except Exception:
         pass
     return "unknown"
+
+
+def get_current_user_name() -> str:
+    """根据当前客户端 IP 解析人员名称。"""
+    from app.core import storage
+
+    ip = get_client_ip()
+    name = storage.resolve_person_by_ip(ip)
+    return name or ip
+
+
+def is_admin() -> bool:
+    """判断当前客户端是否属于管理员名单。"""
+    from app.core import storage
+
+    try:
+        return storage.is_admin_user(get_current_user_name())
+    except Exception as e:
+        logger.debug("判断管理员权限时出错: %s", e)
+        return False
+
+
+def get_identity_info() -> dict:
+    """获取当前访问身份信息。"""
+    ip = get_client_ip()
+    name = get_current_user_name()
+    admin = is_admin()
+    deployer = is_deployer()
+    return {
+        "ip": ip,
+        "name": name,
+        "is_admin": admin,
+        "is_deployer": deployer,
+        "role_label": "管理员" if admin else "游客",
+    }
 
 
 def require_deployer(func: Callable) -> Callable:

@@ -10,6 +10,7 @@ import shutil
 import logging
 import contextvars
 import urllib.parse
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -162,6 +163,9 @@ def ensure_profile_layout(migrate_legacy: bool = True) -> None:
         (os.path.join(DATA_DIR, "bindings.json"), os.path.join(default_base, "bindings.json")),
         (os.path.join(DATA_DIR, "tools.json"), os.path.join(default_base, "tools.json")),
         (os.path.join(DATA_DIR, "schedule.json"), os.path.join(default_base, "schedule.json")),
+        (os.path.join(DATA_DIR, "ip_mapping.json"), os.path.join(default_base, "ip_mapping.json")),
+        (os.path.join(DATA_DIR, "admin_users.json"), os.path.join(default_base, "admin_users.json")),
+        (os.path.join(DATA_DIR, "edit_remarks.json"), os.path.join(default_base, "edit_remarks.json")),
         (os.path.join(DATA_DIR, "dltool_config.json"), os.path.join(default_base, "dltool_config.json")),
         (os.path.join(DATA_DIR, "configs"), os.path.join(default_base, "configs")),
         (os.path.join(DATA_DIR, "archive"), os.path.join(default_base, "archive")),
@@ -323,39 +327,7 @@ def delete_config_mapping(name: str, *, delete_files: bool = False) -> bool:
     removed = remove_config_mapping(target)
     if not delete_files:
         return removed
-
-    _ensure_dirs()
-    file_path = get_config_path(target)
-    if os.path.exists(file_path):
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
-
-    archive_dir = os.path.join(get_archive_root_dir(), target)
-    if os.path.exists(archive_dir):
-        try:
-            shutil.rmtree(archive_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-    try:
-        from . import parse_cache
-        parse_cache.invalidate(file_path)
-    except Exception:
-        pass
-
-    favorites = load_favorites()
-    new_favs = [f for f in favorites if f.get("source_file") != target]
-    if len(new_favs) != len(favorites):
-        save_favorites(new_favs)
-
-    bindings = load_bindings()
-    for b in bindings:
-        b["variables"] = [v for v in b.get("variables", []) if v.get("file") != target]
-    bindings = [b for b in bindings if b.get("variables")]
-    save_bindings(bindings)
-
+    _delete_config_artifacts(target)
     return removed
 
 
@@ -674,6 +646,78 @@ def get_file_update_date(name: str) -> Optional[str]:
     return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _records_dir_path(name: str) -> str:
+    target = _sanitize_config_filename(name)
+    return os.path.join(get_records_root_dir(), target)
+
+
+def _delete_config_artifacts(target: str) -> bool:
+    changed = False
+
+    file_path = get_config_path(target)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            changed = True
+        except OSError:
+            pass
+
+    archive_dir = os.path.join(get_archive_root_dir(), target)
+    if os.path.exists(archive_dir):
+        try:
+            shutil.rmtree(archive_dir, ignore_errors=True)
+            changed = True
+        except Exception:
+            pass
+
+    record_dir = _records_dir_path(target)
+    if os.path.exists(record_dir):
+        try:
+            shutil.rmtree(record_dir, ignore_errors=True)
+            changed = True
+        except Exception:
+            pass
+
+    try:
+        from . import parse_cache
+        parse_cache.invalidate(file_path)
+    except Exception:
+        pass
+
+    favorites = load_favorites()
+    new_favs = [f for f in favorites if f.get("source_file") != target]
+    if len(new_favs) != len(favorites):
+        save_favorites(new_favs)
+        changed = True
+
+    bindings = load_bindings()
+    b_changed = False
+    for b in bindings:
+        before = len(b.get("variables", []))
+        b["variables"] = [v for v in b.get("variables", []) if v.get("file") != target]
+        if len(b.get("variables", [])) != before:
+            b_changed = True
+    bindings = [b for b in bindings if b.get("variables")]
+    if b_changed:
+        save_bindings(bindings)
+        changed = True
+
+    remarks = load_edit_remarks()
+    new_remarks = [item for item in remarks if item.get("source_file") != target]
+    if len(new_remarks) != len(remarks):
+        save_edit_remarks(new_remarks)
+        changed = True
+
+    return changed
+
+
+def delete_config_file(name: str, *, remove_mapping: bool = True) -> bool:
+    target = _sanitize_config_filename(name)
+    removed = remove_config_mapping(target) if remove_mapping else False
+    deleted = _delete_config_artifacts(target)
+    return removed or deleted
+
+
 # ===================== 收藏变量 =====================
 
 FAVORITES_FILE = os.path.join(DATA_DIR, "favorites.json")
@@ -778,6 +822,306 @@ def update_favorite_note(variable_path: str, source_file: str, note: str) -> boo
             save_favorites(favorites)
             return True
     return False
+
+
+# ===================== IP 对应表 =====================
+
+IP_MAPPING_FILE = os.path.join(DATA_DIR, "ip_mapping.json")
+LEGACY_IP_MAPPING_FILE = IP_MAPPING_FILE
+
+
+def get_ip_mapping_file(profile_id: Optional[str] = None) -> str:
+    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
+    return _get_profile_json_file("ip_mapping.json", pid)
+
+
+def load_ip_mapping() -> List[Dict[str, str]]:
+    profile = get_active_profile()
+    path = _get_profile_json_file("ip_mapping.json", profile)
+    if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_IP_MAPPING_FILE):
+        return _load_json(LEGACY_IP_MAPPING_FILE, [])
+    return _load_json(path, [])
+
+
+def save_ip_mapping(mapping: List[Dict[str, str]]) -> None:
+    _save_json(_get_profile_json_file("ip_mapping.json", get_active_profile()), mapping)
+
+
+def upsert_ip_mapping(ip: str, name: str) -> bool:
+    ip_text = str(ip or "").strip()
+    name_text = str(name or "").strip()
+    if not ip_text or not name_text:
+        raise ValueError("IP 和姓名不能为空")
+
+    mapping = load_ip_mapping()
+    for item in mapping:
+        if (item.get("ip") or "").strip() == ip_text:
+            item["name"] = name_text
+            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_ip_mapping(mapping)
+            return True
+
+    mapping.append(
+        {
+            "ip": ip_text,
+            "name": name_text,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
+    save_ip_mapping(mapping)
+    return True
+
+
+def remove_ip_mapping(ip: str) -> bool:
+    ip_text = str(ip or "").strip()
+    mapping = load_ip_mapping()
+    new_mapping = [item for item in mapping if (item.get("ip") or "").strip() != ip_text]
+    save_ip_mapping(new_mapping)
+    return len(new_mapping) < len(mapping)
+
+
+def resolve_person_by_ip(ip: str) -> str:
+    ip_text = str(ip or "").strip()
+    if not ip_text:
+        return ""
+    for item in load_ip_mapping():
+        if (item.get("ip") or "").strip() == ip_text:
+            return str(item.get("name") or "").strip()
+    return ""
+
+
+# ===================== 管理员列表 =====================
+
+ADMIN_USERS_FILE = os.path.join(DATA_DIR, "admin_users.json")
+LEGACY_ADMIN_USERS_FILE = ADMIN_USERS_FILE
+
+
+def get_admin_users_file(profile_id: Optional[str] = None) -> str:
+    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
+    return _get_profile_json_file("admin_users.json", pid)
+
+
+def load_admin_users() -> List[Dict[str, str]]:
+    profile = get_active_profile()
+    path = _get_profile_json_file("admin_users.json", profile)
+    if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_ADMIN_USERS_FILE):
+        return _load_json(LEGACY_ADMIN_USERS_FILE, [])
+    return _load_json(path, [])
+
+
+def save_admin_users(users: List[Dict[str, str]]) -> None:
+    _save_json(_get_profile_json_file("admin_users.json", get_active_profile()), users)
+
+
+def upsert_admin_user(name: str) -> bool:
+    name_text = str(name or "").strip()
+    if not name_text:
+        raise ValueError("管理员姓名不能为空")
+
+    users = load_admin_users()
+    for item in users:
+        if (item.get("name") or "").strip() == name_text:
+            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_admin_users(users)
+            return True
+
+    users.append(
+        {
+            "name": name_text,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
+    save_admin_users(users)
+    return True
+
+
+def remove_admin_user(name: str) -> bool:
+    name_text = str(name or "").strip()
+    users = load_admin_users()
+    new_users = [item for item in users if (item.get("name") or "").strip() != name_text]
+    save_admin_users(new_users)
+    return len(new_users) < len(users)
+
+
+def is_admin_user(name: str) -> bool:
+    name_text = str(name or "").strip()
+    if not name_text:
+        return False
+    return any((item.get("name") or "").strip() == name_text for item in load_admin_users())
+
+
+# ===================== 审阅备注 =====================
+
+EDIT_REMARKS_FILE = os.path.join(DATA_DIR, "edit_remarks.json")
+LEGACY_EDIT_REMARKS_FILE = EDIT_REMARKS_FILE
+
+
+def get_edit_remarks_file(profile_id: Optional[str] = None) -> str:
+    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
+    return _get_profile_json_file("edit_remarks.json", pid)
+
+
+def load_edit_remarks() -> List[Dict[str, Any]]:
+    profile = get_active_profile()
+    path = _get_profile_json_file("edit_remarks.json", profile)
+    if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_EDIT_REMARKS_FILE):
+        return _load_json(LEGACY_EDIT_REMARKS_FILE, [])
+    return _load_json(path, [])
+
+
+def save_edit_remarks(items: List[Dict[str, Any]]) -> None:
+    _save_json(_get_profile_json_file("edit_remarks.json", get_active_profile()), items)
+
+
+def add_edit_remark(
+    *,
+    source_file: str,
+    node_key: str,
+    node_path: str,
+    node_label: str,
+    original_value: str,
+    proposed_value: str,
+    node_type: str,
+    tree_type: str,
+    actor_ip: str,
+    actor_name: str,
+) -> str:
+    source_name = _sanitize_config_filename(source_file)
+    proposed_text = str(proposed_value or "").strip()
+    if not node_key.strip():
+        raise ValueError("节点标识不能为空")
+    if proposed_text == "":
+        raise ValueError("修改值不能为空")
+
+    actor_ip_text = str(actor_ip or "").strip() or "unknown"
+    actor_name_text = str(actor_name or "").strip()
+    actor_display = actor_name_text or actor_ip_text
+
+    items = load_edit_remarks()
+    item_id = uuid.uuid4().hex
+    items.append(
+        {
+            "id": item_id,
+            "source_file": source_name,
+            "node_key": str(node_key),
+            "node_path": str(node_path or ""),
+            "node_label": str(node_label or ""),
+            "original_value": str(original_value or ""),
+            "proposed_value": proposed_text,
+            "node_type": str(node_type or ""),
+            "tree_type": str(tree_type or ""),
+            "actor_ip": actor_ip_text,
+            "actor_name": actor_name_text,
+            "actor_display": actor_display,
+            "status": "pending",
+            "reviewed_by": "",
+            "reviewer_ip": "",
+            "reviewed_at": "",
+            "generated_file": "",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
+    save_edit_remarks(items)
+    return item_id
+
+
+def build_edit_remark_map(
+    source_file: str,
+    *,
+    statuses: Optional[set[str]] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    source_name = _sanitize_config_filename(source_file)
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for item in load_edit_remarks():
+        if item.get("source_file") != source_name:
+            continue
+        status = str(item.get("status") or "pending")
+        if statuses is not None and status not in statuses:
+            continue
+        key = str(item.get("node_key") or item.get("node_path") or "")
+        if not key:
+            continue
+        result.setdefault(key, []).append(item)
+
+    for values in result.values():
+        values.sort(key=lambda entry: (entry.get("created_at") or "", entry.get("id") or ""))
+    return result
+
+
+def list_review_items(source_file: Optional[str] = None) -> List[Dict[str, Any]]:
+    target_file = _sanitize_config_filename(source_file) if source_file else None
+    grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+    for item in load_edit_remarks():
+        if item.get("status") != "pending":
+            continue
+        if target_file and item.get("source_file") != target_file:
+            continue
+
+        key = (str(item.get("source_file") or ""), str(item.get("node_key") or item.get("node_path") or ""))
+        if key not in grouped:
+            grouped[key] = {
+                "source_file": item.get("source_file") or "",
+                "node_key": item.get("node_key") or "",
+                "node_path": item.get("node_path") or "",
+                "node_label": item.get("node_label") or "",
+                "original_value": item.get("original_value") or "",
+                "node_type": item.get("node_type") or "",
+                "tree_type": item.get("tree_type") or "",
+                "remarks": [],
+            }
+        grouped[key]["remarks"].append(item)
+
+    items = list(grouped.values())
+    for entry in items:
+        entry["remarks"].sort(key=lambda remark: (remark.get("created_at") or "", remark.get("id") or ""))
+    items.sort(key=lambda entry: (entry.get("source_file") or "", entry.get("node_path") or "", entry.get("node_key") or ""))
+    return items
+
+
+def apply_review_results(
+    *,
+    approved_ids: List[str],
+    rejected_ids: List[str],
+    reviewer_name: str,
+    reviewer_ip: str,
+    generated_files: Optional[Dict[str, str]] = None,
+) -> Dict[str, int]:
+    approved = {str(item_id) for item_id in approved_ids}
+    rejected = {str(item_id) for item_id in rejected_ids}
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    reviewer_name_text = str(reviewer_name or "").strip()
+    reviewer_ip_text = str(reviewer_ip or "").strip()
+    generated_map = generated_files or {}
+
+    items = load_edit_remarks()
+    approved_count = 0
+    rejected_count = 0
+    changed = False
+
+    for item in items:
+        item_id = str(item.get("id") or "")
+        if item_id in approved:
+            item["status"] = "approved"
+            item["reviewed_by"] = reviewer_name_text
+            item["reviewer_ip"] = reviewer_ip_text
+            item["reviewed_at"] = now
+            item["generated_file"] = generated_map.get(item.get("source_file") or "", "")
+            approved_count += 1
+            changed = True
+        elif item_id in rejected:
+            item["status"] = "rejected"
+            item["reviewed_by"] = reviewer_name_text
+            item["reviewer_ip"] = reviewer_ip_text
+            item["reviewed_at"] = now
+            item["generated_file"] = ""
+            rejected_count += 1
+            changed = True
+
+    if changed:
+        save_edit_remarks(items)
+
+    return {"approved": approved_count, "rejected": rejected_count}
 
 
 # ===================== 变量绑定关系 =====================

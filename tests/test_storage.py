@@ -25,11 +25,17 @@ def setup_test_env(monkeypatch):
     monkeypatch.setattr(storage_mod, "BINDINGS_FILE", os.path.join(TEST_DATA_DIR, "bindings.json"))
     monkeypatch.setattr(storage_mod, "TOOLS_FILE", os.path.join(TEST_DATA_DIR, "tools.json"))
     monkeypatch.setattr(storage_mod, "SCHEDULE_FILE", os.path.join(TEST_DATA_DIR, "schedule.json"))
+    monkeypatch.setattr(storage_mod, "IP_MAPPING_FILE", os.path.join(TEST_DATA_DIR, "ip_mapping.json"))
+    monkeypatch.setattr(storage_mod, "ADMIN_USERS_FILE", os.path.join(TEST_DATA_DIR, "admin_users.json"))
+    monkeypatch.setattr(storage_mod, "EDIT_REMARKS_FILE", os.path.join(TEST_DATA_DIR, "edit_remarks.json"))
     monkeypatch.setattr(storage_mod, "LEGACY_MAPPING_FILE", storage_mod.MAPPING_FILE)
     monkeypatch.setattr(storage_mod, "LEGACY_FAVORITES_FILE", storage_mod.FAVORITES_FILE)
     monkeypatch.setattr(storage_mod, "LEGACY_BINDINGS_FILE", storage_mod.BINDINGS_FILE)
     monkeypatch.setattr(storage_mod, "LEGACY_TOOLS_FILE", storage_mod.TOOLS_FILE)
     monkeypatch.setattr(storage_mod, "LEGACY_SCHEDULE_FILE", storage_mod.SCHEDULE_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_IP_MAPPING_FILE", storage_mod.IP_MAPPING_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_ADMIN_USERS_FILE", storage_mod.ADMIN_USERS_FILE)
+    monkeypatch.setattr(storage_mod, "LEGACY_EDIT_REMARKS_FILE", storage_mod.EDIT_REMARKS_FILE)
     storage_mod._ensure_dirs()
     yield
     # 清理
@@ -110,6 +116,18 @@ class TestConfigMapping:
         storage.save_config_file("d.xml", b"v2")
         storage.add_favorite("/root/x", "x", "1", "d.xml", "备注")
         storage.add_binding("g1", [{"file": "d.xml", "path": "/root/x"}])
+        storage.add_edit_remark(
+            source_file="d.xml",
+            node_key="0.0",
+            node_path="/root/x",
+            node_label="x",
+            original_value="1",
+            proposed_value="2",
+            node_type="str",
+            tree_type="xml",
+            actor_ip="127.0.0.1",
+            actor_name="张三",
+        )
 
         ok = storage.delete_config_mapping("d.xml", delete_files=True)
         assert ok is True
@@ -118,6 +136,7 @@ class TestConfigMapping:
         assert os.path.exists(os.path.join(storage.get_archive_root_dir(), "d.xml")) is False
         assert storage.load_favorites() == []
         assert storage.load_bindings() == []
+        assert storage.load_edit_remarks() == []
 
 
 class TestConfigFileStorage:
@@ -294,3 +313,85 @@ class TestSchedule:
         schedule = load_schedule()
         assert schedule["enabled"] is True
         assert schedule["interval_hours"] == 12
+
+
+class TestIdentityTables:
+    def test_ip_mapping_crud_and_resolve(self):
+        from app.core import storage
+
+        storage.upsert_ip_mapping("10.0.0.1", "张三")
+        storage.upsert_ip_mapping("10.0.0.2", "李四")
+        storage.upsert_ip_mapping("10.0.0.1", "张三A")
+
+        mapping = storage.load_ip_mapping()
+        assert len(mapping) == 2
+        assert storage.resolve_person_by_ip("10.0.0.1") == "张三A"
+
+        ok = storage.remove_ip_mapping("10.0.0.2")
+        assert ok is True
+        assert storage.resolve_person_by_ip("10.0.0.2") == ""
+
+    def test_admin_user_crud(self):
+        from app.core import storage
+
+        storage.upsert_admin_user("张三")
+        storage.upsert_admin_user("王五")
+        assert storage.is_admin_user("张三") is True
+        assert storage.is_admin_user("游客") is False
+
+        ok = storage.remove_admin_user("王五")
+        assert ok is True
+        assert [item["name"] for item in storage.load_admin_users()] == ["张三"]
+
+
+class TestEditRemarks:
+    def test_add_group_and_apply_review_results(self):
+        from app.core import storage
+
+        first_id = storage.add_edit_remark(
+            source_file="cfg.xml",
+            node_key="0.1",
+            node_path="root/a",
+            node_label="a",
+            original_value="1",
+            proposed_value="2",
+            node_type="str",
+            tree_type="xml",
+            actor_ip="10.0.0.1",
+            actor_name="张三",
+        )
+        second_id = storage.add_edit_remark(
+            source_file="cfg.xml",
+            node_key="0.1",
+            node_path="root/a",
+            node_label="a",
+            original_value="1",
+            proposed_value="3",
+            node_type="str",
+            tree_type="xml",
+            actor_ip="10.0.0.2",
+            actor_name="李四",
+        )
+
+        remark_map = storage.build_edit_remark_map("cfg.xml")
+        assert len(remark_map["0.1"]) == 2
+
+        review_items = storage.list_review_items("cfg.xml")
+        assert len(review_items) == 1
+        assert len(review_items[0]["remarks"]) == 2
+
+        result = storage.apply_review_results(
+            approved_ids=[first_id],
+            rejected_ids=[second_id],
+            reviewer_name="管理员",
+            reviewer_ip="127.0.0.1",
+            generated_files={"cfg.xml": "cfg_20260613.xml"},
+        )
+        assert result == {"approved": 1, "rejected": 1}
+
+        items = storage.load_edit_remarks()
+        approved = next(item for item in items if item["id"] == first_id)
+        rejected = next(item for item in items if item["id"] == second_id)
+        assert approved["status"] == "approved"
+        assert approved["generated_file"] == "cfg_20260613.xml"
+        assert rejected["status"] == "rejected"

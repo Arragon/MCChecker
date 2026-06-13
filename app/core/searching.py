@@ -17,43 +17,64 @@ def build_note_map(favorites: list[dict], source_file: str) -> Dict[str, str]:
     return note_map
 
 
-def filter_tree(node: Dict[str, Any], keyword: str, note_map: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+def filter_tree_and_count(
+    node: Dict[str, Any],
+    keyword: str,
+    note_map: Optional[Dict[str, str]] = None,
+) -> tuple[Optional[Dict[str, Any]], int]:
     kw = (keyword or "").strip().lower()
     if not kw:
-        return node
+        return node, 0
 
-    label = str(node.get("label") or "")
-    value = node.get("value")
-    nid = node.get("id") or ""
-    note = ""
-    if note_map and nid:
-        note = note_map.get(nid, "")
+    def _filter(n: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], int]:
+        label = str(n.get("label") or "")
+        value = n.get("value")
+        nid = n.get("id") or ""
+        note = ""
+        if note_map and nid:
+            note = note_map.get(nid, "")
 
-    hay = (label + " " + ("" if value is None else str(value)) + " " + note).lower()
-    matched = kw in hay
+        hay = (label + " " + ("" if value is None else str(value)) + " " + note).lower()
+        matched = kw in hay
 
-    children = node.get("children") or []
-    filtered_children = []
-    for c in children:
-        if not isinstance(c, dict):
-            continue
-        fc = filter_tree(c, kw, note_map)
-        if fc is not None:
-            filtered_children.append(fc)
+        if matched:
+            out = dict(n)
+            if note:
+                out["note"] = note
+            matched_cnt = 1 if value is not None else 0
+            return out, matched_cnt
 
-    if not matched and not filtered_children:
-        return None
+        children = n.get("children") or []
+        filtered_children = []
+        matched_cnt = 0
+        for c in children:
+            if not isinstance(c, dict):
+                continue
+            fc, c_cnt = _filter(c)
+            if fc is not None:
+                filtered_children.append(fc)
+            matched_cnt += c_cnt
 
-    out = {
-        "id": node.get("id"),
-        "label": node.get("label"),
-        "value": node.get("value"),
-        "children": filtered_children,
-        "attrs": node.get("attrs", {}),
-    }
-    if note:
-        out["note"] = note
-    return out
+        if not filtered_children:
+            return None, 0
+
+        out = {
+            "id": n.get("id"),
+            "label": n.get("label"),
+            "value": n.get("value"),
+            "children": filtered_children,
+            "attrs": n.get("attrs", {}),
+        }
+        if note:
+            out["note"] = note
+        return out, matched_cnt
+
+    return _filter(node)
+
+
+def filter_tree(node: Dict[str, Any], keyword: str, note_map: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+    filtered, _ = filter_tree_and_count(node, keyword, note_map)
+    return filtered
 
 
 def count_value_nodes(node: Dict[str, Any]) -> int:
@@ -64,4 +85,3 @@ def count_value_nodes(node: Dict[str, Any]) -> int:
         if isinstance(c, dict):
             cnt += count_value_nodes(c)
     return cnt
-

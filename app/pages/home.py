@@ -1,5 +1,8 @@
 """主页渲染模块"""
 
+import asyncio
+import time
+
 from nicegui import app, ui
 
 from app.core import storage
@@ -7,8 +10,8 @@ from app.core import device_models
 from app.core import tab_manager
 from app.core import tabs_state
 from app.core.favorites_live import resolve_overview_favorites
-from app.utils.auth import is_deployer
-from app.pages.viewer import render_file_viewer
+from app.utils.auth import get_identity_info, is_admin, is_deployer
+from app.pages.viewer import load_tree_for_viewer, render_file_viewer
 from app.pages.management import render_management_page
 from app.pages.bindings import render_bindings_page
 from app.pages.tools import render_tools_page
@@ -17,6 +20,12 @@ from app.pages.history import render_history_page
 from app.pages.dltool import render_dltool_page
 from app.pages.search import render_search_page
 from app.pages.records import render_records_page
+from app.pages.review import render_review_page
+from app.pages.file_downloads import (
+    DOWNLOAD_KIND_ARCHIVE,
+    DOWNLOAD_KIND_CURRENT,
+    make_download_handler,
+)
 from app.pages.theme import ensure_theme
 
 _TAB_LIMIT = 15
@@ -31,6 +40,8 @@ def render_home_page():
     storage.set_active_profile(selected_model)
 
     deployer = is_deployer()
+    admin = is_admin()
+    identity = get_identity_info()
 
     session_tabs = []
     session_active_tab = {"name": "overview"}
@@ -77,6 +88,9 @@ def render_home_page():
                       ).props("flat round dense color=white size=sm").tooltip("变量绑定")
             ui.button(icon="build", on_click=lambda: _switch_to_tab("tools", "工具菜单", session_tabs, session_active_tab, session_tab_history)
                       ).props("flat round dense color=white size=sm").tooltip("工具菜单")
+        if admin:
+            ui.button(icon="rule", on_click=lambda: _switch_to_tab("review", "审阅修改", session_tabs, session_active_tab, session_tab_history)
+                      ).props("flat round dense color=white size=sm").tooltip("审阅修改")
 
         ui.space()
 
@@ -97,6 +111,9 @@ def render_home_page():
                 ui.item("管理机型", on_click=lambda: _show_manage_models_dialog(selected_model)).props("clickable")
 
         ui.label(device_models.get_model_name(selected_model)).classes("text-white text-caption q-ml-xs ellipsis gt-xs").style("max-width: 160px")
+        ui.badge(identity["role_label"], color="positive" if identity["is_admin"] else "grey-7").classes("q-ml-sm")
+        ui.label(identity["name"]).classes("text-white text-caption q-ml-xs ellipsis gt-xs").style("max-width: 120px")
+        ui.label(identity["ip"]).classes("text-white text-caption q-ml-xs ellipsis gt-sm").style("max-width: 140px")
 
         ui.button(icon="tune", on_click=right_drawer.toggle).props("flat round dense color=white").classes("lt-md") \
             .tooltip("打开/关闭工具箱")
@@ -140,33 +157,80 @@ def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_hi
     其他文件：直接显示文件名
     """
     ui.label("文件列表").classes("mc-section-title q-mb-sm")
+    container = ui.column().classes("w-full mc-sidebar-files")
+    last_sig = {"value": None}
 
-    # 加载全量配置映射，建立 文件名->配置名 的关系
+    def _compute_sidebar_sig():
+        import os
+
+        files = storage.list_config_files()
+        parts = [("admin", is_admin()), ("count", len(files))]
+        for fname in files:
+            path = storage.get_config_path(fname)
+            if os.path.exists(path):
+                stat = os.stat(path)
+                parts.append((fname, stat.st_mtime_ns, stat.st_size))
+            else:
+                parts.append((fname, 0, 0))
+        return tuple(parts)
+
+    def refresh_sidebar():
+        sig = _compute_sidebar_sig()
+        if sig == last_sig["value"]:
+            return
+        last_sig["value"] = sig
+        container.clear()
+        with container:
+            _render_sidebar_files(session_tabs, session_active_tab, session_tab_history)
+
+    refresh_sidebar()
+    ui.timer(1.0, refresh_sidebar)
+
+
+def _render_sidebar_files(session_tabs: list, session_active_tab: dict, session_tab_history: list) -> None:
     mapping = storage.load_config_mapping()
     mapping_names = {m["name"] for m in mapping}
-
+    admin = is_admin()
     files = storage.list_config_files()
-    if files:
-        for fname in files:
-            ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
-            icon_map = {"json": "data_object", "xml": "code"}
-            icon = icon_map.get(ext, "description")
-            color_map = {"json": "blue", "xml": "orange"}
-            color = color_map.get(ext, "grey")
-
-            with ui.card().classes(
-                "w-full q-mb-xs q-pa-xs mc-nav-card"
-            ).on("click", lambda f=fname: _open_file_tab(f, session_tabs, session_active_tab, session_tab_history)):
-                with ui.row().classes("items-start w-full"):
-                    ui.icon(icon, color=color, size="sm").classes("q-mr-sm q-mt-xs")
-                    with ui.column().classes("q-ma-none q-pa-none w-full"):
-                        ui.label(fname).classes("mc-nav-filename text-body2 text-weight-medium q-mb-none")
-                        if fname in mapping_names:
-                            update_date = storage.get_file_update_date(fname)
-                            if update_date:
-                                ui.label(update_date).classes("text-caption text-grey q-mt-none")
-    else:
+    if not files:
         ui.label("暂无文件").classes("text-caption text-grey")
+        return
+
+    for fname in files:
+        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+        icon_map = {"json": "data_object", "xml": "code"}
+        icon = icon_map.get(ext, "description")
+        color_map = {"json": "blue", "xml": "orange"}
+        color = color_map.get(ext, "grey")
+        download_handler = make_download_handler(DOWNLOAD_KIND_CURRENT, fname)
+
+        with ui.card().classes(
+            "w-full mc-nav-card mc-nav-card--file"
+        ).on("click", lambda f=fname: _open_file_tab(f, session_tabs, session_active_tab, session_tab_history)):
+            with ui.row().classes("items-center w-full no-wrap"):
+                ui.icon(icon, color=color, size="sm").classes("q-mr-xs")
+                with ui.column().classes("q-ma-none q-pa-none col min-w-0 mc-nav-text"):
+                    file_label = ui.label(fname).classes("mc-nav-filename text-body2 text-weight-medium q-mb-none")
+                    file_label.tooltip(fname)
+                    if fname in mapping_names:
+                        update_date = storage.get_file_update_date(fname)
+                        if update_date:
+                            ui.label(update_date).classes("text-caption text-grey q-mt-none")
+                with ui.element("div").classes("mc-nav-actions"):
+                    download_btn = ui.button(icon="download")
+                    download_btn.props("flat round dense color=primary")
+                    download_btn.classes("mc-download-btn mc-download-btn--icon")
+                    download_btn.tooltip("下载当前文件")
+                    download_btn.on("click.stop", download_handler)
+                    if admin:
+                        delete_btn = ui.button(icon="delete")
+                        delete_btn.props("flat round dense color=negative")
+                        delete_btn.classes("mc-nav-delete-btn mc-download-btn--icon")
+                        delete_btn.tooltip("删除文件")
+                        delete_btn.on(
+                            "click.stop",
+                            lambda e=None, name=fname: _show_delete_file_dialog(name),
+                        )
 
 
 def _render_tools_sidebar(session_tabs: list = None, session_active_tab: dict = None):
@@ -297,6 +361,115 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
                 _render_overview_panel(deployer, session_tabs, session_active_tab)
 
     ui.timer(1.0, refresh_overview)
+
+
+def _render_loading_block(text: str = "加载中..."):
+    ui.html(
+        f'<div class="mc-loading"><div class="mc-spinner"></div><div class="mc-loading-text">{text}</div></div>',
+        sanitize=False,
+    )
+
+
+def _render_file_viewer_with_loading(active_tab: dict, deployer: bool, session_tabs: list, session_active_tab: dict):
+    slot = ui.column().classes("w-full")
+    state = {"done": False}
+    load_key = str(time.monotonic_ns())
+    active_tab["_load_key"] = load_key
+
+    def _can_update() -> bool:
+        return (
+            active_tab.get("_load_key") == load_key
+            and session_active_tab.get("name") == active_tab.get("name")
+        )
+
+    def show_loading():
+        if state["done"] or not _can_update():
+            return
+        slot.clear()
+        with slot:
+            _render_loading_block("加载中...")
+
+    ui.timer(0.5, show_loading, once=True)
+
+    async def do_load():
+        tree, err = await asyncio.to_thread(load_tree_for_viewer, active_tab["filename"])
+        if not _can_update():
+            return
+        slot.clear()
+        with slot:
+            if err:
+                ui.label(err).classes("text-negative")
+            else:
+                render_file_viewer(
+                    active_tab["filename"],
+                    deployer,
+                    session_tabs,
+                    session_active_tab,
+                    search_keyword=active_tab.get("search_keyword"),
+                    preloaded_tree=tree,
+                )
+        state["done"] = True
+
+    asyncio.create_task(do_load())
+
+
+def _load_archive_tree(filename: str, archive_filename: str) -> tuple[dict | None, str | None]:
+    from app.core import parser, parse_cache
+
+    source_path = storage.get_archived_path(filename, archive_filename)
+    tree = parse_cache.load_tree(source_path)
+    if tree is not None:
+        return tree, None
+
+    if not os.path.exists(source_path):
+        return None, f"归档文件 {archive_filename} 不存在"
+    try:
+        tree = parser.parse_path(source_path, archive_filename)
+    except ValueError as e:
+        return None, f"解析失败: {e}"
+    parse_cache.save_tree(source_path, tree)
+    return tree, None
+
+
+def _render_archive_viewer_with_loading(active_tab: dict, deployer: bool, session_active_tab: dict | None = None):
+    slot = ui.column().classes("w-full")
+    state = {"done": False}
+    load_key = str(time.monotonic_ns())
+    active_tab["_load_key"] = load_key
+
+    def _can_update() -> bool:
+        if active_tab.get("_load_key") != load_key or active_tab.get("type") != "archive_view":
+            return False
+        if session_active_tab is not None and session_active_tab.get("name") != active_tab.get("name"):
+            return False
+        return True
+
+    def show_loading():
+        if state["done"] or not _can_update():
+            return
+        slot.clear()
+        with slot:
+            _render_loading_block("加载中...")
+
+    ui.timer(0.5, show_loading, once=True)
+
+    async def do_load():
+        tree, err = await asyncio.to_thread(
+            _load_archive_tree,
+            active_tab.get("filename", ""),
+            active_tab.get("archive_filename", ""),
+        )
+        if not _can_update():
+            return
+        slot.clear()
+        with slot:
+            if err:
+                ui.label(err).classes("text-negative")
+            else:
+                _render_archive_viewer(active_tab, deployer, preloaded_tree=tree)
+        state["done"] = True
+
+    asyncio.create_task(do_load())
 
 
 def _render_overview_panel(deployer: bool, session_tabs: list, session_active_tab: dict):
@@ -542,6 +715,22 @@ def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overv
                 ui.label(active_tab["label"]).classes("mc-page-title")
                 ui.space()
                 if active_tab["type"] == "file":
+                    ui.button(
+                        "下载文件",
+                        icon="download",
+                        on_click=make_download_handler(DOWNLOAD_KIND_CURRENT, active_tab["filename"]),
+                    ).props("flat dense color=primary").classes("mc-download-btn")
+                else:
+                    ui.button(
+                        "下载历史版本",
+                        icon="download",
+                        on_click=make_download_handler(
+                            DOWNLOAD_KIND_ARCHIVE,
+                            active_tab["filename"],
+                            active_tab.get("archive_filename"),
+                        ),
+                    ).props("flat dense color=primary").classes("mc-download-btn")
+                if active_tab["type"] == "file":
                     search_input = ui.input(placeholder="搜索当前文件...").props("dense outlined").classes("w-64")
                     ui.button(icon="search",
                               on_click=lambda: _do_local_search(search_input.value, active_tab, session_active_tab)
@@ -553,15 +742,9 @@ def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overv
 
         tab_type = active_tab["type"]
         if tab_type == "file":
-            render_file_viewer(
-                active_tab["filename"],
-                deployer,
-                session_tabs,
-                session_active_tab,
-                search_keyword=active_tab.get("search_keyword"),
-            )
+            _render_file_viewer_with_loading(active_tab, deployer, session_tabs, session_active_tab)
         elif tab_type == "archive_view":
-            _render_archive_viewer(active_tab, deployer)
+            _render_archive_viewer_with_loading(active_tab, deployer, session_active_tab)
         elif tab_type == "management":
             render_management_page(deployer)
         elif tab_type == "bindings":
@@ -574,6 +757,8 @@ def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overv
             render_history_page(active_tab, deployer, session_tabs, session_active_tab)
         elif tab_type == "records":
             render_records_page(active_tab, deployer, session_tabs, session_active_tab)
+        elif tab_type == "review":
+            render_review_page(session_active_tab)
         elif tab_type == "dltool":
             render_dltool_page(
                 on_refresh=lambda: session_active_tab.pop("_rendered", None)
@@ -582,25 +767,51 @@ def _update_tabs_display(session_tabs, session_active_tab, tabs_container, overv
             render_search_page(active_tab)
 
 
-def _render_archive_viewer(tab: dict, deployer: bool):
-    """渲染归档文件查看器"""
-    from app.core import parser, parse_cache
+def _show_delete_file_dialog(name: str) -> None:
+    if not is_admin():
+        ui.notify("权限不足", type="negative")
+        return
 
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label("删除文件").classes("text-h6")
+        ui.label(f"将删除文件及其关联归档、记录与审阅备注: {name}").classes("text-body2 q-mb-sm")
+
+        def do_delete():
+            ok = storage.delete_config_file(name, remove_mapping=True)
+            if not ok:
+                ui.notify("未找到可删除的文件", type="warning")
+                return
+            ui.notify("文件已删除", type="positive")
+            dialog.close()
+            ui.run_javascript("location.reload()")
+
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("删除", icon="delete", on_click=do_delete).props("color=negative")
+
+        dialog.open()
+
+
+def _render_archive_viewer(tab: dict, deployer: bool, preloaded_tree: dict | None = None):
+    """渲染归档文件查看器"""
     filename = tab.get("filename", "")
     archive_filename = tab.get("archive_filename", "")
-    source_path = storage.get_archived_path(filename, archive_filename)
-    tree = parse_cache.load_tree(source_path)
+    tree = preloaded_tree
     if tree is None:
-        content = storage.load_archived_file(filename, archive_filename)
-        if content is None:
-            ui.label(f"归档文件 {archive_filename} 不存在").classes("text-negative")
-            return
-        try:
-            tree = parser.parse_file(content, archive_filename)
-        except ValueError as e:
-            ui.label(f"解析失败: {e}").classes("text-negative")
-            return
-        parse_cache.save_tree(source_path, tree)
+        from app.core import parser, parse_cache
+
+        source_path = storage.get_archived_path(filename, archive_filename)
+        tree = parse_cache.load_tree(source_path)
+        if tree is None:
+            if not os.path.exists(source_path):
+                ui.label(f"归档文件 {archive_filename} 不存在").classes("text-negative")
+                return
+            try:
+                tree = parser.parse_path(source_path, archive_filename)
+            except ValueError as e:
+                ui.label(f"解析失败: {e}").classes("text-negative")
+                return
+            parse_cache.save_tree(source_path, tree)
 
     with ui.row().classes("items-center q-mb-md"):
         ui.badge(archive_filename, color="grey")

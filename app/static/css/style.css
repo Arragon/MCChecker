@@ -180,11 +180,65 @@ body {
   background: rgba(37, 99, 235, 0.06);
 }
 
+.mc-nav-card--file {
+  position: relative;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+}
+
+.mc-nav-card--file .mc-nav-text {
+  padding-right: 0;
+  transition: padding-right 0.16s ease;
+}
+
+.mc-nav-card--file:hover .mc-nav-text,
+.mc-nav-card--file:focus-within .mc-nav-text {
+  padding-right: 88px;
+}
+
+.mc-nav-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.mc-nav-card--file:hover .mc-nav-actions,
+.mc-nav-card--file:focus-within .mc-nav-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mc-download-btn.q-btn {
+  border-radius: 10px;
+  transition: transform 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.mc-download-btn.q-btn:hover {
+  background: rgba(37, 99, 235, 0.10);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.10);
+}
+
+.mc-download-btn.q-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.mc-download-btn--icon.q-btn {
+  min-width: 34px;
+  min-height: 34px;
+}
+
 .mc-nav-filename {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.15;
 }
 
 .mc-diff-wrap {
@@ -317,6 +371,49 @@ body {
   letter-spacing: -0.01em;
 }
 
+.mc-loading {
+  width: 100%;
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-direction: column;
+  border: 1px solid var(--mc-border);
+  border-radius: 12px;
+  background: var(--mc-surface);
+}
+
+.mc-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 3px solid rgba(25, 118, 210, 0.16);
+  border-top-color: rgba(25, 118, 210, 0.95);
+  animation: mc-spin 0.9s linear infinite;
+}
+
+.mc-loading-text {
+  font-size: 0.9rem;
+  color: rgba(71, 85, 105, 0.95);
+  letter-spacing: -0.01em;
+}
+
+@keyframes mc-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mc-spinner {
+    animation: none;
+  }
+}
+
 .mc-page-subtitle {
   color: var(--mc-muted);
   font-size: 0.82rem;
@@ -379,15 +476,23 @@ body {
   overflow-x: auto;
 }
 
+.mc-tree-toolbar {
+  flex-wrap: wrap;
+}
+
+.mc-tree-toolbar-btn.q-btn {
+  border-radius: 999px;
+}
+
 .fav-tree .tree-row {
   display: flex;
   align-items: center;
-  height: 30px;
-  padding: 0 12px 0 6px;
+  min-height: 32px;
+  padding: 2px 12px 2px 6px;
   border-radius: 8px;
   cursor: default;
   transition: background 0.12s ease;
-  gap: 0;
+  gap: 1px;
   margin: 0;
   box-sizing: border-box;
 }
@@ -542,11 +647,197 @@ body {
   font-size: 0.9em;
 }
 
+.fav-tree .mc-tree-toggle {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(71, 85, 105, 0.95);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.fav-tree .mc-tree-toggle:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.fav-tree .mc-tree-toggle-icon {
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.fav-tree .mc-range-toggle.q-btn {
+  min-height: 22px;
+  padding: 0 6px;
+}
+
+.fav-tree .mc-range-toggle .q-btn__content {
+  font-size: 0.74rem;
+  color: rgba(100, 116, 139, 0.95);
+  gap: 4px;
+}
+
+.fav-tree .mc-row-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.fav-tree .mc-node-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.fav-tree .tree-row:hover .mc-node-actions,
+.fav-tree .tree-row:focus-within .mc-node-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.fav-tree .mc-inline-edit-btn.q-btn {
+  min-height: 24px;
+}
+
+.fav-tree .mc-review-note-inline {
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: rgba(71, 85, 105, 0.95);
+  white-space: normal;
+}
+
+.fav-tree .mc-param-key {
+  font-weight: 750;
+  color: rgba(30, 58, 138, 0.95);
+}
+
+.fav-tree .mc-param-val {
+  font-weight: 750;
+  color: rgba(37, 99, 235, 0.95);
+}
+
+.fav-tree .mc-param-meta {
+  font-size: 0.78em;
+  color: rgba(100, 116, 139, 0.9);
+  font-weight: 400;
+}
+
+.fav-tree .mc-param-range {
+  padding: 2px 12px 2px 58px;
+}
+
+.fav-tree .mc-param-range-inner {
+  font-size: 0.72rem;
+  color: rgba(100, 116, 139, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .fav-tree .children-wrap {
   overflow: hidden;
   margin: 0 !important;
   padding: 0 !important;
-  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fav-tree.xml-tree {
+  overflow-x: auto;
+}
+
+.fav-tree.xml-tree .tree-row {
+  min-height: 36px;
+  padding: 4px 16px 4px 8px;
+  gap: 4px;
+}
+
+.fav-tree.xml-tree .indent-cell {
+  width: 24px;
+}
+
+.fav-tree.xml-tree .indent-cell .guide-line {
+  width: 2px;
+  opacity: 0.52;
+}
+
+.fav-tree.xml-tree .tree-label {
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.6;
+  padding: 4px 0;
+}
+
+.fav-tree.xml-tree .lbl-0 {
+  font-size: 0.98rem;
+}
+
+.fav-tree.xml-tree .lbl-1 {
+  font-size: 0.92rem;
+}
+
+.fav-tree.xml-tree .lbl-2,
+.fav-tree.xml-tree .lbl-3 {
+  font-size: 0.86rem;
+}
+
+.fav-tree.xml-tree .mc-param-meta {
+  flex-basis: 100%;
+  margin-left: 0;
+  line-height: 1.55;
+}
+
+.fav-tree.xml-tree .mc-review-note-inline {
+  flex-basis: 100%;
+  margin-left: 0;
+  color: rgba(51, 65, 85, 0.92);
+}
+
+.fav-tree.xml-tree .mc-range-toggle.q-btn {
+  margin-left: 4px;
+}
+
+.fav-tree.xml-tree .mc-param-range {
+  padding: 2px 18px 6px 74px;
+}
+
+.fav-tree.xml-tree .mc-param-range-inner {
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.fav-tree.xml-tree .children-wrap {
+  padding-bottom: 2px !important;
+}
+
+@media (max-width: 900px) {
+  .fav-tree.xml-tree .tree-row {
+    min-height: 34px;
+    padding: 4px 10px 4px 4px;
+  }
+
+  .fav-tree.xml-tree .indent-cell {
+    width: 18px;
+  }
+
+  .fav-tree.xml-tree .mc-param-range {
+    padding: 2px 12px 6px 50px;
+  }
 }
 
 .fav-tree .depth-1 {
@@ -563,6 +854,24 @@ body {
 
 .fav-tree .depth-4 {
   padding-left: 80px;
+}
+
+.mc-review-note-list {
+  gap: 6px;
+}
+
+.mc-review-note-item {
+  display: block;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgba(51, 65, 85, 0.95);
+  background: rgba(37, 99, 235, 0.06);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.mc-review-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .fav-tree .fav-node-header {

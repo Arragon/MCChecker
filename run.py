@@ -19,12 +19,14 @@ logger = logging.getLogger(__name__)
 from app.core import storage, scheduler as sched
 from app.utils.auth import is_deployer, get_client_ip
 from app.pages.home import render_home_page
+from app.pages.file_downloads import register_download_routes
 import app.pages.record_view
 
 nice_app.add_static_files(
     "/static",
     str(pathlib.Path(__file__).parent / "app" / "static"),
 )
+register_download_routes()
 
 storage.ensure_profile_layout(migrate_legacy=True)
 storage._ensure_dirs()

@@ -1,11 +1,12 @@
 """DL 快捷计算工具 —— UI 页面"""
 
 import json
+import os
 
 from nicegui import ui
 
 from app.core import dltool as engine
-from app.core import storage, parser
+from app.core import storage, parser, parse_cache
 
 
 _COEFF_LABELS = [
@@ -178,12 +179,15 @@ def _try_extract_coeffs_for_item(cfg: dict, item_id: str):
     if not source_file or not variable_path or not field_map:
         return
 
-    content = storage.load_config_file(source_file)
-    if content is None:
+    source_path = storage.get_config_path(source_file)
+    if not os.path.exists(source_path):
         ui.notify(f"文件 {source_file} 不存在", type="warning")
         return
     try:
-        tree = parser.parse_file(content, source_file)
+        tree = parse_cache.load_tree(source_path)
+        if tree is None:
+            tree = parser.parse_path(source_path, source_file)
+            parse_cache.save_tree(source_path, tree)
     except ValueError as e:
         ui.notify(f"解析失败: {e}", type="negative")
         return
@@ -705,108 +709,122 @@ def _show_results(results: list, mode: str, *, item_id: str, item: dict, pp_info
         ui.notify("无有效结果（可能被范围过滤或无解）", type="warning")
         return
 
-    with ui.dialog() as dlg, ui.card().classes("w-[920px] max-w-[95vw] max-h-[80vh] overflow-auto"):
-        title = "正向计算结果" if mode == "forward" else "反向求解结果"
-        with ui.row().classes("items-start justify-between w-full q-mb-sm"):
-            with ui.column().classes("q-gutter-xs"):
-                ui.label(title).classes("text-h6")
-                ui.label(f"共 {len(results)} 条").classes("text-caption text-grey")
-            ui.button(icon="close", on_click=dlg.close).props("flat round dense")
+    is_forward = (mode == "forward")
+    title = "正向计算 结果" if is_forward else "反向求解 结果"
+    icon = "trending_flat" if is_forward else "settings_backup_restore"
+    has_multi = any(r.get("multiple") for r in results)
 
+    # 弹窗主体卡片：改用固定高度 h-[600px] 确保内部弹性容器不塌陷，且能容纳底部扩展内容
+    with ui.dialog() as dlg, ui.card().classes("w-[780px] h-[640px] rounded-xl shadow-xl p-6 gap-4 flex flex-col"):
+
+        # 1. 头部区域
+        with ui.row().classes("w-full items-center justify-between border-b border-slate-100 pb-3 shrink-0"):
+            with ui.row().classes("items-center gap-2"):
+                ui.icon(icon).classes("text-primary text-h5")
+                ui.label(title).classes("text-h6 font-bold text-slate-800")
+            ui.badge(f"{len(results)} 条数据", color="primary").props("outline")
+
+        # 2. PP 能量特殊信息
         if item_id == "pp_energy" and pp_info:
-            with ui.card().classes("w-full q-pa-sm q-mb-md").style("border: 1px solid rgba(37, 99, 235, 0.22)"):
-                with ui.row().classes("items-center q-gutter-md"):
-                    ui.html('<span class="mc-chip">PP能量 = Y × 传输系数 ÷ 功率转换系数</span>', sanitize=False)
-                    ui.html(f'<span class="mc-chip">传输效率 {pp_info["scale"]:.6g}</span>', sanitize=False)
-                    ui.html(f'<span class="mc-chip">传输系数 {pp_info["trans_coeff"]:.6g}</span>', sanitize=False)
-                    ui.html(f'<span class="mc-chip">功率转换系数 {pp_info["power_conv_coeff"]:.6g}</span>', sanitize=False)
+            with ui.row().classes("w-full bg-blue-50 border border-blue-100 rounded-lg p-2 gap-3 shrink-0"):
+                ui.icon("info", size="xs").classes("text-blue-600 mt-0.5")
+                with ui.column().classes("gap-0"):
+                    ui.label("PP能量 = Y × 传输系数 ÷ 功率转换系数").classes("text-[11px] text-blue-800 font-medium")
+                    with ui.row().classes("gap-3 text-[11px] text-blue-600"):
+                        ui.label(f"传输效率: {pp_info['scale']:.6g}")
+                        ui.label(f"传输系数: {pp_info['trans_coeff']:.6g}")
+                        ui.label(f"功率转换系数: {pp_info['power_conv_coeff']:.6g}")
 
-        with ui.card().classes("w-full q-pa-md"):
-            if mode == "forward":
-                ui.label("核心结果").classes("mc-section-title q-mb-sm")
-                head = '<thead><tr><th>输入 x</th><th>输出 Y</th></tr></thead>'
-                ui.html(f'<table class="result-table">{head}<tbody>', sanitize=False)
+        # 3. 表头区域
+        col1_title = "输入 x" if is_forward else "目标 y"
+        col2_title = "输出 y = f(x)" if is_forward else "解 x"
+        with ui.row().classes(
+                "w-full bg-slate-50 border border-slate-200 rounded-t-lg p-3 font-semibold text-slate-600 text-sm no-wrap shrink-0"):
+            ui.label(col1_title).classes("w-1/2 pl-2 shrink-0")
+            ui.label(col2_title).classes("w-1/2 pl-2 shrink-0")
+
+        # 4. 数据滚动区域
+        with ui.scroll_area().classes("w-full border-x border-b border-slate-200 rounded-b-lg flex-1"):
+            with ui.column().classes("w-full gap-0 divide-y divide-slate-100"):
                 for r in results:
-                    ui.html(f'<tr><td>{r.get("x")}</td><td>{r.get("y")}</td></tr>', sanitize=False)
-                ui.html("</tbody></table>", sanitize=False)
-            else:
-                ui.label("核心结果").classes("mc-section-title q-mb-sm")
-                head = '<thead><tr><th>目标 Y</th><th>解 x</th></tr></thead>'
-                ui.html(f'<table class="result-table">{head}<tbody>', sanitize=False)
-                for r in results:
-                    yv = r.get("y")
-                    x_vals = r.get("x_values") or []
-                    if not x_vals:
-                        ui.html(f'<tr><td>{yv}</td><td><span style="color:#E65100">无实数解</span></td></tr>', sanitize=False)
-                    elif r.get("multiple"):
-                        x_str = ", ".join(str(x) for x in x_vals)
-                        ui.html(
-                            f'<tr><td>{yv}</td><td>{x_str} <span class="alert-badge">一对多({len(x_vals)}解)</span></td></tr>',
-                            sanitize=False,
-                        )
-                    else:
-                        ui.html(f'<tr><td>{yv}</td><td>{x_vals[0]}</td></tr>', sanitize=False)
-                ui.html("</tbody></table>", sanitize=False)
-
-        if mode == "reverse" and any(r.get("multiple") for r in results):
-            ui.label("多解确认").classes("mc-section-title q-mt-md q-mb-sm")
-            ui.label("当存在一对多时，请选择你认为最优的解（会生成唯一解结果）。").classes("mc-page-subtitle q-mb-sm")
-            chosen = {}
-            chosen_container = ui.column().classes("w-full")
-
-            with ui.column().classes("w-full q-gutter-sm"):
-                for idx, r in enumerate(results):
-                    if not r.get("multiple"):
-                        continue
-                    yv = r.get("y")
-                    xs = r.get("x_values") or []
-                    if not xs:
-                        continue
-                    default_x = min(xs, key=lambda v: abs(float(v)))
-                    chosen[idx] = default_x
-                    with ui.row().classes("items-center q-gutter-sm w-full"):
-                        ui.label(f"目标 Y: {yv}").classes("text-caption text-grey")
-                        ui.select(
-                            options=[str(x) for x in xs],
-                            value=str(default_x),
-                            on_change=lambda e, i=idx: chosen.__setitem__(i, float(e.value)),
-                        ).props("dense outlined").classes("w-56")
-
-            def apply_choice():
-                chosen_container.clear()
-                with chosen_container:
-                    ui.label("唯一解结果").classes("mc-section-title q-mb-sm")
-                    ui.html('<table class="result-table"><thead><tr><th>目标 Y</th><th>确认的 x</th></tr></thead><tbody>', sanitize=False)
-                    for i, r in enumerate(results):
-                        yv = r.get("y")
-                        xs = r.get("x_values") or []
-                        if not xs:
-                            ui.html(f'<tr><td>{yv}</td><td><span style="color:#E65100">无实数解</span></td></tr>', sanitize=False)
-                        elif r.get("multiple"):
-                            ui.html(f"<tr><td>{yv}</td><td>{chosen.get(i)}</td></tr>", sanitize=False)
+                    with ui.row().classes(
+                            "w-full p-3 hover:bg-slate-50 transition-colors items-center no-wrap text-sm text-slate-700"):
+                        if is_forward:
+                            ui.label(str(r.get("x"))).classes("w-1/2 font-mono text-slate-500 pl-2 truncate shrink-0")
+                            ui.label(str(r.get("y"))).classes("w-1/2 font-mono text-primary font-semibold pl-2 truncate shrink-0")
                         else:
-                            ui.html(f"<tr><td>{yv}</td><td>{xs[0]}</td></tr>", sanitize=False)
-                    ui.html("</tbody></table>", sanitize=False)
+                            ui.label(str(r.get("y"))).classes("w-1/2 font-mono text-slate-500 pl-2 truncate shrink-0")
+                            with ui.row().classes("w-1/2 pl-2 items-center gap-2 no-wrap shrink-0"):
+                                x_vals = r.get("x_values") or []
+                                if not x_vals:
+                                    ui.label("无实数解").classes(
+                                        "px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200 shrink-0")
+                                elif r.get("multiple"):
+                                    x_str = ", ".join(str(x) for x in x_vals)
+                                    ui.label(x_str).classes("font-mono text-amber-700 font-semibold flex-1 truncate")
+                                    ui.label(f"一对多 ({len(x_vals)}解)").classes(
+                                        "px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200 shrink-0")
+                                else:
+                                    ui.label(str(x_vals[0])).classes("font-mono text-emerald-600 font-semibold truncate flex-1")
 
-            ui.button("应用选择", icon="check", on_click=apply_choice).props("color=primary dense q-mb-md")
-            apply_choice()
+        # 5. 多解确认与参数明细（可滚动）
+        with ui.scroll_area().classes("w-full h-32 shrink-0"):
+            with ui.column().classes("w-full gap-2"):
+                # 多解确认
+                if not is_forward and has_multi:
+                    with ui.column().classes("w-full bg-amber-50 border border-amber-100 rounded-lg p-3 gap-2"):
+                        with ui.row().classes("items-center gap-2 text-amber-900 text-xs"):
+                            ui.icon("warning", size="xs").classes("text-amber-600")
+                            ui.label("存在一对多结果，请选择最优解以生成唯一解表格。").classes("font-medium")
+                        
+                        chosen = {}
+                        for idx, r in enumerate(results):
+                            if not r.get("multiple"): continue
+                            xs = r.get("x_values") or []
+                            if not xs: continue
+                            
+                            default_x = min(xs, key=lambda v: abs(float(v)))
+                            chosen[idx] = default_x
+                            with ui.row().classes("items-center gap-2 w-full"):
+                                ui.label(f"目标 Y: {r.get('y')}").classes("text-[11px] text-slate-500 w-24")
+                                ui.select(
+                                    options=[str(x) for x in xs],
+                                    value=str(default_x),
+                                    on_change=lambda e, i=idx: chosen.__setitem__(i, float(e.value)),
+                                ).props("dense outlined").classes("flex-1 bg-white").style("font-size: 11px")
 
-        with ui.expansion("参数明细", value=False).classes("w-full q-mt-md"):
-            coeffs = item.get("coeffs") or {}
-            rows = []
-            for i in range(1, 9):
-                rows.append((f"k{i}", coeffs.get(f'k{i}', 0.0)))
-            rows.append(("b", coeffs.get("b", 0.0)))
-            ui.html('<table class="result-table"><thead><tr><th>参数</th><th>值</th></tr></thead><tbody>', sanitize=False)
-            if item_id == "pp_energy":
-                ui.html(f"<tr><td>传输系数</td><td>{item.get('trans_coeff', 1.0)}</td></tr>", sanitize=False)
-                ui.html(f"<tr><td>功率转换系数</td><td>{item.get('power_conv_coeff', 1.0)}</td></tr>", sanitize=False)
-            ui.html(f"<tr><td>x_min</td><td>{item.get('x_min')}</td></tr>", sanitize=False)
-            ui.html(f"<tr><td>x_max</td><td>{item.get('x_max')}</td></tr>", sanitize=False)
-            ui.html(f"<tr><td>y_min</td><td>{item.get('y_min')}</td></tr>", sanitize=False)
-            ui.html(f"<tr><td>y_max</td><td>{item.get('y_max')}</td></tr>", sanitize=False)
-            for k, v in rows:
-                ui.html(f"<tr><td>{k}</td><td>{v}</td></tr>", sanitize=False)
-            ui.html("</tbody></table>", sanitize=False)
+                        def apply_choice():
+                            # 创建新的弹窗展示唯一解结果
+                            with ui.dialog() as sub_dlg, ui.card().classes("w-[500px] p-6 gap-4"):
+                                ui.label("唯一解结果").classes("text-h6 font-bold")
+                                with ui.scroll_area().classes("w-full h-80 border rounded-lg"):
+                                    with ui.column().classes("w-full divide-y"):
+                                        for i, r in enumerate(results):
+                                            yv = r.get("y")
+                                            xs = r.get("x_values") or []
+                                            val = chosen.get(i) if r.get("multiple") else (xs[0] if xs else "无解")
+                                            with ui.row().classes("w-full p-2 justify-between"):
+                                                ui.label(f"Y: {yv}").classes("text-slate-500")
+                                                ui.label(str(val)).classes("font-mono font-bold text-primary")
+                                ui.button("关闭", on_click=sub_dlg.close).props("flat").classes("ml-auto")
+                            sub_dlg.open()
+
+                        ui.button("生成唯一解表格", icon="auto_fix_high", on_click=apply_choice).props(
+                            "color=amber-9 text-color=white dense").classes("rounded-md text-xs")
+
+                # 参数明细
+                with ui.expansion("查看参数明细", icon="settings").classes("w-full border border-slate-100 rounded-lg text-sm"):
+                    coeffs = item.get("coeffs") or {}
+                    with ui.grid(columns=3).classes("w-full p-2 gap-2 text-[11px]"):
+                        for i in range(1, 9):
+                            k = f"k{i}"
+                            ui.label(f"{k}: {coeffs.get(k, 0.0)}").classes("font-mono text-slate-500")
+                        ui.label(f"b: {coeffs.get('b', 0.0)}").classes("font-mono text-slate-500")
+                        ui.label(f"x_range: [{item.get('x_min')}, {item.get('x_max')}]").classes("text-slate-400")
+                        ui.label(f"y_range: [{item.get('y_min')}, {item.get('y_max')}]").classes("text-slate-400")
+
+        # 6. 操作按钮
+        with ui.row().classes("w-full justify-end gap-2 mt-auto shrink-0"):
+            ui.button("关闭", on_click=dlg.close).props("flat color=primary").classes("px-4 rounded-lg font-medium")
 
     dlg.open()

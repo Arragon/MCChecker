@@ -1,9 +1,13 @@
 """文件解析查看器页面"""
 
+import hashlib
+import os
+
 from nicegui import ui
 
-from app.core import storage, parser, parse_cache, searching
-from app.utils.auth import is_deployer
+from app.core import storage, parser, parse_cache, searching, reviewing
+from app.pages.file_downloads import DOWNLOAD_KIND_CURRENT, make_download_handler
+from app.utils.auth import get_identity_info, is_deployer
 
 # 层级竖线颜色（每级不同色，现代柔和配色）
 _LEVEL_LINE_COLORS = [
@@ -19,9 +23,29 @@ _LEVEL_LINE_COLORS = [
 
 _LEVEL_TEXT_COLORS = ["dark", "grey-9", "grey-8", "grey-7", "grey-6"]
 
+_PARAM_SECONDARY_FIELDS = {"@description", "@editPrivilege"}
+_PARAM_RANGE_FIELDS = {"@default", "@min", "@max", "@incMax", "@incMin"}
 
-def _build_row_prefix_html(depth: int, has_children: bool, is_expanded: bool) -> str:
-    """构建行前缀 HTML：层级缩进竖线 + 折叠箭头或叶子标记"""
+
+def load_tree_for_viewer(filename: str) -> tuple[dict | None, str | None]:
+    source_path = storage.get_config_path(filename)
+    tree = parse_cache.load_tree(source_path)
+    if tree is not None:
+        return tree, None
+
+    if not os.path.exists(source_path):
+        return None, f"文件 {filename} 不存在"
+
+    try:
+        tree = parser.parse_path(source_path, filename)
+    except ValueError as e:
+        return None, f"解析失败: {e}"
+
+    parse_cache.save_tree(source_path, tree)
+    return tree, None
+
+
+def _build_indent_html(depth: int) -> str:
     parts = []
     for d in range(depth):
         color = _LEVEL_LINE_COLORS[d % len(_LEVEL_LINE_COLORS)]
@@ -30,31 +54,76 @@ def _build_row_prefix_html(depth: int, has_children: bool, is_expanded: bool) ->
             f'<span class="guide-line" style="background:{color}"></span>'
             f'</span>'
         )
+    return "".join(parts)
+
+
+def _build_row_prefix_html(depth: int, has_children: bool) -> str:
+    prefix = _build_indent_html(depth)
     if has_children:
-        arrow_class = "expanded" if is_expanded else "collapsed"
-        parts.append(
-            f'<span class="toggle-btn {arrow_class}" onclick="mct(this)"></span>'
+        return (
+            prefix
+            + '<button type="button" class="mc-tree-toggle is-expanded" '
+            + 'aria-label="折叠节点" aria-expanded="true" onclick="window.mcToggleTree(this)">'
+            + '<span class="mc-tree-toggle-icon">▾</span>'
+            + "</button>"
         )
-    else:
-        parts.append('<span class="leaf-marker"></span>')
-    return ''.join(parts)
+    return prefix + '<span class="leaf-marker"></span>'
 
 
-def render_file_viewer(filename: str, deployer: bool, session_tabs: list, session_active_tab: dict, search_keyword: str | None = None):
+def _make_tree_panel_id(*parts: str) -> str:
+    seed = "|".join(str(p or "") for p in parts)
+    return f"mc-tree-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _make_range_btn_id(node_path: str) -> str:
+    return f"mc-range-{hashlib.sha1(node_path.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _is_param_node(label: str, value, children: list) -> bool:
+    if value is None or not children:
+        return False
+    if not str(label).startswith("param_"):
+        return False
+    for c in children:
+        if isinstance(c, dict) and c.get("label") in _PARAM_RANGE_FIELDS.union(_PARAM_SECONDARY_FIELDS):
+            return True
+    return False
+
+
+def _extract_param_meta(children: list) -> tuple[dict, dict, list]:
+    secondary: dict[str, str] = {}
+    ranges: dict[str, str] = {}
+    rest: list = []
+    for c in children:
+        if not isinstance(c, dict):
+            continue
+        lbl = c.get("label")
+        val = c.get("value")
+        if lbl in _PARAM_SECONDARY_FIELDS and val is not None:
+            secondary[str(lbl)] = str(val)
+            continue
+        if lbl in _PARAM_RANGE_FIELDS and val is not None:
+            ranges[str(lbl)] = str(val)
+            continue
+        rest.append(c)
+    return secondary, ranges, rest
+
+
+def render_file_viewer(
+    filename: str,
+    deployer: bool,
+    session_tabs: list,
+    session_active_tab: dict,
+    search_keyword: str | None = None,
+    preloaded_tree: dict | None = None,
+):
     """渲染文件解析查看器"""
-    source_path = storage.get_config_path(filename)
-    tree = parse_cache.load_tree(source_path)
+    tree = preloaded_tree
     if tree is None:
-        content = storage.load_config_file(filename)
-        if content is None:
-            ui.label(f"文件 {filename} 不存在").classes("text-negative")
+        tree, err = load_tree_for_viewer(filename)
+        if err:
+            ui.label(err).classes("text-negative")
             return
-        try:
-            tree = parser.parse_file(content, filename)
-        except ValueError as e:
-            ui.label(f"解析失败: {e}").classes("text-negative")
-            return
-        parse_cache.save_tree(source_path, tree)
 
     tree_full = tree
 
@@ -75,11 +144,12 @@ def render_file_viewer(filename: str, deployer: bool, session_tabs: list, sessio
 
     show_note = False
     note_map = {}
+    review_remark_map = storage.build_edit_remark_map(filename)
     kw = (search_keyword or "").strip()
     if kw:
         note_map = searching.build_note_map(favorites, filename)
-        filtered = searching.filter_tree(tree, kw, note_map)
-        if not filtered or not filtered.get("children"):
+        filtered, match_count = searching.filter_tree_and_count(tree, kw, note_map)
+        if not filtered or match_count <= 0:
             with ui.row().classes("items-center q-mb-md"):
                 ui.badge(filename, color="blue")
                 ui.label(f'搜索: "{kw}"').classes("text-caption text-grey q-ml-sm")
@@ -97,6 +167,11 @@ def render_file_viewer(filename: str, deployer: bool, session_tabs: list, sessio
         if kw:
             ui.label(f'搜索: "{kw}"').classes("text-caption text-grey q-ml-sm")
         ui.space()
+        ui.button(
+            "下载文件",
+            icon="download",
+            on_click=make_download_handler(DOWNLOAD_KIND_CURRENT, filename),
+        ).props("flat dense color=primary").classes("mc-download-btn")
         ui.button("版本历史", icon="history",
                   on_click=lambda: _open_history_tab(filename, session_tabs, session_active_tab)
                   ).props("flat dense")
@@ -107,41 +182,100 @@ def render_file_viewer(filename: str, deployer: bool, session_tabs: list, sessio
                   on_click=lambda: _open_comparison_tab(filename, session_tabs, session_active_tab)
                   ).props("flat dense")
 
+    panel_id = _make_tree_panel_id(filename, kw)
+    with ui.row().classes("items-center q-gutter-sm q-mb-sm mc-tree-toolbar"):
+        ui.label("节点控制").classes("text-caption text-grey-7")
+        ui.button(
+            "全部展开",
+            icon="unfold_more",
+            on_click=lambda pid=panel_id: ui.run_javascript(f"window.mcTreeSetAll('{pid}', true)"),
+        ).props("flat dense color=primary").classes("mc-tree-toolbar-btn")
+        ui.button(
+            "全部折叠",
+            icon="unfold_less",
+            on_click=lambda pid=panel_id: ui.run_javascript(f"window.mcTreeSetAll('{pid}', false)"),
+        ).props("flat dense color=grey-7").classes("mc-tree-toolbar-btn")
+
     # 树形视图
-    with ui.column().classes("w-full fav-tree q-pa-sm"):
-        for child in tree.get("children", []):
-            _render_node(child, filename, fav_direct, fav_covered, fav_entry_map,
-                        tree_full, depth=0, expand_state={}, note_map=note_map, show_note=show_note)
+    tree_kind = (tree.get("attrs") or {}).get("type")
+    tree_classes = "w-full fav-tree q-pa-sm"
+    if tree_kind == "xml":
+        tree_classes += " xml-tree"
+    with ui.element("div").props(f'id="{panel_id}"').classes("mc-tree-panel w-full"):
+        with ui.column().classes(tree_classes):
+            for child_index, child in enumerate(tree.get("children", [])):
+                _render_node(
+                    child,
+                    filename,
+                    fav_direct,
+                    fav_covered,
+                    fav_entry_map,
+                    tree_full,
+                    session_active_tab,
+                    depth=0,
+                    node_key=reviewing.make_node_key("", child_index),
+                    tree_type=str(tree_kind or ""),
+                    note_map=note_map,
+                    review_remark_map=review_remark_map,
+                    show_note=show_note,
+                )
 
 
 def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
-                 fav_entry_map: dict, tree: dict, depth: int, expand_state: dict, note_map: dict | None = None, show_note: bool = False):
+                 fav_entry_map: dict, tree: dict, session_active_tab: dict, depth: int,
+                 node_key: str, tree_type: str, note_map: dict | None = None,
+                 review_remark_map: dict | None = None, show_note: bool = False):
     """递归渲染单个树节点"""
     label = node["label"]
     value = node.get("value")
     children = node.get("children", [])
     node_path = node["id"]
+    node_type = str((node.get("attrs") or {}).get("type") or "")
 
     has_children = bool(children)
-    is_expanded = expand_state.get(node_path, True)
     depth_parity = "depth-even" if depth % 2 == 0 else "depth-odd"
+    is_param = _is_param_node(label, value, children)
+    secondary_meta, range_meta, children_for_tree = _extract_param_meta(children) if is_param else ({}, {}, children)
+    review_remarks = (review_remark_map or {}).get(node_key, [])
+    review_texts = [
+        f"{str(item.get('actor_display') or item.get('actor_name') or item.get('actor_ip') or '未知')}：{str(item.get('proposed_value') or '')}"
+        for item in review_remarks
+    ]
 
     # 节点行
     row_classes = f"tree-row w-full {depth_parity}" + (" is-parent" if has_children else "")
     with ui.row().classes(row_classes):
-        prefix_html = _build_row_prefix_html(depth, has_children, is_expanded)
-        ui.html(prefix_html, sanitize=False)
+        ui.html(_build_row_prefix_html(depth, has_children), sanitize=False)
 
         _render_star(node_path, label, value, filename, fav_direct, fav_covered, fav_entry_map, tree)
 
         lbl_class = f"lbl-{min(depth, 3)}" if has_children else ""
         txt_color = _LEVEL_TEXT_COLORS[min(depth, len(_LEVEL_TEXT_COLORS) - 1)]
         if value is not None:
-            ui.html(
-                f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
-                f'{label} <span class="val-text">= {value}</span></span>',
-                sanitize=False
-            )
+            if is_param:
+                desc = (secondary_meta.get("@description") or "").strip()
+                priv = (secondary_meta.get("@editPrivilege") or "").strip()
+                sec_parts = []
+                if desc:
+                    sec_parts.append(desc)
+                if priv:
+                    sec_parts.append(priv)
+                sec_text = " · ".join(sec_parts)
+                meta_html = f'<span class="mc-param-meta"> {sec_text}</span>' if sec_text else ""
+                ui.html(
+                    f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
+                    f'<span class="mc-param-key">{label}</span> '
+                    f'<span class="mc-param-val">= {value}</span>'
+                    f'{meta_html}'
+                    f'</span>',
+                    sanitize=False,
+                )
+            else:
+                ui.html(
+                    f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
+                    f'{label} <span class="val-text">= {value}</span></span>',
+                    sanitize=False,
+                )
             if show_note:
                 note = ""
                 if isinstance(note_map, dict):
@@ -158,15 +292,183 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
             ui.html(f'<span class="font-mono text-body2 text-grey tree-label">{label}</span>',
                     sanitize=False)
 
+        if review_texts:
+            ui.label("；".join(review_texts)).classes("mc-review-note-inline q-ml-sm")
+
+        range_btn = None
+        if is_param and range_meta:
+            range_btn_id = _make_range_btn_id(node_path)
+            range_btn = (
+                ui.button("展开参数范围", icon="unfold_more")
+                .props(f'flat dense size=sm id="{range_btn_id}"')
+                .classes("mc-range-toggle")
+            )
+
+        ui.html('<span class="mc-row-spacer"></span>', sanitize=False)
+        with ui.element("span").classes("mc-node-actions"):
+            edit_btn = ui.button(icon="edit")
+            edit_btn.props("flat round dense size=sm color=primary")
+            edit_btn.classes("mc-inline-edit-btn")
+            edit_btn.tooltip("添加修改备注")
+            edit_btn.on(
+                "click",
+                lambda e=None, n=node, nk=node_key, tt=tree_type, nt=node_type: _open_edit_remark_dialog(
+                    filename,
+                    n,
+                    nk,
+                    tt,
+                    nt,
+                    session_active_tab,
+                ),
+            )
+
+    range_parts: list[str] = []
+    if is_param and range_meta and range_btn is not None:
+        def _fmt_bound(val_key: str, inc_key: str) -> str:
+            v = (range_meta.get(val_key) or "").strip()
+            if not v:
+                return ""
+            inc = (range_meta.get(inc_key) or "").strip().lower()
+            if inc in ("true", "1", "yes"):
+                return f"{v}（含）"
+            if inc in ("false", "0", "no"):
+                return f"{v}（不含）"
+            return v
+
+        default_val = (range_meta.get("@default") or "").strip()
+        min_val = _fmt_bound("@min", "@incMin")
+        max_val = _fmt_bound("@max", "@incMax")
+        if default_val:
+            range_parts.append(f"default: {default_val}")
+        if min_val:
+            range_parts.append(f"min: {min_val}")
+        if max_val:
+            range_parts.append(f"max: {max_val}")
+
     # 子节点容器
     if has_children:
         children_wrap = ui.column().classes("children-wrap q-pa-none q-ma-none")
-        if not is_expanded:
-            children_wrap.style("max-height: 0px")
         with children_wrap:
-            for child in children:
-                _render_node(child, filename, fav_direct, fav_covered, fav_entry_map,
-                            tree, depth + 1, expand_state, note_map=note_map, show_note=show_note)
+            if range_parts:
+                range_wrap = ui.row().classes("mc-param-range w-full").style("display: none")
+                with range_wrap:
+                    ui.html(
+                        f'<div class="mc-param-range-inner">{ " · ".join(range_parts) }</div>',
+                        sanitize=False,
+                    )
+
+                range_state = {"open": False}
+
+                def _toggle_range(btn=range_btn, wrap=range_wrap):
+                    range_state["open"] = not range_state["open"]
+                    if range_state["open"]:
+                        ui.run_javascript(
+                            f"""
+                            (function() {{
+                              var btn = document.getElementById('{range_btn_id}');
+                              if (!btn) return;
+                              var row = btn.closest('.tree-row');
+                              if (!row) return;
+                              var treeBtn = row.querySelector('.mc-tree-toggle');
+                              if (treeBtn && treeBtn.getAttribute('aria-expanded') !== 'true' && window.mcSetTreeNode) {{
+                                window.mcSetTreeNode(treeBtn, true);
+                              }}
+                            }})();
+                            """.strip()
+                        )
+                        wrap.style("display: flex")
+                        btn._props["label"] = "收起参数范围"
+                        btn._props["icon"] = "unfold_less"
+                    else:
+                        wrap.style("display: none")
+                        btn._props["label"] = "展开参数范围"
+                        btn._props["icon"] = "unfold_more"
+                    btn.update()
+
+                range_btn.on("click", _toggle_range)
+
+            for child_index, child in enumerate(children_for_tree):
+                _render_node(
+                    child,
+                    filename,
+                    fav_direct,
+                    fav_covered,
+                    fav_entry_map,
+                    tree,
+                    session_active_tab,
+                    depth + 1,
+                    node_key=reviewing.make_node_key(node_key, child_index),
+                    tree_type=tree_type,
+                    note_map=note_map,
+                    review_remark_map=review_remark_map,
+                    show_note=show_note,
+                )
+
+
+def _open_edit_remark_dialog(
+    filename: str,
+    node: dict,
+    node_key: str,
+    tree_type: str,
+    node_type: str,
+    session_active_tab: dict,
+) -> None:
+    identity = get_identity_info()
+    current_value = node.get("value")
+    if current_value is None:
+        ui.notify("当前节点没有直接值，请选择具体叶子条目添加备注", type="warning")
+        return
+
+    existing = storage.build_edit_remark_map(filename).get(node_key, [])
+
+    with ui.dialog() as dialog, ui.card().classes("w-[560px] max-w-[96vw]"):
+        ui.label("添加修改备注").classes("text-h6 q-mb-sm")
+        ui.label(f"节点: {node.get('label') or node.get('id') or '-'}").classes("text-body2")
+        ui.label(f"当前值: {current_value}").classes("text-caption text-grey q-mb-sm")
+        ui.label(f"提交人: {identity['name']}  ({identity['ip']})").classes("text-caption text-grey q-mb-sm")
+
+        value_input = ui.input(
+            placeholder="输入建议修改值",
+        ).props("outlined dense").classes("w-full")
+
+        if existing:
+            ui.label("已有备注").classes("text-subtitle2 q-mt-sm q-mb-xs")
+            with ui.column().classes("w-full mc-review-note-list"):
+                for item in existing:
+                    ui.label(
+                        f"{str(item.get('actor_display') or item.get('actor_ip') or '未知')}：{str(item.get('proposed_value') or '')}"
+                    ).classes("mc-review-note-item")
+
+        def do_save():
+            proposed_value = str(value_input.value or "").strip()
+            if not proposed_value:
+                ui.notify("请输入修改值", type="warning")
+                return
+            try:
+                storage.add_edit_remark(
+                    source_file=filename,
+                    node_key=node_key,
+                    node_path=str(node.get("id") or ""),
+                    node_label=str(node.get("label") or ""),
+                    original_value=str(current_value),
+                    proposed_value=proposed_value,
+                    node_type=node_type,
+                    tree_type=tree_type,
+                    actor_ip=identity["ip"],
+                    actor_name=identity["name"],
+                )
+            except Exception as e:
+                ui.notify(str(e) or "保存失败", type="negative")
+                return
+            session_active_tab.pop("_rendered", None)
+            ui.notify("修改备注已记录", type="positive")
+            dialog.close()
+
+        with ui.row().classes("w-full justify-end q-gutter-sm q-mt-md"):
+            ui.button("取消", on_click=dialog.close).props("flat")
+            ui.button("保存备注", icon="save", on_click=do_save).props("color=primary")
+
+        dialog.open()
 
 
 def _serialize_subtree(node: dict) -> list:
