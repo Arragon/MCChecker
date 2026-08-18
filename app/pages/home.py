@@ -30,6 +30,9 @@ from app.pages.theme import ensure_theme
 
 _TAB_LIMIT = 15
 
+# ---- 全局繁忙标记：防止重任务期间 drawer/侧边栏同步冲突 ----
+_busy_processing = {"value": False}
+
 
 def render_home_page():
     """渲染主页"""
@@ -175,6 +178,8 @@ def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_hi
         return tuple(parts)
 
     def refresh_sidebar():
+        if _busy_processing["value"]:
+            return
         sig = _compute_sidebar_sig()
         if sig == last_sig["value"]:
             return
@@ -1134,23 +1139,37 @@ def _show_upload_dialog(session_tabs: list, session_active_tab: dict, session_ta
 
         ui.upload(label="选择文件", auto_upload=True, on_upload=handle_upload).props("dense").classes("w-full")
 
-        def process_upload():
+        async def process_upload():
             if uploaded["data"] is None:
                 ui.notify("请先上传文件", type="warning")
                 return
             filename = uploaded["name"]
-            try:
-                parser.parse_file(uploaded["data"], filename)
-            except ValueError as e:
-                ui.notify(f"解析失败: {e}", type="negative")
-                return
-            if is_deployer():
-                storage.save_config_file(filename, uploaded["data"])
-                ui.notify(f"已解析并保存: {filename}", type="positive")
-            else:
-                ui.notify(f"已解析: {filename} (仅会话可见)", type="info")
-            _open_file_tab(filename, session_tabs, session_active_tab, session_tab_history)
+            data = uploaded["data"]
+
             dialog.close()
+            ui.notify(f"正在解析: {filename}...", type="ongoing")
+
+            # 标记繁忙，暂停侧边栏刷新
+            _busy_processing["value"] = True
+            try:
+                # 解析放到线程池，避免阻塞事件循环
+                try:
+                    await asyncio.to_thread(parser.parse_file, data, filename)
+                except ValueError as e:
+                    _busy_processing["value"] = False
+                    ui.notify(f"解析失败: {e}", type="negative")
+                    return
+
+                # 保存也放到线程池
+                if is_deployer():
+                    await asyncio.to_thread(storage.save_config_file, filename, data)
+                    ui.notify(f"已解析并保存: {filename}", type="positive")
+                else:
+                    ui.notify(f"已解析: {filename} (仅会话可见)", type="info")
+
+                _open_file_tab(filename, session_tabs, session_active_tab, session_tab_history)
+            finally:
+                _busy_processing["value"] = False
 
         with ui.row().classes("w-full justify-end"):
             ui.button("取消", on_click=dialog.close).props("flat")
@@ -1175,22 +1194,34 @@ def _show_url_dialog(session_tabs: list, session_active_tab: dict, session_tab_h
                 return
             if not filename:
                 filename = url.rsplit("/", 1)[-1] if "/" in url else "downloaded_config"
-            content = downloader.download_file(url)
-            if content is None:
-                ui.notify("下载失败", type="negative")
-                return
-            try:
-                parser.parse_file(content, filename)
-            except ValueError as e:
-                ui.notify(f"解析失败: {e}", type="negative")
-                return
-            if is_deployer():
-                storage.save_config_file(filename, content)
-                ui.notify(f"已下载并保存: {filename}", type="positive")
-            else:
-                ui.notify(f"已下载并解析: {filename} (仅会话可见)", type="info")
-            _open_file_tab(filename, session_tabs, session_active_tab, session_tab_history)
+
             dialog.close()
+            ui.notify(f"正在下载: {filename}...", type="ongoing")
+
+            _busy_processing["value"] = True
+            try:
+                content = await asyncio.to_thread(downloader.download_file, url)
+                if content is None:
+                    _busy_processing["value"] = False
+                    ui.notify("下载失败", type="negative")
+                    return
+
+                try:
+                    await asyncio.to_thread(parser.parse_file, content, filename)
+                except ValueError as e:
+                    _busy_processing["value"] = False
+                    ui.notify(f"解析失败: {e}", type="negative")
+                    return
+
+                if is_deployer():
+                    await asyncio.to_thread(storage.save_config_file, filename, content)
+                    ui.notify(f"已下载并保存: {filename}", type="positive")
+                else:
+                    ui.notify(f"已下载并解析: {filename} (仅会话可见)", type="info")
+
+                _open_file_tab(filename, session_tabs, session_active_tab, session_tab_history)
+            finally:
+                _busy_processing["value"] = False
 
         with ui.row().classes("w-full justify-end"):
             ui.button("取消", on_click=dialog.close).props("flat")
