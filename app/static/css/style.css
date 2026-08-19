@@ -1214,3 +1214,143 @@ body {
 .mc-diff-code .hljs-comment {
   color: rgba(100, 116, 139, 0.9);
 }
+
+/* ============ 修改备注：节点行备注显示区与气泡卡片 ============ */
+
+/* 节点行 hover 时操作按钮浮现更顺滑（保留框架，仅增强过渡） */
+.fav-tree .tree-row {
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+
+.fav-tree .tree-row:hover {
+  box-shadow: inset 3px 0 0 rgba(37, 99, 235, 0.45);
+}
+
+/* 节点行备注显示区：紧凑、不撑破行高 */
+.mc-node-remark {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.mc-remark-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  max-width: 520px;
+}
+
+/* 单条备注气泡卡片 */
+.mc-remark-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.07);
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.mc-remark-chip:hover {
+  background: rgba(37, 99, 235, 0.10);
+}
+
+.mc-remark-chip.mc-remark-approved {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.22);
+}
+
+.mc-remark-chip.mc-remark-rejected {
+  background: rgba(220, 38, 38, 0.07);
+  border-color: rgba(220, 38, 38, 0.20);
+}
+
+.mc-remark-chip--dialog {
+  max-width: 100%;
+}
+
+.mc-remark-avatar {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.mc-remark-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.mc-remark-value {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: rgba(15, 23, 42, 0.94);
+  word-break: break-word;
+}
+
+.mc-remark-meta {
+  font-size: 0.7rem;
+  color: rgba(100, 116, 139, 0.95);
+  line-height: 1.4;
+}
+
+/* 弹窗内已有备注列表：复用气泡卡片，增加留白 */
+.mc-review-note-list .mc-remark-chip {
+  margin-bottom: 2px;
+}
+
+/* 备注删除按钮：小型、低调，hover 时显红 */
+.mc-remark-delete-btn {
+  opacity: 0.55;
+}
+
+.mc-remark-delete-btn:hover {
+  opacity: 1;
+}
+
+/* 审阅界面每条备注的删除按钮 */
+.mc-review-card .mc-remark-delete-btn {
+  opacity: 0.7;
+}
+
+.mc-review-card .mc-remark-delete-btn:hover {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .mc-remark-delete-btn {
+    opacity: 1;
+  }
+}
+
+/* ============ 页面布局视觉微调（保留整体框架） ============ */
+
+/* 文件信息栏与节点控制栏对齐留白统一 */
+.mc-tree-toolbar {
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface-2);
+  padding: 6px 10px;
+}
+
+/* 查看器树形主容器：更柔和的内边距与圆角 */
+.fav-tree {
+  border-radius: var(--mc-radius);
+  border: 1px solid var(--mc-border);
+  background: var(--mc-surface);
+}
+
+/* 卡片标题与正文间距微调，统一呼吸感 */
+.mc-section-title {
+  letter-spacing: -0.01em;
+}

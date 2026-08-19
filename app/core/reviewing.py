@@ -34,10 +34,42 @@ def get_node_by_key(tree: Dict[str, Any], node_key: str) -> Dict[str, Any]:
     return node
 
 
+def get_node_by_path(tree: Dict[str, Any], node_path: str) -> Dict[str, Any]:
+    """按解析树节点 id（稳定路径）在树中查找节点。
+
+    相比 get_node_by_key（基于数组索引），路径 id 在搜索筛选、源文件更新、
+    解析缓存重建后依然稳定，可避免定位漂移 / 越界。
+    """
+    target = str(node_path or "").strip()
+    if not target:
+        raise ValueError("节点路径不能为空")
+
+    def _walk(node: Dict[str, Any]) -> Dict[str, Any] | None:
+        if str(node.get("id") or "") == target:
+            return node
+        for child in node.get("children") or []:
+            if not isinstance(child, dict):
+                continue
+            found = _walk(child)
+            if found is not None:
+                return found
+        return None
+
+    result = _walk(tree)
+    if result is None:
+        raise ValueError("节点路径不存在")
+    return result
+
+
 def apply_review_updates(tree: Dict[str, Any], approved_items: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     copied = deepcopy(tree)
     for item in approved_items:
-        node = get_node_by_key(copied, item.get("node_key") or "")
+        # 优先使用稳定的节点路径（解析树 id）定位；仅当缺失时回退到旧索引键。
+        node_path = item.get("node_path") or item.get("node_key") or ""
+        try:
+            node = get_node_by_path(copied, node_path)
+        except ValueError:
+            node = get_node_by_key(copied, item.get("node_key") or "")
         node["value"] = str(item.get("proposed_value") or "")
     return copied
 

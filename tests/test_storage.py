@@ -348,9 +348,10 @@ class TestEditRemarks:
     def test_add_group_and_apply_review_results(self):
         from app.core import storage
 
+        # 备注主键统一使用稳定的节点路径（解析树 id），不再使用数组索引。
         first_id = storage.add_edit_remark(
             source_file="cfg.xml",
-            node_key="0.1",
+            node_key="root/a",
             node_path="root/a",
             node_label="a",
             original_value="1",
@@ -362,7 +363,7 @@ class TestEditRemarks:
         )
         second_id = storage.add_edit_remark(
             source_file="cfg.xml",
-            node_key="0.1",
+            node_key="root/a",
             node_path="root/a",
             node_label="a",
             original_value="1",
@@ -374,7 +375,7 @@ class TestEditRemarks:
         )
 
         remark_map = storage.build_edit_remark_map("cfg.xml")
-        assert len(remark_map["0.1"]) == 2
+        assert len(remark_map["root/a"]) == 2
 
         review_items = storage.list_review_items("cfg.xml")
         assert len(review_items) == 1

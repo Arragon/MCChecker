@@ -7,7 +7,12 @@ from nicegui import ui
 
 from app.core import storage, parser, parse_cache, searching, reviewing
 from app.pages.file_downloads import DOWNLOAD_KIND_CURRENT, make_download_handler
-from app.utils.auth import get_identity_info, is_deployer
+from app.utils.auth import get_identity_info, is_deployer, is_admin
+
+# 备注显示区容器注册表：key=(filename, node_key) -> remark_box 元素，
+# 供删除备注时精准定位并局部刷新对应节点行（避免整页重渲染）。
+_REMARK_BOX_REGISTRY: dict = {}
+
 
 # 层级竖线颜色（每级不同色，现代柔和配色）
 _LEVEL_LINE_COLORS = [
@@ -213,7 +218,7 @@ def render_file_viewer(
                     tree_full,
                     session_active_tab,
                     depth=0,
-                    node_key=reviewing.make_node_key("", child_index),
+                    node_key=child.get("id") or reviewing.make_node_key("", child_index),
                     tree_type=str(tree_kind or ""),
                     note_map=note_map,
                     review_remark_map=review_remark_map,
@@ -292,9 +297,6 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
             ui.html(f'<span class="font-mono text-body2 text-grey tree-label">{label}</span>',
                     sanitize=False)
 
-        if review_texts:
-            ui.label("；".join(review_texts)).classes("mc-review-note-inline q-ml-sm")
-
         range_btn = None
         if is_param and range_meta:
             range_btn_id = _make_range_btn_id(node_path)
@@ -305,6 +307,13 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
             )
 
         ui.html('<span class="mc-row-spacer"></span>', sanitize=False)
+
+        # 备注显示区：独立容器，保存/删除备注后仅局部刷新此处，不再整页重渲染。
+        remark_box = ui.element("span").classes("mc-node-remark q-ml-sm")
+        _REMARK_BOX_REGISTRY[(filename, node_key)] = remark_box
+        with remark_box:
+            _render_node_remarks(remark_box, node_key, filename)
+
         with ui.element("span").classes("mc-node-actions"):
             edit_btn = ui.button(icon="edit")
             edit_btn.props("flat round dense size=sm color=primary")
@@ -312,13 +321,14 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
             edit_btn.tooltip("添加修改备注")
             edit_btn.on(
                 "click",
-                lambda e=None, n=node, nk=node_key, tt=tree_type, nt=node_type: _open_edit_remark_dialog(
+                lambda e=None, n=node, nk=node_key, tt=tree_type, nt=node_type, rb=remark_box: _open_edit_remark_dialog(
                     filename,
                     n,
                     nk,
                     tt,
                     nt,
                     session_active_tab,
+                    remark_box=rb,
                 ),
             )
 
@@ -397,7 +407,7 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
                     tree,
                     session_active_tab,
                     depth + 1,
-                    node_key=reviewing.make_node_key(node_key, child_index),
+                    node_key=child.get("id") or reviewing.make_node_key(node_key, child_index),
                     tree_type=tree_type,
                     note_map=note_map,
                     review_remark_map=review_remark_map,
@@ -412,6 +422,7 @@ def _open_edit_remark_dialog(
     tree_type: str,
     node_type: str,
     session_active_tab: dict,
+    remark_box: object | None = None,
 ) -> None:
     identity = get_identity_info()
     current_value = node.get("value")
@@ -435,9 +446,7 @@ def _open_edit_remark_dialog(
             ui.label("已有备注").classes("text-subtitle2 q-mt-sm q-mb-xs")
             with ui.column().classes("w-full mc-review-note-list"):
                 for item in existing:
-                    ui.label(
-                        f"{str(item.get('actor_display') or item.get('actor_ip') or '未知')}：{str(item.get('proposed_value') or '')}"
-                    ).classes("mc-review-note-item")
+                    _render_remark_chip(item, in_dialog=True)
 
         def do_save():
             proposed_value = str(value_input.value or "").strip()
@@ -460,7 +469,10 @@ def _open_edit_remark_dialog(
             except Exception as e:
                 ui.notify(str(e) or "保存失败", type="negative")
                 return
-            session_active_tab.pop("_rendered", None)
+            # 局部刷新：仅重渲染该节点的备注显示区，不再整页重渲染。
+            if remark_box is not None:
+                _render_node_remarks(remark_box, node_key, filename)
+                remark_box.update()
             ui.notify("修改备注已记录", type="positive")
             dialog.close()
 
@@ -469,6 +481,88 @@ def _open_edit_remark_dialog(
             ui.button("保存备注", icon="save", on_click=do_save).props("color=primary")
 
         dialog.open()
+
+
+def _render_node_remarks(remark_box: object, node_key: str, filename: str) -> None:
+    """渲染单个节点行的备注显示区（用于在保存/删除后局部刷新）。"""
+    remark_box.clear()
+    identity = get_identity_info()
+    is_reviewer = bool(identity.get("is_admin"))
+    client_ip = str(identity.get("ip") or "")
+    remarks = storage.build_edit_remark_map(filename).get(node_key, [])
+    if not remarks:
+        return
+    with remark_box:
+        with ui.column().classes("mc-remark-list"):
+            for item in remarks:
+                _render_remark_chip(
+                    item,
+                    in_dialog=False,
+                    remark_box=remark_box,
+                    node_key=node_key,
+                    filename=filename,
+                    can_delete=(is_reviewer or str(item.get("actor_ip") or "") == client_ip),
+                )
+
+
+def _render_remark_chip(item: dict, in_dialog: bool = False, remark_box: object | None = None,
+                        node_key: str = "", filename: str = "", can_delete: bool = False) -> None:
+    """渲染单条备注为气泡卡片：含提交人色标、建议值、时间、状态。"""
+    actor = str(item.get("actor_display") or item.get("actor_ip") or "未知")
+    proposed = str(item.get("proposed_value") or "")
+    created_at = str(item.get("created_at") or "")
+    status = str(item.get("status") or "pending")
+    status_cls = {
+        "approved": "mc-remark-approved",
+        "rejected": "mc-remark-rejected",
+    }.get(status, "mc-remark-pending")
+
+    # 用提交人名做稳定色标（取首字符 + 哈希选色）
+    color = _remark_actor_color(actor)
+
+    with ui.row().classes(f"mc-remark-chip {status_cls}" + (" mc-remark-chip--dialog" if in_dialog else "")):
+        ui.label(actor[:1]).classes("mc-remark-avatar").style(
+            f"background:{color};color:#fff"
+        )
+        with ui.column().classes("mc-remark-body"):
+            ui.label(proposed).classes("mc-remark-value")
+            meta = f"{actor}"
+            if created_at:
+                meta += f" · {created_at}"
+            ui.label(meta).classes("mc-remark-meta")
+        if can_delete and not in_dialog:
+            ui.button(
+                icon="delete",
+                on_click=lambda e=None, rid=str(item.get("id") or ""), nk=node_key, fn=filename: _delete_viewer_remark(
+                    rid, nk, fn,
+                ),
+            ).props("flat round dense size=xs color=negative").classes("mc-remark-delete-btn").tooltip("删除该备注")
+
+
+def _delete_viewer_remark(remark_id: str, node_key: str, filename: str) -> None:
+    """查看器删除单条备注：仅管理员或原始添加者（客户端 IP 匹配）可删除。"""
+    try:
+        ok = storage.delete_edit_remark(remark_id)
+    except Exception as e:
+        ui.notify(str(e) or "删除失败", type="negative")
+        return
+    if not ok:
+        ui.notify("未找到该备注或已被删除", type="warning")
+        return
+    ui.notify("备注已删除", type="positive")
+    # 局部刷新：仅重渲染该节点行的备注显示区（找到对应 remark_box 容器）。
+    target_box = _REMARK_BOX_REGISTRY.get((filename, node_key))
+    if target_box is not None:
+        _render_node_remarks(target_box, node_key, filename)
+        target_box.update()
+
+
+def _remark_actor_color(actor: str) -> str:
+    palette = [
+        "#2563eb", "#0ea5e9", "#16a34a", "#f59e0b",
+        "#dc2626", "#7c3aed", "#db2777", "#0891b2",
+    ]
+    return palette[abs(hash(actor)) % len(palette)]
 
 
 def _serialize_subtree(node: dict) -> list:
