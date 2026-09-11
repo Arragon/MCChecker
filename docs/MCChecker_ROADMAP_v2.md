@@ -1,1016 +1,2430 @@
 # MCChecker 开发路线图
 
-文档日期：2026-09-11。设计基线：`v1.0.1` / `e47e54a01f0ad6d74db3a08670a1034f937575c2`。配套设计：[MCChecker_ARCHITECTURE.md](MCChecker_ARCHITECTURE.md)。执行项目：[MCChecker › Overview](https://linear.app/inhandy/project/mcchecker-9275450a22c3/overview)。本文件是可独立使用的开发计划，包含每个任务的问题、范围、实现注意、验收、依赖和优先级。
+**状态：Canonical Execution Roadmap（完整版）**\
+**版本：2026-09-12 二次架构评审修订版**\
+**代码基准：`v1.0.1`**\
+**基准说明：当前 `v1.0.1` 在二次评审开始时的 HEAD 为
+`abe83cb20764d6c63a623078d7d3ec60fd4a7fe8`；该提交相对运行代码审查提交
+`e47e54a01f0ad6d74db3a08670a1034f937575c2` 仅新增两份 v2
+文档，因此本文中的运行代码事实仍以同一套源码为依据。**\
+**架构设计：`docs/MCChecker_ARCHITECTURE.md`**\
+**Linear Project：MCChecker / Inhandy**
 
-## 1. 目标、范围和当前判断
+> 本文件是 MCChecker 的正式开发计划与任务定义源。Linear
+> 用于反映执行状态与真实 blocking/blockedBy；`MCChecker_ROADMAP_v2.md`
+> 为历史审查版本，不再作为当前执行计划。Issue 创建、文档更新或 Milestone
+> 建立均不代表功能完成。
 
-【建议】继续采用 NiceGUI 模块化单体、APScheduler 与本地文件/JSON。先修现有配置生命周期、权限、节点定位、审阅写回、临时文件、计算和离线部署，再整理应用操作边界和核心界面。目标不是换技术栈，而是当前可靠、下一阶段同类功能可局部扩展。
+------------------------------------------------------------------------
 
-【代码确认】当前已实现配置导入/查看、收藏、搜索、更新/归档、四类比较、修改记录、审阅、多机型和 DL。已确认多处业务正确性与数据安全缺陷，详见下列 F/T 任务及固定源码链接。profile 是 ContextVar，不是普通共享全局；离线资源依赖尚未经过实测；位置/同名序号不能被视为跨版本稳定节点身份。
+# 1. 目标与裁决
 
-【合理推断】真实并发量、最大文件规模、现网 Python/NiceGUI/APScheduler 版本、代理拓扑和旧数据分布尚未确认。本路线图不报告未执行的测试、性能数字、工期或现网事故。先在副本和临时目录验证，再实施数据操作；尚未完成的验收不得标记为通过。
+MCChecker 当前已经形成一个实际可用的内网配置检查工具：具备 XML/JSON
+查看、搜索、收藏、版本归档、四类对比、修改记录、审阅生成、多机型、定时更新以及
+DL 快捷计算。下一阶段不应 Rewrite，也不应为未来未知需求搭建平台。
 
-计划共 5 个阶段、20 个交付任务：12 个 P0、7 个 P1、1 个 P2。P3 只进入 Deferred，不创建执行 Issue。每个任务可以包含少量可独立 Review 的提交，但不拆成每个函数一个 Issue；跨多个文件的工作按业务验收边界组织。
+整改目标只有四个：
 
-## 2. 优先级和执行规则
+1.  **正确性**：同一输入得到正确、可解释的结果；审阅、diff、DL 不误导。
+2.  **数据安全**：任何失败、并发、升级、删除和测试都不能静默损伤既有权威数据。
+3.  **可维护性**：新增相似功能不再复制授权、profile、保存、错误、树渲染和任务逻辑。
+4.  **可部署性**：单进程内网部署可复现，完全断公网仍能完成核心使用。
 
-P0 影响正确性、数据安全、稳定性、核心功能、兼容性或离线部署；P1 明显影响核心体验、维护成本、长期可靠性或近期功能扩展；P2 有明确收益但不阻塞可用版本；P3 需求未验证或收益不足。
+目标架构保持：
 
-Linear 优先级映射为 P0→Urgent(1)、P1→High(2)、P2→Normal(3)。不使用 Linear 的数值 0 表示 P0，因为该值实际是 No priority。所有任务初始 Backlog，不虚设完成状态、负责人、日期和工时。规划完成不代表开发完成。
+``` text
+Python + NiceGUI + APScheduler
+        +
+Local files / JSON
+        +
+Modular Monolith
+```
 
-依赖表示最终集成/验收的真实前置，不阻止在旧文件内先落独立安全补丁。例如 T08 的缺失导入、T11 的数值修复、T12 的端口修复，可以先交付，不必等待整个 M1 或大规模目录重构。
+明确不做：
 
-总体顺序：P0 稳定性/数据/兼容/离线 → 必要边界与测试 → 核心 UI/UX → 性能和发布可靠性 → 视觉 polish。测试隔离 T13 提前并行，不等 P0 结束才建立测试。
+-   NiceGUI → React/Vue Rewrite
+-   微服务
+-   Redis / Celery
+-   通用插件系统
+-   工作流引擎
+-   DI Container / Repository Framework
+-   无证据的 SQLite/数据库迁移
+-   全量 REST 化
+-   Dashboard 化重设计
+-   零停机热更新
+-   无业务授权的自动历史清理
 
-## 3. 阶段与 Milestone
+------------------------------------------------------------------------
 
-### M1 · 修复正确性、数据安全与离线发布
+# 2. 优先级
 
-目标：消除可定位的 P0，并证明基础离线发行路径可行。
+  ------------------------------------------------------------------------------------------------------------------
+  优先级                              定义
+  ----------------------------------- ------------------------------------------------------------------------------
+  P0                                  影响正确性、数据安全、稳定性、核心兼容、离线部署，或开发过程可能触碰真实数据
 
-主要工作：T01 统一写操作授权并显式传递机型上下文；T02 收紧文件路径与下载源输入边界；T03 消除配置内容与工具链接的脚本注入路径；T04 实现原子持久化与并发安全的版本保存；T05 补齐迁移、重命名与删除的恢复链路；T06 分离完整源文档与展示树并修复节点定位；T07 重建审阅提交的版本校验与保真输出；T08 修复临时上传与历史记录的文件引用链路；T09 统一更新入口的校验与受控异步执行；T10 保证解析缓存与源版本的一致性；T11 修复 DL 数值输入、结果对应与求解语义；T12 建立可复现离线发布包并修复启动配置。
+  P1                                  明显影响核心体验、维护成本、长期可靠性和近期扩展
 
-依赖与进入条件：无统一前置阶段。T01/T02/T03/T04/T06/T11/T12 可并行起步，其余按任务级依赖集成；T13 测试隔离应尽早并行。
+  P2                                  有明确收益，但不阻塞成熟可用版本
+
+  P3                                  尚未验证的未来能力，仅记录触发条件，不创建当前开发 Issue
+  ------------------------------------------------------------------------------------------------------------------
 
-阶段验收：全部 P0 对应回归通过，原文/历史/配置可恢复，越权与串机型被阻止，审阅不误改、不丢未改字段，数值结果不误导，临时/归档/记录可用；冷缓存禁公网的基础部署验证通过。
+Linear 映射：
 
-Definition of Done：每个修复有反例、正例与兼容验收，故障场景保留原数据；没有“待验证”被记为通过。不等待整体重构再发布可以独立上线的安全修复。
+-   P0 → Urgent
+-   P1 → High
+-   P2 → Medium
+-   P3 → Deferred，不创建执行 Issue
 
-Linear milestone ID：`41f344a7-0f42-4025-9131-e76fefef96f6`。
+------------------------------------------------------------------------
 
-### M2 · 明确模块边界并建立回归门槛
+# 3. 执行原则
 
-目标：把修复形成的真实接口沉淀为少量应用操作、可靠存储和统一错误契约。
+## 3.1 修正确认问题，而不是先搭框架
 
-主要工作：T13 隔离测试数据并建立关键回归门槛；T14 提取应用操作边界并统一错误与日志。
+每个架构变化都必须回答：
 
-依赖与进入条件：T13 可以立即开展；T14 需要相关 P0 的操作契约稳定。
+1.  当前真实问题是什么？
+2.  不改会产生什么实际成本？
+3.  最小可行整改是什么？
 
-阶段验收：核心导入、审阅、diff 可脱离 NiceGUI 测试，测试不写真实 data；旧入口兼容，新增入口不重复授权与提交逻辑。
+能在原文件安全修复的 P0 不等待目录整理。
 
-Definition of Done：依赖方向清楚，旧测试修正后通过，回归用例与 CI 有效；没有通用 Repository、DI 或插件框架。
+## 3.2 兼容已有数据，不兼容错误行为
 
-Linear milestone ID：`fe4bb3cc-efec-4bdb-8b08-0b2afb2c57e6`。
+应保持兼容：
 
-### M3 · 优化核心工作流与信息密度
+-   profile ID 与已有机型数据
+-   configs / archive / records 原文
+-   config mapping
+-   favorites / bindings
+-   edit remarks
+-   schedule
+-   DL 参数
+-   IP / admin 数据
+-   旧下载链接，在安全可解析时
 
-目标：让文件、版本、搜索、审阅、计算和管理操作连续且可解释。
+不要求保留：
 
-主要工作：T15 收敛工作区导航与配置管理表单；T16 统一树视图并修复搜索与版本对比连续性；T17 保留审阅与计算草稿并明确任务结果。
+-   未授权管理写入
+-   路径穿越
+-   任意 URL 服务端读取
+-   错误 DL 数值
+-   误改审阅节点
+-   静默丢 XML 字段
+-   损坏 JSON 被视为空数据继续覆盖
 
-依赖与进入条件：T14 与对应 FileRef/locator/任务/审阅契约稳定；任务依赖为最终集成前置。
+## 3.3 测试先安全，再谈覆盖率
 
-阶段验收：关键入口完整，保存后即时一致，历史选择准确，临时文件来源清楚，草稿/筛选不无故丢失，空/错/忙/冲突状态各有含义。
+T13 是 P0。任何会运行现有 pytest 的开发工作都不得先让测试触碰真实
+`data/` 或 `.nicegui/`。
 
-Definition of Done：代表用户角色与视口的浏览器验收通过；没有新增 Dashboard 或大量装饰卡片；所有控件可离线加载。
+## 3.4 依赖表示"最终完成前置"，不表示禁止提前做局部修复
 
-Linear milestone ID：`ceb51f90-fb97-48d5-8e73-b782805ced3a`。
+例如：
 
-### M4 · 验证性能与发布可靠性
+-   T12 的端口修复和 wheelhouse 可以立即进行。
+-   T05 的恢复清单可以在 T04 原子 I/O 完整完成前先设计和测试纯逻辑。
+-   T16 的历史版本参数 bug 可以先修，再提取共用树。
 
-目标：在完整语义不退化的前提下控制渲染/查询成本，并完成组合流程、升级与恢复验收。
+------------------------------------------------------------------------
 
-主要工作：T18 按代表性负载优化渲染与查询成本；T19 完成核心流程、离线与升级恢复验收。
+# 4. Milestone 总览
 
-依赖与进入条件：T18 依赖任务、缓存正确性与核心视图；T19 汇总此前任务。缓存正确性 T10 属于 M1，不能拖到性能阶段。
+## M1 · 修复正确性、数据安全与离线发布
 
-阶段验收：代表性冷暖缓存、长会话、双客户端场景有测量；禁公网首次安装/首访及旧数据升级/恢复通过。
+**目标：** 消除全部确认 P0，同时建立后续开发不会损伤真实数据的基础。
 
-Definition of Done：记录环境、样本、结果、失败和支持边界；发布包可重建，备份可恢复，没有未解决 P0。
+  Task   Linear      Priority 交付对象
+  ------ --------- ---------- -------------------------------------------
+  T01    INH-612           P0 授权与显式 profile
+  T02    INH-613           P0 文件、上传、下载源安全边界
+  T03    INH-615           P0 HTML / JavaScript 注入边界
+  T04    INH-616           P0 原子持久化、并发保护、WriteGate
+  T05    INH-617           P0 迁移、改名、删除、备份恢复
+  T06    INH-618           P0 SourceSnapshot / ParsedDocument / NodeRef
+  T07    INH-619           P0 审阅版本校验与保真输出
+  T08    INH-620           P0 FileRef 与临时/历史/记录生命周期
+  T09    INH-621           P0 更新验证、手动刷新、异步任务
+  T10    INH-622           P0 解析与派生 diff 缓存一致性
+  T11    INH-623           P0 DL 数值输入、对应与求解语义
+  T12    INH-624           P0 可复现完全离线发布
+  T13    INH-625           P0 测试数据隔离与回归安全门槛
 
-Linear milestone ID：`d5be8116-2c33-4c78-910b-4901a0c3a8d6`。
+**M1 Gate：**
+
+-   测试不会触碰真实 data/.nicegui。
+-   非授权写入失败且原文件不变。
+-   profile/default/后台任务无串数据。
+-   配置/JSON 写失败后旧数据仍可用。
+-   迁移/改名/删除可以确定恢复。
+-   大 XML 不再为性能丢语义字段。
+-   审阅不能误改节点，不静默丢字段。
+-   临时文件不冒充持久文件。
+-   错误更新源不能替换当前有效配置。
+-   cache 不会向用户返回旧版本结果。
+-   DL 结果与算法保证一致。
+-   冷浏览器 + 禁公网可安装、启动和加载核心资源。
+
+------------------------------------------------------------------------
+
+## M2 · 明确应用边界与维护契约
+
+  Task   Linear      Priority
+  ------ --------- ----------
+  T14    INH-626           P1
+
+**目标：** 把 M1
+中已经验证的真实业务流程沉淀成少量应用操作、错误和日志契约，并统一架构文档事实源。
+
+不做：
+
+-   全量 Service 化
+-   Repository
+-   DI
+-   Command Bus
+-   Plugin Framework
+
+------------------------------------------------------------------------
+
+## M3 · 优化核心工作流与信息密度
+
+  Task   Linear      Priority
+  ------ --------- ----------
+  T15    INH-627           P1
+  T16    INH-628           P1
+  T17    INH-629           P1
+
+**目标：** 让文件、版本、搜索、审阅、DL 和管理操作连续、明确、可恢复。
+
+------------------------------------------------------------------------
+
+## M4 · 验证性能与发布可靠性
+
+  Task   Linear      Priority
+  ------ --------- ----------
+  T18    INH-630           P1
+  T19    INH-631           P1
+
+**目标：**
+先测量，再优化；最终完成旧数据升级、完整浏览器闭环、断网安装、备份与恢复演练。
+
+------------------------------------------------------------------------
+
+## M5 · 收敛非必要视觉样式
+
+  Task   Linear      Priority
+  ------ --------- ----------
+  T20    INH-632           P2
+
+**目标：** 在核心版本可发布后收敛视觉噪音，不反向阻塞 P0/P1。
+
+------------------------------------------------------------------------
+
+# 5. 真实依赖图
+
+## 5.1 精确任务依赖
+
+  Task   前置任务
+  ------ ----------------------------------------
+  T01    无
+  T02    无
+  T03    无
+  T04    无
+  T05    T01, T02, T04
+  T06    无
+  T07    T01, T04, T06
+  T08    T01, T02
+  T09    T01, T02, T04, T06
+  T10    T04, T06
+  T11    无
+  T12    无
+  T13    无
+  T14    T01, T04, T06, T07, T09, T13
+  T15    T01, T08, T09, T14
+  T16    T03, T06, T08, T14, T15
+  T17    T07, T09, T11, T14, T15
+  T18    T09, T10, T16, T17
+  T19    T05, T12, T13, T14, T15, T16, T17, T18
+  T20    T19
+
+## 5.2 推荐并行工作线
+
+``` text
+测试安全线:        T13 ───────────────────────────────┐
+授权安全线:        T01 ─┬─ T05 ──────────────────────┤
+路径/网络线:       T02 ─┘   ├─ T08 ─┐                │
+持久化线:          T04 ──────┤       ├─ T14 ─────────┤
+解析正确性线:      T06 ─┬─ T07 ─────┘                │
+                         ├─ T09 ──────────────────────┤
+                         └─ T10 ──────────────────────┤
+浏览器注入线:      T03 ────────────────────┐          │
+DL 线:             T11 ────────────────────┼─ T17 ───┤
+离线发行线:        T12 ───────────────────────────────┤
+                                              T15/T16 │
+                                                  ↓   │
+                                                 T18  │
+                                                  ↓   │
+                                                 T19 ◄┘
+                                                  ↓
+                                                 T20
+```
+
+------------------------------------------------------------------------
 
-### M5 · 收敛非必要视觉样式
+# 6. M1 任务明细
 
-目标：统一已有样式并减少没有功能收益的装饰。
+## T01 · 统一写操作授权并显式传递机型上下文
 
-主要工作：T20 收敛视觉样式并清理重复覆盖。
+**Linear：INH-612**\
+**Priority：P0 / Urgent**
 
-依赖与进入条件：T19 验收后的稳定布局；不反向阻塞 M4 的可用版本。
+### Problem
 
-阶段验收：焦点、可读性、信息密度不退化，无运行时公网资源和新 UI 依赖。
+当前身份依赖客户端 IP；机型新增/删除/改名、更新设置、DL
+生效配置等入口的授权检查不统一，有些只在打开 UI 时判断。`storage` 使用
+`ContextVar`，不是普通共享全局变量，但 `get_active_profile()` 在上下文为
+`default` 时仍读取 NiceGUI `app.storage.user["device_model"]`，因此显式
+`use_profile("default")` 可能被浏览器当前机型覆盖。非法 profile ID
+又被静默归一到 default。
 
-Definition of Done：代表页面视觉与功能回归通过，样式修改可单独回滚。
+另一个容易忽略的事实：`ip_mapping.json` 和 `admin_users.json`
+当前实际存放在各 profile 内，因此身份/管理员语义也受 active profile
+影响。整改不得未经产品确认把它们偷偷改成全局身份表。
 
-Linear milestone ID：`a5ebc7d2-e138-4595-88f0-ab48ff7d17c3`。
+### Scope
+
+覆盖：
 
-## 4. 任务总表与真实依赖
+-   persistent write
+-   device model 管理
+-   update source / schedule 管理
+-   DL 生效参数
+-   review / delete
+-   后台任务
+-   profile 解析
+-   受信代理来源
 
-| 任务 | 优先级 | 阶段 | 交付对象 | 前置任务 | Linear |
-|---|---|---|---|---|---|
-| T01 | P0 | M1 | 统一写操作授权并显式传递机型上下文 | 无 | 尚未核实同步结果 |
-| T02 | P0 | M1 | 收紧文件路径与下载源输入边界 | 无 | 尚未核实同步结果 |
-| T03 | P0 | M1 | 消除配置内容与工具链接的脚本注入路径 | 无 | 尚未核实同步结果 |
-| T04 | P0 | M1 | 实现原子持久化与并发安全的版本保存 | 无 | 尚未核实同步结果 |
-| T05 | P0 | M1 | 补齐迁移、重命名与删除的恢复链路 | T01, T02, T04 | 尚未核实同步结果 |
-| T06 | P0 | M1 | 分离完整源文档与展示树并修复节点定位 | 无 | 尚未核实同步结果 |
-| T07 | P0 | M1 | 重建审阅提交的版本校验与保真输出 | T01, T04, T06 | 尚未核实同步结果 |
-| T08 | P0 | M1 | 修复临时上传与历史记录的文件引用链路 | T01, T02 | 尚未核实同步结果 |
-| T09 | P0 | M1 | 统一更新入口的校验与受控异步执行 | T01, T02, T04, T06 | 尚未核实同步结果 |
-| T10 | P0 | M1 | 保证解析缓存与源版本的一致性 | T04, T06 | 尚未核实同步结果 |
-| T11 | P0 | M1 | 修复 DL 数值输入、结果对应与求解语义 | 无 | 尚未核实同步结果 |
-| T12 | P0 | M1 | 建立可复现离线发布包并修复启动配置 | 无 | 尚未核实同步结果 |
-| T13 | P1 | M2 | 隔离测试数据并建立关键回归门槛 | 无 | 尚未核实同步结果 |
-| T14 | P1 | M2 | 提取应用操作边界并统一错误与日志 | T01, T04, T06, T07, T09, T13 | 尚未核实同步结果 |
-| T15 | P1 | M3 | 收敛工作区导航与配置管理表单 | T01, T08, T09, T14 | 尚未核实同步结果 |
-| T16 | P1 | M3 | 统一树视图并修复搜索与版本对比连续性 | T03, T06, T08, T14, T15 | 尚未核实同步结果 |
-| T17 | P1 | M3 | 保留审阅与计算草稿并明确任务结果 | T07, T09, T11, T14, T15 | 尚未核实同步结果 |
-| T18 | P1 | M4 | 按代表性负载优化渲染与查询成本 | T09, T10, T16, T17 | 尚未核实同步结果 |
-| T19 | P1 | M4 | 完成核心流程、离线与升级恢复验收 | T05, T12, T13, T14, T15, T16, T17, T18 | 尚未核实同步结果 |
-| T20 | P2 | M5 | 收敛视觉样式并清理重复覆盖 | T19 | 尚未核实同步结果 |
+不覆盖：
 
-任务表的前置关系不是仅写在描述里：同步完成后，在 Linear 使用实际 blocking/blockedBy 关系建立。不存在估算关键路径时长，因为尚无负责人和开发速度基线。
+-   登录平台
+-   OAuth / SSO
+-   通用 RBAC
+-   部门/租户系统
 
-### 4.1 建议的并行工作线
+### Implementation Notes
+
+最小方案：
+
+``` text
+UI / HTTP
+  ↓
+resolve Actor
+resolve explicit profile_id
+  ↓
+authorize(actor, action, profile_id)
+  ↓
+application operation
+```
+
+要求：
+
+-   提交时重新授权，不能只依赖按钮是否显示。
+-   `default` 显式指定后不得再读取浏览器机型。
+-   未知 profile 返回明确错误，不回落 default。
+-   后台任务创建时固定 profile，使用 system actor。
+-   core/storage 不再反向读取 NiceGUI user state。
+-   直连默认只使用真实 peer address。
+-   只有配置了 trusted proxy 才接受 forwarded client identity。
+-   保留当前 profile-scoped IP/admin 数据语义。
+
+### Acceptance Criteria
+
+-   访客直接调用管理写入口失败且相关文件 hash 不变。
+-   管理员撤权后已经打开的对话框提交仍失败。
+-   default 与非 default 双会话交错操作不串数据。
+-   浏览器会话 + scheduler 同时运行不串 profile。
+-   未知 profile 不读取 default。
+-   反向代理部署不会把所有客户端误认成 deployer。
+-   原 IP/admin 表继续可读，不发生无授权迁移。
+
+### Dependencies
+
+无。
 
-安全线从 T01/T02/T03 开始；持久化与生命周期线从 T04 开始到 T05；语义正确性线从 T06 到 T07/T10；执行线 T09 复用安全、保存和解析边界；临时/版本线 T08 修现有核心功能；DL T11 和发行 T12 可独立开展；T13 从第一批修复同步提供测试隔离。不同工作线交会处用实际依赖合并，不以“阶段顺序”人为阻塞全部工作。
+### Definition of Done
 
-T14 将经过修复的应用操作提取为清晰边界，随后 T15/T16/T17 改界面与工作流。T18 只做有证据的性能优化，T19 是完整发布门禁；T20 视觉清理不能反向阻塞已经验收的可用版本。
+权限矩阵、显式 profile、system
+actor、代理识别、旧数据兼容和双会话测试全部完成。
 
-## 5. 开发任务明细
+### Review Boundary
 
-以下每项均包含独立完成条件。所有源码链接固定到审查提交；开发时应先核对分支差异，已经修复的问题可用测试关闭，不重复重构。
+建议拆两组 PR：
 
-### T01 · 统一写操作授权并显式传递机型上下文
+1.  补权限漏点、提交再校验。
+2.  显式 profile/Actor 与兼容包装。
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F01。
+不要和身份体系重构绑定。
 
-路线图 T01 / 问题 F01；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+------------------------------------------------------------------------
 
-#### Problem
-【代码确认】home.py 的机型新增、更名、删除入口及对应回调未形成完整授权检查；DL 页面可直接保存共享系数与绑定。部分危险操作只在打开对话框时校验权限。storage 使用 ContextVar，而不是普通共享全局变量，但 get_active_profile() 在上下文值为 default 时仍回读 app.storage.user 的 device_model，因此显式 use_profile("default") 可能被浏览器选择覆盖。无效 profile 字符又被静默归一为 default。
+## T02 · 收紧文件、上传与下载源输入边界
 
-影响：未授权修改、机型数据误操作以及同一操作在不同入口下使用不同身份/机型。后续增加入口会继续复制这些缺陷。代理把客户端识别为本机的风险依赖实际拓扑，尚未现场验证。
+**Linear：INH-613**\
+**Priority：P0 / Urgent**
 
-依据：[S02 · 存储、机型上下文与文件生命周期](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)；[S03 · 身份与权限判断](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/utils/auth.py)；[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S12 · 机型注册、复制与删除](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/device_models.py)；[S16 · DL 输入、编辑、绑定与结果页](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/dltool.py)。
+### Problem
 
-#### Scope
-管理写操作、身份边界与现有机型隔离；不建设账号中心、SSO 或通用 RBAC。
+当前配置路径校验不统一；`get_config_path()`、archive
+等调用链仍可能接收未经统一验证的名称。URL 下载使用服务端
+`urllib`，缺少统一的
+scheme、重定向、DNS/目标、大小与耗时预算。上传和对比文件也可能一次性读入内存，没有统一容量边界。
 
-#### Implementation Notes
-【建议】先原地封堵机型与 DL 管理写入口，在提交时重新校验。定义轻量 Actor 与动作权限表；deployer 与 admin 保持独立能力，不强行改成互斥角色。页面解析身份和机型，向业务函数传入 profile_id；任务在创建时固定机型。显式 default 优先于浏览器状态，无效/不存在机型返回明确错误。保留旧入口作为兼容包装，但包装在 UI 边界解析上下文，不能让核心存储回读 NiceGUI。直连默认不信任转发头；反向代理须配置受信代理及来源规则。
+更新 URL / record URL 可能包含 userinfo 或 query token；若完整出现在 UI
+或日志，会形成额外泄漏面。
 
-迁移：先补提交守卫与 default 判定，再逐个将业务入口改为显式参数；保留旧文件结构与读取方式。
+### Scope
 
-#### Acceptance Criteria
-访客调用机型增删改、DL 配置保存、更新源写入均被拒绝，持久化文件哈希不变。管理员撤权后，已经打开的提交按钮也被拒绝。default 与非 default 两个会话及后台任务交错执行不串数据。未知机型不能读写默认目录。旧 IP 对应表、管理员表与既有协作收藏/备注仍可使用；直连与实际代理拓扑分别验收。
+-   upload
+-   comparison upload
+-   temporary URL import
+-   update URL
+-   record URL
+-   current/archive/record path
+-   redirect
+-   response budget
+-   parse node/depth budget
 
-#### Dependencies
-无，可独立启动。
+### Implementation Notes
 
-#### Priority
-P0 / Linear Urgent。
+统一两个基础边界：
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+``` text
+validate_filename()
+resolve_within(root, relative)
+```
 
-#### Review 边界
-先提交授权漏点与回归；再提交 default/context 解析和显式参数适配。不要同时变更身份数据模型。
+必须覆盖：
 
-### T02 · 收紧文件路径与下载源输入边界
+-   `../`
+-   `\`
+-   absolute path
+-   Windows drive
+-   UNC
+-   ADS
+-   NUL
+-   symlink escape
+-   安全 Unicode 文件名
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F02。
+网络读取：
 
-路线图 T02 / 问题 F02；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+-   只允许 `http/https`。
+-   每次 redirect 都重新验证。
+-   访客临时 URL 导入采用更严格允许策略。
+-   deployer 已配置的内网业务源可以按明确 host/subnet policy 放行。
+-   默认拒绝未批准 loopback、link-local、metadata endpoint。
+-   分块读取。
+-   总字节限制。
+-   总耗时/连接超时。
+-   响应 Content-Type 只作为提示，最终以内容解析为准。
+-   parse 有 depth/node budget。
+-   日志和非管理 UI 脱敏 userinfo/query secret。
 
-#### Problem
-【代码确认】get_config_path()/get_archive_dir() 直接拼接名称；save_config_file() 没有统一文件名校验；新增映射也不走更新映射使用的校验。downloader 使用 urllib.request.urlopen 和无上限 resp.read()，未限制 scheme、目标、重定向与大小。现有下载路由有 basename 检查，但没有统一的真实路径包含性与符号链接策略。
+### Acceptance Criteria
 
-影响：输入可越出预期存储边界；任意 URL 让服务端成为不受控的读取代理；超大内容可耗尽资源。内网下载是业务能力，不能简单封禁全部私有地址。
+-   路径穿越、UNC、盘符、symlink escape 全部失败。
+-   正常中文/Unicode 文件名继续可用。
+-   `file:/ftp:/data:` 等协议被拒绝。
+-   redirect 不能绕过目标策略。
+-   超量内容在覆盖当前配置前停止。
+-   失败临时文件被清理。
+-   批准内网源仍工作。
+-   URL 凭据不进入普通日志和访客页面。
 
-依据：[S02 · 存储、机型上下文与文件生命周期](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)；[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S10 · URL 下载](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/downloader.py)；[S11 · 当前文件与归档下载路由](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/file_downloads.py)；[S17 · 更新设置、人员映射与管理员表单](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/management.py)。
+### Dependencies
 
-#### Scope
-所有导入、更新、下载、归档与记录路径，及服务端 URL 读取。
+无。
 
-#### Implementation Notes
-【建议】统一 validate_filename 与 resolve_within：拒绝绝对路径、路径分隔符、空字节、驱动器/UNC/ADS 和越界解析，不靠替换字符偷偷改名。保留安全的既有 Unicode 文件名；对历史危险名称只提示并隔离操作，不自动删除。下载仅允许 http/https，目标由部署者配置明确主机/端口或所需网段，默认不允许 loopback、链路本地、元数据端点及未批准目标；每次重定向重新检查，DNS 解析结果和最终连接目标都应受策略约束。使用分块读取、总字节与耗时上限，解析增加深度/节点预算。
+### Definition of Done
 
-迁移：先统一校验并盘点历史名称/来源；在启用收紧策略前给出兼容检查结果，对不安全旧项显式阻止执行，保留原数据。
+路径、上传、URL、redirect、容量和兼容测试全部进入回归。
 
-#### Acceptance Criteria
-覆盖 ../、反斜杠、绝对路径、Windows 盘符与 UNC、符号链接越界、编码路径和安全中文名。file:/ftp:/data: 等协议被拒绝；重定向不能绕过允许列表；批准的内网 HTTP/HTTPS 仍工作。超大、超时和异常来源不覆盖当前文件，不在日志泄漏 URL 凭据。
+### Review Boundary
 
-#### Dependencies
-无，可独立启动。
+先统一 path/filename；再处理 URL/redirect/budget。不要夹带 UI 重构。
 
-#### Priority
-P0 / Linear Urgent。
+------------------------------------------------------------------------
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+## T03 · 消除配置内容与工具链接的 HTML / JavaScript 注入路径
 
-#### Review 边界
-先统一路径策略，再统一下载源/重定向/资源预算；两部分都保留兼容盘点。
+**Linear：INH-615**\
+**Priority：P0 / Urgent**
 
-### T03 · 消除配置内容与工具链接的脚本注入路径
+### Problem
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F03。
+viewer/search/home/records/history 等多处使用
+`ui.html(..., sanitize=False)`；问题不是 `sanitize=False`
+本身，而是动态配置 label/value/path/备注/URL 被拼进原始 HTML、DOM
+attribute 或 JavaScript 字符串。
 
-路线图 T03 / 问题 F03；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+配置文件属于外部输入，恶意内容可能在浏览器上下文执行，影响普通查看者甚至管理员。
 
-#### Problem
-【代码确认】viewer、search 和收藏树把 label/value/描述等直接拼入 ui.html(..., sanitize=False)。home 的 data-fav-path、DOM 查询以及 window.open 直接插入数据或工具 URL。records 中部分差异输出已经转义，说明现有处理不一致，而不是完全没有防护。
+### Scope
 
-影响：导入文件或共享收藏可以把数据变为浏览器可执行内容，影响其他查看者与有管理权限的用户。
+-   dynamic HTML
+-   JS parameters
+-   DOM selector
+-   favorite path
+-   tool URL
+-   config label/value
+-   review note
+-   record/diff text
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S05 · 文件查看、筛选与修改备注](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)；[S23 · 全局搜索页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/search.py)；[S20 · 修改记录列表](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/records.py)；[S26 · 工具菜单页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/tools.py)。
+### Implementation Notes
 
-#### Scope
-所有动态 HTML、JS 字符串、DOM 定位和外链；不靠强行关闭所有 HTML 破坏现有树控件。
+规则：
 
-#### Implementation Notes
-【建议】普通文本优先使用 ui.label 等文本 API；必须拼 HTML 时逐个转义文本与属性。固定模板才可 sanitize=False。JavaScript 参数统一 JSON 编码，URL 使用原生导航/链接组件并校验 scheme，外链使用 noopener/noreferrer。收藏移除使用受控元素引用或编码后的稳定键，不再拼选择器字符串。保留已转义的差异展示。
+-   普通数据优先 `ui.label` / text API。
+-   只有固定模板允许 raw HTML。
+-   文本和 HTML attribute 分别 escape。
+-   JS 参数使用 JSON 序列化，不直接拼接字符串。
+-   URL 使用原生 link/navigation 能力。
+-   只允许合理 scheme。
+-   外链 `noopener/noreferrer`。
+-   favorite/remove 等操作优先通过元素引用或编码 key，不拼 CSS
+    selector。
 
-迁移：先逐个修危险插值，再归并安全渲染助手；不要等共用树重构完成才修注入。
+### Acceptance Criteria
 
-#### Acceptance Criteria
-含引号、尖括号、HTML 标签、事件属性和脚本样式文本的 XML/JSON/备注均作为文字显示，不执行脚本、不额外出网。工具链接不接受 javascript:；正常特殊字符 URL 可打开。收藏、搜索与历史页面均覆盖，不能只修 viewer。
+输入包含：
 
-#### Dependencies
-无，可独立启动。
+-   `<script>`
+-   `<img onerror>`
+-   quotes
+-   slash/backslash
+-   HTML
+-   CSS
+-   Unicode control chars
 
-#### Priority
-P0 / Linear Urgent。
+均只能显示为文本，不执行、不破坏 DOM、不额外出网。
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+### Dependencies
 
-#### Review 边界
-按危险输出点修复并加入数据转义用例；公共控件提取留到 T16。
+无。
 
-### T04 · 实现原子持久化与并发安全的版本保存
+### Definition of Done
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F04。
+危险 sink 盘点、修复和注入回归完成；viewer 之外的
+search/history/records/home/tools 同样覆盖。
 
-路线图 T04 / 问题 F04；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+### Review Boundary
 
-#### Problem
-【代码确认】storage._save_json、device_models 和 DL 配置直接覆盖 JSON；_load_json 在文件损坏时返回空默认值。save_config_file 先移动当前版本再写新文件，归档重名回退仅精确到秒；记录文件也只用秒时间戳。多个读改写没有共同互斥边界。
+P0 注入修复不要等待 T16 共用树。
 
-影响：中断可留下截断 JSON/缺失当前文件；并发会丢修改；同秒保存可能覆盖旧归档或记录。损坏后读成空集合再保存会把可恢复数据覆盖。
+------------------------------------------------------------------------
 
-依据：[S02 · 存储、机型上下文与文件生命周期](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)；[S12 · 机型注册、复制与删除](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/device_models.py)；[S15 · DL 计算引擎与配置](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/dltool.py)。
+## T04 · 实现原子持久化、并发保护与 WriteGate
 
-#### Scope
-权威 JSON、配置、归档、修改记录与生成文件；不引入数据库，也不声称单文件 replace 提供多文件事务。
+**Linear：INH-616**\
+**Priority：P0 / Urgent**
 
-#### Implementation Notes
-【建议】用同目录唯一临时文件完成写入、flush/fsync、原子替换；按机型的进程内 RLock 覆盖完整读—校验—修改—提交，机型注册表另用全局锁，锁内不做网络请求或大 diff。先可靠保留旧版本，再原子替换当前文件，不提前搬走唯一有效副本。归档/记录采用独占创建和唯一后缀，旧命名仍可读取。区分文件不存在与损坏，损坏的权威 JSON 进入只读保护并提示恢复。写入失败必须上抛；缓存/diff 失败可以降级但须日志。限定单服务进程、单调度器写同一 data 根。
+### Problem
 
-迁移：保持所有旧格式与命名读取；替换底层写入原语后再逐步收拢各模块的独立写入。
+当前 `_save_json()` 等直接覆盖文件；损坏 JSON 被 `_load_json()`
+当默认空值返回后，下一次保存可能永久覆盖仍可恢复的数据。`save_config_file()`
+先 move 当前版，再写新文件，异常可留下 current
+缺失。读改写缺少统一互斥，同秒归档/record 名称也可能碰撞。
 
-#### Acceptance Criteria
-注入写入中断、磁盘满、无权限、归档失败、os.replace 失败，旧文件仍可读且不得虚报成功。同秒连续更新和并发写不会覆盖归档；两个用户同时增加不同备注均保留。损坏 JSON 不被自动清空。恢复后原始文件与旧版哈希一致；平台特定持久性限制有记录。
+同时，一致备份/升级没有真正的"停止新写"边界。
 
-#### Dependencies
-无，可独立启动。
+### Scope
 
-#### Priority
-P0 / Linear Urgent。
+-   all authoritative JSON
+-   current config
+-   archive
+-   record
+-   generated review files
+-   single-process write coordination
+-   maintenance backup gate
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+### Implementation Notes
 
-#### Review 边界
-先原子 I/O 与损坏保护，再并发锁和唯一归档；故障注入随每一步提交。
+单文件：
 
-### T05 · 补齐迁移、重命名与删除的恢复链路
+``` text
+mkstemp in same dir
+→ write / serialize
+→ flush
+→ fsync
+→ os.replace
+```
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F05。
+按平台记录目录 fsync 与 Windows replace 限制。
 
-路线图 T05 / 问题 F05；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+并发：
 
-#### Problem
-【代码确认】启动调用 ensure_profile_layout(migrate_legacy=True)，逐项 shutil.move，异常只告警。重命名先保存映射，再移动文件，更新收藏/绑定但遗漏 records、审阅引用和 DL 来源等。copy_profile_data 仅复制部分类型，还复制可丢弃缓存；删除使用 ignore_errors=True，可能部分失败却显示成功。
+-   profile 级 RLock 包完整 read → validate → modify → commit。
+-   device model registry 等全局数据单独锁。
+-   网络、解析、大 diff 不在锁内。
+-   commit 前重新校验 expected source hash。
 
-影响：升级可能留下半迁移布局；重命名后记录、备注、计算系数来源失联；删除和复制结果与界面承诺不一致，难以恢复。
+配置更新：
 
-依据：[S01 · 启动入口](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/run.py)；[S02 · 存储、机型上下文与文件生命周期](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)；[S12 · 机型注册、复制与删除](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/device_models.py)；[S17 · 更新设置、人员映射与管理员表单](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/management.py)。
+-   先保留有效旧版。
+-   再原子切换 current。
+-   archive/record 使用 exclusive unique filename。
+-   同内容更新不制造重复 archive。
 
-#### Scope
-升级与现有文件生命周期；不把机型空间升级为部门/租户系统。
+损坏数据：
 
-#### Implementation Notes
-【建议】为迁移和重命名建立具体操作的 preflight、备份清单、步骤状态、校验和恢复流程，不搭通用事务引擎。旧数据迁移改为备份—复制—校验—启用，原目录保留到人工确认。重命名先检查目标冲突，收集所有已存在的引用，完成数据与引用写入后再切换映射；中断启动时明确恢复/阻止继续写。删除先移入有清单的隔离目录，默认不物理清除，不自动过期删除。机型复制明确区分业务配置和操作历史；默认不复制权限身份、待审事项和缓存。
+-   missing → 可以安全 default。
+-   corrupt → 明确 error / read-only protection。
+-   不能 `corrupt -> [] -> save []`。
 
-迁移：先建立只读盘点与备份，再替换有破坏性的 move/rmtree 路径；旧目录不自动清理。
+WriteGate：
 
-#### Acceptance Criteria
-旧布局、纯新布局、混合布局、目标冲突、任意步骤失败均有确定结果。重复迁移幂等，失败不丢原数据。重命名后 configs/archive/records/favorites/bindings/edit_remarks/DL 来源以及生成文件引用可追溯。删除可恢复且部分失败不能报全部成功。复制说明与实际内容逐类一致。
+``` text
+OPEN
+→ DRAINING
+→ MAINTENANCE
+→ OPEN
+```
 
-#### Dependencies
-T01, T02, T04
+用途：
 
-#### Priority
-P0 / Linear Urgent。
+-   consistent backup
+-   upgrade
+-   recovery
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+它只负责单进程写准入，不是分布式锁。
 
-#### Review 边界
-按迁移、重命名、隔离删除三个可独立 Review 的提交组完成；共享同一恢复清单契约，不扩展为框架。
+### Acceptance Criteria
 
-### T06 · 分离完整源文档与展示树并修复节点定位
+故障注入：
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F06。
+-   temp write fail
+-   fsync fail
+-   replace fail
+-   ENOSPC
+-   permission denied
+-   archive fail
 
-路线图 T06 / 问题 F06；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+之后旧权威数据仍完整。
 
-#### Problem
-【代码确认】parser 对 >=200,000 字节 XML 使用属性白名单，非白名单属性直接不进入解析树；XML 同名兄弟共用 id，get_all_values 字典可能覆盖同路径值。JSON 展示值统一为字符串，根标量/空根类型不足以由当前树准确还原。viewer 在过滤树及参数元数据隐藏后的 children 上重新 enumerate，随后用该下标形成审阅 node_key。
+并发：
 
-影响：大文件显示/差异遗漏数据；重复节点收藏与对比混淆；筛选页面对某节点提交的建议可能定位到另一个原始节点。位置或 label+occurrence 都不能被当成跨版本稳定身份。
+-   两个用户同时追加不同备注都保留。
+-   同秒保存不覆盖历史。
+-   maintenance 时新写明确被拒绝/排队。
+-   在途写完成到安全点后才能备份。
+-   解除 maintenance 后可正常写。
 
-依据：[S05 · 文件查看、筛选与修改备注](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)；[S06 · XML/JSON 解析与节点路径](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/parser.py)；[S07 · 审阅定位、修改与序列化](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/reviewing.py)；[S14 · 结构化与文本差异](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/differ.py)；[S22 · 搜索过滤与计数](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/searching.py)。
+### Dependencies
 
-#### Scope
-解析契约、节点引用、收藏/绑定兼容与结构化差异；不建设 schema registry，不给所有文件改 UUID。
+无。
 
-#### Implementation Notes
-【建议】保留统一展示结构作为 ViewTree，但从完整源文档解析出 DocumentSnapshot：原始 bytes、hash、格式、完整类型与节点 locator。JSON locator 使用有转义的 token 路径/JSON Pointer；XML 用展开命名空间、兄弟位置和明确的 text/attribute 定位，仅在对应源版本内解释。过滤、分组、隐藏字段只改变展示，不重建定位。结构化 diff 对类型、空容器和重复节点有明确语义；旧 path 仅作为显示/迁移别名，不保证跨版本自动匹配。取消按文件大小丢弃语义字段，改为展示层按需展开。
+### Definition of Done
 
-迁移：为节点增加 locator、source_hash 和 parser_version，保留原 id/label；新旧读取并行，旧缓存按版本失效重建。
+关键 writer 全部落到共同原语和 WriteGate；故障注入、并发和 backup
+barrier 测试通过。
 
-#### Acceptance Criteria
-199,999/200,000 字节两侧相同字段均被保留；重复 XML 标签、命名空间、带点/斜杠 JSON 键、空对象/数组/根标量及类型变化有用例。搜索命中子节点、隐藏参数属性后，提交 locator 仍指向完整原始文档同一节点。旧收藏/绑定可唯一解析者继续使用，歧义项标记待重新绑定，不猜测迁移。
+### Review Boundary
 
-#### Dependencies
-无，可独立启动。
+建议：
 
-#### Priority
-P0 / Linear Urgent。
+1.  atomic I/O + corrupt protection
+2.  read-modify-write lock
+3.  unique archive
+4.  WriteGate
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+------------------------------------------------------------------------
 
-#### Review 边界
-先完整源快照/locator，再消费者适配和类型/重复节点 diff；保留旧 path 别名。
+## T05 · 补齐迁移、重命名、删除、备份与恢复链路
 
-### T07 · 重建审阅提交的版本校验与保真输出
+**Linear：INH-617**\
+**Priority：P0 / Urgent**
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F07。
+### Problem
 
-路线图 T07 / 问题 F07；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+启动迁移使用逐项 `shutil.move`；配置重命名先改 mapping
+再移动文件并只更新部分引用；删除可能
+`ignore_errors=True`。跨文件操作中断后无法确定当前状态。
 
-#### Problem
-【代码确认】apply_review_updates 仅按 node_key 修改展示树，不检查源版本和原值；review 页面从缓存/当前文件生成内容，再批量更新备注状态。序列化会从有损展示树重建 XML/JSON，多文件任一失败可留下部分结果；提交没有完整幂等与过期选择检查。
+### Scope
 
-影响：可能误改节点、覆盖过期建议、丢非修改字段，或出现“文件已生成但状态未提交”。这是正确性问题，不能仅通过换节点 ID 解决。
+-   legacy → profile migration
+-   config rename
+-   profile copy
+-   profile/config delete
+-   quarantine
+-   recovery
+-   consistent backup manifest
 
-依据：[S07 · 审阅定位、修改与序列化](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/reviewing.py)；[S08 · 审阅提交与结果文件生成](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/review.py)；[S02 · 存储、机型上下文与文件生命周期](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)；[S06 · XML/JSON 解析与节点路径](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/parser.py)。
+### Implementation Notes
 
-#### Scope
-现有建议—审阅—生成新文件闭环；不新增多级审批、工作流引擎或自动合并。
+只针对真实跨文件操作建立 operation manifest：
 
-#### Implementation Notes
-【建议】建议记录保存 source_hash、locator、原始类型/值和 schema_version。提交时重新授权、在锁内核验 hash 与仍为 pending 的记录，只修改原始源文档中选定位置；输出重解析并比较预期差异后才能发布。不将展示树作为写回源。按单个源文件组成可独立提交批次，批次有唯一 ID/结果清单和可恢复状态；跨文件明确逐文件成功/失败，不伪装全局原子。无法保证保真的文档暂保留只读和原文下载，明确不允许不安全生成；保留原文，不静默修复命名空间后当作原始文档导出。
+``` text
+operation_id
+type
+source/target
+expected_hash
+preimage / backup
+completed_steps
+state
+```
 
-迁移：新增版本与批次字段，旧备注原样保留；缺少基准版本的待审备注必须重新核验/提交，不能自动假定适用于当前文件。
+状态可保持简单：
 
-#### Acceptance Criteria
-源文件在建议提交后更新时拒绝自动应用并显示冲突。筛选/重复节点建议不误改。仅选定值变化，未选属性、类型、文本、尾文本及受支持注释/命名空间语义保留；不支持的特性明确阻止生成。重复点击/双管理员提交只产生一次业务结果。故障重启后能辨识待恢复批次；单文件失败不标为 approved，原配置不被覆盖。
+``` text
+PREPARED
+APPLYING
+COMMITTED
+RECOVERY_REQUIRED
+```
 
-#### Dependencies
-T01, T04, T06
+迁移：
 
-#### Priority
-P0 / Linear Urgent。
+-   backup/copy
+-   verify
+-   activate
+-   原路径保留到确认
+-   repeat safe
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+rename：
 
-#### Review 边界
-先版本/原值校验与拒绝不安全导出，再按源文件批次完成保真生成和恢复；不等待新 UI。
+必须盘点：
 
-### T08 · 修复临时上传与历史记录的文件引用链路
+-   configs
+-   archive
+-   records
+-   mapping
+-   favorites
+-   bindings
+-   edit remarks
+-   DL source/binding
+-   generated-file relation
+-   tab/FileRef
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F08。
+delete：
 
-路线图 T08 / 问题 F08；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+-   默认 move to quarantine。
+-   保留 manifest。
+-   不自动过期清空。
+-   permanent delete 必须明确动作。
 
-#### Problem
-【代码确认】访客上传/URL 导入解析后丢弃内容，只以 filename 打开标签；viewer 随后仅从持久化目录加载，同名时可能显示服务器旧文件，否则显示不存在。home._load_archive_tree 的冷缓存分支使用 os 但模块未导入 os。records 打开 /record_view 时没有 profile 参数，独立页面再次依赖浏览器上下文。
+backup：
 
-影响：已经承诺的访客临时查看不成立；旧版本冷缓存不可查看；切换机型后修改记录链接可能打开错误空间。
+-   使用 T04 WriteGate。
+-   权威数据 + config + secret 恢复材料。
+-   cache/temp 可排除。
+-   restore 时发现新目标 hash 不同：停止，不覆盖。
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S05 · 文件查看、筛选与修改备注](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)；[S11 · 当前文件与归档下载路由](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/file_downloads.py)；[S18 · 历史列表与比较入口](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/history.py)；[S20 · 修改记录列表](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/records.py)；[S21 · 修改记录独立页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/record_view.py)；[S38 · 标签持久化](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/tabs_state.py)。
+### Acceptance Criteria
 
-#### Scope
-现有临时文件、当前版本、归档与修改记录；不统一成复杂资源平台。
+-   旧/新/混合布局均可处理。
+-   任何步骤中断都可确定恢复。
+-   重复 migration 幂等。
+-   rename 后所有已有引用可追溯。
+-   delete 可恢复。
+-   partial failure 不能报全部成功。
+-   backup hash 清单可校验。
+-   恢复不覆盖恢复点之后新增的未知数据。
 
-#### Implementation Notes
-【建议】引入简单 FileRef(profile_id, kind, name, version/token)，kind 仅为 current/archive/record/temp。临时原始内容放入会话受控临时目录或有容量限制的会话存储，使用不可猜测 token、所有者验证和过期清理；不放共享 configs，也不只用文件名索引。查看、下载和标签持有同一 FileRef，明确显示来源。补齐 os 导入与异常清理。记录链接显式携带机型，旧链接保留兼容解析但显示当前解析机型。
+### Dependencies
 
-迁移：先修缺失导入和临时内容流，旧标签字典通过适配器转成 FileRef；过期临时标签不再回退同名服务器文件。
+T01、T02、T04。
 
-#### Acceptance Criteria
-访客上传新文件能查看；上传与服务器同名文件时显示临时内容且服务器 hash 不变；不同会话不能打开对方临时 token。临时项过期有明确提示。清空缓存后归档仍可查看。跨机型同名记录链接始终打开指定版本；当前/归档下载的旧 URL 参数继续兼容。
+### Definition of Done
 
-#### Dependencies
-T01, T02
+迁移、rename、delete/quarantine、backup/restore 的 fault injection
+在副本环境通过。
 
-#### Priority
-P0 / Linear Urgent。
+### Review Boundary
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+按 migration / rename / delete-recovery 三组完成，不扩展成通用事务框架。
 
-#### Review 边界
-缺失 os 导入可立即单独修；随后接通临时 FileRef 和显式记录机型。
+------------------------------------------------------------------------
 
-### T09 · 统一更新入口的校验与受控异步执行
+## T06 · 建立不可变 SourceSnapshot、完整 ParsedDocument 与稳定 NodeRef
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F09。
+**Linear：INH-618**\
+**Priority：P0 / Urgent**
 
-路线图 T09 / 问题 F09；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+### Problem
 
-#### Problem
-【代码确认】上传已部分使用 asyncio.to_thread，但管理页全量/单项更新、历史 diff、全局搜索、审阅和部分 DL 计算仍同步执行。scheduler.run_single_update 下载后直接保存，缺少解析验证。home 的 _busy_processing 是全局布尔，不能表达多个并发任务；记录页另有定时拉取，与服务器调度重叠。
+当前 parser 对较大 XML 丢弃非白名单 attribute；同名 XML sibling 的
+path/id 冲突；JSON 值常被字符串化；筛选/隐藏后 viewer 重新 enumerate
+child，审阅 key 可能不再对应原节点。
 
-影响：网络错误页可能替代有效配置；一次长操作影响其他用户连接；手动/定时重入重复归档。全局 busy 既相互干扰，又可能被先完成的任务提前解除。
+旧设计如果直接变成 `raw bytes + full model + ViewTree`
+三套长期模型，又会产生新的同步负担。
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S09 · 定时与手动更新](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/scheduler.py)；[S10 · URL 下载](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/downloader.py)；[S17 · 更新设置、人员映射与管理员表单](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/management.py)；[S18 · 历史列表与比较入口](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/history.py)；[S20 · 修改记录列表](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/records.py)；[S23 · 全局搜索页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/search.py)；[S16 · DL 输入、编辑、绑定与结果页](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/dltool.py)。
+### Scope
 
-#### Scope
-更新、重型页面工作与任务结果；不引入 Celery、Redis 或分布式队列。
+-   source revision
+-   complete parse semantics
+-   locator
+-   type
+-   duplicate sibling
+-   search/favorite/binding/diff reference
+-   UI projection
 
-#### Implementation Notes
-【建议】保留 APScheduler，启动/关闭由统一生命周期管理。手动与定时入口调用同一 update 操作：下载到暂存、按格式验证、比较源 hash、原子提交，再生成可重建 diff。按 profile+操作键防重入，使用有上限的执行器/队列和明确 TaskStatus。I/O/计算离开 UI 事件循环；UI 更新回到原客户端上下文，导航离开后结果不得覆盖新页面。记录拉取只有服务端调度负责，页面仅刷新状态。取消只在安全边界生效，不能宣称取消 await 已终止工作线程。
+### Implementation Notes
 
-迁移：保留现有 to_thread 和加载代际守卫，先修其他同步入口；待同等失败测试通过再移除全局 busy，不能直接删除超时 workaround。
+只保留两层核心模型。
 
-#### Acceptance Criteria
-HTTP 200 错误页、畸形 XML/JSON、超时和超量均不覆盖当前配置。相同文件内容不重复归档，并记录检查时间。手动与定时同时触发同一更新不会重复提交。双客户端慢下载/比较期间另一客户端可操作且无断连；异常、离页、重试后 busy 必须恢复。关闭服务停止接单并明确等待/恢复行为。
+#### SourceSnapshot
 
-#### Dependencies
-T01, T02, T04, T06
+``` text
+FileRef
+content_hash
+format
+parser_version
+source_handle/path
+```
 
-#### Priority
-P0 / Linear Urgent。
+-   小临时文件可持有 bytes。
+-   大文件不强制为了 snapshot 再复制一份完整 bytes。
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+#### ParsedDocument
 
-#### Review 边界
-先导入/更新的下载验证与提交，再收拢异步执行、防重入和调度生命周期。
+唯一完整解析模型：
 
-### T10 · 保证解析缓存与源版本的一致性
+-   JSON 类型保持
+-   object / array / scalar root
+-   XML expanded namespace
+-   attributes
+-   text
+-   tail
+-   sibling occurrence
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F10。
+UI 的：
 
-路线图 T10 / 问题 F10；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+-   filter
+-   search
+-   hide parameter metadata
+-   lazy expand
 
-#### Problem
-【代码确认】parse_cache 按源路径散列定位，检查 mtime_ns/size，但没有 parser/schema 版本；保存 tree 后再读取/写入元数据可能把不同时间的源与树组合。两份缓存文件使用固定 .tmp，多个写者可冲突。缓存清理用删除文件数扣除条目数，统计口径也不一致。
+只生成 NodeRef/投影，不复制并重新编号整棵权威树。
 
-影响：修复解析器后旧树仍可能命中；并发更新可返回错误版本或产生损坏缓存。审阅尤其不能以缓存作为权威输入。
+NodeRef：
 
-依据：[S13 · 解析缓存](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/parse_cache.py)；[S05 · 文件查看、筛选与修改备注](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)；[S08 · 审阅提交与结果文件生成](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/review.py)；[S24 · 收藏实时值解析](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/favorites_live.py)。
+``` text
+source_hash
+locator
+value_type
+original_value
+```
 
-#### Scope
-已有解析缓存，不引入外部缓存服务。
+JSON 使用 escaped pointer/token path。XML locator 只在固定 source hash
+内定义身份，不声称跨版本稳定。
 
-#### Implementation Notes
-【建议】缓存只对应不可变的源快照，键/元数据包括源 hash、parser_version、cache_schema_version。用一次快照解析得到树，不在解析后重新读取源状态来冒充版本。优先单文件缓存封装或唯一代际目录加原子指针，避免两文件不一致；使用唯一临时名与同键互斥。审阅从校验后的原文重新构建或使用同 hash 的完整源模型。缓存损坏直接丢弃重建；清理只访问受控缓存根，统一按条目报告。
+### Acceptance Criteria
 
-迁移：旧缓存一律按缺少版本元数据处理为 miss；保留源文件和历史版本，不迁移可丢弃树。
+覆盖：
 
-#### Acceptance Criteria
-解析器升级即失效；同大小/同 mtime 的不同内容不会用于权威操作。源在解析期间替换、同键并发写、缓存半写与过期清理均不返回混合版本。删全部缓存后业务可用，缓存清理不触碰原配置或归档。
+-   199999 / 200000 bytes 两侧
+-   repeated XML sibling
+-   namespace
+-   attribute/text/tail
+-   JSON key 带 `/ ~ .`
+-   arrays
+-   empty object/array
+-   root scalar
+-   type change
 
-#### Dependencies
-T04, T06
+过滤/搜索后 NodeRef 仍指向原始节点。
 
-#### Priority
-P0 / Linear Urgent。
+旧 favorite/binding：
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+-   唯一匹配 → 可继续。
+-   多候选 → 标记歧义，要求重新绑定。
+-   不选择第一个/最后一个猜测。
 
-#### Review 边界
-先缓存版本与源快照一致性，再原子缓存/并发和清理统计；不把它当性能可选项。
+### Dependencies
 
-### T11 · 修复 DL 数值输入、结果对应与求解语义
+无。
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F11。
+### Definition of Done
 
-路线图 T11 / 问题 F11；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+完整语义、locator、旧 path 兼容和大文件内存行为有 fixture 证明。
 
-#### Problem
-【代码确认】_collect_inputs 使用 inp.value or 0.0，将未设置范围变为 0；_pp_scale_info 用 or 1.0，使真实 0 被替换且分母为 0 检查失效。反向结果经过范围过滤后按旧 y_vals 下标贴回目标 y。poly_find_x 仅网格命中/变号检测，不能保证找出切触重根，且未单独处理左端点和恒等情形。字段提取失败可默认为 0 并仍出现成功提示。
+### Review Boundary
 
-影响：结果数值、输入标签或边界可能错误；“全部实根/无解/最优解”的文案超出了算法保证，影响工具可信度。
+先 SourceSnapshot/locator；再 parser completeness；最后消费者适配。
 
-依据：[S15 · DL 计算引擎与配置](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/dltool.py)；[S16 · DL 输入、编辑、绑定与结果页](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/dltool.py)；[S36 · DL 多解测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_dltool_multi.py)。
+------------------------------------------------------------------------
 
-#### Scope
-现有正反向计算与系数提取；不建立通用数学平台。
+## T07 · 重建审阅提交的版本校验与保真输出
 
-#### Implementation Notes
-【建议】区分 None、0 和非法数值；拒绝 NaN/Inf、非正采样数及无效区间。结果全程携带 input_index 与原始输入，不根据过滤后的数组位置重标。提取系数返回成功/缺失/无效字段，不默默用 0 替代。即时收敛求解文案为“已检测到的候选根”，增加端点、重根、恒等与残差校验；实现可验证的有界多项式实根策略前不得承诺穷尽。优先评估现有依赖是否已有可信求根能力；没有则比较至多八阶导数分段算法与新增数值依赖的成本，不只增加采样数。多解选择不自动称最小绝对值为最优。
+**Linear：INH-619**\
+**Priority：P0 / Urgent**
 
-迁移：先修确定性数值与行映射缺陷，再完善求根覆盖；无法证明完整性时保留诚实的近似输出与原始参数。
+### Problem
 
-#### Acceptance Criteria
-未设置范围保存后仍为 None；传输系数 0 与分母 0 分别按规则处理。过滤第一个 y 后，其余行仍对应正确输入。覆盖 (x-a)^2 的非网格根、左端点根、常数/零多项式、近重根、区间外根、负缩放和溢出，输出残差及不确定状态。无效绑定不能改变已生效系数。原有三类计算及系数文件可读。
+当前 review 根据 positional `node_key` 修改当前展示树，不校验 source
+hash / original value，再从展示树重新序列化。源版本变化、过滤、重复
+sibling 都可能误改；XML 非展示字段可能被静默丢失。
 
-#### Dependencies
-无，可独立启动。
+### Scope
 
-#### Priority
-P0 / Linear Urgent。
+现有：
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+``` text
+suggest
+→ pending review
+→ approve/reject
+→ generate result
+```
 
-#### Review 边界
-先 None/0/行对应/系数提取的确定性 bug，再求根边界与结果文案；保留明确算法能力限制。
+不增加：
 
-### T12 · 建立可复现离线发布包并修复启动配置
+-   multi-stage approval
+-   workflow engine
+-   auto merge
 
-Linear：尚未核实同步结果。阶段：M1。对应问题：F12。
+### Implementation Notes
 
-路线图 T12 / 问题 F12；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+remark 新记录保存：
 
-#### Problem
-【代码确认】requirements 只有 nicegui>=2.0.0、apscheduler>=3.10.0，无已验证版本锁；run.py 定义了 MCHECKER_PORT 读取却固定使用 50002，与 README 的 50001/环境变量行为矛盾。仓库包含 .nicegui 用户状态和 __pycache__。现有源码未证明必须使用公网 CDN，不能将文档“首次需要网络”的表述直接当作事实。
+-   source hash
+-   NodeRef
+-   original type/value
+-   schema version
 
-影响：同一源码安装出不同运行环境，离线部署无法保证复现；端口配置失效；发布可能携带开发会话。实际部署版本与全部资源请求仍需实测。
+submit：
 
-依据：[S01 · 启动入口](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/run.py)；[S29 · 依赖声明](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/requirements.txt)；[S39 · 现有架构说明，仅作对照](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/docs/architecture.md)；[S40 · 现有使用与部署说明，仅作对照](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/README.md)。
+1.  重新授权。
+2.  校验 remark 仍 pending。
+3.  校验 source hash。
+4.  校验 locator + original value/type。
+5.  对完整 ParsedDocument / 安全源执行修改。
+6.  先生成 candidate。
+7.  重新 parse candidate。
+8.  验证只有预期语义变化。
+9.  发布 artifact。
+10. 再更新 remark status。
 
-#### Scope
-构建、安装、运行资产、端口、数据根与发布卫生；不新增强制容器、在线更新器或环境管理服务。
+XML 保真：
 
-#### Implementation Notes
-【建议】从当前已工作的环境导出并验证 Python/NiceGUI/APScheduler 和传递依赖精确版本、哈希、平台信息，生成对应 OS/架构的 wheelhouse 与离线安装脚本。修复端口读取；升级已有 50002 部署时显式保留其监听地址，不静默改端口。支持可选数据根但保留旧 data 默认，存储 secret 安全持久化失败须明确报错。打包本地字体/图标/JS/CSS 所需资产，首访禁公网验收。从版本控制/发行包移除开发会话与字节码，不删除部署机实际会话；检查已公开内容是否需要凭据轮换。
+目标是"未修改业务语义不丢失"，不是声称 byte-for-byte 相同。
 
-迁移：先记录现网版本/端口/路径并做部署副本验证，再锁定发行环境；不为了追新直接升依赖主版本。
+如果标准库无法保留真实业务样本中的：
 
-#### Acceptance Criteria
-全新目标机器不访问索引即可安装；空浏览器缓存且禁止公网时完成查看、搜索、比较、审阅、DL、下载与首屏字体/图标加载。允许的内网更新源照常工作，公网来源在离线模式明确禁用。MCHECKER_PORT 生效；旧部署升级不意外换端口或数据根。发布包不含用户 .nicegui、业务数据和 secret。
+-   comments
+-   PI
+-   prefix/namespace requirement
+-   encoding
+-   tail / mixed content
+-   DOCTYPE 等
 
-#### Dependencies
-无，可独立启动。
+则：
 
-#### Priority
-P0 / Linear Urgent。
+-   评估成熟 XML 库；
+-   或拒绝自动生成；
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+不能静默丢失。
 
-#### Review 边界
-先记录部署基线并修端口，再构建锁文件/wheelhouse/本地资产和冷缓存验收；不夹带依赖大升级。
+批次以 source file
+为最小提交单元。不同文件逐文件成功/失败，不伪装全局事务。
 
-### T13 · 隔离测试数据并建立关键回归门槛
+### Acceptance Criteria
 
-Linear：尚未核实同步结果。阶段：M2。对应问题：F13。
+-   suggestion 后 source 改动 → conflict。
+-   repeated sibling 不误改。
+-   filter/search 后不误改。
+-   未选字段保持语义。
+-   unsupported XML 明确拒绝。
+-   双管理员重复 submit 只有一次业务结果。
+-   candidate 生成失败不把 remark 标 approved。
+-   restart 能识别未完成 operation。
 
-路线图 T13 / 问题 F13；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+### Dependencies
 
-#### Problem
-【代码确认】test_differ 的绑定测试只替换 BINDINGS_FILE，而当前存储实际使用 profile 文件路径，测试可能写到仓库默认 data。该测试以 len(bound_items)>=0 作为断言，无法发现绑定完全失效。已有测试覆盖若干纯函数和存储流程，但不能证明浏览器权限、审阅保真、离线首访和并发恢复正确。
+T01、T04、T06。
 
-影响：测试可污染本地数据；无效断言给出假安全感；重构和新增功能容易重复引入已经修过的 P0。
+### Definition of Done
 
-依据：[S30 · 对比测试与测试隔离](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_differ.py)；[S31 · 存储回归测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_storage.py)；[S32 · 机型回归测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_profiles.py)；[S33 · 文件下载测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_file_downloads.py)；[S34 · 解析测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_parser.py)；[S35 · 解析缓存测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_parse_cache.py)；[S36 · DL 多解测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_dltool_multi.py)。
+版本冲突、semantic preservation、idempotency、recovery 和 legacy remark
+测试通过。
 
-#### Scope
-测试隔离、有效断言与最小 CI；不设无依据的覆盖率百分比。
+### Review Boundary
 
-#### Implementation Notes
-【建议】在统一 conftest 中按测试提供临时 DATA_DIR、profiles、缓存和会话目录，重置 ContextVar/单例；禁止测试写到 fixture 根外。修正绑定断言为明确路径/组/数量。每个 P0 修复随 PR 添加反例与正例，CI 运行纯函数、存储故障注入和接口测试，浏览器/离线套件可在发行候选阶段运行。测试工具是开发依赖，不进入运行包。
+先"拒绝误改"，再"安全生成"，最后"批次恢复"。
 
-迁移：先隔离目录再跑原测试；不以删除失败用例来获得全绿。
+------------------------------------------------------------------------
 
-#### Acceptance Criteria
-测试前后真实 data/.nicegui 不变；用例可独立、随机顺序重复执行。绑定故意破坏时测试必失败。每个 P0 关联回归用例，失败会阻止发布；不存在吞异常后默认通过。
+## T08 · 修复 FileRef、临时上传、归档和记录引用链路
 
-#### Dependencies
-无，可独立启动。
+**Linear：INH-620**\
+**Priority：P0 / Urgent**
 
-#### Priority
-P1 / Linear High。
+### Problem
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+访客上传内容解析后没有持久化，却仍通过 filename 打开 viewer；viewer
+再从服务器 configs
+读取，因此同名时可能显示旧服务器文件，不同名则找不到。历史/record
+入口也并非所有链接都携带 profile/version。
 
-#### Review 边界
-先测试目录隔离，再修无效断言和最小 CI；任何环境都不得先碰生产 data。
+### Scope
 
-### T14 · 提取应用操作边界并统一错误与日志
+FileRef kind：
 
-Linear：尚未核实同步结果。阶段：M2。对应问题：F14。
+-   current
+-   archive
+-   record
+-   temp
 
-路线图 T14 / 问题 F14；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+覆盖：
 
-#### Problem
-【代码确认】页面直接串联权限、解析、存储、结果通知；differ 直接导入 storage.get_bound_paths，storage 又调用 differ；storage 的机型选择反向依赖 NiceGUI。三个模块重复实现 JSON 读写，异常经常被 pass。
+-   upload
+-   URL temporary import
+-   comparison upload
+-   viewer
+-   download
+-   tabs
+-   history
+-   record_view
 
-影响：新增入口必须复制保存和权限逻辑；错误无法定位；目录虽然分开，核心业务仍难脱离 UI 测试。
+### Implementation Notes
 
-依据：[S02 · 存储、机型上下文与文件生命周期](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)；[S03 · 身份与权限判断](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/utils/auth.py)；[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S08 · 审阅提交与结果文件生成](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/review.py)；[S09 · 定时与手动更新](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/scheduler.py)；[S14 · 结构化与文本差异](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/differ.py)；[S15 · DL 计算引擎与配置](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/dltool.py)；[S17 · 更新设置、人员映射与管理员表单](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/management.py)。
+最小：
 
-#### Scope
-形成模块边界，不为所有 getter 包 service，也不把 storage.py 拆文件数当目标。
+``` text
+FileRef(profile_id, kind, name, version_or_token)
+```
 
-#### Implementation Notes
-【建议】仅提取已存在的复用操作：配置导入/更新/生命周期、审阅提交、任务执行。普通查询可直接调用明确 profile 的存储函数。保留 core.storage 兼容门面，底层原子 I/O 和路径边界归一；不要按每张 JSON 表生成 Repository。differ 接收绑定快照而非自行读存储。应用错误提供 code/message/retryable/context，UI 和 HTTP 各自映射。标准 logging 记录 operation_id、profile、actor、目标、结果、耗时和恢复信息，轮转并脱敏；无需求不拆多个日志平台。
+temp：
 
-迁移：先特征测试，再一次迁出一个业务用例并保留转发函数；每步可独立回滚，避免业务逻辑与目录重排混在同一个大提交。
+-   session isolated dir / bounded temp storage
+-   random token
+-   owner/session validation
+-   capacity limit
+-   TTL
+-   cleanup
+-   不进入 shared configs
+-   默认不进入 global search / review / favorite，除非明确保存
 
-#### Acceptance Criteria
-核心导入、审阅、diff 可不加载 NiceGUI 测试。上传与定时更新复用同一验证/提交路径。核心模块不导入 pages；新入口不复制授权与文件提交。磁盘满、权限拒绝、版本冲突、解析失败在 UI 和日志有一致代码且不泄密。旧函数进口/参数包装有兼容测试。
+所有 viewer/tab/download 都持有 FileRef，不用 filename 推断来源。
 
-#### Dependencies
-T01, T04, T06, T07, T09, T13
+旧 URL：
 
-#### Priority
-P1 / Linear High。
+-   current/archive 继续支持安全参数。
+-   record 新链接必须携带 profile。
+-   旧 record link 兼容解析，但要显示解析到哪个 profile。
+-   expired temp 不回退同名 persistent。
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+### Acceptance Criteria
 
-#### Review 边界
-一次迁移一个真实业务操作，业务逻辑保持不变；错误/日志契约再统一，目录搬移单独 Review。
+-   访客上传可完整查看。
+-   同名 temp 优先显示 temp，服务器 hash 不变。
+-   session A 不能访问 session B temp。
+-   temp expired 有明确错误。
+-   cold cache archive 可查看。
+-   profile 切换后旧 record link 不串。
+-   tab restore 不把 temp 换成同名 current。
 
-### T15 · 收敛工作区导航与配置管理表单
+### Dependencies
 
-Linear：尚未核实同步结果。阶段：M3。对应问题：F15。
+T01、T02。
 
-路线图 T15 / 问题 F15；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+### Definition of Done
 
-#### Problem
-【代码确认】home 集中工作区、收藏、机型、导入、历史加载；双侧栏默认展开，主内容有 max-width。管理页把更新源、调度、IP 和管理员堆在同页，小时/天选择未接入保存计算；tools/bindings 保存后通知成功但列表未即时刷新。角色标签仅反映 admin，部署者可显示为游客。
+FileRef 在 temp/current/archive/record 全链路一致，生命周期测试通过。
 
-影响：核心数据区域被压缩，操作位置与权限不易理解；用户容易重复保存或误判调度周期。新增页面会继续堆积 home 的分支与状态逻辑。
+### Review Boundary
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S17 · 更新设置、人员映射与管理员表单](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/management.py)；[S25 · 绑定管理页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/bindings.py)；[S26 · 工具菜单页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/tools.py)；[S27 · 主题与 JavaScript 注入](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/theme.py)；[S28 · CSS 与信息密度](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/static/css/style.css)；[S37 · 标签策略](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/tab_manager.py)；[S38 · 标签持久化](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/tabs_state.py)。
+先修明显缺失 import/版本参数 bug，再接 FileRef。
 
-#### Scope
-信息架构、工作区和现有设置流程；界面尺寸是验收视口，不是对当前页面实测结论。
+------------------------------------------------------------------------
 
-#### Implementation Notes
-【建议】保留文件工作区和标签，左侧改紧凑可搜索文件列表，右工具区默认可收起；顶部主动作增加文字，当前机型、来源和权限明确。设置按更新源/调度、人员权限、机型、工具/绑定分区，不另建 Dashboard。统一页面标题、工具栏、带标签表单、行级错误与空状态，更新源/IP/管理员/历史优先紧凑表格。小时/天正确换算但磁盘仍存 interval_hours。保存成功局部刷新并保留筛选。提取轻量 workspace/tab 操作，不建立动态插件路由。
+## T09 · 统一更新入口的校验、手动刷新与受控异步执行
 
-迁移：保留旧标签 key 与入口适配，按页面替换布局；先解决功能与密度，再做视觉修饰。
+**Linear：INH-621**\
+**Priority：P0 / Urgent**
 
-#### Acceptance Criteria
-现有功能入口全部可到达，角色显示真实；新增/修改/删除后列表立即一致。小时/天设置往返一致；非法 IP/重复名称/空绑定有行级反馈。1366×768 和 1920×1080 代表窗口可完成核心任务，不依赖 hover 才发现唯一主操作；机型切换和标签恢复不误打开其他来源。
+### Problem
 
-#### Dependencies
-T01, T08, T09, T14
+manual update、scheduler、record refresh
+和重型页面操作执行方式不统一。`run_single_update()` 下载后直接保存，合法
+XML/JSON 格式的错误页仍可能覆盖 current。页面还可能有自己的 periodic
+record fetch，与 scheduler 重复。
 
-#### Priority
-P1 / Linear High。
+### Scope
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+-   single update
+-   full update
+-   schedule
+-   manual record refresh
+-   periodic record update
+-   heavy diff/search work
+-   TaskStatus
 
-#### Review 边界
-先工作区/角色/单位与 CRUD 一致性，再设置分区和紧凑布局；旧快捷入口保留适配。
+### Implementation Notes
 
-### T16 · 统一树视图并修复搜索与版本对比连续性
+统一 update pipeline：
 
-Linear：尚未核实同步结果。阶段：M3。对应问题：F16。
+``` text
+download to staging
+→ network/size validation
+→ parse
+→ structural fingerprint check
+→ compare expected current hash
+→ atomic archive/current commit
+→ derive diff/cache
+```
 
-路线图 T16 / 问题 F16；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+structural fingerprint 最小要求：
 
-#### Problem
-【代码确认】viewer/search/收藏/归档/record_view 多套树渲染存在重复和差异；收藏树调用 window.mct，但主题只定义 mcSetTreeNode/mcToggleTree/mcTreeSetAll。filter_tree_and_count 在父节点匹配时提前返回且可能计为 0，页面据此显示未找到。history._compare_with_current 接收 archive_filename 却未存入比较标签，比较页默认另选第一项。CSS 对树禁用文本选择，部分长值被截断。
+-   XML root expanded name
+-   JSON root type
 
-影响：相同数据在不同页面表现不同；有命中却无结果；点击某个版本后对比了另一个版本，破坏用户对结果的理解。
+定时更新：
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S05 · 文件查看、筛选与修改备注](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)；[S18 · 历史列表与比较入口](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/history.py)；[S19 · 比较页面与复制结果](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/comparison.py)；[S21 · 修改记录独立页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/record_view.py)；[S22 · 搜索过滤与计数](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/searching.py)；[S23 · 全局搜索页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/search.py)；[S27 · 主题与 JavaScript 注入](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/theme.py)；[S28 · CSS 与信息密度](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/static/css/style.css)。
+-   root/type 异常 → reject。
+-   不弹 UI 确认。
 
-#### Scope
-同类树控件、搜索与比较，不新增全文搜索服务。
+管理员手动：
 
-#### Implementation Notes
-【建议】共用树行/节点控件与本地交互脚本，读写能力以少量明确选项控制，不建通用 schema-driven renderer。保留原 locator 与过滤上下文，搜索分别表达命中节点与命中变量，父节点命中不能丢结果。比较 FileRef 明确 old/new、指定版本和原始上传名称；历史入口传入并持久化完整比较选择，重用标签时也更新选择。增加路径/值复制、展开长值、键盘操作；clipboard 确认成功后再提示，HTTP 不支持时提供选中文本/下载替代。
+-   如果可解析但 root/type 明显变化，展示变更并要求 explicit confirm。
+-   不直接覆盖。
 
-迁移：先修版本参数与搜索计数，再从 viewer/search 两个已重复页面提取控件，其余页面逐步复用。
+record：
 
-#### Acceptance Criteria
-搜索父节点、文件名和备注都有预期结果；筛选前后定位相同。从第三个历史版本点击比较时，两侧来源准确且重新打开仍一致。所有树页面折叠/展开、焦点、长值和复制一致；HTTP 内网复制失败不显示假成功；原有四类对比都覆盖。
+-   APScheduler 负责周期抓取。
+-   页面 periodic fetch 删除。
+-   **手动刷新按钮保留**，触发同一 server task。
 
-#### Dependencies
-T03, T06, T08, T14, T15
+execution：
 
-#### Priority
-P1 / Linear High。
+-   bounded executor/queue
+-   profile+resource operation key 防重入
+-   UI event loop 不运行 blocking I/O
+-   client 离开不影响已经进入 commit 的业务操作
+-   cancel 只在安全边界生效
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+### Acceptance Criteria
 
-#### Review 边界
-先搜索计数和历史选择传递，再合并两套树控件并逐页接入；不一次性换全部渲染。
+-   200 HTML error 不覆盖。
+-   valid-but-wrong XML/JSON root 不自动覆盖。
+-   malformed/too large/timeout 不覆盖。
+-   same content 不重复 archive。
+-   manual + schedule 同时触发不会重复 commit。
+-   manual record refresh 仍工作。
+-   page timer 不重复抓取 record。
+-   双客户端慢任务期间另一个客户端可正常操作。
 
-### T17 · 保留审阅与计算草稿并明确任务结果
+### Dependencies
 
-Linear：尚未核实同步结果。阶段：M3。对应问题：F17。
+T01、T02、T04、T06。
 
-路线图 T17 / 问题 F17；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+### Definition of Done
 
-#### Problem
-【代码确认】审阅要求本页所有待审节点先做选择才能提交，选择状态在渲染局部闭包；DL 的 editing 写入共享配置，绑定“应用”会即时保存，因此“取消”不一定撤销已应用变更。导入提前关闭对话框，长任务提示与失败恢复不统一。
+三种 update/record 入口共享同一 operation、验证、TaskStatus 和错误契约。
 
-影响：切页丢审阅选择、多个用户共享编辑模式、取消语义不可信，长流程失败后必须重做。
+### Review Boundary
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S08 · 审阅提交与结果文件生成](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/review.py)；[S15 · DL 计算引擎与配置](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/dltool.py)；[S16 · DL 输入、编辑、绑定与结果页](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/dltool.py)。
+先 validation/commit；再 async/dedup；最后 scheduler/manual UI。
 
-#### Scope
-现有审阅/计算表单与任务状态，不新增跨设备草稿同步和通知中心。
+------------------------------------------------------------------------
 
-#### Implementation Notes
-【建议】编辑草稿与生效配置分开；DL editing、输入控件和中间绑定放会话状态，保存时校验版本并一次提交，取消不写共享文件。审阅按文件/已选条目提交，未选择项维持 pending；切页保留当前会话草稿并标注源版本。复用已有 TaskStatus 展示排队/执行/成功/部分失败/冲突，避免长期悬挂 toast；失败保留输入，明确重试是否安全。结果页展示来源文件、版本、参数和时间，不自动覆盖当前配置。
+## T10 · 保证解析与派生 diff 缓存一致性
 
-迁移：兼容读取旧 editing 字段但不再当作全站状态；保留旧系数与未审备注，逐页迁移草稿。
+**Linear：INH-622**\
+**Priority：P0 / Urgent**
 
-#### Acceptance Criteria
-切换标签后审阅选择和 DL 草稿可恢复；两会话进入编辑互不影响；取消后生效配置 hash 不变。部分审阅不影响未选项；源变化产生冲突提示。离页、断连、重连和重复提交均给出可解释状态，输入不被无提示丢弃。
+### Problem
 
-#### Dependencies
-T07, T09, T11, T14, T15
+parse cache 使用 path + mtime + size，没有 parser/schema
+version，源替换和并发可能命中旧树。archive `.diff.json`
+同样是派生数据，但和历史原文混放，并且包含 `bound_count` 等依赖当前
+bindings 的统计，bindings 修改后旧 summary 可能过时。
 
-#### Priority
-P1 / Linear High。
+### Scope
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+-   parsed document cache
+-   archive diff cache
+-   future derived search cache
 
-#### Review 边界
-先 DL 草稿/取消，再审阅选择保留与部分提交，最后统一任务结果显示。
+不包括：
 
-### T18 · 按代表性负载优化渲染与查询成本
+-   authoritative configs
+-   archive raw files
+-   remarks
+-   business JSON
 
-Linear：尚未核实同步结果。阶段：M4。对应问题：F18。
+### Implementation Notes
 
-路线图 T18 / 问题 F18；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+统一派生缓存 identity：
 
-#### Problem
-【代码确认】文件树一次创建全部后代节点；全局搜索遍历文件；history/records 会在渲染期间解析或比较多个版本；home 有 0.3 秒标签检测和每秒文件/收藏检查。性能退化程度尚未在真实部署测量。
+``` text
+source content hash
+algorithm version
+cache schema version
+```
 
-影响：随着节点、版本和客户端增加，重复解析、全量 DOM 和每客户端文件扫描可能形成首要性能瓶颈；不能用丢字段来换速度。
+diff 若保存绑定信息：
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S05 · 文件查看、筛选与修改备注](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)；[S18 · 历史列表与比较入口](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/history.py)；[S20 · 修改记录列表](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/records.py)；[S23 · 全局搜索页面](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/search.py)；[S13 · 解析缓存](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/parse_cache.py)。
+``` text
++ binding revision/hash
+```
 
-#### Scope
-现有性能瓶颈与资源释放；不凭预测引入数据库、Redis 或前端框架。
+否则绑定统计改为实时计算。
 
-#### Implementation Notes
-【建议】先记录部署硬件、文件数/节点数、冷暖缓存、客户端数、交互延迟、事件循环延迟和峰值内存。优先 lazy expand、结果分页、按需 diff、复用同 hash 的解析结果；本地动作直接刷新，跨客户端用轻量版本签名定时检查，隐藏页面暂停检查。保留全量原文和搜索语义；只有测量证明仍不够时才考虑进程池或搜索索引。
+要求：
 
-迁移：每次只改变一个有测量证据的热点；无法证明收益的优化撤回。
+-   version mismatch → miss。
+-   parser/differ upgrade → miss。
+-   old cache 不迁移，直接 rebuild。
+-   source 在 parse 过程中变化 → 结果丢弃。
+-   同 key 写入互斥。
+-   unique temp。
+-   cache corrupt → delete cache only。
+-   `.diff.json` 保持 legacy readable，但新架构将其视为 cache，不是
+    archive authority。
 
-#### Acceptance Criteria
-同一数据/硬件/脚本下记录前后结果；全字段解析和旧功能结果一致。大文件展开/搜索可中断显示且不污染新页面；长会话切页/关页后任务、timer 和临时项有界释放。冷缓存可用，不能只报缓存命中成绩；不设无依据的性能提升百分比。
+### Acceptance Criteria
 
-#### Dependencies
-T09, T10, T16, T17
+-   same mtime/size different bytes 不命中。
+-   parser version 改变失效。
+-   differ version 改变失效。
+-   binding 修改后 bound_count 不陈旧。
+-   half cache 不返回。
+-   clear all cache 后业务仍正确。
+-   cache clean 不碰 raw archive/current。
 
-#### Priority
-P1 / Linear High。
+### Dependencies
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+T04、T06。
 
-#### Review 边界
-每个性能提交附同环境前后证据；无收益或损害语义的变化撤回。
+### Definition of Done
 
-### T19 · 完成核心流程、离线与升级恢复验收
+parse/diff cache 都有确定 identity、atomic write、invalidation 与
+cleanup 规则。
 
-Linear：尚未核实同步结果。阶段：M4。对应问题：F19。
+### Review Boundary
 
-路线图 T19 / 问题 F19；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+先 correctness，再性能。
 
-#### Problem
-【代码确认】现有 tests 的主要验证单位是函数与文件操作，尚没有足够证据覆盖完整多用户浏览器流程、首访断网、升级中断与恢复。此项是集成验收，不代替各 P0 的本地回归。
+------------------------------------------------------------------------
 
-影响：独立修复可能在真实页面、目标 OS、原有数据和代理环境中组合失效；没有恢复演练就不能确认升级安全。
+## T11 · 修复 DL 数值输入、结果对应与求解语义
 
-依据：[S30 · 对比测试与测试隔离](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_differ.py)；[S31 · 存储回归测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_storage.py)；[S32 · 机型回归测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_profiles.py)；[S33 · 文件下载测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_file_downloads.py)；[S34 · 解析测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_parser.py)；[S35 · 解析缓存测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_parse_cache.py)；[S36 · DL 多解测试](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_dltool_multi.py)；[S40 · 现有使用与部署说明，仅作对照](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/README.md)。
+**Linear：INH-623**\
+**Priority：P0 / Urgent**
 
-#### Scope
-发布门禁与恢复演练，不建设复杂测试平台。
+### Problem
 
-#### Implementation Notes
-【建议】用脱敏旧布局/新布局/混合布局和代表文件建立发行验收包。浏览器覆盖访客、部署者、管理员、两机型、当前/临时/归档/记录，以及上传—查看—搜索—收藏—比较—建议—审阅—下载闭环。目标环境禁公网首次安装和访问；模拟停止、磁盘错误及多文件操作中断后恢复。记录失败项、环境与证据，完成后才更新支持矩阵和发布状态。
+当前存在确定性 bug：
 
-迁移：先在副本环境验收再计划部署；本路线图交付不代表已经改动或验收生产代码。
+-   `None` 被 `or 0` 转成 0。
+-   真正 0 被 `or 1.0` 替换。
+-   过滤结果后按旧下标贴回 y。
+-   coefficient extract 失败可能默认为 0。
+-   poly root solver 只靠 sampling/sign change，可能漏
+    even-multiplicity/tangent root。
+-   结果文案可能超出算法保证。
 
-#### Acceptance Criteria
-各 P0 验收通过，完整业务闭环通过；升级前后业务文件与引用核对一致；回滚恢复旧代码及对应备份可用，运行 secret/会话按策略保留。无运行时公网请求，数据留部署端。未知/失败项不能标通过；明确单进程与文件规模边界。
+### Scope
 
-#### Dependencies
-T05, T12, T13, T14, T15, T16, T17, T18
+现有三类 DL calculation、input/range、coefficient extraction、reverse
+root、result mapping。
 
-#### Priority
-P1 / Linear High。
+### Implementation Notes
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+第一阶段只修确定性错误：
 
-#### Review 边界
-先运行核心浏览器套件，再断网/恢复演练；失败回到所属缺陷任务，不用新建大量验收碎片。
+-   None / 0 分开。
+-   reject NaN/Inf。
+-   invalid interval 拒绝。
+-   结果携带 original input index。
+-   coefficient result 明确 success/missing/invalid。
 
-### T20 · 收敛视觉样式并清理重复覆盖
+第二阶段：
 
-Linear：尚未核实同步结果。阶段：M5。对应问题：F20。
+-   candidate roots
+-   endpoint detection
+-   residual check
+-   even multiplicity/tangent cases
+-   constant/zero polynomial
 
-路线图 T20 / 问题 F20；固定审查基线 `e47e54a01f0ad6d74db3a08670a1034f937575c2`。
+在没有可证明完整求解前：
 
-#### Problem
-【代码确认】已有 CSS tokens、系统字体栈、focus-visible 与 reduced-motion，但全局 .q-card:hover 阴影、彩色收藏边框、多个树配色和 DL 内联样式并存。其存在不等于必须换 UI 框架。
+不能写"全部实根"。
 
-影响：视觉噪声、非交互区域的错误可点击暗示和升级 CSS 覆盖维护成本；不阻塞当前正确使用。
+若真实需求要求 8 阶有界区间完整根：
 
-依据：[S04 · 首页、工作区、上传与机型管理](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)；[S16 · DL 输入、编辑、绑定与结果页](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/dltool.py)；[S27 · 主题与 JavaScript 注入](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/theme.py)；[S28 · CSS 与信息密度](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/static/css/style.css)。
+再比较：
 
-#### Scope
-非必要视觉 polish，不新增 Dashboard、深浅双主题或整套 CSS 框架。
+-   mature numerical dependency
+-   derivative isolation + bisection
 
-#### Implementation Notes
-【建议】复用现有 tokens，收敛语义色、圆角、密度与焦点；移除无功能收益的 hover 阴影/缩放，样式限制在 mc 命名空间，减少 Quasar 全局覆盖。保留必要 loading 动画和可访问性。主题资产通过本地静态入口加载，不在每个页面重复发送整段 CSS。
+不要靠增加 sampling 数量假装正确。
 
-迁移：在功能布局稳定后小范围归并样式，保留旧选择器过渡并逐项删除失效覆盖。
+### Acceptance Criteria
 
-#### Acceptance Criteria
-代表页面的字体、间距、状态色和焦点一致；非交互容器不诱导点击；长值、键盘与密度不退化；没有新增公网资源或运行依赖。视觉回归与功能回归通过，P2 不阻塞前一阶段可用版本发布。
+覆盖：
 
-#### Dependencies
-T19
+-   None
+-   real zero
+-   denominator zero
+-   multi row filtering
+-   `(x-a)^2` 非采样点 root
+-   endpoint root
+-   zero polynomial
+-   constant
+-   no real root
+-   near multiple root
+-   overflow
+-   negative scale
 
-#### Priority
-P2 / Linear Normal。
+每个候选根输出 residual/有效性。
 
-#### Definition of Done
-实现已 Review，相关正反例和兼容回归通过，记录执行环境与证据；仅创建 Issue 不代表完成。
+### Dependencies
 
-#### Review 边界
-按 tokens、作用域、重复覆盖收敛；视觉调整单独提交且不与功能修复混合。
+无。授权/持久化由 T01/T04 组合验收，但数值修复本身不应被它们阻塞。
 
-## 6. 统一 Definition of Done
+### Definition of Done
 
-每项任务只有在实现已 Review、正反例通过、与旧数据/接口的兼容条件满足、错误分支可解释且相关文档更新后才可 Done。不能仅以“新增了模块”“页面能打开”或“测试未报错”作为验收。
+确定性 bug 和算法能力边界都有 tests；旧 DL config 继续可读。
 
-数据类任务必须证明未选定/未修改的原文没有变化，旧归档与业务引用可恢复，写失败不会显示成功。权限类任务必须直接调用提交入口验证，而非仅看按钮不可见。任务执行类必须验证离页、双客户端、重入和异常清理。数值类必须验证输入/输出对应、边界值和算法限制，而不是只看常规样本有结果。
+------------------------------------------------------------------------
 
-UI 任务需要在实际浏览器完成核心操作、键盘与长文本验收；浏览器测试工具仅作为开发依赖。发行类任务必须清空缓存、禁止公网，测试安装和首访，不用已经联网预热过的浏览器作为证据。任何未验证环境应保留明确支持限制。
+## T12 · 建立可复现完全离线发布并修复启动配置
 
-每个 PR 说明 Current → Target → Why → Migration。路径/数据布局/依赖变更必须有回滚说明；安全与数据修复尽可能与纯目录移动或样式变化分开提交。不要删除历史兼容分支，除非对应样本和约束已确认过时。
+**Linear：INH-624**\
+**Priority：P0 / Urgent**
 
-## 7. 核心验收场景矩阵
+### Problem
 
-| 场景 | 必须看到的结果 | 关联任务 |
-|---|---|---|
-| 访客直接调用机型/DL 管理写操作 | 拒绝且生效配置不变 | T01 |
-| 打开对话框后撤权再提交 | 提交时拒绝，非只隐藏入口 | T01 |
-| default/其他机型、前台/后台交错 | 每次操作始终落固定机型 | T01/T09 |
-| 路径越界、符号链接、Windows 路径变体 | 根外不可读写，安全中文名仍可用 | T02 |
-| file URL、非法协议、重定向和超大下载 | 拒绝/受限，当前原文不被替换 | T02/T09 |
-| 配置值含 HTML、JS 样式文本 | 仅作为文字显示，无脚本执行与额外出网 | T03 |
-| JSON 半写/损坏、磁盘满、同时增加备注 | 原数据可恢复，无丢写/假成功 | T04 |
-| 同秒多次更新和修改记录保存 | 所有版本独立，不覆盖 | T04 |
-| 旧/新/混合布局迁移中断 | 原数据保留、明确恢复、重复执行幂等 | T05 |
-| 文件改名/删除/恢复 | 所有既有引用一致或明确失效，禁止静默错指向 | T05 |
-| XML 阈值前后、重复兄弟、命名空间 | 全字段保留、节点不合并 | T06 |
-| 搜索/隐藏参数元数据后提交建议 | 仍定位原文的同一节点 | T06/T07 |
-| 源版本变化、重复审阅、多文件部分失败 | 冲突/幂等/逐文件结果明确，状态不虚报 | T07 |
-| 访客临时上传与服务器同名 | 展示临时内容，服务器不变 | T08 |
-| 临时 token 跨会话、过期 | 非所有者拒绝，过期不回退同名文件 | T08 |
-| 冷缓存打开归档与跨机型记录链接 | 具体来源正确，可查看/下载 | T08 |
-| 下载到 HTTP 200 错误页 | 验证失败，不覆盖有效配置 | T09 |
-| 慢操作时另一浏览器继续工作 | 无事件循环长阻塞和全局 busy 污染 | T09 |
-| parser 版本变化或解析期间源替换 | 缓存失效或重试，不返回混合版本 | T10 |
-| None/0/NaN/Inf/过滤后的 y 行 | 正确区分，行对应不变，无静默默认 | T11 |
-| 切触重根/左端点/恒等多项式 | 结果与限制诚实，不把未检测当证明无解 | T11 |
-| 清洁机器、浏览器冷缓存、禁公网 | 安装与核心流程完整，无 CDN/字体/API 依赖 | T12/T19 |
-| 在含真实 data 的 checkout 运行测试 | 测试写入被限制到临时根 | T13 |
-| 新增相似入口调用现有业务操作 | 不复制授权/路径/保存，实现仍可纯逻辑测试 | T14 |
-| CRUD 保存与调度天/小时 | 页面即时一致，持久化时间语义正确 | T15 |
-| 从第三个历史版本进入比较 | 两侧来源与用户选择完全一致 | T16 |
-| 切页/取消/双用户编辑 | 草稿独立，取消不改生效数据 | T17 |
-| 大文件与长会话 | 完整语义不退化，资源释放有界，冷热均测 | T18 |
-| 升级失败后恢复旧版本 | 旧代码/对应备份可运行，新业务数据不被无提示删除 | T19 |
+`requirements.txt` 只给下限；环境不可复现。`MCHECKER_PORT`
+存在读取函数但运行固定 50002。仓库跟踪
+`.nicegui/storage-user-*.json`、`__pycache__/*.pyc`，`.gitignore`
+没有覆盖这些开发产物。
 
-## 8. 发布、升级和回滚安排
+无法仅凭旧文档断言 NiceGUI 必须联网；必须实际做 cold-cache
+blocked-public-network 验证。
 
-【建议】第一批可发布的是能独立回归的 P0 补丁，不必等视觉阶段。涉及源模型、恢复或原子提交的组合改动必须通过相应依赖验收后发布；不得只上线新页面，仍让后台走旧不安全写入。
+### Scope
 
-每次发行先记录实际 Python/依赖版本、监听地址、数据根、secret 来源、机型数和布局状态；创建一致备份并校验。候选代码在副本上运行，验证旧数据、临时数据和归档。停接新写或进入明确只读窗口后切换；启动发现未完成恢复清单时，不继续随机修改受影响对象。
+-   Python/runtime lock
+-   NiceGUI/APScheduler lock
+-   transitive dependencies
+-   wheelhouse
+-   static assets
+-   port
+-   data root
+-   storage secret
+-   repo/release hygiene
 
-失败回滚恢复旧代码与匹配备份；升级后产生的数据单独保全，不能直接用旧备份覆盖。任何破坏性迁移需要用户明确的部署操作，不由本次路线图交付自动执行。当前交付仅写规划到 Linear，不修改 GitHub 业务源码和生产数据。
+### Implementation Notes
 
-支持矩阵至少记录实际验证的 OS/架构、Python、NiceGUI/APScheduler、浏览器、直连/代理、HTTP/内部 HTTPS、数据布局和规模。没有验证的版本不写“完全支持”。单进程/单调度器是本阶段明确边界；多 worker 不属于默认部署方式。
+从实际已运行环境出发锁定：
 
-## 9. Deferred / Future Consideration（P3，不建 Issue）
+-   Python version
+-   NiceGUI
+-   APScheduler
+-   transitive wheels
+-   OS/architecture
 
-| 能力 | 暂缓理由 | 触发条件 |
-|---|---|---|
-| 独立 React/Vue 前端 | 重写成本高且不直接修已知问题 | NiceGUI 的已测限制阻断明确需求 |
-| SQLite/数据库或全文索引 | 未证明规模/事务成本需要 | 真实并发/查询瓶颈，或文件恢复代码复杂度持续高于迁移成本 |
-| SSO、账号中心、部门/租户隔离 | 未确认产品与身份要求 | 不可信访问、共享终端或明确组织管理需求 |
-| 插件系统、微服务、工作流引擎 | 无多个真实独立扩展需求 | 已存在扩展方/编排需求及独立部署收益 |
-| 代码热替换/零停机部署 | 当前没有可用性指标要求 | 维护窗口不能接受且有资源承担实现/验证成本 |
-| Dashboard、大屏、通知中心 | 与文件工作流无直接必要性 | 实际持续使用场景经确认 |
-| 自动清理历史/统一保留规则 | 可能损害数据与恢复 | 存储压力与备份/保留政策同时确认 |
-| 跨设备草稿、通用资源平台 | 现有会话和 FileRef 足够 | 多设备协作需求已验证且无法局部解决 |
-| 全量 REST 化 | 暂无第二消费者 | 已确认集成方/CLI 需要稳定 API |
+先支持真实部署平台，不维护未知平台包矩阵。
 
-Deferred 不设置日期和任务占位，不用低优先级大量 Issue 伪造路线图。触发条件出现时重新验证，不直接照旧设想实施。
+提供：
 
-## 10. 未知项及最小验证步骤
+``` text
+offline wheelhouse
+install script
+verification manifest
+```
 
-| 未知项 | 最小验证 | 如何改变决策 |
-|---|---|---|
-| 实际部署版本与平台 | 读取部署端版本、启动参数和依赖清单 | 确定锁文件/打包矩阵，不预先追新 |
-| 代理/共享 IP 情况 | 一次直连与代理身份测试，检查来源映射 | 决定 IP 模式是否仍可接受，是否必须强认证 |
-| XML 特性与保真边界 | 取脱敏典型和边界原文，零修改/单修改往返比较 | 标准库足够则保留；不够才评估成熟库 |
-| 旧目录与迁移中间态 | 只读列清单、hash 和引用，不移动数据 | 选择兼容适配/恢复流程 |
-| 性能上限 | 固定冷暖缓存、文件/节点/客户端样本测量 | 决定 lazy/paging 是否足够，是否需要额外计算能力 |
-| 求根完整性要求 | 用已知多项式反例与真实系数范围验证 | 决定候选根模式是否足够，是否引入更可靠数值实现 |
-| 真正公网依赖 | 冷缓存浏览器 + 服务器禁公网请求记录 | 确定需随包的资产，不凭 README 替换框架 |
+启动：
 
-这些验证嵌入 T01/T06/T11/T12/T18/T19，不单独制造调研 Issue。获得足以改变决策的证据后结束调查，回到交付。
+-   `MCHECKER_PORT` 真正生效。
+-   旧部署的 50002 必须显式迁移，不悄悄改回 50001。
+-   data root 可选但默认保持旧路径。
+-   storage secret 持久化失败不能静默每次生成新 secret。
 
-## 11. Linear 落地记录
+资源：
 
-Project：`c76b3c74-f0a2-4ac1-a6ab-42c07b5a0e71`；Team：Inhandy（INH）。Project → 5 Milestones → 20 Issues。
+-   浏览器 cold cache。
+-   禁公网。
+-   NiceGUI/Quasar/icon/font/JS/CSS 必须同源加载。
 
-同步状态尚未最终核对；不把未返回 identifier 的创建请求视为成功。
+不要为离线新增全局产品 toggle。断公网由部署网络保证；外部工具或公网 URL
+只需明确失败。
 
-| 任务 | 实际 Issue | Milestone | 建立的 blocker |
-|---|---|---|---|
-| T01 | 尚未核实同步结果 | M1 | 无 |
-| T02 | 尚未核实同步结果 | M1 | 无 |
-| T03 | 尚未核实同步结果 | M1 | 无 |
-| T04 | 尚未核实同步结果 | M1 | 无 |
-| T05 | 尚未核实同步结果 | M1 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T06 | 尚未核实同步结果 | M1 | 无 |
-| T07 | 尚未核实同步结果 | M1 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T08 | 尚未核实同步结果 | M1 | 尚未核实同步结果, 尚未核实同步结果 |
-| T09 | 尚未核实同步结果 | M1 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T10 | 尚未核实同步结果 | M1 | 尚未核实同步结果, 尚未核实同步结果 |
-| T11 | 尚未核实同步结果 | M1 | 无 |
-| T12 | 尚未核实同步结果 | M1 | 无 |
-| T13 | 尚未核实同步结果 | M2 | 无 |
-| T14 | 尚未核实同步结果 | M2 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T15 | 尚未核实同步结果 | M3 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T16 | 尚未核实同步结果 | M3 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T17 | 尚未核实同步结果 | M3 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T18 | 尚未核实同步结果 | M4 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T19 | 尚未核实同步结果 | M4 | 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果, 尚未核实同步结果 |
-| T20 | 尚未核实同步结果 | M5 | 尚未核实同步结果 |
+仓库卫生：
 
-关系验收：尚未回读完成；最终交付前核对。
+-   `.nicegui/`
+-   `__pycache__/`
+-   `*.pyc`
+-   generated test output
 
-## 12. 最终交付成功条件
+从 Git/发行包移除；检查历史是否包含真正敏感内容。
 
-架构书与路线图完整可读，代码事实、推断和建议有明确区分；Linear 项目中任务位于正确 Milestone，每个任务包含问题、范围、实现注意、验收、依赖和优先级，并以真实 blocker 关系表达顺序。
+### Acceptance Criteria
 
-实际开发结束后，必须同时证明：当前导入、解析、比较、审阅、计算和数据操作更可靠；新增同类功能主要通过局部页面/纯逻辑扩展，复用已有身份、机型、文件、节点与提交边界。仅完成目录重排或视觉翻新不满足这两个条件。
+-   fresh machine 无 package index 安装成功。
+-   cold browser + no public internet 首屏成功。
+-   local upload/view/search/compare/download smoke 成功。
+-   无公网静态请求。
+-   `MCHECKER_PORT` 生效。
+-   旧部署不意外换端口/data root。
+-   release bundle 无业务 data、secret、`.nicegui`、pyc。
 
-## 附录：固定源码证据
+T12 不重复承担 T07/T11 的业务正确性；完整业务组合由 T19。
 
-- S01：[启动入口 · `run.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/run.py)。
-- S02：[存储、机型上下文与文件生命周期 · `app/core/storage.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/storage.py)。
-- S03：[身份与权限判断 · `app/utils/auth.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/utils/auth.py)。
-- S04：[首页、工作区、上传与机型管理 · `app/pages/home.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/home.py)。
-- S05：[文件查看、筛选与修改备注 · `app/pages/viewer.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/viewer.py)。
-- S06：[XML/JSON 解析与节点路径 · `app/core/parser.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/parser.py)。
-- S07：[审阅定位、修改与序列化 · `app/core/reviewing.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/reviewing.py)。
-- S08：[审阅提交与结果文件生成 · `app/pages/review.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/review.py)。
-- S09：[定时与手动更新 · `app/core/scheduler.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/scheduler.py)。
-- S10：[URL 下载 · `app/core/downloader.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/downloader.py)。
-- S11：[当前文件与归档下载路由 · `app/pages/file_downloads.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/file_downloads.py)。
-- S12：[机型注册、复制与删除 · `app/core/device_models.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/device_models.py)。
-- S13：[解析缓存 · `app/core/parse_cache.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/parse_cache.py)。
-- S14：[结构化与文本差异 · `app/core/differ.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/differ.py)。
-- S15：[DL 计算引擎与配置 · `app/core/dltool.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/dltool.py)。
-- S16：[DL 输入、编辑、绑定与结果页 · `app/pages/dltool.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/dltool.py)。
-- S17：[更新设置、人员映射与管理员表单 · `app/pages/management.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/management.py)。
-- S18：[历史列表与比较入口 · `app/pages/history.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/history.py)。
-- S19：[比较页面与复制结果 · `app/pages/comparison.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/comparison.py)。
-- S20：[修改记录列表 · `app/pages/records.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/records.py)。
-- S21：[修改记录独立页面 · `app/pages/record_view.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/record_view.py)。
-- S22：[搜索过滤与计数 · `app/core/searching.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/searching.py)。
-- S23：[全局搜索页面 · `app/pages/search.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/search.py)。
-- S24：[收藏实时值解析 · `app/core/favorites_live.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/favorites_live.py)。
-- S25：[绑定管理页面 · `app/pages/bindings.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/bindings.py)。
-- S26：[工具菜单页面 · `app/pages/tools.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/tools.py)。
-- S27：[主题与 JavaScript 注入 · `app/pages/theme.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/pages/theme.py)。
-- S28：[CSS 与信息密度 · `app/static/css/style.css`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/static/css/style.css)。
-- S29：[依赖声明 · `requirements.txt`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/requirements.txt)。
-- S30：[对比测试与测试隔离 · `tests/test_differ.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_differ.py)。
-- S31：[存储回归测试 · `tests/test_storage.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_storage.py)。
-- S32：[机型回归测试 · `tests/test_profiles.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_profiles.py)。
-- S33：[文件下载测试 · `tests/test_file_downloads.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_file_downloads.py)。
-- S34：[解析测试 · `tests/test_parser.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_parser.py)。
-- S35：[解析缓存测试 · `tests/test_parse_cache.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_parse_cache.py)。
-- S36：[DL 多解测试 · `tests/test_dltool_multi.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/tests/test_dltool_multi.py)。
-- S37：[标签策略 · `app/core/tab_manager.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/tab_manager.py)。
-- S38：[标签持久化 · `app/core/tabs_state.py`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/app/core/tabs_state.py)。
-- S39：[现有架构说明，仅作对照 · `docs/architecture.md`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/docs/architecture.md)。
-- S40：[现有使用与部署说明，仅作对照 · `README.md`](https://github.com/Arragon/MCChecker/blob/e47e54a01f0ad6d74db3a08670a1034f937575c2/README.md)。
+### Dependencies
+
+无。
+
+### Definition of Done
+
+锁文件、wheelhouse、离线安装、网络记录、启动配置和发布卫生可复现。
+
+### Review Boundary
+
+先 port/repo hygiene；再 dependency lock/wheelhouse；最后 cold-cache
+offline smoke。
+
+------------------------------------------------------------------------
+
+## T13 · 隔离测试数据并建立关键回归安全门槛
+
+**Linear：INH-625**\
+**Priority：P0 / Urgent**
+
+### Problem
+
+现有 test fixture 并没有全局在 import 前重定向 data root。`test_differ`
+只替换某个 legacy 常量时，真实实现可能仍通过 profile path 写到仓库
+`data/profiles/default`。同时存在 `len(x) >= 0` 等无法失败的断言。
+
+运行测试本身可能损害开发者或部署副本数据，属于 P0。
+
+### Scope
+
+-   pytest root
+-   DATA_ROOT
+-   profiles
+-   cache
+-   NiceGUI storage
+-   ContextVar
+-   scheduler/cache singleton
+-   test guards
+-   invalid assertions
+-   minimal CI
+
+### Implementation Notes
+
+测试进程开始：
+
+1.  创建 temp root。
+2.  设置环境/配置。
+3.  再 import 捕获路径的业务模块。
+
+每 test：
+
+-   unique profile
+-   reset ContextVar
+-   reset scheduler
+-   reset parse cache state
+-   reset user storage mock
+
+增加 write guard：
+
+任何 authoritative write path 如果不在 fixture root：
+
+**立即 fail test**。
+
+不要"测试结束后再清理生产 data"。
+
+修复所有 vacuous assertion。
+
+每个 P0 PR 带：
+
+-   failing regression before fix
+-   positive case
+-   compatibility case
+
+### Acceptance Criteria
+
+-   在真实 checkout 预先放 sentinel data。
+-   跑 tests 后 sentinel hash/mtime 不变。
+-   tests random order 可重复。
+-   单 test 可独立运行。
+-   故意破坏 binding 时相关 test 必 fail。
+-   fixture root 外写立即失败。
+
+### Dependencies
+
+无。
+
+### Definition of Done
+
+测试隔离与 guard 成为所有后续任务的安全基础。
+
+### Review Boundary
+
+优先级上可视为最早任务之一。
+
+------------------------------------------------------------------------
+
+# 7. M2 任务明细
+
+## T14 · 提取应用操作边界并统一错误、日志与文档契约
+
+**Linear：INH-626**\
+**Priority：P1 / High**
+
+### Problem
+
+当前页面直接组合：
+
+``` text
+auth
+parser
+storage
+scheduler
+reviewing
+differ
+notify
+```
+
+相同操作在不同入口重复。`differ` 读取 storage bindings，而 storage
+又调用 differ；storage 读取 NiceGUI profile，造成反向依赖。
+
+文档也存在事实源冲突：Agent rules 指向
+`docs/architecture.md`，而正式设计此前另有 v2
+文件；旧架构文档仍包含已经被审查否定的陈旧结论。
+
+### Scope
+
+只提取真正跨入口复用的用例：
+
+-   config import/update/lifecycle
+-   review submit
+-   task/update execution
+
+统一：
+
+-   domain error
+-   logging
+-   doc source-of-truth
+
+### Implementation Notes
+
+目标：
+
+``` text
+pages/http
+   ↓
+application operations
+   ↓
+core + storage
+```
+
+不是：
+
+``` text
+controller
+service
+repository
+DAO
+domain manager
+...
+```
+
+只读 getter 可以直接使用显式 profile storage。
+
+differ 接收：
+
+``` text
+binding snapshot
+```
+
+而不是自己读 storage。
+
+错误：
+
+``` text
+code
+message
+retryable
+context
+```
+
+少量 code：
+
+-   INVALID_INPUT
+-   FORBIDDEN
+-   NOT_FOUND
+-   SOURCE_CHANGED
+-   REVIEW_CONFLICT
+-   TOO_LARGE
+-   BUSY
+-   DOWNLOAD_FAILED
+-   STORAGE_FAILURE
+-   CORRUPT_DATA
+
+日志：
+
+-   operation id
+-   profile
+-   actor
+-   target
+-   result
+-   duration
+-   error code
+
+不记录：
+
+-   config content
+-   password/token
+-   Cookie
+-   full credential URL
+
+文档事实源：
+
+1.  `docs/MCChecker_ARCHITECTURE.md`
+2.  `docs/MCChecker_ROADMAP.md`
+3.  Linear = execution mirror
+4.  `docs/architecture.md` = Agent compatibility entry
+5.  v2 文件 = historical
+
+### Acceptance Criteria
+
+-   import/update/review 可不加载 NiceGUI 测试。
+-   new entry 不复制 authorization/commit logic。
+-   core 不 import pages。
+-   storage core 不依赖 browser state。
+-   error 在 UI/log 中有一致 code。
+-   docs/architecture.md 明确指向 canonical。
+-   Roadmap T ID 与 Linear 一一对应。
+
+### Dependencies
+
+T01、T04、T06、T07、T09、T13。
+
+### Definition of Done
+
+一次迁移一个真实用例并保留旧 wrapper；不把目录重排和业务变化混成一个大
+PR。
+
+### Review Boundary
+
+1.  config/update operation
+2.  review operation
+3.  error/log
+4.  docs source-of-truth
+
+------------------------------------------------------------------------
+
+# 8. M3 任务明细
+
+## T15 · 收敛工作区导航与配置管理表单
+
+**Linear：INH-627**\
+**Priority：P1 / High**
+
+### Problem
+
+home
+承担太多工作区/收藏/机型/导入状态；双侧栏和卡片降低信息密度。management
+把 update/schedule/IP/admin 放在一个长页面；tools/bindings CRUD
+状态反馈不完全即时。小时/天调度 UI 与实际存储语义也有偏差风险。
+
+### Scope
+
+-   home workspace
+-   left file nav
+-   tools drawer
+-   management
+-   model
+-   binding
+-   tool form
+-   current identity/profile display
+
+不做：
+
+-   Dashboard
+-   plugin navigation
+-   new business feature
+
+### Implementation Notes
+
+工作区保留：
+
+``` text
+left compact file list
++
+center tabs
++
+optional right tools
+```
+
+left：
+
+-   search/filter
+-   selected state
+-   current update/error state
+
+top：
+
+-   current profile/model
+-   source
+-   role
+-   major actions with label
+
+settings：
+
+-   update source/schedule
+-   identity/admin
+-   model
+-   tools/bindings
+
+用 table/row/form，而不是每行一个悬浮 card。
+
+schedule：
+
+disk 继续 `interval_hours`，day/hour 只做 UI conversion。
+
+CRUD：
+
+-   local refresh affected section。
+-   不默认 `location.reload()`。
+-   keep filter/selection。
+
+tab：
+
+-   基于 FileRef。
+-   draft tab 不无提示 auto-evict。
+
+### Acceptance Criteria
+
+-   所有旧入口仍可达。
+-   role/profile/source 清楚。
+-   CRUD 后立即一致。
+-   hour/day round-trip 正确。
+-   invalid IP/duplicate/empty binding 有 inline error。
+-   1366×768 和 1920×1080 完成核心操作。
+-   keyboard/touch 不依赖 hover。
+-   tab restore 不串 profile/source。
+
+### Dependencies
+
+T01、T08、T09、T14。
+
+### Definition of Done
+
+功能/密度先验收，视觉 polish 留 T20。
+
+### Review Boundary
+
+按 page group 改，不做全站一次性换肤。
+
+------------------------------------------------------------------------
+
+## T16 · 统一树视图并修复搜索与版本对比连续性
+
+**Linear：INH-628**\
+**Priority：P1 / High**
+
+### Problem
+
+viewer/search/favorites/archive/record_view
+有多套树；折叠、复制、长值、range、remark
+行为不一致。搜索父节点命中可能计数为 0。history 点击某 archive 后
+comparison 可能默认另一版本。
+
+### Scope
+
+-   common tree row/node
+-   local/global search
+-   history
+-   comparison
+-   record view
+-   long value/copy
+-   keyboard
+
+### Implementation Notes
+
+基于 T06 ParsedDocument/NodeRef。
+
+common tree 只做 display + explicit hooks：
+
+-   read only
+-   favorite
+-   remark
+-   search hit
+-   diff state
+
+不读取 storage。
+
+search：
+
+区分：
+
+-   node hit
+-   leaf/value hit
+-   filename hit
+-   note hit
+
+父 node hit 不能因为 leaf count=0 被误判"无结果"。
+
+comparison：
+
+tab payload 持有：
+
+``` text
+old FileRef
+new FileRef
+upload original name
+```
+
+点击历史第三版，就必须展示第三版。
+
+copy：
+
+clipboard 真成功后才显示 success；失败提供 selectable text/download
+fallback。
+
+### Acceptance Criteria
+
+-   搜索 parent/file/note/value 都正确。
+-   locator 不因 filter 改变。
+-   任意 archive click → exact version。
+-   reload/reopen 后 exact version 保留。
+-   四种 comparison 全回归。
+-   所有 tree 页面 focus/expand/copy/long value 一致。
+-   T03 safe rendering 不回归。
+
+### Dependencies
+
+T03、T06、T08、T14、T15。
+
+### Definition of Done
+
+先修 correctness bugs，再提取 viewer/search 共用 tree，最后逐页迁移。
+
+### Review Boundary
+
+不做 schema-driven renderer。
+
+------------------------------------------------------------------------
+
+## T17 · 保留审阅与计算草稿并明确任务结果
+
+**Linear：INH-629**\
+**Priority：P1 / High**
+
+### Problem
+
+review selection 只在局部 render state；切 tab 会丢。DL `editing` 存在
+shared config，中间 binding apply 会持久化，因此 Cancel
+不一定意味着"没写"。
+
+长任务结果也依赖 toast/局部状态，不利于 reconnect/partial failure。
+
+### Scope
+
+-   review draft
+-   DL draft
+-   TaskStatus presentation
+-   partial submit
+-   retry semantics
+
+### Implementation Notes
+
+DL：
+
+``` text
+effective config
+≠
+session draft
+```
+
+session draft：
+
+-   editing state
+-   input
+-   temporary binding selection
+
+Save：
+
+-   带 base config hash/revision。
+-   once commit。
+
+Cancel：
+
+-   authoritative config hash 不变。
+
+review：
+
+-   selection 按 file/session 保存。
+-   未选 item 继续 pending。
+-   draft 绑定 source hash。
+-   source changed → conflict。
+
+TaskStatus UI：
+
+-   queued
+-   running
+-   succeeded
+-   partially_failed
+-   failed
+-   conflict
+
+失败：
+
+-   preserve inputs
+-   show safe retry condition
+
+### Acceptance Criteria
+
+-   tab switch 后 draft 恢复。
+-   两客户端编辑互不影响。
+-   Cancel 后 config hash 不变。
+-   partial review 不改变未选。
+-   source change 有 conflict。
+-   disconnect/reconnect 后任务结果可解释。
+-   repeated click 不重复业务提交。
+
+### Dependencies
+
+T07、T09、T11、T14、T15。
+
+### Definition of Done
+
+DL draft、review selection、TaskStatus 三组浏览器回归通过。
+
+### Review Boundary
+
+不要新增跨设备 draft sync。
+
+------------------------------------------------------------------------
+
+# 9. M4 任务明细
+
+## T18 · 按代表性负载优化渲染与查询成本
+
+**Linear：INH-630**\
+**Priority：P1 / High**
+
+### Problem
+
+已观察到潜在热点：
+
+-   full tree DOM
+-   global search all files
+-   history/records parse/diff on render
+-   high-frequency timers
+-   repeated file scans
+
+但没有真实性能基线。
+
+### Scope
+
+仅优化测量证明的：
+
+-   parsing reuse
+-   tree render
+-   search
+-   diff
+-   polling/timers
+-   long session resource release
+
+### Implementation Notes
+
+基准记录：
+
+-   deployment hardware
+-   file count
+-   node count
+-   archive count
+-   clients
+-   cold/warm cache
+-   interaction latency
+-   event-loop delay
+-   peak memory
+
+优先顺序：
+
+1.  lazy expand
+2.  paging/chunked result
+3.  on-demand diff
+4.  same source hash ParsedDocument reuse
+5.  stop hidden-page timers
+6.  lightweight version signature
+
+只有仍不足时再评估：
+
+-   process pool
+-   search index
+-   database
+
+### Acceptance Criteria
+
+-   同一环境有 before/after。
+-   cold cache 也记录。
+-   result semantics 完全一致。
+-   no field dropped for speed。
+-   large search/tree 可以分批显示。
+-   closed page/tab resource bounded。
+-   没有无证据性能百分比。
+
+### Dependencies
+
+T09、T10、T16、T17。
+
+### Definition of Done
+
+每个性能 change 都有数据；无收益 change 撤回。
+
+### Review Boundary
+
+一个 PR 一个主要 hotspot。
+
+------------------------------------------------------------------------
+
+## T19 · 完成核心流程、完全离线与升级恢复验收
+
+**Linear：INH-631**\
+**Priority：P1 / High**
+
+### Problem
+
+单元修复不能证明最终系统在：
+
+-   actual browser
+-   target OS
+-   old data
+-   mixed migration state
+-   proxy
+-   public network blocked
+-   interruption
+
+条件下仍正确。
+
+### Scope
+
+最终 release gate。
+
+### Implementation Notes
+
+准备脱敏 fixture：
+
+-   legacy layout
+-   new layout
+-   mixed layout
+-   repeated XML
+-   large XML
+-   special JSON
+-   current/archive/record/temp
+-   two profiles
+-   pending remarks
+-   DL config
+-   bindings
+
+角色：
+
+-   guest
+-   deployer
+-   admin
+
+浏览器闭环：
+
+``` text
+upload
+→ view
+→ search
+→ favorite
+→ compare
+→ propose
+→ review
+→ generated file
+→ download
+```
+
+另覆盖：
+
+-   DL
+-   update management
+-   manual record refresh
+-   profile switch
+-   reconnect
+
+release：
+
+-   clean offline install
+-   cold browser
+-   no public internet
+
+backup/recovery：
+
+-   WriteGate
+-   hash manifest
+-   migration interruption
+-   rename interruption
+-   review batch interruption
+-   update commit interruption
+
+rollback：
+
+优先代码 rollback + 保留当前有效业务数据。
+
+不能：
+
+``` text
+restore old snapshot
+→ overwrite everything newer
+```
+
+如果 schema 不兼容：
+
+按 compatibility matrix 做 export/recovery。
+
+### Acceptance Criteria
+
+-   所有 P0 已通过各自回归。
+-   完整业务闭环通过。
+-   offline first install/visit 通过。
+-   no public runtime dependency。
+-   backup 可恢复。
+-   interrupted upgrade 可恢复。
+-   double client / two profile 不串。
+-   no unresolved P0。
+-   明确 single process/single scheduler 支持边界。
+-   记录实测最大代表文件，不虚构"无限"。
+
+### Dependencies
+
+T05、T12、T13、T14、T15、T16、T17、T18。
+
+### Definition of Done
+
+发行报告包含：
+
+-   environment
+-   fixture
+-   result
+-   failed case
+-   manual step
+-   supported boundary
+-   recovery procedure
+-   compatibility matrix
+
+未验证项不能标通过。
+
+### Review Boundary
+
+验收失败回归所属 T task，不新建大量"验收碎片 Issue"。
+
+------------------------------------------------------------------------
+
+# 10. M5 任务明细
+
+## T20 · 收敛视觉样式并清理重复覆盖
+
+**Linear：INH-632**\
+**Priority：P2 / Medium**
+
+### Problem
+
+已有 CSS token、system font、focus-visible、reduced motion，但全局 Card
+hover elevation、彩色边框、多个 tree 色系、DL inline style
+等造成视觉噪声和维护分叉。
+
+### Scope
+
+只改既有页面：
+
+-   spacing
+-   radius
+-   card/border
+-   status color
+-   hover
+-   focus
+-   responsive
+-   repeated CSS
+
+### Implementation Notes
+
+-   复用 existing CSS variables。
+-   默认 list/row/table/section。
+-   Card 只表示真正独立 group。
+-   移除全局 `.q-card:hover` elevation。
+-   减少 decorative color。
+-   保留 semantic status color。
+-   CSS 尽量落在 `mc-*` namespace。
+-   减少全局 Quasar override。
+-   hover action 必须 focus/touch 可达。
+-   不增加 external UI library/font。
+-   不做 Dashboard。
+-   不顺手加 dark theme。
+
+### Acceptance Criteria
+
+-   core pages visual hierarchy 一致。
+-   information density 不退化。
+-   long text readable。
+-   focus visible。
+-   mobile/narrow width 关键按钮不丢。
+-   reduced motion 保留。
+-   no public asset dependency。
+-   functional regression 通过。
+
+### Dependencies
+
+T19。
+
+### Definition of Done
+
+视觉改动可独立回滚；不阻塞已经成熟可发布版本。
+
+------------------------------------------------------------------------
+
+# 11. Milestone Definition of Done
+
+## M1 Gate
+
+必须全部满足：
+
+-   [ ] T13 test isolation 已先验证。
+-   [ ] 所有 P0 有 regression。
+-   [ ] 未授权写入不能发生。
+-   [ ] profile/default 不串。
+-   [ ] dangerous path/URL 被阻止。
+-   [ ] XSS/JS injection 被阻止。
+-   [ ] atomic write/fault injection 通过。
+-   [ ] migration/delete 有 recovery。
+-   [ ] parser 不丢语义。
+-   [ ] review 不误改/不静默丢字段。
+-   [ ] temp/current/archive/record 来源明确。
+-   [ ] bad update 不覆盖。
+-   [ ] derived cache 不陈旧。
+-   [ ] DL deterministic bugs 修复。
+-   [ ] offline package 基础可重建。
+
+## M2 Gate
+
+-   [ ] 核心写 use case 不依赖 NiceGUI。
+-   [ ] authorization/validation/commit 不复制。
+-   [ ] error code 可统一映射。
+-   [ ] log 脱敏。
+-   [ ] canonical architecture/roadmap 唯一。
+
+## M3 Gate
+
+-   [ ] 核心入口完整可达。
+-   [ ] exact history selection。
+-   [ ] tree/search semantics 一致。
+-   [ ] temp/current/archive 明确。
+-   [ ] draft 不丢。
+-   [ ] Cancel 不写 authoritative config。
+-   [ ] loading/success/error/conflict 状态一致。
+
+## M4 Gate
+
+-   [ ] 性能先测量后优化。
+-   [ ] cold/warm 都有数据。
+-   [ ] complete browser flow。
+-   [ ] offline clean install。
+-   [ ] backup/restore。
+-   [ ] upgrade/recovery。
+-   [ ] no unresolved P0。
+
+## M5 Gate
+
+-   [ ] visual consistency。
+-   [ ] keyboard/focus/touch。
+-   [ ] long-value usability。
+-   [ ] no new external runtime asset。
+-   [ ] functional regression。
+
+------------------------------------------------------------------------
+
+# 12. Linear 同步规则
+
+Linear 不是第二份独立设计文档。
+
+每个 Issue 必须至少保持：
+
+-   Task ID
+-   Problem
+-   Scope
+-   Implementation Notes
+-   Acceptance Criteria
+-   Dependencies
+-   Priority
+-   DoD
+
+Roadmap 改任务语义时：
+
+1.  先修改本文件。
+2.  同步 Issue title/description。
+3.  同步 Milestone。
+4.  同步 blocks/blockedBy。
+5.  回查 Linear。
+6.  不重新创建重复 Issue。
+
+当前映射固定：
+
+  Task   Linear
+  ------ ---------
+  T01    INH-612
+  T02    INH-613
+  T03    INH-615
+  T04    INH-616
+  T05    INH-617
+  T06    INH-618
+  T07    INH-619
+  T08    INH-620
+  T09    INH-621
+  T10    INH-622
+  T11    INH-623
+  T12    INH-624
+  T13    INH-625
+  T14    INH-626
+  T15    INH-627
+  T16    INH-628
+  T17    INH-629
+  T18    INH-630
+  T19    INH-631
+  T20    INH-632
+
+`INH-614` 是已取消的 MCP 测试 Issue，不属于 Roadmap。
+
+------------------------------------------------------------------------
+
+# 13. Deferred / Future Consideration
+
+以下内容当前 **不创建 Issue**。
+
+## Database / SQLite
+
+重新评估触发：
+
+-   需要多进程 writer。
+-   文件跨对象事务逻辑继续明显膨胀。
+-   查询/关系复杂度已经实测成为核心成本。
+-   文件 storage 成为明确性能瓶颈。
+
+数据库不能自动解决：
+
+-   XML 保真
+-   NodeRef
+-   XSS -错误 DL
+-   arbitrary URL
+
+因此现在不迁。
+
+## SSO / Account / Organization Isolation
+
+重新评估触发：
+
+-   shared workstation。
+-   untrusted intranet。
+-   audit identity requirement。
+-   department/organization isolation 明确成为产品需求。
+
+当前 profile 不等于 tenant。
+
+## Multi-process / HA
+
+重新评估触发：
+
+-   单进程成为实测吞吐瓶颈。
+-   可用性指标要求进程级故障不中断。
+-   WriteGate / file locks 无法覆盖部署模型。
+
+届时必须重新设计 writer ownership，不能简单启动多个 NiceGUI worker
+指向同一 data root。
+
+## React / Vue Rewrite
+
+只有 NiceGUI 经实际验证无法满足已确认的：
+
+-   UX
+-   offline
+-   performance
+-   deployment
+
+要求时才重新比较。
+
+## Plugin System
+
+至少出现多个真实独立扩展，并且固定代码分支成本已经成为持续问题后再评估。
+
+## Workflow Engine
+
+仅当审批/长事务/补偿流程真实复杂化，而不是只有当前 review batch
+时再考虑。
+
+## Automatic Retention
+
+历史、recovery、quarantine
+都包含可恢复数据。没有明确业务保留策略和管理员授权前，不增加自动永久删除。
+
+## Zero-downtime Hot Code Update
+
+当前不属于 MCChecker
+成熟化必要条件。只有明确维护窗口不可接受、有可用性指标并接受复杂度时再评估。
+
+------------------------------------------------------------------------
+
+# 14. 最终执行顺序
+
+推荐首批并行：
+
+``` text
+T13  测试隔离
+T01  权限/profile
+T02  path/network/upload
+T03  injection
+T04  atomic I/O
+T06  parser/locator
+T11  DL deterministic fixes
+T12  port + dependency/offline baseline
+```
+
+第二批：
+
+``` text
+T05  recovery
+T07  review
+T08  FileRef/temp
+T09  update/tasks
+T10  cache consistency
+```
+
+然后：
+
+``` text
+T14 → T15/T16/T17 → T18 → T19 → T20
+```
+
+其中：
+
+-   P0 可以独立发布。
+-   T12 不等待 M1 全部完成。
+-   T19 才是完整 Release Gate。
+-   T20 永远不阻塞正确性/稳定性发布。
+
+------------------------------------------------------------------------
+
+# 15. 全局 Definition of Done
+
+任何 T task 只有同时满足以下条件才可以在 Linear 标记 Done：
+
+1.  实际代码已经实现。
+2.  对应正例、反例和兼容回归已经执行。
+3.  没有损伤已有数据。
+4.  需要的 migration/recovery 已验证。
+5.  相关文档已经同步。
+6.  真实 blocks/blockedBy 已更新。
+7.  未验证内容明确留下，不用"理论上应该"代替结果。
+
+**文档完成 ≠ 开发完成。Issue 创建 ≠ 开发完成。测试未执行 ≠ 测试通过。**
