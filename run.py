@@ -69,14 +69,17 @@ def _get_storage_secret() -> str:
 
 
 def _get_port() -> int:
+    """从环境变量获取端口，默认 50001"""
     raw = os.getenv("MCHECKER_PORT")
     if not raw:
         return 50001
     try:
         port = int(str(raw).strip())
     except ValueError:
+        logger.warning("Invalid MCHECKER_PORT: %s, using default 50001", raw)
         return 50001
     if port < 1 or port > 65535:
+        logger.warning("MCHECKER_PORT out of range: %s, using default 50001", port)
         return 50001
     return port
 
@@ -85,8 +88,7 @@ ui.run(
     title="MCChecker",
     favicon=pathlib.Path(__file__).parent / "app" / "static" / "favicon.ico",
     host="0.0.0.0",
-    # port=_get_port(),
-    port=50002,
+    port=_get_port(),
     reload=False,
     show=False,
     storage_secret=_get_storage_secret(),

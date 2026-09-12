@@ -7,7 +7,8 @@ import json
 import os
 import logging
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 import math
 
 from . import storage
@@ -15,6 +16,71 @@ from . import storage
 logger = logging.getLogger(__name__)
 
 DLTOOL_FILE = os.path.join(storage.DATA_DIR, "dltool_config.json")
+
+
+# ---------------------------------------------------------------------------
+# Data classes for structured results
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DLResult:
+    """DL 计算结果"""
+    input_index: int  # 原始输入行索引
+    value: Optional[float]
+    status: str  # "success", "missing", "invalid", "no_real_root"
+    residual: Optional[float] = None
+    message: Optional[str] = None
+
+
+@dataclass
+class CoefficientResult:
+    """系数提取结果"""
+    status: str  # "success", "missing", "invalid"
+    value: Optional[float] = None
+    message: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+def validate_number(value, name: str) -> float:
+    """验证数值有效（拒绝 None / NaN / Inf）"""
+    if value is None:
+        raise ValueError(f"{name} is required")
+    if not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be numeric")
+    if math.isnan(value) or math.isinf(value):
+        raise ValueError(f"{name} must be finite")
+    return float(value)
+
+
+def validate_interval(low, high) -> Tuple[float, float]:
+    """验证区间有效"""
+    if low is None or high is None:
+        raise ValueError("Interval bounds required")
+    if low >= high:
+        raise ValueError(f"Invalid interval: [{low}, {high}]")
+    return (float(low), float(high))
+
+
+def extract_coefficient(data, row_index: int, col_index: int) -> CoefficientResult:
+    """安全提取系数"""
+    try:
+        if data is None:
+            return CoefficientResult("missing", message="No data")
+        if row_index >= len(data):
+            return CoefficientResult("missing", message=f"Row {row_index} not found")
+        row = data[row_index]
+        if col_index >= len(row):
+            return CoefficientResult("missing", message=f"Column {col_index} not found")
+        value = row[col_index]
+        if value is None:
+            return CoefficientResult("missing", message="Value is None")
+        value = validate_number(value, "coefficient")
+        return CoefficientResult("success", value=value)
+    except (TypeError, ValueError) as e:
+        return CoefficientResult("invalid", message=str(e))
 
 
 def _get_config_file() -> str:
@@ -292,7 +358,7 @@ def detect_multi_solutions(
     if effective_x_min >= effective_x_max:
         return {"has_multi": False, "error": "search_range_invalid"}
 
-    x_samples = max(int(x_samples or 0), 50)
+    x_samples = max(int(x_samples if x_samples is not None else 0), 50)
     ys: List[float] = []
     for i in range(x_samples + 1):
         x = effective_x_min + (effective_x_max - effective_x_min) * i / x_samples
@@ -360,6 +426,101 @@ def detect_multi_solutions(
         "x_span": (effective_x_min, effective_x_max),
         "y_span": (check_y_min, check_y_max),
     }
+
+
+def _eval_poly_list(coeffs: List[float], x: float) -> float:
+    """秦九韶算法求值: coeffs = [a_n, ..., a_1, a_0]"""
+    result = 0.0
+    for c in coeffs:
+        result = result * x + c
+    return result
+
+
+def _is_zero_polynomial(coeffs: List[float]) -> bool:
+    return all(abs(c) < 1e-15 for c in coeffs)
+
+
+def _is_constant_polynomial(coeffs: List[float]) -> bool:
+    """除常数项外所有高次系数为零"""
+    if len(coeffs) <= 1:
+        return True
+    return all(abs(c) < 1e-15 for c in coeffs[:-1])
+
+
+def find_polynomial_roots(
+    coeffs: List[float],
+    interval: Tuple[float, float],
+    tolerance: float = 1e-8,
+    samples: int = 20000,
+) -> List[DLResult]:
+    """改进的多项式求根（在指定区间内）
+
+    coeffs: [a_n, a_{n-1}, ..., a_1, a_0]  降幂排列
+    interval: (low, high)
+
+    改进点:
+    - 端点检测
+    - 零/常数多项式特殊处理
+    - 候选根 residual 验证
+    - 不声称"全部实根"除非可证明
+    """
+    low, high = validate_interval(interval[0], interval[1])
+    results: List[DLResult] = []
+
+    # 1. 特殊多项式
+    if _is_zero_polynomial(coeffs):
+        return [DLResult(-1, None, "invalid", message="zero polynomial")]
+    if _is_constant_polynomial(coeffs):
+        const = coeffs[-1] if coeffs else 0.0
+        if abs(const) < tolerance:
+            return [DLResult(-1, None, "success", message="constant zero")]
+        return [DLResult(-1, None, "no_real_root", message="non-zero constant")]
+
+    # 2. 端点检测
+    for ep in (low, high):
+        val = _eval_poly_list(coeffs, ep)
+        if abs(val) < tolerance:
+            results.append(DLResult(-1, ep, "success", residual=abs(val)))
+
+    # 3. Sampling + sign change
+    step = (high - low) / samples
+    prev_val = _eval_poly_list(coeffs, low)
+    candidates: List[float] = []
+
+    for i in range(1, samples + 1):
+        x_curr = low + i * step
+        curr_val = _eval_poly_list(coeffs, x_curr)
+
+        if curr_val == 0.0:
+            candidates.append(x_curr)
+        elif prev_val * curr_val < 0:
+            root = _bisect(
+                lambda x, c=coeffs: _eval_poly_list(c, x),
+                x_curr - step, x_curr, tol=1e-12, max_iter=80,
+            )
+            if root is not None:
+                candidates.append(round(root, 10))
+
+        prev_val = curr_val
+
+    # 4. 去重 + residual 验证
+    seen: List[float] = []
+    for cand in candidates:
+        # 跳过与端点重复
+        if any(abs(cand - ep) < 1e-9 for ep in (low, high)):
+            continue
+        # 去重
+        if any(abs(cand - s) < 1e-9 for s in seen):
+            continue
+        seen.append(cand)
+        residual = abs(_eval_poly_list(coeffs, cand))
+        if residual < tolerance:
+            results.append(DLResult(-1, cand, "success", residual=residual))
+        else:
+            results.append(DLResult(-1, cand, "invalid", residual=residual,
+                                    message="residual too large"))
+
+    return results
 
 
 def parse_coeffs_from_data(data: dict, field_map: Dict[str, str]) -> Dict[str, float]:

@@ -1,0 +1,16 @@
+{
+  "string": "text",
+  "integer": 42,
+  "float": 3.14159,
+  "boolean_true": true,
+  "boolean_false": false,
+  "null_value": null,
+  "empty_string": "",
+  "empty_object": {},
+  "empty_array": [],
+  "negative": -100,
+  "zero": 0,
+  "scientific": 0.000123,
+  "unicode": "中文 日本語 한국어 🎉",
+  "special_chars": "line1\nline2\ttab\\slash\"quote"
+}

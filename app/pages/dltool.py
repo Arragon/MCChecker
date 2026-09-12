@@ -1,12 +1,118 @@
 """DL 快捷计算工具 —— UI 页面"""
 
+from __future__ import annotations
+
+import hashlib
+import html
 import json
 import os
+import threading
 
 from nicegui import ui
 
 from app.core import dltool as engine
 from app.core import storage, parser, parse_cache
+
+
+# ---------------------------------------------------------------------------
+# DLDraft — 会话草稿 (T17 / INH-629)
+# ---------------------------------------------------------------------------
+
+class DLDraft:
+    """DL 会话草稿
+
+    保存 editing state / inputs / temporary binding selection，
+    与 authoritative config 隔离。commit 时校验 base_config_hash
+    确保源配置未被其他客户端修改。
+    """
+
+    def __init__(self, base_config: dict):
+        self.editing_state: dict = {}
+        self.inputs: dict = {}  # coeff_key -> value
+        self.temp_bindings: dict = {}  # item_id -> binding dict
+        self.base_config_hash: str = self._compute_config_hash(base_config)
+
+    @staticmethod
+    def _compute_config_hash(cfg: dict) -> str:
+        """计算 authoritative config 的 hash（排除运行时字段）"""
+        clean = {k: v for k, v in cfg.items() if not k.startswith("_")}
+        raw = json.dumps(clean, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def capture_inputs(self, cfg: dict) -> None:
+        """从 cfg 的 _inputs 捕获当前输入值"""
+        for inp in cfg.get("_inputs", []):
+            key = getattr(inp, "_coeff_key", None)
+            section = getattr(inp, "_coeff_section", None)
+            if key and section:
+                self.inputs[f"{section}.{key}"] = inp.value
+
+    def restore_inputs(self, cfg: dict) -> None:
+        """恢复输入值到 cfg 的 _inputs"""
+        for inp in cfg.get("_inputs", []):
+            key = getattr(inp, "_coeff_key", None)
+            section = getattr(inp, "_coeff_section", None)
+            if key and section:
+                stored = self.inputs.get(f"{section}.{key}")
+                if stored is not None:
+                    inp.value = stored
+                    try:
+                        inp.update()
+                    except Exception:
+                        pass
+
+    def check_base_unchanged(self, cfg: dict) -> bool:
+        """校验 authoritative config 自 draft 创建后未变"""
+        current_hash = self._compute_config_hash(cfg)
+        return current_hash == self.base_config_hash
+
+    def commit(self, cfg: dict) -> bool:
+        """提交草稿到 authoritative config
+
+        Returns:
+            bool: True 表示提交成功，False 表示 base config 已变（冲突）
+        """
+        if not self.check_base_unchanged(cfg):
+            return False
+        # 将 inputs 写入 cfg
+        for full_key, value in self.inputs.items():
+            parts = full_key.split(".")
+            d = cfg
+            for p in parts[:-1]:
+                d = d.setdefault(p, {})
+            d[parts[-1]] = value if value is not None else 0.0
+        # 将 temp_bindings 写入
+        for item_id, binding in self.temp_bindings.items():
+            cfg.setdefault("items", {}).setdefault(item_id, {})["binding"] = binding
+        cfg["editing"] = False
+        return True
+
+    def cancel(self) -> None:
+        """取消草稿：清空编辑状态，authoritative config 不变"""
+        self.editing_state.clear()
+        self.inputs.clear()
+        self.temp_bindings.clear()
+
+
+# ---------------------------------------------------------------------------
+# 防重复提交锁 (T17 / INH-629)
+# ---------------------------------------------------------------------------
+
+_submit_locks: dict[str, bool] = {}
+_submit_locks_guard = threading.Lock()
+
+
+def submit_with_lock(operation_key: str, submit_fn):
+    """防重复提交：同一 operation_key 同时只允许一次业务提交"""
+    with _submit_locks_guard:
+        if operation_key in _submit_locks:
+            return None  # 已经在处理
+        _submit_locks[operation_key] = True
+    try:
+        return submit_fn()
+    finally:
+        with _submit_locks_guard:
+            _submit_locks.pop(operation_key, None)
 
 
 _COEFF_LABELS = [
@@ -60,14 +166,19 @@ def _render_edit_buttons(cfg: dict, on_refresh=None):
         ui.button("修改", icon="edit", on_click=lambda: _enter_edit_mode(cfg, on_refresh)) \
             .props("flat color=primary")
     else:
-        ui.button("保存", icon="save", on_click=lambda: _save_and_exit(cfg, on_refresh)) \
-            .props("flat color=positive")
-        ui.button("取消", icon="close", on_click=lambda: _cancel_edit(cfg, on_refresh)) \
-            .props("flat color=grey-5")
+        ui.button("保存", icon="save", on_click=lambda: submit_with_lock(
+            f"dl_save_{id(cfg)}", lambda: _save_and_exit(cfg, on_refresh)
+        )).props("flat color=positive")
+        ui.button("取消", icon="close", on_click=lambda: submit_with_lock(
+            f"dl_cancel_{id(cfg)}", lambda: _cancel_edit(cfg, on_refresh)
+        )).props("flat color=grey-5")
 
 
 def _enter_edit_mode(cfg: dict, on_refresh=None):
     cfg["editing"] = True
+    # 创建草稿快照（T17 / INH-629）
+    draft = DLDraft(cfg)
+    cfg["_draft"] = draft
     engine.save_config(cfg)
     ui.notify("已进入编辑模式", type="info")
     if on_refresh:
@@ -75,15 +186,32 @@ def _enter_edit_mode(cfg: dict, on_refresh=None):
 
 
 def _save_and_exit(cfg: dict, on_refresh=None):
-    _collect_inputs(cfg)
-    cfg["editing"] = False
+    draft = cfg.get("_draft")
+    if draft is not None:
+        # 捕获当前输入到草稿
+        draft.capture_inputs(cfg)
+        # 提交草稿（带 base config hash 校验）
+        ok = draft.commit(cfg)
+        if not ok:
+            ui.notify("配置已被其他客户端修改，请刷新后重试", type="warning")
+            return
+    else:
+        _collect_inputs(cfg)
+        cfg["editing"] = False
     engine.save_config(cfg)
+    cfg.pop("_draft", None)
     ui.notify("配置已保存", type="positive")
     if on_refresh:
         on_refresh()
 
 
 def _cancel_edit(cfg: dict, on_refresh=None):
+    draft = cfg.get("_draft")
+    if draft is not None:
+        # 取消草稿：authoritative config hash 不变
+        draft.cancel()
+        cfg.pop("_draft", None)
+    # 重新加载原始配置
     fresh = engine.load_config()
     cfg.clear()
     cfg.update(fresh)
@@ -297,12 +425,12 @@ def _show_multi_solution_dialog(res: dict):
                 ui.label("建议缩小 x / y 范围，或在“反向求解结果”弹窗中选择最优解以确保唯一性。").classes("text-body2 text-orange-9")
 
         ui.label(f"多解点位（最多展示 {min(len(cases), 8)} 组 y 值）").classes("mc-section-title q-mt-md q-mb-sm")
-        ui.html('<table class="result-table"><thead><tr><th>目标 y</th><th>解 x（同一 y 对应多个 x）</th></tr></thead><tbody>', sanitize=False)
+        ui.html('<table class="result-table"><thead><tr><th>目标 y</th><th>解 x（同一 y 对应多个 x）</th></tr></thead><tbody>')
         for c in cases[:8]:
             xs = c.get("x_values") or []
-            x_str = ", ".join(str(round(float(x), 10)) for x in xs)
-            ui.html(f"<tr><td>{round(float(c.get('y', 0.0)), 10)}</td><td>{x_str}</td></tr>", sanitize=False)
-        ui.html("</tbody></table>", sanitize=False)
+            x_str = ", ".join(html.escape(str(round(float(x), 10))) for x in xs)
+            ui.html(f"<tr><td>{html.escape(str(round(float(c.get('y', 0.0)), 10)))}</td><td>{x_str}</td></tr>")
+        ui.html("</tbody></table>")
 
         with ui.row().classes("w-full justify-end q-mt-md"):
             ui.button("知道了", on_click=dlg.close).props("color=primary")
@@ -538,12 +666,12 @@ def _render_calc_item(cfg: dict, item_id: str, item: dict, editing: bool,
                             ui.label("检测到多解：当前系数与范围组合存在 y→x 的一对多场景").classes("text-body2 text-orange-9")
                         cases = res.get("cases") or []
                         ui.label(f"多解点位（最多展示 {len(cases)} 组 y 值）").classes("text-caption text-orange-9 q-mt-sm")
-                        ui.html('<table class="result-table"><thead><tr><th>目标 y</th><th>解 x（同一 y 对应多个 x）</th></tr></thead><tbody>', sanitize=False)
+                        ui.html('<table class="result-table"><thead><tr><th>目标 y</th><th>解 x（同一 y 对应多个 x）</th></tr></thead><tbody>')
                         for c in cases:
                             xs = c.get("x_values") or []
-                            x_str = ", ".join(str(round(float(x), 10)) for x in xs)
-                            ui.html(f"<tr><td>{round(float(c.get('y', 0.0)), 10)}</td><td>{x_str}</td></tr>", sanitize=False)
-                        ui.html("</tbody></table>", sanitize=False)
+                            x_str = ", ".join(html.escape(str(round(float(x), 10))) for x in xs)
+                            ui.html(f"<tr><td>{html.escape(str(round(float(c.get('y', 0.0)), 10)))}</td><td>{x_str}</td></tr>")
+                        ui.html("</tbody></table>")
                 return res
 
             for inp in list(coeff_inputs) + list(range_inputs.values()) + list(extra_inputs.values()):

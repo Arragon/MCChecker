@@ -12,9 +12,15 @@
   --mc-danger: #dc2626;
   --mc-radius: 10px;
   --mc-radius-sm: 8px;
+  --mc-radius-xs: 6px;
+  --mc-spacing-xs: 4px;
+  --mc-spacing-sm: 8px;
+  --mc-spacing-md: 12px;
+  --mc-spacing-lg: 16px;
   --mc-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --mc-shadow-md: 0 8px 20px rgba(15, 23, 42, 0.08);
   --mc-focus: rgba(37, 99, 235, 0.35);
+  --mc-font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 html,
@@ -150,10 +156,6 @@ body {
   box-shadow: var(--mc-shadow-sm);
 }
 
-.q-card:hover {
-  box-shadow: var(--mc-shadow-md);
-}
-
 .q-btn {
   text-transform: none;
   letter-spacing: 0;
@@ -216,17 +218,12 @@ body {
 }
 
 .mc-download-btn.q-btn {
-  border-radius: 10px;
-  transition: transform 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+  border-radius: var(--mc-radius);
+  transition: background-color 0.12s ease;
 }
 
 .mc-download-btn.q-btn:hover {
   background: rgba(37, 99, 235, 0.10);
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.10);
-}
-
-.mc-download-btn.q-btn:active {
-  transform: translateY(1px) scale(0.98);
 }
 
 .mc-download-btn--icon.q-btn {
@@ -242,10 +239,10 @@ body {
 }
 
 .mc-diff-wrap {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--mc-font-mono);
   font-size: 0.78rem;
   line-height: 1.45;
-  border-radius: 10px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(226, 232, 240, 0.95);
   overflow: hidden;
 }
@@ -282,11 +279,11 @@ body {
 }
 
 .mc-change-block {
-  border-radius: 10px;
+  border-radius: var(--mc-radius);
   border: 1px solid rgba(226, 232, 240, 0.95);
-  padding: 10px 12px;
-  margin: 10px 0;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  padding: var(--mc-spacing-md) var(--mc-spacing-lg);
+  margin: var(--mc-spacing-md) 0;
+  font-family: var(--mc-font-mono);
   font-size: 0.78rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -361,8 +358,7 @@ body {
 }
 
 .mc-mono {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  font-family: var(--mc-font-mono);
 }
 
 .mc-page-title {
@@ -377,10 +373,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--mc-spacing-lg);
   flex-direction: column;
   border: 1px solid var(--mc-border);
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   background: var(--mc-surface);
 }
 
@@ -405,12 +401,6 @@ body {
   }
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mc-spinner {
-    animation: none;
   }
 }
 
@@ -474,6 +464,22 @@ body {
   line-height: 1.45;
   user-select: none;
   overflow-x: auto;
+}
+
+/* ---- T20: 通用工具类 ---- */
+
+.mc-section {
+  padding: var(--mc-spacing-md);
+  border-radius: var(--mc-radius-sm);
+}
+
+.mc-status-success { color: var(--mc-success); }
+.mc-status-warning { color: var(--mc-warning); }
+.mc-status-error   { color: var(--mc-danger); }
+
+.mc-action-btn:focus-visible {
+  outline: 2px solid var(--mc-primary);
+  outline-offset: 2px;
 }
 
 .mc-tree-toolbar {
@@ -866,8 +872,8 @@ body {
   line-height: 1.45;
   color: rgba(51, 65, 85, 0.95);
   background: rgba(37, 99, 235, 0.06);
-  border-radius: 8px;
-  padding: 4px 8px;
+  border-radius: var(--mc-radius-sm);
+  padding: var(--mc-spacing-xs) var(--mc-spacing-sm);
 }
 
 .mc-review-card {
@@ -1045,14 +1051,9 @@ body {
 }
 
 .dl-page .dl-card {
-  border-radius: 12px;
+  border-radius: var(--mc-radius);
   border: 1px solid var(--mc-border);
   box-shadow: var(--mc-shadow-sm);
-  transition: box-shadow 0.2s;
-}
-
-.dl-page .dl-card:hover {
-  box-shadow: var(--mc-shadow-md);
 }
 
 .dl-page .coeff-grid {
@@ -1081,8 +1082,7 @@ body {
 
 .dl-page .coeff-grid input {
   text-align: center;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  font-family: var(--mc-font-mono);
   font-size: 0.88rem !important;
 }
 
@@ -1114,8 +1114,7 @@ body {
 .dl-page .result-table td {
   padding: 5px 12px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.85);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  font-family: var(--mc-font-mono);
 }
 
 .dl-page .result-table tr:hover td {
@@ -1134,8 +1133,8 @@ body {
 
 .dl-page .calc-panel {
   border: 1px solid var(--mc-border);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: var(--mc-radius);
+  padding: var(--mc-spacing-lg);
   background: var(--mc-surface);
 }
 
@@ -1176,8 +1175,7 @@ body {
 .mc-diff-code pre,
 .mc-diff-code code,
 .mc-diff-code .hljs {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  font-family: var(--mc-font-mono);
   font-size: 0.84rem;
   line-height: 1.55;
 }
@@ -1213,4 +1211,129 @@ body {
 
 .mc-diff-code .hljs-comment {
   color: rgba(100, 116, 139, 0.9);
+}
+
+/* ---- T15: 紧凑文件列表 ---- */
+
+.mc-sidebar-search .q-field__control {
+  min-height: 32px !important;
+  height: 32px !important;
+}
+
+.mc-file-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.mc-file-item:hover {
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.mc-file-item.mc-file-item-active {
+  background: rgba(37, 99, 235, 0.12);
+  border-left: 3px solid var(--mc-primary);
+}
+
+.mc-file-icon {
+  flex-shrink: 0;
+}
+
+.mc-file-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+  flex-shrink: 0;
+}
+
+.mc-file-item:hover .mc-file-actions,
+.mc-file-item:focus-within .mc-file-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ---- T15: 管理表格布局 ---- */
+
+.mc-mgmt-table {
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius);
+  overflow: hidden;
+}
+
+.mc-mgmt-thead {
+  background: var(--mc-surface-2);
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.mc-mgmt-th {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--mc-muted);
+  padding: 8px 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mc-mgmt-row {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  transition: background 0.1s ease;
+}
+
+.mc-mgmt-row:last-child {
+  border-bottom: none;
+}
+
+.mc-mgmt-row:hover {
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.mc-mgmt-row > .row {
+  padding: 6px 0;
+}
+
+.mc-mgmt-td {
+  padding: 6px 12px;
+  font-size: 0.84rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.mc-mgmt-add-form {
+  padding: 8px 12px;
+  border: 1px dashed var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+  background: rgba(241, 245, 249, 0.5);
+}
+
+@media (max-width: 600px) {
+  .mc-mgmt-td {
+    font-size: 0.78rem;
+    padding: 4px 8px;
+  }
+
+  .mc-mgmt-th {
+    font-size: 0.72rem;
+    padding: 6px 8px;
+  }
+
+  .mc-section {
+    font-size: 0.9em;
+    padding: var(--mc-spacing-sm);
+  }
+
+  .mc-content {
+    padding: 0 var(--mc-spacing-sm);
+  }
 }

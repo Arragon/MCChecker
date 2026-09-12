@@ -1,0 +1,44 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 9090,
+    "workers": 8,
+    "ssl": {
+      "enabled": false,
+      "cert": "/path/to/cert.pem",
+      "key": "/path/to/key.pem"
+    }
+  },
+  "database": {
+    "host": "db.example.com",
+    "port": 5432,
+    "name": "mydb",
+    "user": "admin",
+    "password": "new_secret",
+    "pool_size": 20
+  },
+  "logging": {
+    "level": "DEBUG",
+    "format": "json",
+    "outputs": [
+      "console",
+      "file",
+      "syslog"
+    ],
+    "file": {
+      "path": "/var/log/app.log",
+      "max_size": "200MB",
+      "rotation": "hourly"
+    }
+  },
+  "features": {
+    "enable_cache": true,
+    "cache_ttl": 7200,
+    "rate_limit": 2000,
+    "new_feature": true
+  },
+  "monitoring": {
+    "enabled": true,
+    "endpoint": "/metrics"
+  }
+}

@@ -2,7 +2,11 @@
 
 import json
 import pytest
-from app.core.parser import parse_file, parse_json, parse_xml, flatten_tree, get_all_values
+from app.core.parser import (
+    parse_file, parse_json, parse_xml, flatten_tree, get_all_values,
+    parse_xml_full, parse_json_full, compute_content_hash,
+)
+from app.core.models import ParsedDocument, NodeRef
 
 
 SAMPLE_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -159,3 +163,202 @@ class TestFlattenTree:
         assert len(values) > 0
         # 所有值应为字符串
         assert all(isinstance(v, str) for v in values.values())
+
+
+# ---------------------------------------------------------------------------
+# 完整语义解析测试（parse_xml_full / parse_json_full）
+# ---------------------------------------------------------------------------
+
+class TestParseXmlFull:
+    def test_returns_parsed_document(self):
+        doc = parse_xml_full(SAMPLE_XML, "config.xml")
+        assert isinstance(doc, ParsedDocument)
+        assert doc.format == "xml"
+        assert doc.source.content_hash == compute_content_hash(SAMPLE_XML)
+
+    def test_preserves_all_attributes(self):
+        """大 XML 也不丢属性：所有 attribute 都保留"""
+        xml = b'<root><item a="1" b="2" c="3" d="4" e="5" f="6" g="7" h="8"/></root>'
+        doc = parse_xml_full(xml, "test.xml")
+        # 找到 item 节点
+        item_node = doc.root["children"][0]["children"][0]
+        attr_children = [c for c in item_node["children"] if c["attrs"]["type"] == "attribute"]
+        assert len(attr_children) == 8  # 全部 8 个属性都保留
+
+    def test_xml_sibling_occurrence(self):
+        """重复 sibling 的 occurrence 定位"""
+        xml = b'<root><item>A</item><item>B</item><item>C</item></root>'
+        doc = parse_xml_full(xml, "test.xml")
+        items = doc.root["children"][0]["children"]
+        assert len(items) == 3
+        assert items[0]["occurrence"] == 1
+        assert items[1]["occurrence"] == 2
+        assert items[2]["occurrence"] == 3
+        assert items[0]["locator"] != items[1]["locator"]
+
+    def test_namespace_handling(self):
+        """命名空间展开"""
+        xml = b'<root xmlns:ns="http://example.com"><ns:item>val</ns:item></root>'
+        doc = parse_xml_full(xml, "test.xml")
+        item = doc.root["children"][0]["children"][0]
+        assert "{http://example.com}" in item["tag"]
+
+    def test_locator_format(self):
+        xml = b'<root><child/></root>'
+        doc = parse_xml_full(xml, "test.xml")
+        child = doc.root["children"][0]["children"][0]
+        assert child["locator"].startswith("xml:")
+        assert "[1]" in child["locator"]
+
+    def test_text_and_tail(self):
+        xml = b'<root><a>hello</a><b>world</b></root>'
+        doc = parse_xml_full(xml, "test.xml")
+        a_node = doc.root["children"][0]["children"][0]
+        assert a_node["value"] == "hello"
+
+    def test_large_xml_no_attr_filtering(self):
+        """超过 200000 bytes 的 XML 也不丢属性"""
+        # 构建一个大 XML（填充 padding 属性使其超过阈值）
+        attrs = " ".join(f'attr{i}="val{i}"' for i in range(200))
+        xml = f'<root><item {attrs}>text</item></root>'.encode("utf-8")
+        # 确保超过阈值
+        if len(xml) < 200_000:
+            padding = "x" * (200_000 - len(xml) + 100)
+            xml = f'<root><item {attrs}>{padding}</item></root>'.encode("utf-8")
+        doc = parse_xml_full(xml, "big.xml")
+        item = doc.root["children"][0]["children"][0]
+        attr_children = [c for c in item["children"] if c["attrs"]["type"] == "attribute"]
+        assert len(attr_children) == 200  # 全部保留
+
+    def test_unbound_prefix_recovery(self):
+        """未绑定前缀的 XML 能正常解析"""
+        xml = b'<root><ns:item>val</ns:item></root>'
+        doc = parse_xml_full(xml, "test.xml")
+        assert doc.format == "xml"
+        # 应能解析出子节点
+        assert len(doc.root["children"][0]["children"]) >= 1
+
+
+class TestParseJsonFull:
+    def test_returns_parsed_document(self):
+        doc = parse_json_full(SAMPLE_JSON, "config.json")
+        assert isinstance(doc, ParsedDocument)
+        assert doc.format == "json"
+        assert doc.source.content_hash == compute_content_hash(SAMPLE_JSON)
+
+    def test_preserves_types(self):
+        """保留 int/float/bool/null/str 类型"""
+        data = b'{"i": 42, "f": 3.14, "b": true, "n": null, "s": "hello"}'
+        doc = parse_json_full(data, "test.json")
+        # wrapper.children[0] 是 root object node，其 children 是 dict
+        obj = doc.root["children"][0]
+        children = obj["children"]
+        assert isinstance(children, dict)
+        assert children["i"]["value_type"] == "int"
+        assert children["i"]["value"] == 42
+        assert children["f"]["value_type"] == "float"
+        assert children["b"]["value_type"] == "bool"
+        assert children["n"]["value_type"] == "NoneType"
+        assert children["s"]["value_type"] == "str"
+        assert children["s"]["value"] == "hello"
+
+    def test_nested_object(self):
+        data = b'{"config": {"name": "test", "count": 5}}'
+        doc = parse_json_full(data, "test.json")
+        obj = doc.root["children"][0]
+        config = obj["children"]["config"]
+        assert config["type"] == "object"
+        assert config["children"]["name"]["value"] == "test"
+        assert config["children"]["count"]["value"] == 5
+
+    def test_array(self):
+        data = b'{"items": [1, "two", null]}'
+        doc = parse_json_full(data, "test.json")
+        obj = doc.root["children"][0]
+        items = obj["children"]["items"]
+        assert items["type"] == "array"
+        assert len(items["children"]) == 3
+        assert items["children"][0]["value"] == 1
+        assert items["children"][1]["value"] == "two"
+        assert items["children"][2]["value"] is None
+
+    def test_empty_object_and_array(self):
+        data = b'{"empty_obj": {}, "empty_arr": []}'
+        doc = parse_json_full(data, "test.json")
+        obj = doc.root["children"][0]
+        assert obj["children"]["empty_obj"]["children"] == {}
+        assert obj["children"]["empty_arr"]["children"] == []
+
+    def test_key_with_special_chars(self):
+        """JSON key 带 / ~ . 特殊字符"""
+        data = b'{"a/b": 1, "c~d": 2, "e.f": 3}'
+        doc = parse_json_full(data, "test.json")
+        obj = doc.root["children"][0]
+        children = obj["children"]
+        # a/b -> JSON Pointer 中应被 escaped 为 a~1b
+        assert "a/b" in children
+        assert children["a/b"]["locator"] == "$/a~1b"
+        # c~d -> c~0d
+        assert children["c~d"]["locator"] == "$/c~0d"
+        # e.f 不需要特殊转义
+        assert children["e.f"]["locator"] == "$/e.f"
+
+    def test_root_scalar(self):
+        """JSON 根为标量"""
+        data = b'42'
+        doc = parse_json_full(data, "test.json")
+        # root scalar is wrapped directly in wrapper children
+        children = doc.root["children"]
+        assert isinstance(children, list)
+        assert len(children) == 1
+        assert children[0]["value"] == 42
+
+    def test_type_change_same_key(self):
+        """不同值类型变化"""
+        data1 = b'{"x": 42}'
+        data2 = b'{"x": "hello"}'
+        doc1 = parse_json_full(data1, "a.json")
+        doc2 = parse_json_full(data2, "b.json")
+        obj1 = doc1.root["children"][0]
+        obj2 = doc2.root["children"][0]
+        assert obj1["children"]["x"]["value_type"] == "int"
+        assert obj2["children"]["x"]["value_type"] == "str"
+
+    def test_locator_json_pointer(self):
+        data = b'{"a": {"b": {"c": "deep"}}}'
+        doc = parse_json_full(data, "test.json")
+        obj = doc.root["children"][0]
+        deep = obj["children"]["a"]["children"]["b"]["children"]["c"]
+        assert deep["locator"] == "$/a/b/c"
+
+    def test_array_index_locator(self):
+        data = b'{"arr": [10, 20, 30]}'
+        doc = parse_json_full(data, "test.json")
+        obj = doc.root["children"][0]
+        arr = obj["children"]["arr"]
+        assert arr["children"][0]["locator"] == "$/arr/0"
+        assert arr["children"][2]["locator"] == "$/arr/2"
+
+
+class TestBackwardCompat:
+    """确保新旧 API 共存，旧 API 行为不变"""
+
+    def test_old_parse_xml_still_works(self):
+        result = parse_xml(SAMPLE_XML, "config.xml")
+        assert result["attrs"]["type"] == "xml"
+        assert result["id"] == "root"
+
+    def test_old_parse_json_still_works(self):
+        result = parse_json(SAMPLE_JSON, "config.json")
+        assert result["attrs"]["type"] == "json"
+
+    def test_full_and_old_produce_same_tree_shape(self):
+        """parse_xml_full 的 wrapper 结构与旧 parse_xml 基本一致"""
+        old = parse_xml(SAMPLE_XML, "config.xml")
+        new_doc = parse_xml_full(SAMPLE_XML, "config.xml")
+        new = new_doc.root
+        # 顶层结构一致
+        assert old["id"] == new["id"] == "root"
+        assert old["attrs"]["type"] == new["attrs"]["type"] == "xml"
+        # 子节点数量应相同（单根元素）
+        assert len(old["children"]) == len(new["children"]) == 1

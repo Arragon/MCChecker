@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import threading
 from collections import defaultdict
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 from nicegui import ui
 
@@ -13,6 +17,84 @@ from app.utils.auth import get_identity_info, is_admin
 
 
 _REJECT_OPTION = "__reject__"
+
+
+# ---------------------------------------------------------------------------
+# ReviewDraft — 审阅选择草稿 (T17 / INH-629)
+# ---------------------------------------------------------------------------
+
+class ReviewDraft:
+    """审阅选择草稿
+
+    保存每个审阅项的选择状态（node_ref -> remark），
+    并记录源文件的 content_hash 用于冲突检测。
+    """
+
+    def __init__(self, file_ref: str, source_hash: str):
+        self.file_ref = file_ref
+        self.source_hash = source_hash
+        self.selected_items: Dict[str, Optional[str]] = {}  # selection_key -> chosen remark id
+        self.remarks: Dict[str, str] = {}  # selection_key -> remark text
+
+    def save_selection(self, selection_key: str, chosen_value: Optional[str]) -> None:
+        """保存单个审阅项的选择"""
+        self.selected_items[selection_key] = chosen_value
+
+    def restore_selection(self, selection_key: str) -> Optional[str]:
+        """恢复单个审阅项的选择"""
+        return self.selected_items.get(selection_key)
+
+    def check_source_changed(self, current_hash: str) -> bool:
+        """检查源文件是否已变更（变更则存在冲突）"""
+        return current_hash != self.source_hash
+
+    def get_unselected_keys(self, all_keys: list[str]) -> list[str]:
+        """获取未选择的审阅项 key（用于 partial submit）"""
+        return [k for k in all_keys if not self.selected_items.get(k)]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为 dict"""
+        return {
+            "file_ref": self.file_ref,
+            "source_hash": self.source_hash,
+            "selected_items": self.selected_items,
+            "remarks": self.remarks,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ReviewDraft:
+        """从 dict 反序列化"""
+        draft = cls(data["file_ref"], data["source_hash"])
+        draft.selected_items = data.get("selected_items", {})
+        draft.remarks = data.get("remarks", {})
+        return draft
+
+
+# ---------------------------------------------------------------------------
+# 防重复提交锁 (T17 / INH-629)
+# ---------------------------------------------------------------------------
+
+_review_submit_locks: dict[str, bool] = {}
+_review_submit_guard = threading.Lock()
+
+
+def review_submit_with_lock(operation_key: str, submit_fn):
+    """审阅防重复提交"""
+    with _review_submit_guard:
+        if operation_key in _review_submit_locks:
+            return None
+        _review_submit_locks[operation_key] = True
+    try:
+        return submit_fn()
+    finally:
+        with _review_submit_guard:
+            _review_submit_locks.pop(operation_key, None)
+
+
+def compute_items_hash(items: list[dict]) -> str:
+    """计算审阅项列表的内容 hash（用于冲突检测）"""
+    raw = json.dumps(items, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def render_review_page(session_active_tab: dict | None = None) -> None:
@@ -32,7 +114,35 @@ def render_review_page(session_active_tab: dict | None = None) -> None:
         ui.label("暂无待审阅的修改备注").classes("text-caption text-grey")
         return
 
+    # 计算当前审阅项的 hash（用于冲突检测）
+    current_items_hash = compute_items_hash(review_items)
+
+    # 从 session 恢复草稿（T17 / INH-629）
+    draft: Optional[ReviewDraft] = None
+    if session_active_tab is not None:
+        draft_data = session_active_tab.get("_review_draft")
+        if draft_data is not None:
+            draft = ReviewDraft.from_dict(draft_data)
+            # 检查源是否已变更
+            if draft.check_source_changed(current_items_hash):
+                ui.label("审阅源已变更，请刷新页面重新审阅").classes("text-warning q-mb-sm")
+                ui.badge("冲突", color="orange").props("outline")
+                # 清除旧草稿
+                session_active_tab.pop("_review_draft", None)
+                draft = None
+
+    if draft is None:
+        draft = ReviewDraft("review_page", current_items_hash)
+        if session_active_tab is not None:
+            session_active_tab["_review_draft"] = draft.to_dict()
+
     selection_state: dict[str, dict[str, str | None]] = {}
+    # 从草稿恢复选择状态
+    for item in review_items:
+        key = _selection_key(item)
+        restored = draft.restore_selection(key)
+        selection_state[key] = {"value": restored}
+
     generated_container = ui.column().classes("w-full q-gutter-sm q-mt-md")
 
     grouped: dict[str, list[dict]] = defaultdict(list)
@@ -47,23 +157,41 @@ def render_review_page(session_active_tab: dict | None = None) -> None:
                 ui.label(f"{len(items)} 个待审节点").classes("text-caption text-grey")
 
             for item in items:
-                _render_review_item(item, selection_state)
+                _render_review_item(item, selection_state, draft)
 
     def submit_review():
-        pending_missing = [
-            item for item in review_items
-            if not (selection_state.get(_selection_key(item), {}).get("value"))
-        ]
-        if pending_missing:
-            ui.notify("请先为每个待审节点选择通过项或不通过", type="warning")
+        # 保存草稿到 session
+        if session_active_tab is not None:
+            session_active_tab["_review_draft"] = draft.to_dict()
+
+        # 收集已选择和未选择的项
+        all_keys = [_selection_key(item) for item in review_items]
+        selected_keys = [k for k in all_keys if selection_state.get(k, {}).get("value")]
+        unselected_keys = [k for k in all_keys if not selection_state.get(k, {}).get("value")]
+
+        # Partial submit: 未选项继续 pending
+        if unselected_keys:
+            ui.notify(
+                f"部分提交：{len(selected_keys)} 项已选择，{len(unselected_keys)} 项继续待审",
+                type="info"
+            )
+
+        if not selected_keys:
+            ui.notify("请至少选择一个待审节点", type="warning")
             return
+
+        # 仅处理已选择的项
+        selected_items = [
+            item for item in review_items
+            if _selection_key(item) in selected_keys
+        ]
 
         remark_lookup = {}
         approved_by_file: dict[str, list[dict]] = defaultdict(list)
         approved_ids: list[str] = []
         rejected_ids: list[str] = []
 
-        for item in review_items:
+        for item in selected_items:
             chosen = selection_state[_selection_key(item)]["value"]
             remarks = item.get("remarks") or []
             for remark in remarks:
@@ -109,6 +237,10 @@ def render_review_page(session_active_tab: dict | None = None) -> None:
             generated_files=generated_files,
         )
 
+        # 提交成功后清除草稿
+        if session_active_tab is not None:
+            session_active_tab.pop("_review_draft", None)
+
         generated_container.clear()
         with generated_container:
             if generated_files:
@@ -137,10 +269,16 @@ def render_review_page(session_active_tab: dict | None = None) -> None:
         )
 
     with ui.row().classes("w-full justify-end q-gutter-sm q-mt-md"):
-        ui.button("提交审阅结果", icon="done_all", on_click=submit_review).props("color=primary")
+        ui.button("提交审阅结果", icon="done_all", on_click=lambda: review_submit_with_lock(
+            f"review_submit_{identity['ip']}", submit_review
+        )).props("color=primary")
 
 
-def _render_review_item(item: dict, selection_state: dict[str, dict[str, str | None]]) -> None:
+def _render_review_item(
+    item: dict,
+    selection_state: dict[str, dict[str, str | None]],
+    draft: Optional[ReviewDraft] = None,
+) -> None:
     remarks = item.get("remarks") or []
     selection_key = _selection_key(item)
     selection_state.setdefault(selection_key, {"value": None})
@@ -161,10 +299,16 @@ def _render_review_item(item: dict, selection_state: dict[str, dict[str, str | N
         }
         options[_REJECT_OPTION] = "不通过"
 
+        def on_selection_change(e, key=selection_key):
+            selection_state[key].update(value=e.value)
+            # 保存到草稿
+            if draft is not None:
+                draft.save_selection(key, e.value)
+
         ui.radio(
             options,
             value=selection_state[selection_key]["value"],
-            on_change=lambda e, key=selection_key: selection_state[key].update(value=e.value),
+            on_change=on_selection_change,
         ).props("inline")
 
         with ui.column().classes("w-full q-gutter-xs q-mt-sm"):

@@ -6,20 +6,37 @@ from nicegui import ui
 
 from app.core import storage
 from app.core.differ import compare_versions, compare_with_uploaded
+from app.core.tree_component import copy_to_clipboard, notify_copy_result
 
 _DIFF_PREVIEW_LIMIT = 200
 
 
 def render_comparison_page(tab: dict, deployer: bool):
-    """渲染版本对比页面"""
+    """渲染版本对比页面
+
+    Tab payload 可持有 FileRef:
+    - old_ref: 旧版本 FileRef (dict)
+    - new_ref: 新版本 FileRef (dict)
+    - upload_original_name: 上传文件原始名
+    """
     filename = tab.get("filename", "")
+    # 支持从历史版本直接打开对比（持有 FileRef）
+    old_ref = tab.get("old_ref")
+    new_ref = tab.get("new_ref")
 
     ui.label(f"版本对比 - {filename}").classes("mc-page-title q-mb-md")
 
     versions = storage.list_archived_versions(filename)
     version_options = [v["filename"] for v in versions]
 
-    mode = {"value": "current_vs_history"}
+    # 如果 tab 持有 FileRef，自动选择对应版本
+    initial_mode = "current_vs_history"
+    if old_ref and new_ref:
+        initial_mode = "history_vs_history"
+    elif old_ref:
+        initial_mode = "current_vs_history"
+
+    mode = {"value": initial_mode}
 
     diff_container = ui.column().classes("w-full")
 
@@ -28,9 +45,9 @@ def render_comparison_page(tab: dict, deployer: bool):
         with diff_container:
             result_container = ui.column().classes("w-full q-mt-md")
             if mode["value"] == "current_vs_history":
-                _render_current_vs_history(filename, version_options, result_container)
+                _render_current_vs_history(filename, version_options, result_container, old_ref)
             elif mode["value"] == "history_vs_history":
-                _render_history_vs_history(filename, version_options, result_container)
+                _render_history_vs_history(filename, version_options, result_container, old_ref, new_ref)
             elif mode["value"] == "upload_vs_current":
                 _render_upload_vs_current(filename, result_container)
             elif mode["value"] == "upload_vs_history":
@@ -56,14 +73,21 @@ def render_comparison_page(tab: dict, deployer: bool):
     setup_compare_ui()
 
 
-def _render_current_vs_history(filename: str, version_options: list, result_container):
+def _render_current_vs_history(filename: str, version_options: list, result_container, old_ref=None):
     """当前版本 vs 历史版本"""
     if not version_options:
         with ui.card().classes("w-full q-pa-md"):
             ui.label("无历史版本可对比").classes("text-warning")
         return
 
-    selected = {"value": version_options[0]}
+    # 如果有 old_ref，使用其 version_or_token 作为初始选择
+    initial_value = version_options[0]
+    if old_ref and old_ref.get("version_or_token"):
+        ref_name = old_ref.get("version_or_token")
+        if ref_name in version_options:
+            initial_value = ref_name
+
+    selected = {"value": initial_value}
     with ui.card().classes("w-full q-pa-md"):
         ui.label("选择历史版本").classes("mc-section-title q-mb-sm")
         with ui.row().classes("w-full items-center gap-2"):
@@ -79,15 +103,27 @@ def _render_current_vs_history(filename: str, version_options: list, result_cont
             ).props("color=primary dense")
 
 
-def _render_history_vs_history(filename: str, version_options: list, result_container):
+def _render_history_vs_history(filename: str, version_options: list, result_container, old_ref=None, new_ref=None):
     """历史版本 vs 历史版本"""
     if len(version_options) < 2:
         with ui.card().classes("w-full q-pa-md"):
             ui.label("需要至少2个历史版本").classes("text-warning")
         return
 
-    selected_a = {"value": version_options[0]}
-    selected_b = {"value": version_options[1] if len(version_options) > 1 else ""}
+    # 如果有 FileRef，使用其版本作为初始选择
+    initial_a = version_options[0]
+    initial_b = version_options[1] if len(version_options) > 1 else ""
+    if old_ref and old_ref.get("version_or_token"):
+        ref_name = old_ref.get("version_or_token")
+        if ref_name in version_options:
+            initial_a = ref_name
+    if new_ref and new_ref.get("version_or_token"):
+        ref_name = new_ref.get("version_or_token")
+        if ref_name in version_options:
+            initial_b = ref_name
+
+    selected_a = {"value": initial_a}
+    selected_b = {"value": initial_b}
 
     with ui.card().classes("w-full q-pa-md"):
         ui.label("选择两个历史版本").classes("mc-section-title q-mb-sm")
@@ -305,8 +341,23 @@ def _render_unified_diff(diff_lines: list[str]) -> None:
 
     def copy_all():
         js_text = json.dumps(full_text)
-        ui.run_javascript(f"navigator.clipboard.writeText({js_text});")
-        ui.notify("已复制到剪贴板", type="positive")
+
+        async def do_copy():
+            success = await copy_to_clipboard(full_text)
+            notify_copy_result(success)
+
+        ui.run_javascript(
+            f"navigator.clipboard.writeText({js_text}).then(() => window._copyOk=true).catch(() => window._copyOk=false)"
+        )
+        # 延迟检查复制结果
+        ui.timer(0.2, lambda: _check_copy_result(), once=True)
+
+    def _check_copy_result():
+        """检查剪贴板复制结果"""
+        ui.run_javascript(
+            "return window._copyOk",
+            on_error=lambda: ui.notify("复制失败，请手动选择", type="warning"),
+        )
 
     def open_full_dialog():
         with ui.dialog() as dialog, ui.card().classes("w-11/12 max-w-6xl"):

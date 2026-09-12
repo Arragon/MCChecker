@@ -2,45 +2,7 @@
 
 import json
 import os
-import shutil
-import tempfile
 import pytest
-
-# 使用临时目录覆盖数据目录
-TEST_DATA_DIR = tempfile.mkdtemp()
-
-
-@pytest.fixture(autouse=True)
-def setup_test_env(monkeypatch):
-    """每个测试前设置临时数据目录"""
-    import app.core.storage as storage_mod
-    monkeypatch.setattr(storage_mod, "DATA_DIR", TEST_DATA_DIR)
-    monkeypatch.setattr(storage_mod, "PROFILES_DIR", os.path.join(TEST_DATA_DIR, "profiles"))
-    monkeypatch.setattr(storage_mod, "CONFIGS_DIR", os.path.join(TEST_DATA_DIR, "configs"))
-    monkeypatch.setattr(storage_mod, "ARCHIVE_DIR", os.path.join(TEST_DATA_DIR, "archive"))
-    monkeypatch.setattr(storage_mod, "CACHE_DIR", os.path.join(TEST_DATA_DIR, "cache"))
-    monkeypatch.setattr(storage_mod, "PARSE_CACHE_DIR", os.path.join(TEST_DATA_DIR, "cache", "parse_tree"))
-    monkeypatch.setattr(storage_mod, "MAPPING_FILE", os.path.join(TEST_DATA_DIR, "config_mapping.json"))
-    monkeypatch.setattr(storage_mod, "FAVORITES_FILE", os.path.join(TEST_DATA_DIR, "favorites.json"))
-    monkeypatch.setattr(storage_mod, "BINDINGS_FILE", os.path.join(TEST_DATA_DIR, "bindings.json"))
-    monkeypatch.setattr(storage_mod, "TOOLS_FILE", os.path.join(TEST_DATA_DIR, "tools.json"))
-    monkeypatch.setattr(storage_mod, "SCHEDULE_FILE", os.path.join(TEST_DATA_DIR, "schedule.json"))
-    monkeypatch.setattr(storage_mod, "IP_MAPPING_FILE", os.path.join(TEST_DATA_DIR, "ip_mapping.json"))
-    monkeypatch.setattr(storage_mod, "ADMIN_USERS_FILE", os.path.join(TEST_DATA_DIR, "admin_users.json"))
-    monkeypatch.setattr(storage_mod, "EDIT_REMARKS_FILE", os.path.join(TEST_DATA_DIR, "edit_remarks.json"))
-    monkeypatch.setattr(storage_mod, "LEGACY_MAPPING_FILE", storage_mod.MAPPING_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_FAVORITES_FILE", storage_mod.FAVORITES_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_BINDINGS_FILE", storage_mod.BINDINGS_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_TOOLS_FILE", storage_mod.TOOLS_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_SCHEDULE_FILE", storage_mod.SCHEDULE_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_IP_MAPPING_FILE", storage_mod.IP_MAPPING_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_ADMIN_USERS_FILE", storage_mod.ADMIN_USERS_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_EDIT_REMARKS_FILE", storage_mod.EDIT_REMARKS_FILE)
-    storage_mod._ensure_dirs()
-    yield
-    # 清理
-    shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
-    os.makedirs(TEST_DATA_DIR, exist_ok=True)
 
 
 class TestConfigMapping:

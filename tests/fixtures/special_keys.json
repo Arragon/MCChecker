@@ -1,0 +1,10 @@
+{
+  "key/with/slashes": "value1",
+  "key~with~tildes": "value2",
+  "key with spaces": "value3",
+  "key.with.dots": "value4",
+  "key-with-dashes": "value5",
+  "key_with_underscores": "value6",
+  "123numeric": "value7",
+  "": "empty_key"
+}
