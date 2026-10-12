@@ -5,6 +5,7 @@ import os
 from nicegui import ui
 
 from app.core import storage, parser
+from app.core.models import FileRef, FileKind
 from app.pages.file_downloads import (
     DOWNLOAD_KIND_ARCHIVE,
     DOWNLOAD_KIND_CURRENT,
@@ -56,8 +57,8 @@ def render_history_page(tab: dict, deployer: bool, session_tabs: list, session_a
                         ).props("flat dense color=primary")
             with ui.row().classes("items-center q-gutter-sm q-mt-sm"):
                 if node_count is not None:
-                    ui.html(f'<span class="mc-chip">节点 {node_count}</span>', sanitize=False)
-                ui.html(_render_diff_chips(current_diff), sanitize=False)
+                    ui.html(f'<span class="mc-chip">节点 {node_count}</span>')
+                ui.html(_render_diff_chips(current_diff))
 
         ui.label("历史版本").classes("mc-section-title q-mb-sm")
         if not versions:
@@ -73,7 +74,7 @@ def render_history_page(tab: dict, deployer: bool, session_tabs: list, session_a
                         ui.label(f"大小: {v['size']} bytes").classes("mc-page-subtitle")
                     ui.space()
                     with ui.column().classes("items-end q-gutter-xs"):
-                        ui.html(_render_diff_chips(v.get("diff")), sanitize=False)
+                        ui.html(_render_diff_chips(v.get("diff")))
                         with ui.row().classes("items-center q-gutter-xs"):
                             ui.button(
                                 "下载版本",
@@ -123,16 +124,34 @@ def _render_diff_chips(diff: dict) -> str:
 
 
 def _view_archived(filename: str, archive_filename: str, session_tabs: list, session_active_tab: dict):
-    """查看归档版本"""
+    """查看归档版本（精确版本）
+
+    Tab 持有 FileRef，确保后续操作（如 comparison）使用该版本。
+    """
     content = storage.load_archived_file(filename, archive_filename)
     if content is None:
         ui.notify("归档文件不存在", type="negative")
         return
 
+    # 构建 FileRef 用于精确版本跟踪
+    file_ref = FileRef(
+        profile_id="",  # 由上下文填充
+        kind=FileKind.ARCHIVE,
+        name=filename,
+        version_or_token=archive_filename,
+    )
+
     tab_name = f"file:archive:{filename}:{archive_filename}"
     for tab in session_tabs:
         if tab["name"] == tab_name:
             session_active_tab["name"] = tab_name
+            # 更新 FileRef（确保 reload/reopen 后 exact version 保留）
+            tab["file_ref"] = {
+                "profile_id": file_ref.profile_id,
+                "kind": file_ref.kind.value,
+                "name": file_ref.name,
+                "version_or_token": file_ref.version_or_token,
+            }
             try:
                 from app.core import tabs_state
                 tabs_state.save_current(session_tabs, session_active_tab["name"])
@@ -148,6 +167,12 @@ def _view_archived(filename: str, archive_filename: str, session_tabs: list, ses
         "type": "archive_view",
         "filename": filename,
         "archive_filename": archive_filename,
+        "file_ref": {
+            "profile_id": file_ref.profile_id,
+            "kind": file_ref.kind.value,
+            "name": file_ref.name,
+            "version_or_token": file_ref.version_or_token,
+        },
         "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
     })
     session_active_tab["name"] = tab_name
@@ -156,10 +181,24 @@ def _view_archived(filename: str, archive_filename: str, session_tabs: list, ses
 
 
 def _compare_with_current(filename: str, archive_filename: str, session_tabs: list, session_active_tab: dict):
-    """与当前版本对比"""
+    """与当前版本对比（持有 FileRef）
+
+    Tab payload 持有 old_ref（历史版本 FileRef），
+    确保 comparison 页面能精确选择对应版本。
+    """
+    # 构建历史版本 FileRef
+    old_ref = {
+        "profile_id": "",
+        "kind": FileKind.ARCHIVE.value,
+        "name": filename,
+        "version_or_token": archive_filename,
+    }
+
     tab_name = f"comparison:{filename}"
     for tab in session_tabs:
         if tab["name"] == tab_name:
+            # 更新已有 tab 的 FileRef
+            tab["old_ref"] = old_ref
             session_active_tab["name"] = tab_name
             try:
                 from app.core import tabs_state
@@ -174,6 +213,7 @@ def _compare_with_current(filename: str, archive_filename: str, session_tabs: li
         "label": f"对比: {filename}",
         "type": "comparison",
         "filename": filename,
+        "old_ref": old_ref,
         "opened_at": (max([t.get("opened_at", 0) for t in session_tabs], default=-1) + 1),
     })
     session_active_tab["name"] = tab_name

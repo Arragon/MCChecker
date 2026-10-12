@@ -1,30 +1,34 @@
 """文件解析查看器页面"""
 
+from __future__ import annotations
+
 import hashlib
+import html
 import os
 
 from nicegui import ui
 
 from app.core import storage, parser, parse_cache, searching, reviewing
+from app.core.tree_component import (
+    LEVEL_LINE_COLORS,
+    LEVEL_TEXT_COLORS,
+    PARAM_SECONDARY_FIELDS,
+    PARAM_RANGE_FIELDS,
+    build_indent_html,
+    build_row_prefix_html,
+    make_tree_panel_id,
+    make_range_btn_id,
+    is_param_node,
+    extract_param_meta,
+    render_tree_toolbar,
+    copy_to_clipboard,
+    notify_copy_result,
+)
 from app.pages.file_downloads import DOWNLOAD_KIND_CURRENT, make_download_handler
 from app.utils.auth import get_identity_info, is_deployer
 
-# 层级竖线颜色（每级不同色，现代柔和配色）
-_LEVEL_LINE_COLORS = [
-    "#5C9CE6",  # blue
-    "#4DB6AC",  # teal
-    "#FFB74D",  # amber
-    "#BA68C8",  # purple
-    "#81C784",  # green
-    "#E57373",  # red
-    "#64B5F6",  # light blue
-    "#FFD54F",  # gold
-]
-
-_LEVEL_TEXT_COLORS = ["dark", "grey-9", "grey-8", "grey-7", "grey-6"]
-
-_PARAM_SECONDARY_FIELDS = {"@description", "@editPrivilege"}
-_PARAM_RANGE_FIELDS = {"@default", "@min", "@max", "@incMax", "@incMin"}
+# 性能优化：初始渲染深度限制，更深层级按需展开
+LAZY_EXPAND_DEPTH = 3
 
 
 def load_tree_for_viewer(filename: str) -> tuple[dict | None, str | None]:
@@ -46,67 +50,27 @@ def load_tree_for_viewer(filename: str) -> tuple[dict | None, str | None]:
 
 
 def _build_indent_html(depth: int) -> str:
-    parts = []
-    for d in range(depth):
-        color = _LEVEL_LINE_COLORS[d % len(_LEVEL_LINE_COLORS)]
-        parts.append(
-            f'<span class="indent-cell">'
-            f'<span class="guide-line" style="background:{color}"></span>'
-            f'</span>'
-        )
-    return "".join(parts)
+    return build_indent_html(depth)
 
 
 def _build_row_prefix_html(depth: int, has_children: bool) -> str:
-    prefix = _build_indent_html(depth)
-    if has_children:
-        return (
-            prefix
-            + '<button type="button" class="mc-tree-toggle is-expanded" '
-            + 'aria-label="折叠节点" aria-expanded="true" onclick="window.mcToggleTree(this)">'
-            + '<span class="mc-tree-toggle-icon">▾</span>'
-            + "</button>"
-        )
-    return prefix + '<span class="leaf-marker"></span>'
+    return build_row_prefix_html(depth, has_children)
 
 
 def _make_tree_panel_id(*parts: str) -> str:
-    seed = "|".join(str(p or "") for p in parts)
-    return f"mc-tree-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+    return make_tree_panel_id(*parts)
 
 
 def _make_range_btn_id(node_path: str) -> str:
-    return f"mc-range-{hashlib.sha1(node_path.encode('utf-8')).hexdigest()[:12]}"
+    return make_range_btn_id(node_path)
 
 
 def _is_param_node(label: str, value, children: list) -> bool:
-    if value is None or not children:
-        return False
-    if not str(label).startswith("param_"):
-        return False
-    for c in children:
-        if isinstance(c, dict) and c.get("label") in _PARAM_RANGE_FIELDS.union(_PARAM_SECONDARY_FIELDS):
-            return True
-    return False
+    return is_param_node(label, value, children)
 
 
 def _extract_param_meta(children: list) -> tuple[dict, dict, list]:
-    secondary: dict[str, str] = {}
-    ranges: dict[str, str] = {}
-    rest: list = []
-    for c in children:
-        if not isinstance(c, dict):
-            continue
-        lbl = c.get("label")
-        val = c.get("value")
-        if lbl in _PARAM_SECONDARY_FIELDS and val is not None:
-            secondary[str(lbl)] = str(val)
-            continue
-        if lbl in _PARAM_RANGE_FIELDS and val is not None:
-            ranges[str(lbl)] = str(val)
-            continue
-        rest.append(c)
-    return secondary, ranges, rest
+    return extract_param_meta(children)
 
 
 def render_file_viewer(
@@ -224,8 +188,13 @@ def render_file_viewer(
 def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
                  fav_entry_map: dict, tree: dict, session_active_tab: dict, depth: int,
                  node_key: str, tree_type: str, note_map: dict | None = None,
-                 review_remark_map: dict | None = None, show_note: bool = False):
-    """递归渲染单个树节点"""
+                 review_remark_map: dict | None = None, show_note: bool = False,
+                 max_depth: int = LAZY_EXPAND_DEPTH):
+    """递归渲染单个树节点
+
+    max_depth 控制初始渲染深度，超出深度的子节点以「展开 N 个子节点」按钮代替，
+    点击后在当前位置渲染子树（惰性展开）。
+    """
     label = node["label"]
     value = node.get("value")
     children = node.get("children", [])
@@ -245,12 +214,12 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
     # 节点行
     row_classes = f"tree-row w-full {depth_parity}" + (" is-parent" if has_children else "")
     with ui.row().classes(row_classes):
-        ui.html(_build_row_prefix_html(depth, has_children), sanitize=False)
+        ui.html(_build_row_prefix_html(depth, has_children))
 
         _render_star(node_path, label, value, filename, fav_direct, fav_covered, fav_entry_map, tree)
 
         lbl_class = f"lbl-{min(depth, 3)}" if has_children else ""
-        txt_color = _LEVEL_TEXT_COLORS[min(depth, len(_LEVEL_TEXT_COLORS) - 1)]
+        txt_color = LEVEL_TEXT_COLORS[min(depth, len(LEVEL_TEXT_COLORS) - 1)]
         if value is not None:
             if is_param:
                 desc = (secondary_meta.get("@description") or "").strip()
@@ -261,20 +230,18 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
                 if priv:
                     sec_parts.append(priv)
                 sec_text = " · ".join(sec_parts)
-                meta_html = f'<span class="mc-param-meta"> {sec_text}</span>' if sec_text else ""
+                meta_html = f'<span class="mc-param-meta"> {html.escape(sec_text)}</span>' if sec_text else ""
                 ui.html(
                     f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
-                    f'<span class="mc-param-key">{label}</span> '
-                    f'<span class="mc-param-val">= {value}</span>'
+                    f'<span class="mc-param-key">{html.escape(str(label))}</span> '
+                    f'<span class="mc-param-val">= {html.escape(str(value))}</span>'
                     f'{meta_html}'
                     f'</span>',
-                    sanitize=False,
                 )
             else:
                 ui.html(
                     f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
-                    f'{label} <span class="val-text">= {value}</span></span>',
-                    sanitize=False,
+                    f'{html.escape(str(label))} <span class="val-text">= {html.escape(str(value))}</span></span>',
                 )
             if show_note:
                 note = ""
@@ -285,12 +252,12 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
         elif has_children:
             ui.html(
                 f'<span class="text-body2 text-weight-medium text-{txt_color} {lbl_class} tree-label node-key">'
-                f'{label}</span>',
-                sanitize=False
+                f'{html.escape(str(label))}</span>',
+                
             )
         else:
-            ui.html(f'<span class="font-mono text-body2 text-grey tree-label">{label}</span>',
-                    sanitize=False)
+            ui.html(f'<span class="font-mono text-body2 text-grey tree-label">{html.escape(str(label))}</span>',
+                    )
 
         if review_texts:
             ui.label("；".join(review_texts)).classes("mc-review-note-inline q-ml-sm")
@@ -304,7 +271,7 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
                 .classes("mc-range-toggle")
             )
 
-        ui.html('<span class="mc-row-spacer"></span>', sanitize=False)
+        ui.html('<span class="mc-row-spacer"></span>')
         with ui.element("span").classes("mc-node-actions"):
             edit_btn = ui.button(icon="edit")
             edit_btn.props("flat round dense size=sm color=primary")
@@ -353,8 +320,7 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
                 range_wrap = ui.row().classes("mc-param-range w-full").style("display: none")
                 with range_wrap:
                     ui.html(
-                        f'<div class="mc-param-range-inner">{ " · ".join(range_parts) }</div>',
-                        sanitize=False,
+                        f'<div class="mc-param-range-inner">{ html.escape(" · ".join(range_parts)) }</div>',
                     )
 
                 range_state = {"open": False}
@@ -387,22 +353,70 @@ def _render_node(node: dict, filename: str, fav_direct: set, fav_covered: set,
 
                 range_btn.on("click", _toggle_range)
 
-            for child_index, child in enumerate(children_for_tree):
-                _render_node(
-                    child,
-                    filename,
-                    fav_direct,
-                    fav_covered,
-                    fav_entry_map,
-                    tree,
-                    session_active_tab,
-                    depth + 1,
-                    node_key=reviewing.make_node_key(node_key, child_index),
-                    tree_type=tree_type,
-                    note_map=note_map,
-                    review_remark_map=review_remark_map,
-                    show_note=show_note,
-                )
+            # 惰性展开：超过深度限制时显示「展开」按钮而非直接渲染子节点
+            if depth + 1 >= max_depth:
+                child_count = len(children_for_tree)
+                expand_btn = ui.button(
+                    f"展开 {child_count} 个子节点",
+                    icon="expand_more",
+                ).props("flat dense size=sm color=grey-7").classes("mc-lazy-expand-btn")
+                lazy_container = ui.column().classes("mc-lazy-children w-full")
+                lazy_state = {"expanded": False}
+
+                def _do_lazy_expand(
+                    btn=expand_btn,
+                    container=lazy_container,
+                    children=list(children_for_tree),
+                    fn=filename,
+                    fd=fav_direct,
+                    fc=fav_covered,
+                    fm=fav_entry_map,
+                    tr=tree,
+                    sat=session_active_tab,
+                    d=depth,
+                    nk=node_key,
+                    tt=tree_type,
+                    nm=note_map,
+                    rrm=review_remark_map,
+                    sn=show_note,
+                    md=max_depth,
+                ):
+                    if lazy_state["expanded"]:
+                        return
+                    lazy_state["expanded"] = True
+                    with container:
+                        for child_index, child in enumerate(children):
+                            _render_node(
+                                child, fn, fd, fc, fm, tr, sat,
+                                depth=d + 1,
+                                node_key=reviewing.make_node_key(nk, child_index),
+                                tree_type=tt,
+                                note_map=nm,
+                                review_remark_map=rrm,
+                                show_note=sn,
+                                max_depth=md + 2,  # 展开后增加额外深度
+                            )
+                    btn.visible = False
+
+                expand_btn.on("click", _do_lazy_expand)
+            else:
+                for child_index, child in enumerate(children_for_tree):
+                    _render_node(
+                        child,
+                        filename,
+                        fav_direct,
+                        fav_covered,
+                        fav_entry_map,
+                        tree,
+                        session_active_tab,
+                        depth + 1,
+                        node_key=reviewing.make_node_key(node_key, child_index),
+                        tree_type=tree_type,
+                        note_map=note_map,
+                        review_remark_map=review_remark_map,
+                        show_note=show_note,
+                        max_depth=max_depth,
+                    )
 
 
 def _open_edit_remark_dialog(

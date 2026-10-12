@@ -1,6 +1,8 @@
 """主页渲染模块"""
 
 import asyncio
+import html
+import json
 import time
 
 from nicegui import app, ui
@@ -154,21 +156,31 @@ def _go_back(session_active_tab: dict, session_tab_history: list, session_tabs: 
 
 
 def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_history: list):
-    """左侧导航：文件列表（卡片式）
-
-    全量配置中的文件：显示配置名 + 灰色小字（真实文件名 + 更新时间）
-    其他文件：直接显示文件名
-    """
-    ui.label("文件列表").classes("mc-section-title q-mb-sm")
+    """左侧导航：紧凑可搜索文件列表"""
+    ui.label("文件列表").classes("mc-section-title q-mb-xs")
+    search_input = ui.input(placeholder="搜索文件...").props("dense outlined clearable").classes("w-full q-mb-xs mc-sidebar-search")
     container = ui.column().classes("w-full mc-sidebar-files")
     last_sig = {"value": None}
 
-    def _compute_sidebar_sig():
-        import os
+    search_state = {"keyword": ""}
 
+    def _compute_sidebar_sig():
+        """轻量级侧边栏签名：用 config_mapping 文件的 mtime 代替逐个文件 stat
+
+        性能优化：避免每次轮询都 stat 所有文件，改用 config_mapping.json 的 mtime
+        作为主要变化信号，辅以文件数量。
+        """
+        import os
         files = storage.list_config_files()
-        parts = [("admin", is_admin()), ("count", len(files))]
-        for fname in files:
+        parts = [("admin", is_admin()), ("count", len(files)), ("search", search_state["keyword"])]
+        # 用 mapping 文件的 mtime 作为轻量信号
+        try:
+            mapping_mtime = os.path.getmtime(storage.MAPPING_FILE)
+            parts.append(("mapping", mapping_mtime))
+        except OSError:
+            parts.append(("mapping", 0))
+        # 抽样检查前 5 个文件的 mtime（而非全部）
+        for fname in files[:5]:
             path = storage.get_config_path(fname)
             if os.path.exists(path):
                 stat = os.stat(path)
@@ -180,25 +192,41 @@ def _render_sidebar(session_tabs: list, session_active_tab: dict, session_tab_hi
     def refresh_sidebar():
         if _busy_processing["value"]:
             return
+        # 从搜索框读取当前值
+        raw = (search_input.value or "").strip().lower()
+        if raw != search_state["keyword"]:
+            search_state["keyword"] = raw
+            last_sig["value"] = None  # force refresh on search change
         sig = _compute_sidebar_sig()
         if sig == last_sig["value"]:
             return
         last_sig["value"] = sig
         container.clear()
         with container:
-            _render_sidebar_files(session_tabs, session_active_tab, session_tab_history)
+            _render_sidebar_files(session_tabs, session_active_tab, session_tab_history, search_state["keyword"])
 
     refresh_sidebar()
-    ui.timer(1.0, refresh_sidebar)
+    sidebar_timer = ui.timer(1.0, refresh_sidebar)
+    # 性能优化：保存 timer 引用，以便在页面隐藏时停止
+    return sidebar_timer
 
 
-def _render_sidebar_files(session_tabs: list, session_active_tab: dict, session_tab_history: list) -> None:
+def _render_sidebar_files(session_tabs: list, session_active_tab: dict, session_tab_history: list, search_keyword: str = "") -> None:
+    """紧凑文件列表，非卡片式"""
     mapping = storage.load_config_mapping()
     mapping_names = {m["name"] for m in mapping}
     admin = is_admin()
     files = storage.list_config_files()
+
+    # 搜索过滤
+    if search_keyword:
+        files = [f for f in files if search_keyword in f.lower()]
+
     if not files:
-        ui.label("暂无文件").classes("text-caption text-grey")
+        if search_keyword:
+            ui.label("无匹配文件").classes("text-caption text-grey")
+        else:
+            ui.label("暂无文件").classes("text-caption text-grey")
         return
 
     for fname in files:
@@ -209,11 +237,17 @@ def _render_sidebar_files(session_tabs: list, session_active_tab: dict, session_
         color = color_map.get(ext, "grey")
         download_handler = make_download_handler(DOWNLOAD_KIND_CURRENT, fname)
 
-        with ui.card().classes(
-            "w-full mc-nav-card mc-nav-card--file"
-        ).on("click", lambda f=fname: _open_file_tab(f, session_tabs, session_active_tab, session_tab_history)):
+        is_active = any(
+            t.get("name") == f"file:{fname}" and t.get("name") == session_active_tab.get("name")
+            for t in session_tabs
+        )
+        row_bg = " mc-file-item-active" if is_active else ""
+
+        with ui.element("div").classes(f"mc-file-item{row_bg}").on(
+            "click", lambda f=fname: _open_file_tab(f, session_tabs, session_active_tab, session_tab_history)
+        ):
             with ui.row().classes("items-center w-full no-wrap"):
-                ui.icon(icon, color=color, size="sm").classes("q-mr-xs")
+                ui.icon(icon, color=color, size="sm").classes("q-mr-xs mc-file-icon")
                 with ui.column().classes("q-ma-none q-pa-none col min-w-0 mc-nav-text"):
                     file_label = ui.label(fname).classes("mc-nav-filename text-body2 text-weight-medium q-mb-none")
                     file_label.tooltip(fname)
@@ -221,7 +255,7 @@ def _render_sidebar_files(session_tabs: list, session_active_tab: dict, session_
                         update_date = storage.get_file_update_date(fname)
                         if update_date:
                             ui.label(update_date).classes("text-caption text-grey q-mt-none")
-                with ui.element("div").classes("mc-nav-actions"):
+                with ui.element("div").classes("mc-file-actions"):
                     download_btn = ui.button(icon="download")
                     download_btn.props("flat round dense color=primary")
                     download_btn.classes("mc-download-btn mc-download-btn--icon")
@@ -254,8 +288,13 @@ def _render_tools_sidebar(session_tabs: list = None, session_active_tab: dict = 
     tools = storage.load_tools()
     if tools:
         for tool in tools:
+            tool_url = tool.get("url", "")
+            # 验证 URL scheme，防止 javascript: 等危险协议
+            from app.utils.helpers import safe_external_url
+            if not safe_external_url(tool_url):
+                continue
             with ui.card().classes("w-full q-mb-xs q-pa-sm mc-nav-card").on(
-                "click", lambda url=tool["url"]: ui.run_javascript(f'window.open("{url}", "_blank")')
+                "click", lambda url=tool_url: ui.run_javascript(f'window.open({json.dumps(url)}, "_blank")')
             ):
                 ui.label(tool["name"]).classes("text-subtitle2 font-bold q-mb-none")
                 desc = tool.get("description", "")
@@ -331,7 +370,7 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
             _persist_tabs_state(storage.get_active_profile(), session_tabs, session_active_tab, session_tab_history)
             _update_tabs_display(session_tabs, session_active_tab, tabs_container, overview_container, deployer, session_tab_history, tabbar_container)
 
-    ui.timer(0.3, refresh_tabs)
+    tabs_timer = ui.timer(0.3, refresh_tabs)
     refresh_tabs()
 
     last_overview_sig = {"sig": None}
@@ -356,6 +395,7 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
         return tuple(sig_parts)
 
     def refresh_overview():
+        # 性能优化：概览页不可见时跳过刷新
         if session_active_tab["name"] != "overview":
             return
         sig = _compute_overview_sig()
@@ -365,13 +405,14 @@ def _render_main_content(deployer: bool, session_tabs: list, session_active_tab:
             with overview_container:
                 _render_overview_panel(deployer, session_tabs, session_active_tab)
 
-    ui.timer(1.0, refresh_overview)
+    overview_timer = ui.timer(1.0, refresh_overview)
+    # 返回 timer 引用，以便在页面隐藏时停止
+    return overview_timer
 
 
 def _render_loading_block(text: str = "加载中..."):
     ui.html(
-        f'<div class="mc-loading"><div class="mc-spinner"></div><div class="mc-loading-text">{text}</div></div>',
-        sanitize=False,
+        f'<div class="mc-loading"><div class="mc-spinner"></div><div class="mc-loading-text">{html.escape(text)}</div></div>',
     )
 
 
@@ -564,7 +605,8 @@ def _render_fav_card(file_name: str, item: dict, session_active_tab: dict, color
         f"border-left-color: {accent_hex}"
     ):
         # 隐藏标记，用于取消收藏时定位 DOM 元素
-        ui.html(f'<span data-fav-path="{item["path"]}" style="display:none"></span>', sanitize=False)
+        safe_path = html.escape(str(item["path"]), quote=True)
+        ui.html(f'<span data-fav-path="{safe_path}" style="display:none"></span>')
 
         # ---- 卡片头部 ----
         with ui.row().classes("items-center w-full"):
@@ -631,20 +673,20 @@ def _render_card_tree_node(node: dict, depth: int = 0, line_colors: list = None)
     # 行
     row_classes = "tree-row w-full" + (" is-parent" if has_children else "")
     with ui.row().classes(row_classes):
-        ui.html(prefix_html, sanitize=False)
+        ui.html(prefix_html)
         txt_color = ["dark", "grey-9", "grey-8", "grey-7", "grey-6"][min(depth, 4)]
         lbl_class = f"lbl-{min(depth, 3)}"
         if value is not None:
             ui.html(
                 f'<span class="font-mono tree-label text-{txt_color} {lbl_class}">'
-                f'{label} <span class="val-text">= {value}</span></span>',
-                sanitize=False
+                f'{html.escape(str(label))} <span class="val-text">= {html.escape(str(value))}</span></span>',
+                
             )
         else:
             ui.html(
                 f'<span class="tree-label text-{txt_color} {lbl_class}">'
-                f'{label}</span>',
-                sanitize=False
+                f'{html.escape(str(label))}</span>',
+                
             )
 
     # 子节点
@@ -660,8 +702,9 @@ def _quick_remove_fav(path: str, source_file: str, session_active_tab: dict):
     storage.remove_favorite(path, source_file)
     ui.notify("已取消收藏", type="info")
     # 直接从 DOM 移除对应卡片
+    safe_path_js = json.dumps(path)  # JSON 编码确保 JS 字符串安全
     ui.run_javascript(f"""
-        var m = document.querySelector('[data-fav-path="{path}"]');
+        var m = document.querySelector('[data-fav-path=' + {safe_path_js} + ']');
         if (m) {{ var c = m.closest('.q-card'); if (c) c.remove(); }}
     """)
     # 清除渲染标记，确保切页后数据一致
@@ -677,8 +720,9 @@ def _remove_all_favs_for_file(source_file: str, session_active_tab: dict):
     ui.notify(f"已清空 {source_file} 的所有收藏", type="info")
     # 移除对应文件分组下所有卡片
     for fav in [f for f in favorites if f["source_file"] == source_file]:
+        safe_path_js = json.dumps(fav["path"])  # JSON 编码确保 JS 字符串安全
         ui.run_javascript(f"""
-            var m = document.querySelector('[data-fav-path="{fav['path']}"]');
+            var m = document.querySelector('[data-fav-path=' + {safe_path_js} + ']');
             if (m) {{ var c = m.closest('.q-card'); if (c) c.remove(); }}
         """)
     if session_active_tab is not None:
@@ -788,7 +832,7 @@ def _show_delete_file_dialog(name: str) -> None:
                 return
             ui.notify("文件已删除", type="positive")
             dialog.close()
-            ui.run_javascript("location.reload()")
+            # 局部刷新：sidebar 由 timer 自动检测变化
 
         with ui.row().classes("w-full justify-end q-gutter-sm"):
             ui.button("取消", on_click=dialog.close).props("flat")
@@ -1134,8 +1178,8 @@ def _show_upload_dialog(session_tabs: list, session_active_tab: dict, session_ta
         uploaded = {"data": None, "name": None}
 
         async def handle_upload(e):
-            uploaded["data"] = await e.file.read()
-            uploaded["name"] = e.file.name
+            uploaded["data"] = e.content.read()
+            uploaded["name"] = e.name
 
         ui.upload(label="选择文件", auto_upload=True, on_upload=handle_upload).props("dense").classes("w-full")
 

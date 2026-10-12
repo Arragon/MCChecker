@@ -1,93 +1,25 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 
 from nicegui import ui
 
 from app.core import storage, parse_cache, parser
 from app.core import searching
+from app.core.tree_component import (
+    LEVEL_TEXT_COLORS,
+    build_row_prefix_html,
+    make_tree_panel_id,
+    make_range_btn_id,
+    is_param_node,
+    extract_param_meta,
+    render_tree_toolbar_inline,
+)
 
-
-_LEVEL_LINE_COLORS = [
-    "#5C9CE6",
-    "#4DB6AC",
-    "#FFB74D",
-    "#BA68C8",
-    "#81C784",
-    "#E57373",
-    "#64B5F6",
-    "#FFD54F",
-]
-
-_LEVEL_TEXT_COLORS = ["dark", "grey-9", "grey-8", "grey-7", "grey-6"]
-
-_PARAM_SECONDARY_FIELDS = {"@description", "@editPrivilege"}
-_PARAM_RANGE_FIELDS = {"@default", "@min", "@max", "@incMax", "@incMin"}
-
-
-def _build_indent_html(depth: int) -> str:
-    parts = []
-    for d in range(depth):
-        color = _LEVEL_LINE_COLORS[d % len(_LEVEL_LINE_COLORS)]
-        parts.append(
-            f'<span class="indent-cell">'
-            f'<span class="guide-line" style="background:{color}"></span>'
-            f'</span>'
-        )
-    return "".join(parts)
-
-
-def _build_row_prefix_html(depth: int, has_children: bool) -> str:
-    prefix = _build_indent_html(depth)
-    if has_children:
-        return (
-            prefix
-            + '<button type="button" class="mc-tree-toggle is-expanded" '
-            + 'aria-label="折叠节点" aria-expanded="true" onclick="window.mcToggleTree(this)">'
-            + '<span class="mc-tree-toggle-icon">▾</span>'
-            + "</button>"
-        )
-    return prefix + '<span class="leaf-marker"></span>'
-
-
-def _make_tree_panel_id(*parts: str) -> str:
-    seed = "|".join(str(p or "") for p in parts)
-    return f"mc-tree-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}"
-
-
-def _make_range_btn_id(node_path: str) -> str:
-    return f"mc-range-{hashlib.sha1(node_path.encode('utf-8')).hexdigest()[:12]}"
-
-
-def _is_param_node(label: str, value, children: list) -> bool:
-    if value is None or not children:
-        return False
-    if not str(label).startswith("param_"):
-        return False
-    for c in children:
-        if isinstance(c, dict) and c.get("label") in _PARAM_RANGE_FIELDS.union(_PARAM_SECONDARY_FIELDS):
-            return True
-    return False
-
-
-def _extract_param_meta(children: list) -> tuple[dict, dict, list]:
-    secondary: dict[str, str] = {}
-    ranges: dict[str, str] = {}
-    rest: list = []
-    for c in children:
-        if not isinstance(c, dict):
-            continue
-        lbl = c.get("label")
-        val = c.get("value")
-        if lbl in _PARAM_SECONDARY_FIELDS and val is not None:
-            secondary[str(lbl)] = str(val)
-            continue
-        if lbl in _PARAM_RANGE_FIELDS and val is not None:
-            ranges[str(lbl)] = str(val)
-            continue
-        rest.append(c)
-    return secondary, ranges, rest
+# 性能优化：每个文件分组初始显示的子节点数
+SEARCH_PAGE_SIZE = 20
 
 
 def render_search_page(tab: dict) -> None:
@@ -135,7 +67,7 @@ def render_search_page(tab: dict) -> None:
         return
 
     for fname, filtered, match_count, note_map in groups:
-        panel_id = _make_tree_panel_id(keyword, fname)
+        panel_id = make_tree_panel_id(keyword, fname)
         tree_kind = ((filtered.get("attrs") or {}).get("type")) or ""
         tree_classes = "w-full overflow-auto fav-tree"
         if tree_kind == "xml":
@@ -143,41 +75,40 @@ def render_search_page(tab: dict) -> None:
         with ui.expansion(value=True).classes("w-full").props(
             f"label='{fname}  ({match_count} 项)' header-class='fav-group-header'"
         ):
-            with ui.row().classes("items-center q-gutter-sm q-px-sm q-pt-sm q-pb-xs mc-tree-toolbar"):
-                ui.label("节点控制").classes("text-caption text-grey-7")
-                ui.button(
-                    "全部展开",
-                    icon="unfold_more",
-                    on_click=lambda pid=panel_id: ui.run_javascript(f"window.mcTreeSetAll('{pid}', true)"),
-                ).props("flat dense color=primary").classes("mc-tree-toolbar-btn")
-                ui.button(
-                    "全部折叠",
-                    icon="unfold_less",
-                    on_click=lambda pid=panel_id: ui.run_javascript(f"window.mcTreeSetAll('{pid}', false)"),
-                ).props("flat dense color=grey-7").classes("mc-tree-toolbar-btn")
+            render_tree_toolbar_inline(panel_id)
             with ui.card().classes(tree_classes):
                 with ui.element("div").props(f'id="{panel_id}"').classes("mc-tree-panel w-full"):
-                    for child in filtered.get("children", []):
+                    children = filtered.get("children", [])
+                    # 分页显示：初始显示 SEARCH_PAGE_SIZE 个子树，其余按需加载
+                    visible_children = children[:SEARCH_PAGE_SIZE]
+                    remaining = len(children) - len(visible_children)
+                    for child in visible_children:
                         _render_node(child, note_map, depth=0)
+                    if remaining > 0:
+                        _render_load_more_button(
+                            children[SEARCH_PAGE_SIZE:],
+                            note_map,
+                            remaining,
+                        )
 
 
 def _render_node(node: dict, note_map: dict, depth: int) -> None:
+    """渲染搜索结果树节点（使用共用组件）"""
     label = node.get("label") or ""
     value = node.get("value")
     children = node.get("children", []) or []
     node_id = node.get("id") or ""
 
     has_children = bool(children)
-    depth_parity = "depth-even" if depth % 2 == 0 else "depth-odd"
-    is_param = _is_param_node(label, value, children)
-    secondary_meta, range_meta, children_for_tree = _extract_param_meta(children) if is_param else ({}, {}, children)
+    is_param = is_param_node(label, value, children)
+    secondary_meta, range_meta, children_for_tree = extract_param_meta(children) if is_param else ({}, {}, children)
 
-    row_classes = f"tree-row w-full {depth_parity}" + (" is-parent" if has_children else "")
+    row_classes = f"tree-row w-full {'depth-even' if depth % 2 == 0 else 'depth-odd'}" + (" is-parent" if has_children else "")
     with ui.row().classes(row_classes):
-        ui.html(_build_row_prefix_html(depth, has_children), sanitize=False)
+        ui.html(build_row_prefix_html(depth, has_children))
 
         lbl_class = f"lbl-{min(depth, 3)}" if has_children else ""
-        txt_color = _LEVEL_TEXT_COLORS[min(depth, len(_LEVEL_TEXT_COLORS) - 1)]
+        txt_color = LEVEL_TEXT_COLORS[min(depth, len(LEVEL_TEXT_COLORS) - 1)]
         note = (node.get("note") or note_map.get(node_id, "") or "").strip()
 
         if value is not None:
@@ -190,38 +121,34 @@ def _render_node(node: dict, note_map: dict, depth: int) -> None:
                 if priv:
                     sec_parts.append(priv)
                 sec_text = " · ".join(sec_parts)
-                meta_html = f'<span class="mc-param-meta"> {sec_text}</span>' if sec_text else ""
+                meta_html = f'<span class="mc-param-meta"> {html.escape(sec_text)}</span>' if sec_text else ""
                 ui.html(
                     f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
-                    f'<span class="mc-param-key">{label}</span> '
-                    f'<span class="mc-param-val">= {value}</span>'
+                    f'<span class="mc-param-key">{html.escape(str(label))}</span> '
+                    f'<span class="mc-param-val">= {html.escape(str(value))}</span>'
                     f'{meta_html}'
                     f'</span>',
-                    sanitize=False,
                 )
             else:
                 ui.html(
                     f'<span class="font-mono text-body2 text-{txt_color} {lbl_class} tree-label">'
-                    f'{label} <span class="val-text">= {value}</span></span>',
-                    sanitize=False,
+                    f'{html.escape(str(label))} <span class="val-text">= {html.escape(str(value))}</span></span>',
                 )
             if note:
                 ui.label(note).classes("text-caption text-grey q-ml-sm")
         elif has_children:
             ui.html(
                 f'<span class="text-body2 text-weight-medium text-{txt_color} {lbl_class} tree-label node-key">'
-                f'{label}</span>',
-                sanitize=False,
+                f'{html.escape(str(label))}</span>',
             )
         else:
             ui.html(
-                f'<span class="font-mono text-body2 text-grey tree-label">{label}</span>',
-                sanitize=False,
+                f'<span class="font-mono text-body2 text-grey tree-label">{html.escape(str(label))}</span>',
             )
 
         range_btn = None
         if is_param and range_meta:
-            range_btn_id = _make_range_btn_id(node_id)
+            range_btn_id = make_range_btn_id(node_id)
             range_btn = (
                 ui.button("展开参数范围", icon="unfold_more")
                 .props(f'flat dense size=sm id="{range_btn_id}"')
@@ -258,8 +185,7 @@ def _render_node(node: dict, note_map: dict, depth: int) -> None:
                 range_wrap = ui.row().classes("mc-param-range w-full").style("display: none")
                 with range_wrap:
                     ui.html(
-                        f'<div class="mc-param-range-inner">{ " · ".join(range_parts) }</div>',
-                        sanitize=False,
+                        f'<div class="mc-param-range-inner">{ html.escape(" · ".join(range_parts)) }</div>',
                     )
 
                 range_state = {"open": False}
@@ -295,3 +221,36 @@ def _render_node(node: dict, note_map: dict, depth: int) -> None:
             for child in children_for_tree:
                 if isinstance(child, dict):
                     _render_node(child, note_map, depth + 1)
+
+
+def _render_load_more_button(children: list, note_map: dict, remaining_count: int) -> None:
+    """渲染「加载更多」按钮，按需分批显示剩余搜索结果"""
+    batch_size = SEARCH_PAGE_SIZE
+    btn = ui.button(
+        f"加载剩余 {remaining_count} 个节点",
+        icon="expand_more",
+    ).props("flat dense color=primary").classes("mc-search-load-more w-full q-my-sm")
+
+    container = ui.column().classes("mc-search-more-results w-full")
+    state = {"loaded": False}
+
+    def _do_load(b=btn, c=container, items=list(children), nm=note_map, cnt=remaining_count, bs=batch_size, s=state):
+        if s["loaded"]:
+            return
+        s["loaded"] = True
+        with c:
+            # 分批显示，每批 bs 个
+            for child in items[:bs]:
+                if isinstance(child, dict):
+                    _render_node(child, nm, depth=0)
+        remaining_after = len(items) - bs
+        if remaining_after > 0:
+            # 还有更多，再显示一个按钮
+            items[:] = items[bs:]
+            s["loaded"] = False
+            b._props["label"] = f"加载剩余 {remaining_after} 个节点"
+            b.visible = True
+        else:
+            b.visible = False
+
+    btn.on("click", _do_load)

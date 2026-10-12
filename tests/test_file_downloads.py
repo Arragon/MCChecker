@@ -1,41 +1,9 @@
 """文件下载辅助测试。"""
 
 import os
-import shutil
-import tempfile
 import urllib.parse
 
 import pytest
-
-
-TEST_DATA_DIR = tempfile.mkdtemp()
-
-
-@pytest.fixture(autouse=True)
-def setup_test_env(monkeypatch):
-    import app.core.storage as storage_mod
-
-    monkeypatch.setattr(storage_mod, "DATA_DIR", TEST_DATA_DIR)
-    monkeypatch.setattr(storage_mod, "PROFILES_DIR", os.path.join(TEST_DATA_DIR, "profiles"))
-    monkeypatch.setattr(storage_mod, "CONFIGS_DIR", os.path.join(TEST_DATA_DIR, "configs"))
-    monkeypatch.setattr(storage_mod, "ARCHIVE_DIR", os.path.join(TEST_DATA_DIR, "archive"))
-    monkeypatch.setattr(storage_mod, "CACHE_DIR", os.path.join(TEST_DATA_DIR, "cache"))
-    monkeypatch.setattr(storage_mod, "PARSE_CACHE_DIR", os.path.join(TEST_DATA_DIR, "cache", "parse_tree"))
-    monkeypatch.setattr(storage_mod, "MAPPING_FILE", os.path.join(TEST_DATA_DIR, "config_mapping.json"))
-    monkeypatch.setattr(storage_mod, "FAVORITES_FILE", os.path.join(TEST_DATA_DIR, "favorites.json"))
-    monkeypatch.setattr(storage_mod, "BINDINGS_FILE", os.path.join(TEST_DATA_DIR, "bindings.json"))
-    monkeypatch.setattr(storage_mod, "TOOLS_FILE", os.path.join(TEST_DATA_DIR, "tools.json"))
-    monkeypatch.setattr(storage_mod, "SCHEDULE_FILE", os.path.join(TEST_DATA_DIR, "schedule.json"))
-    monkeypatch.setattr(storage_mod, "LEGACY_MAPPING_FILE", storage_mod.MAPPING_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_FAVORITES_FILE", storage_mod.FAVORITES_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_BINDINGS_FILE", storage_mod.BINDINGS_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_TOOLS_FILE", storage_mod.TOOLS_FILE)
-    monkeypatch.setattr(storage_mod, "LEGACY_SCHEDULE_FILE", storage_mod.SCHEDULE_FILE)
-    storage_mod.set_active_profile(storage_mod.DEFAULT_PROFILE)
-    storage_mod._ensure_dirs()
-    yield
-    shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
-    os.makedirs(TEST_DATA_DIR, exist_ok=True)
 
 
 class TestFileDownloads:
