@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <empty1/>
+    <empty2></empty2>
+    <with_attrs attr1="val1" attr2="val2"/>
+    <nested>
+        <empty_child/>
+    </nested>
+</root>

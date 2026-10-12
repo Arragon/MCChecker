@@ -1,0 +1,9 @@
+{
+  "empty_object": {},
+  "empty_array": [],
+  "nested_empty": {
+    "empty_obj": {},
+    "empty_arr": []
+  },
+  "null_field": null
+}
