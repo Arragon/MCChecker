@@ -160,7 +160,7 @@ def _render_record_card(config_name: str, current: dict, previous: dict | None):
                 ui.label(f"大小: {size} bytes").classes("mc-page-subtitle")
             ui.space()
             with ui.column().classes("items-end q-gutter-xs"):
-                ui.html(_render_diff_chips_for_result(diff_result), sanitize=False)
+                ui.html(_render_diff_chips_for_result(diff_result))
                 with ui.row().classes("items-center q-gutter-xs"):
                     ui.button(
                         "打开解析",
@@ -224,7 +224,6 @@ def _render_structural_diff_blocks(struct: dict):
             f'{"".join(rows)}'
             f'{more_html}'
             f"</div>",
-            sanitize=False,
         )
 
 
@@ -251,4 +250,4 @@ def _render_unified_diff(lines: list[str]):
             .replace(">", "&gt;")
         )
         html_lines.append(f'<div class="{cls}">{safe}</div>')
-    ui.html(f'<div class="mc-diff-wrap">{"".join(html_lines)}</div>', sanitize=False)
+    ui.html(f'<div class="mc-diff-wrap">{"".join(html_lines)}</div>')

@@ -9,13 +9,34 @@ import os
 import shutil
 import logging
 import contextvars
+import tempfile
+import threading
+import time
 import urllib.parse
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# ===================== 异常定义 =====================
+
+
+class CorruptDataError(Exception):
+    """JSON 文件损坏异常
+
+    与 missing 区分：missing 返回 default，corrupt 必须抛出，
+    防止返回空列表后继续覆盖导致数据丢失。
+    """
+    pass
+
+
+class WriteBlockedError(Exception):
+    """写入被 WriteGate 阻止"""
+    pass
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 PROFILES_DIR = os.path.join(DATA_DIR, "profiles")
@@ -47,18 +68,60 @@ def set_active_profile(profile_id: Optional[str]) -> None:
     _profile_var.set(_normalize_profile_id(profile_id))
 
 
-def get_active_profile() -> str:
+def get_active_profile(explicit_profile_id: Optional[str] = None) -> str:
+    """获取 active profile。
+
+    优先级：
+    1. 显式指定 explicit_profile_id（不读浏览器状态）
+    2. ContextVar 当前值
+    3. 浏览器 app.storage.user["device_model"]（仅当无显式指定时）
+    4. DEFAULT_PROFILE
+
+    未知 profile（目录不存在且非已注册机型）时，若非显式指定，
+    回落 default；若显式指定，抛出 ValueError。
+    """
+    if explicit_profile_id is not None:
+        pid = _normalize_profile_id(explicit_profile_id)
+        if not profile_exists(pid):
+            raise ValueError(f"Unknown profile: {explicit_profile_id!r}")
+        return pid
+
     pid_ctx = _normalize_profile_id(_profile_var.get())
     if pid_ctx != DEFAULT_PROFILE:
         return pid_ctx
+    # 无显式指定时，才尝试读浏览器状态
     try:
         from nicegui import app
         pid = app.storage.user.get("device_model")
         if pid:
-            return _normalize_profile_id(pid)
+            normalized = _normalize_profile_id(pid)
+            if profile_exists(normalized):
+                return normalized
     except Exception:
         pass
     return pid_ctx
+
+
+def profile_exists(profile_id: str) -> bool:
+    """检查 profile 是否存在（目录存在或为 default）。"""
+    pid = _normalize_profile_id(profile_id)
+    if pid == DEFAULT_PROFILE:
+        return True
+    profile_dir = os.path.join(PROFILES_DIR, pid)
+    if os.path.isdir(profile_dir):
+        return True
+    # 检查 device_models 注册表
+    try:
+        from . import device_models
+        return device_models.exists(pid)
+    except Exception:
+        return False
+
+
+def is_known_deployer_ip(ip: str) -> bool:
+    """检查 IP 是否为已知部署者 IP（本机地址）。"""
+    from app.utils.auth import get_deployer_ips
+    return ip in get_deployer_ips()
 
 
 @contextmanager
@@ -116,6 +179,118 @@ def get_profile_data_dir(profile_id: Optional[str] = None) -> str:
     return _profile_base_dir(profile_id)
 
 
+# ===================== Profile 级并发保护 =====================
+
+_profile_locks: Dict[str, threading.RLock] = {}
+_profile_locks_guard = threading.Lock()
+
+
+def get_profile_lock(profile_id: str) -> threading.RLock:
+    """获取指定 profile 的 RLock
+
+    用于包裹完整 read → validate → modify → commit 操作，
+    防止同一 profile 的并发写入冲突。
+    """
+    pid = _normalize_profile_id(profile_id)
+    with _profile_locks_guard:
+        if pid not in _profile_locks:
+            _profile_locks[pid] = threading.RLock()
+        return _profile_locks[pid]
+
+
+# ===================== WriteGate 全局写入闸门 =====================
+
+
+class WriteGate:
+    """单进程全局写入闸门
+
+    状态机: OPEN → DRAINING → MAINTENANCE → OPEN
+    - OPEN: 正常写入
+    - DRAINING: 拒绝新写入，等待进行中的写入完成
+    - MAINTENANCE: 维护模式，所有写入被拒绝
+    """
+    OPEN = "open"
+    DRAINING = "draining"
+    MAINTENANCE = "maintenance"
+
+    def __init__(self):
+        self._state = self.OPEN
+        self._lock = threading.Lock()
+        self._in_flight_count = 0
+        self._in_flight_cond = threading.Condition(self._lock)
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def acquire_write(self) -> None:
+        """获取写入许可，非 OPEN 状态时拒绝"""
+        with self._lock:
+            if self._state != self.OPEN:
+                raise WriteBlockedError(
+                    f"WriteGate is {self._state}, write rejected"
+                )
+            self._in_flight_count += 1
+
+    def release_write(self) -> None:
+        """释放写入许可"""
+        with self._in_flight_cond:
+            self._in_flight_count -= 1
+            if self._in_flight_count == 0:
+                self._in_flight_cond.notify_all()
+
+    def enter_maintenance(self, timeout: float = 30.0) -> bool:
+        """进入维护模式，等待所有进行中的写入完成
+
+        Returns: True 如果成功进入维护模式，False 如果超时
+        """
+        with self._in_flight_cond:
+            self._state = self.DRAINING
+            end = time.monotonic() + timeout
+            while self._in_flight_count > 0:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    # 超时，恢复 OPEN
+                    self._state = self.OPEN
+                    return False
+                self._in_flight_cond.wait(timeout=remaining)
+            self._state = self.MAINTENANCE
+            return True
+
+    def exit_maintenance(self) -> None:
+        """退出维护模式，恢复写入"""
+        with self._lock:
+            self._state = self.OPEN
+
+    @contextmanager
+    def write_scope(self):
+        """上下文管理器：自动 acquire/release"""
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
+
+
+# 全局 WriteGate 实例
+global_write_gate = WriteGate()
+
+
+def unique_archive_name(base_name: str, dt: Optional[datetime] = None) -> str:
+    """生成唯一归档文件名，确保同秒归档不碰撞
+
+    格式: {base_name}_{timestamp}_{uuid8}
+    """
+    if dt is None:
+        dt = datetime.now()
+    timestamp = dt.strftime("%Y%m%d_%H%M%S")
+    unique = uuid.uuid4().hex[:8]
+    stem, dot, ext = base_name.rpartition(".")
+    if not dot or not stem:
+        return f"{base_name}_{timestamp}_{unique}"
+    return f"{stem}_{timestamp}_{unique}.{ext}"
+
+
 def _ensure_dirs():
     """确保数据目录存在"""
     os.makedirs(PROFILES_DIR, exist_ok=True)
@@ -126,22 +301,59 @@ def _ensure_dirs():
 
 
 def _load_json(filepath: str, default: Any = None) -> Any:
-    """加载 JSON 文件"""
+    """加载 JSON 文件
+
+    missing → return default (safe)
+    corrupt → raise CorruptDataError (不返回空列表后继续覆盖)
+    """
     if not os.path.exists(filepath):
         return default if default is not None else {}
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+    except json.JSONDecodeError as e:
+        raise CorruptDataError(f"JSON corrupt: {filepath}") from e
+    except IOError as e:
         logger.error("加载 %s 失败: %s", filepath, e)
         return default if default is not None else {}
 
 
+def load_json_safe(path: str, default: Any = None) -> Any:
+    """安全加载 JSON，与 _load_json 行为一致
+
+    missing → return default
+    corrupt → raise CorruptDataError
+    """
+    return _load_json(path, default)
+
+
 def _save_json(filepath: str, data: Any):
-    """保存 JSON 文件"""
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """保存 JSON 文件（原子写入）"""
+    atomic_write_json(filepath, data)
+
+
+def atomic_write_json(path: str, data: Any) -> None:
+    """原子写入 JSON：mkstemp → write → flush → fsync → os.replace
+
+    保证写入失败时旧数据完整保留（ENOSPC、permission denied、进程崩溃等）。
+    """
+    path = str(path)
+    dir_path = os.path.dirname(path)
+    os.makedirs(dir_path, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ===================== 全量配置映射表 =====================
@@ -352,7 +564,7 @@ def get_record_path(name: str, record_filename: str) -> str:
     return os.path.join(get_record_dir(target), rf)
 
 
-def save_record_file(name: str, content: bytes, *, source_url: str | None = None) -> str:
+def save_record_file(name: str, content: bytes, *, source_url: Optional[str] = None) -> str:
     _ensure_dirs()
     target = _sanitize_config_filename(name)
     ext = ".txt"
@@ -367,6 +579,11 @@ def save_record_file(name: str, content: bytes, *, source_url: str | None = None
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     record_filename = f"record_{ts}{ext}"
     record_path = os.path.join(get_record_dir(target), record_filename)
+    # 同秒保存不覆盖，添加唯一后缀
+    if os.path.exists(record_path):
+        unique = uuid.uuid4().hex[:8]
+        record_filename = f"record_{ts}_{unique}{ext}"
+        record_path = os.path.join(get_record_dir(target), record_filename)
     with open(record_path, "wb") as f:
         f.write(content)
     logger.info("保存修改记录文件: %s -> %s", target, record_path)
@@ -526,10 +743,9 @@ def save_config_file(name: str, content: bytes) -> str:
         timestamp = datetime.now().strftime("%Y%m%d")
         archive_name = _add_date_suffix(name, timestamp)
         archive_path = os.path.join(get_archive_dir(name), archive_name)
-        # 如果同名归档已存在，添加时间戳精确到秒
+        # 如果同名归档已存在，使用唯一文件名防止同秒碰撞
         if os.path.exists(archive_path):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archive_name = _add_date_suffix(name, timestamp)
+            archive_name = unique_archive_name(name)
             archive_path = os.path.join(get_archive_dir(name), archive_name)
         shutil.move(filepath, archive_path)
         logger.info("归档旧版本: %s -> %s", name, archive_path)
@@ -988,7 +1204,10 @@ def add_edit_remark(
 ) -> str:
     source_name = _sanitize_config_filename(source_file)
     proposed_text = str(proposed_value or "").strip()
-    if not node_key.strip():
+    # node_key 统一为稳定且全树唯一的节点路径（解析树 id），避免基于数组索引
+    # 的主键在搜索筛选 / 源文件更新 / 生成文件时出现漂移或越界。
+    stable_key = str(node_key or node_path or "").strip()
+    if not stable_key:
         raise ValueError("节点标识不能为空")
     if proposed_text == "":
         raise ValueError("修改值不能为空")
@@ -1003,8 +1222,8 @@ def add_edit_remark(
         {
             "id": item_id,
             "source_file": source_name,
-            "node_key": str(node_key),
-            "node_path": str(node_path or ""),
+            "node_key": stable_key,
+            "node_path": str(node_path or stable_key),
             "node_label": str(node_label or ""),
             "original_value": str(original_value or ""),
             "proposed_value": proposed_text,
@@ -1025,6 +1244,21 @@ def add_edit_remark(
     return item_id
 
 
+def _looks_like_index_key(key: str) -> bool:
+    """判断备注主键是否为「基于数组索引」的旧形态（纯数字或点分数字，如 '3' / '2.5.1'）。
+
+    解析树节点 id（node_path）形如 '/root/items'、'root.a[0]' 等，含字母或特殊符号，
+    不会被判为索引键；而旧的 node_key 仅由数字与 '.' 组成，可据此区分。
+    """
+    key = (key or "").strip()
+    if not key:
+        return False
+    parts = key.split(".")
+    if not parts:
+        return False
+    return all(p.isdigit() for p in parts)
+
+
 def build_edit_remark_map(
     source_file: str,
     *,
@@ -1032,13 +1266,25 @@ def build_edit_remark_map(
 ) -> Dict[str, List[Dict[str, Any]]]:
     source_name = _sanitize_config_filename(source_file)
     result: Dict[str, List[Dict[str, Any]]] = {}
+    # 查看器默认只展示「待审阅」(pending) 备注；审阅完成（通过/驳回）后，
+    # 备注状态变为 approved/rejected，自动从查看器界面消失。
+    if statuses is None:
+        statuses = {"pending"}
     for item in load_edit_remarks():
         if item.get("source_file") != source_name:
             continue
         status = str(item.get("status") or "pending")
         if statuses is not None and status not in statuses:
             continue
-        key = str(item.get("node_key") or item.get("node_path") or "")
+        node_key = str(item.get("node_key") or "")
+        node_path = str(item.get("node_path") or "")
+        # 备注关联主键统一使用稳定的节点路径（解析树 id）。
+        # 历史数据可能使用基于数组索引的 node_key（纯数字或点分数字），
+        # 这种情况回退到 node_path，避免搜索筛选 / 源文件更新后主键漂移错位。
+        if _looks_like_index_key(node_key) and node_path:
+            key = node_path
+        else:
+            key = node_key or node_path
         if not key:
             continue
         result.setdefault(key, []).append(item)
@@ -1058,12 +1304,18 @@ def list_review_items(source_file: Optional[str] = None) -> List[Dict[str, Any]]
         if target_file and item.get("source_file") != target_file:
             continue
 
-        key = (str(item.get("source_file") or ""), str(item.get("node_key") or item.get("node_path") or ""))
+        node_key = str(item.get("node_key") or "")
+        node_path = str(item.get("node_path") or "")
+        if _looks_like_index_key(node_key) and node_path:
+            stable_key = node_path
+        else:
+            stable_key = node_key or node_path
+        key = (str(item.get("source_file") or ""), stable_key)
         if key not in grouped:
             grouped[key] = {
                 "source_file": item.get("source_file") or "",
-                "node_key": item.get("node_key") or "",
-                "node_path": item.get("node_path") or "",
+                "node_key": stable_key,
+                "node_path": node_path or stable_key,
                 "node_label": item.get("node_label") or "",
                 "original_value": item.get("original_value") or "",
                 "node_type": item.get("node_type") or "",
@@ -1122,6 +1374,24 @@ def apply_review_results(
         save_edit_remarks(items)
 
     return {"approved": approved_count, "rejected": rejected_count}
+
+
+def delete_edit_remark(remark_id: str) -> bool:
+    """删除单条修改备注（按 id 精确删除）。
+
+    用于：审阅人员直接删除指定备注；查看器中管理员或备注原始添加者删除。
+    返回是否实际删除了记录。
+    """
+    target = str(remark_id or "").strip()
+    if not target:
+        raise ValueError("备注标识不能为空")
+
+    items = load_edit_remarks()
+    new_items = [item for item in items if str(item.get("id") or "") != target]
+    if len(new_items) == len(items):
+        return False
+    save_edit_remarks(new_items)
+    return True
 
 
 # ===================== 变量绑定关系 =====================

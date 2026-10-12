@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document>
+    <paragraph>
+        This is <bold>bold</bold> and <italic>italic</italic> text.
+    </paragraph>
+    <list>
+        <item>Item <emphasis>one</emphasis></item>
+        <item>Item <emphasis>two</emphasis></item>
+    </list>
+</document>

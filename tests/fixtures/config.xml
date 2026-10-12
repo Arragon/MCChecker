@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <server host="0.0.0.0" port="8080" workers="4">
+        <ssl enabled="true">
+            <cert>/path/to/cert.pem</cert>
+            <key>/path/to/key.pem</key>
+        </ssl>
+    </server>
+    <database>
+        <host>localhost</host>
+        <port>5432</port>
+        <name>mydb</name>
+        <user>admin</user>
+        <password>secret</password>
+        <pool_size>10</pool_size>
+    </database>
+    <logging level="INFO" format="json">
+        <outputs>
+            <output>console</output>
+            <output>file</output>
+        </outputs>
+        <file path="/var/log/app.log" max_size="100MB" rotation="daily"/>
+    </logging>
+    <features>
+        <enable_cache>true</enable_cache>
+        <cache_ttl>3600</cache_ttl>
+        <rate_limit>1000</rate_limit>
+    </features>
+</configuration>

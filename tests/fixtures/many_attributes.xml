@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <item attr0="value0" attr1="value1" attr2="value2" attr3="value3" attr4="value4" attr5="value5" attr6="value6" attr7="value7" attr8="value8" attr9="value9" attr10="value10" attr11="value11" attr12="value12" attr13="value13" attr14="value14" attr15="value15" attr16="value16" attr17="value17" attr18="value18" attr19="value19">
+        <child>text</child>
+    </item>
+</root>

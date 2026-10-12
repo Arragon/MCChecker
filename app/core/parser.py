@@ -2,16 +2,70 @@
 
 将 XML 和 JSON 文件统一转换为树形结构，供前端展示。
 树形结构格式: {"id": str, "label": str, "value": Optional[str], "children": list, "attrs": dict}
+
+新增 parse_xml_full / parse_json_full 返回 ParsedDocument，保留完整语义和 locator。
 """
 
+import hashlib
 import json
 import os
 import io
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
 
+from .models import FileRef, FileKind, SourceSnapshot, NodeRef, ParsedDocument
+
+_PARSER_VERSION = "2.0-full"
+
 _LARGE_XML_BYTES_THRESHOLD = 200_000
 _LARGE_XML_ATTR_ALLOWLIST = {"description", "editPrivilege", "default", "min", "max", "incMin", "incMax"}
+
+# ---------------------------------------------------------------------------
+# 内存缓存：同 content hash 复用 ParsedDocument，避免重复解析
+# ---------------------------------------------------------------------------
+_PARSED_DOC_CACHE_MAX = 32  # LRU 缓存容量
+_parsed_doc_cache: dict[str, ParsedDocument] = {}
+_parsed_doc_cache_order: list[str] = []  # LRU 顺序（最近使用在末尾）
+
+
+def get_parsed_document(source: bytes, filename: str, fmt: str = "") -> ParsedDocument:
+    """获取 ParsedDocument，同 content hash 复用缓存
+
+    如果 fmt 为空，根据文件名后缀推断。
+    """
+    source_hash = compute_content_hash(source)
+
+    if source_hash in _parsed_doc_cache:
+        # LRU: 移到末尾
+        _parsed_doc_cache_order.remove(source_hash)
+        _parsed_doc_cache_order.append(source_hash)
+        return _parsed_doc_cache[source_hash]
+
+    if not fmt:
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        fmt = "json" if ext == "json" else "xml"
+
+    if fmt == "json":
+        doc = parse_json_full(source, filename, source_hash=source_hash)
+    else:
+        doc = parse_xml_full(source, filename, source_hash=source_hash)
+
+    # 写入缓存，淘汰最旧的
+    _parsed_doc_cache[source_hash] = doc
+    _parsed_doc_cache_order.append(source_hash)
+    while len(_parsed_doc_cache_order) > _PARSED_DOC_CACHE_MAX:
+        evict = _parsed_doc_cache_order.pop(0)
+        _parsed_doc_cache.pop(evict, None)
+
+    return doc
+
+
+def clear_parsed_document_cache() -> int:
+    """清空 ParsedDocument 内存缓存，返回清理数量"""
+    count = len(_parsed_doc_cache)
+    _parsed_doc_cache.clear()
+    _parsed_doc_cache_order.clear()
+    return count
 
 
 def parse_file(content: bytes, filename: str) -> Dict[str, Any]:
@@ -149,6 +203,8 @@ def _parse_xml_iterparse(source: Any, filename: str, allowed_attr_names: Optiona
     if root_node is None:
         raise ValueError(f"无法解析文件 {filename}: XML 内容为空")
 
+    _rewrite_sibling_ids(root_node)
+
     return {
         "id": "root",
         "label": filename,
@@ -156,6 +212,45 @@ def _parse_xml_iterparse(source: Any, filename: str, allowed_attr_names: Optiona
         "children": [root_node],
         "attrs": {"type": "xml"},
     }
+
+
+def _rewrite_sibling_ids(node: Dict[str, Any]) -> None:
+    """为同一父节点下的同名兄弟元素重写唯一 id（追加 [occurrence] 序号）。
+
+    旧树中 repeated XML sibling 会得到完全相同的 id/path，导致备注、收藏与
+    取值映射互相覆盖。这里与 ParsedDocument locator（xml:tag[occ]）保持同一
+    约定：仅当同名兄弟多于一个时，按出现顺序追加 [n]。
+    """
+    element_children = [
+        child
+        for child in node.get("children") or []
+        if (child.get("attrs") or {}).get("type") == "element"
+    ]
+    counts: Dict[str, int] = {}
+    for child in element_children:
+        counts[child["label"]] = counts.get(child["label"], 0) + 1
+
+    seen: Dict[str, int] = {}
+    for child in element_children:
+        label = child["label"]
+        if counts[label] > 1:
+            seen[label] = seen.get(label, 0) + 1
+            segment = f"{label}[{seen[label]}]"
+        else:
+            segment = label
+        _rewrite_subtree_ids(child, f"{node['id']}/{segment}")
+
+
+def _rewrite_subtree_ids(node: Dict[str, Any], new_id: str) -> None:
+    """把子树根节点 id 设为 new_id，并同步修正 attribute/#text 子节点 id。"""
+    node["id"] = new_id
+    for child in node.get("children") or []:
+        child_type = (child.get("attrs") or {}).get("type")
+        if child_type == "attribute":
+            child["id"] = f"{new_id}@{child['label'][1:]}"
+        elif child_type == "text":
+            child["id"] = f"{new_id}#text"
+    _rewrite_sibling_ids(node)
 
 
 def parse_xml_path(file_path: str, filename: str) -> Dict[str, Any]:
@@ -169,7 +264,7 @@ def parse_xml_path(file_path: str, filename: str) -> Dict[str, Any]:
         return _parse_xml_iterparse(file_path, filename, allowed_attr_names=allowed)
     except ET.ParseError as e:
         if "unbound prefix" not in str(e) and "junk after document element" not in str(e):
-            raise
+            raise ValueError(f"无法解析文件 {filename}: {e}") from e
     with open(file_path, "rb") as f:
         content = f.read()
     return parse_xml(content, filename)
@@ -185,12 +280,18 @@ def parse_xml(content: bytes, filename: str) -> Dict[str, Any]:
         if "junk after document element" in msg:
             cut = content.rfind(b">")
             if cut >= 0:
-                return _parse_xml_iterparse(io.BytesIO(content[: cut + 1]), filename, allowed_attr_names=allowed)
+                try:
+                    return _parse_xml_iterparse(io.BytesIO(content[: cut + 1]), filename, allowed_attr_names=allowed)
+                except ET.ParseError as retry_err:
+                    raise ValueError(f"无法解析文件 {filename}: {retry_err}") from retry_err
         if "unbound prefix" not in msg:
-            raise
+            raise ValueError(f"无法解析文件 {filename}: {e}") from e
     text = content.decode("utf-8-sig")
     text = _preprocess_xml_namespaces(text)
-    return _parse_xml_iterparse(io.BytesIO(text.encode("utf-8")), filename, allowed_attr_names=allowed)
+    try:
+        return _parse_xml_iterparse(io.BytesIO(text.encode("utf-8")), filename, allowed_attr_names=allowed)
+    except ET.ParseError as e:
+        raise ValueError(f"无法解析文件 {filename}: {e}") from e
 
 
 def _json_to_tree(data: Any, path: str) -> List[Dict[str, Any]]:
@@ -312,10 +413,227 @@ def get_all_values(tree: Dict[str, Any]) -> Dict[str, str]:
     return result
 
 
-def _collect_values(node: Dict[str, Any], prefix: str, result: Dict[str, str]):
-    """递归收集有值的节点"""
-    path = f"{prefix}/{node['label']}" if prefix else node["label"]
+def _collect_values(node: Dict[str, Any], prefix: str, result: Dict[str, str], name: Optional[str] = None):
+    """递归收集有值的节点。同名兄弟按出现顺序追加 [n]，与 id 重写规则一致。"""
+    label = name if name is not None else node["label"]
+    path = f"{prefix}/{label}" if prefix else label
     if node.get("value") is not None:
         result[path] = node["value"]
+    element_children = [
+        child
+        for child in node.get("children", [])
+        if (child.get("attrs") or {}).get("type") == "element"
+    ]
+    counts: Dict[str, int] = {}
+    for child in element_children:
+        counts[child["label"]] = counts.get(child["label"], 0) + 1
+    seen: Dict[str, int] = {}
     for child in node.get("children", []):
-        _collect_values(child, path, result)
+        child_name = child["label"]
+        if (child.get("attrs") or {}).get("type") == "element" and counts[child["label"]] > 1:
+            seen[child["label"]] = seen.get(child["label"], 0) + 1
+            child_name = f"{child['label']}[{seen[child['label']]}]"
+        _collect_values(child, path, result, child_name)
+
+
+# ---------------------------------------------------------------------------
+# 完整语义解析（返回 ParsedDocument）
+# ---------------------------------------------------------------------------
+
+def compute_content_hash(data: bytes) -> str:
+    """计算内容的 SHA-256 hash"""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _make_file_ref(filename: str, content_hash: str, fmt: str) -> FileRef:
+    """根据文件名推断 FileKind 并构建 FileRef"""
+    kind = FileKind.CURRENT
+    return FileRef(profile_id="default", kind=kind, name=filename)
+
+
+def _make_source(filename: str, content_hash: str, fmt: str,
+                 source_handle: str = "") -> SourceSnapshot:
+    ref = _make_file_ref(filename, content_hash, fmt)
+    return SourceSnapshot(
+        file_ref=ref,
+        content_hash=content_hash,
+        format=fmt,
+        parser_version=_PARSER_VERSION,
+        source_handle=source_handle or filename,
+    )
+
+
+# ---- XML full -----------------------------------------------------------
+
+def parse_xml_full(source: bytes, filename: str = "",
+                   source_hash: str = "") -> ParsedDocument:
+    """完整 XML 解析，保留所有语义（全部 attribute、text/tail、命名空间）
+
+    不做大文件属性裁剪，返回 ParsedDocument。
+    """
+    if not source_hash:
+        source_hash = compute_content_hash(source)
+
+    # 复用已有 namespace 修复逻辑
+    text_bytes = source
+    try:
+        root = ET.fromstring(text_bytes)
+    except ET.ParseError as e:
+        msg = str(e)
+        if "unbound prefix" in msg:
+            text = source.decode("utf-8-sig")
+            text = _preprocess_xml_namespaces(text)
+            text_bytes = text.encode("utf-8")
+            root = ET.fromstring(text_bytes)
+        elif "junk after document element" in msg:
+            cut = source.rfind(b">")
+            if cut >= 0:
+                root = ET.fromstring(source[:cut + 1])
+            else:
+                raise
+        else:
+            raise
+
+    # 构建完整树（保留所有 attribute）
+    occurrence_map: Dict[str, int] = {}
+    tree = _build_full_xml_tree(root, source_hash, occurrence_map)
+
+    wrapper = {
+        "id": "root",
+        "label": filename or "<xml>",
+        "value": None,
+        "children": [tree],
+        "attrs": {"type": "xml"},
+    }
+
+    src = _make_source(filename, source_hash, "xml")
+    return ParsedDocument(source=src, root=wrapper, format="xml")
+
+
+def _build_full_xml_tree(elem: ET.Element, source_hash: str,
+                         occurrence_map: Dict[str, int]) -> Dict[str, Any]:
+    """递归构建完整 XML 树，保留全部 attribute、text、tail、命名空间"""
+    tag = elem.tag  # 已展开的命名空间 {uri}local
+    occurrence_map[tag] = occurrence_map.get(tag, 0) + 1
+    occurrence = occurrence_map[tag]
+
+    locator = _make_xml_locator(tag, occurrence)
+
+    # 属性子节点
+    attr_children: List[Dict[str, Any]] = []
+    for attr_name, attr_value in elem.attrib.items():
+        attr_children.append({
+            "id": f"{locator}@{attr_name}",
+            "label": f"@{attr_name}",
+            "value": attr_value,
+            "children": [],
+            "attrs": {"type": "attribute"},
+            "locator": f"{locator}@{attr_name}",
+        })
+
+    # 子元素
+    child_nodes: List[Dict[str, Any]] = []
+    for child in elem:
+        child_nodes.append(
+            _build_full_xml_tree(child, source_hash, occurrence_map)
+        )
+
+    text = (elem.text or "").strip()
+    tail = (elem.tail or "").strip()
+
+    all_children = attr_children + child_nodes
+    value = None
+    if text and not child_nodes:
+        value = text
+    elif text and child_nodes:
+        all_children.insert(0, {
+            "id": f"{locator}#text",
+            "label": "#text",
+            "value": text,
+            "children": [],
+            "attrs": {"type": "text"},
+            "locator": f"{locator}#text",
+        })
+
+    node: Dict[str, Any] = {
+        "id": locator,
+        "label": tag,
+        "value": value,
+        "children": all_children,
+        "attrs": {"type": "element"},
+        "tag": tag,
+        "occurrence": occurrence,
+        "locator": locator,
+    }
+    if tail:
+        node["tail"] = tail
+    return node
+
+
+def _make_xml_locator(tag: str, occurrence: int) -> str:
+    """XML locator: 展开命名空间 + 兄弟 occurrence"""
+    return f"xml:{tag}[{occurrence}]"
+
+
+# ---- JSON full ----------------------------------------------------------
+
+def parse_json_full(source: bytes, filename: str = "",
+                    source_hash: str = "") -> ParsedDocument:
+    """完整 JSON 解析，保留所有类型信息（int/float/bool/null/str）"""
+    if not source_hash:
+        source_hash = compute_content_hash(source)
+
+    text = source.decode("utf-8-sig")
+    data = json.loads(text)
+
+    tree = _build_full_json_tree(data, source_hash, path="$")
+
+    wrapper = {
+        "id": "root",
+        "label": filename or "<json>",
+        "value": None,
+        "children": tree if isinstance(tree, list) else [tree],
+        "attrs": {"type": "json"},
+    }
+
+    src = _make_source(filename, source_hash, "json")
+    return ParsedDocument(source=src, root=wrapper, format="json")
+
+
+def _build_full_json_tree(data: Any, source_hash: str, path: str) -> Any:
+    """递归构建完整 JSON 树，保留原始类型"""
+    if isinstance(data, dict):
+        children: Dict[str, Any] = {}
+        for k, v in data.items():
+            child_path = _json_pointer(path, str(k))
+            children[str(k)] = _build_full_json_tree(v, source_hash, child_path)
+        return {
+            "type": "object",
+            "value_type": "object",
+            "children": children,
+            "locator": path,
+        }
+    elif isinstance(data, list):
+        items = [
+            _build_full_json_tree(v, source_hash, f"{path}/{i}")
+            for i, v in enumerate(data)
+        ]
+        return {
+            "type": "array",
+            "value_type": "array",
+            "children": items,
+            "locator": path,
+        }
+    else:
+        return {
+            "type": "scalar",
+            "value_type": type(data).__name__,
+            "value": data,
+            "locator": path,
+        }
+
+
+def _json_pointer(parent: str, key: str) -> str:
+    """JSON Pointer with RFC 6901 escaping: ~ -> ~0, / -> ~1"""
+    escaped = key.replace("~", "~0").replace("/", "~1")
+    return f"{parent}/{escaped}"

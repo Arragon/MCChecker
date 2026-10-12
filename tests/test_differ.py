@@ -106,8 +106,8 @@ class TestBindingAnnotation:
 
         result = compare_versions(SAMPLE_JSON_V1, SAMPLE_JSON_V2, "v1.json", "v2.json", use_bindings=True)
         struct = result["structural_diff"]
-        # 应有绑定项标注
-        assert len(struct["bound_items"]) >= 0  # 至少不报错
+        # 应有绑定项标注（timeout 绑定）
+        assert len(struct["bound_items"]) > 0
 
     def test_no_bindings(self):
         result = compare_versions(SAMPLE_JSON_V1, SAMPLE_JSON_V2, "v1.json", "v2.json", use_bindings=False)

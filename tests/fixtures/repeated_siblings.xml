@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <item id="1">First</item>
+    <item id="2">Second</item>
+    <item id="3">Third</item>
+    <item id="4">Fourth</item>
+    <item id="5">Fifth</item>
+    <group>
+        <entry>A</entry>
+        <entry>B</entry>
+        <entry>C</entry>
+    </group>
+</root>
