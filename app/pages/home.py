@@ -1178,7 +1178,7 @@ def _show_upload_dialog(session_tabs: list, session_active_tab: dict, session_ta
         uploaded = {"data": None, "name": None}
 
         async def handle_upload(e):
-            uploaded["data"] = e.content.read()
+            uploaded["data"] = e.file.read()
             uploaded["name"] = e.name
 
         ui.upload(label="选择文件", auto_upload=True, on_upload=handle_upload).props("dense").classes("w-full")

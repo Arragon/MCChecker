@@ -745,12 +745,7 @@ def save_config_file(name: str, content: bytes) -> str:
         archive_path = os.path.join(get_archive_dir(name), archive_name)
         # 如果同名归档已存在，使用唯一文件名防止同秒碰撞
         if os.path.exists(archive_path):
-            unique_suffix = unique_archive_name(name)
-            if "." in name:
-                base, ext = name.rsplit(".", 1)
-                archive_name = f"{base}_{unique_suffix}.{ext}"
-            else:
-                archive_name = f"{name}_{unique_suffix}"
+            archive_name = unique_archive_name(name)
             archive_path = os.path.join(get_archive_dir(name), archive_name)
         shutil.move(filepath, archive_path)
         logger.info("归档旧版本: %s -> %s", name, archive_path)

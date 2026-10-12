@@ -80,7 +80,11 @@ class DLDraft:
             d = cfg
             for p in parts[:-1]:
                 d = d.setdefault(p, {})
-            d[parts[-1]] = value if value is not None else 0.0
+            # 范围字段允许空（None = 不过滤），系数字段空值归一为 0.0
+            if parts[-1] in _RANGE_KEYS and value in (None, ""):
+                d[parts[-1]] = None
+            else:
+                d[parts[-1]] = value if value is not None else 0.0
         # 将 temp_bindings 写入
         for item_id, binding in self.temp_bindings.items():
             cfg.setdefault("items", {}).setdefault(item_id, {})["binding"] = binding
@@ -222,6 +226,16 @@ def _cancel_edit(cfg: dict, on_refresh=None):
         on_refresh()
 
 
+_RANGE_KEYS = {"x_min", "x_max", "y_min", "y_max"}
+
+
+def _input_to_value(key: str, v):
+    """范围字段空值存 None（不过滤），其他字段空值归一为 0.0"""
+    if key in _RANGE_KEYS and v in (None, ""):
+        return None
+    return v if v not in (None, "") else 0.0
+
+
 def _collect_inputs(cfg: dict):
     for inp in cfg.get("_inputs", []):
         key = getattr(inp, "_coeff_key", None)
@@ -232,9 +246,9 @@ def _collect_inputs(cfg: dict):
                 d = cfg
                 for p in parts:
                     d = d.setdefault(p, {})
-                d[key] = inp.value or 0.0
+                d[key] = _input_to_value(key, inp.value)
             else:
-                cfg[section][key] = inp.value or 0.0
+                cfg[section][key] = _input_to_value(key, inp.value)
 
 
 def _open_binding_dialog(cfg: dict, item_id: str, on_refresh=None):

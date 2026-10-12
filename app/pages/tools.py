@@ -28,11 +28,11 @@ def render_tools_page(deployer: bool):
             with ui.element("div").classes("mc-mgmt-table w-full"):
                 with ui.element("div").classes("mc-mgmt-thead"):
                     with ui.row().classes("items-center w-full no-wrap"):
-                        ui.element("div").text("名称").classes("mc-mgmt-th").style("flex: 2")
-                        ui.element("div").text("介绍").classes("mc-mgmt-th").style("flex: 3")
-                        ui.element("div").text("地址").classes("mc-mgmt-th").style("flex: 3")
+                        ui.label("名称").classes("mc-mgmt-th").style("flex: 2")
+                        ui.label("介绍").classes("mc-mgmt-th").style("flex: 3")
+                        ui.label("地址").classes("mc-mgmt-th").style("flex: 3")
                         if deployer:
-                            ui.element("div").text("操作").classes("mc-mgmt-th").style("flex: 1")
+                            ui.label("操作").classes("mc-mgmt-th").style("flex: 1")
 
                 for tool in tools:
                     _render_tool_row(tool, deployer, refresh_tools)
@@ -89,9 +89,9 @@ def _render_tool_row(tool: dict, deployer: bool, refresh_cb):
 
     with ui.element("div").classes("mc-mgmt-row"):
         with ui.row().classes("items-center w-full no-wrap"):
-            ui.element("div").classes("mc-mgmt-td text-weight-medium").style("flex: 2").text(name or "-")
-            ui.element("div").classes("mc-mgmt-td text-grey-7").style("flex: 3").text(desc or "-")
-            ui.element("div").classes("mc-mgmt-td font-mono text-caption").style("flex: 3").text(url or "-")
+            ui.label(name or "-").classes("mc-mgmt-td text-weight-medium").style("flex: 2")
+            ui.label(desc or "-").classes("mc-mgmt-td text-grey-7").style("flex: 3")
+            ui.label(url or "-").classes("mc-mgmt-td font-mono text-caption").style("flex: 3")
             if deployer:
                 td_actions = ui.element("div").classes("mc-mgmt-td").style("flex: 1")
                 with td_actions:

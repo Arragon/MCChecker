@@ -27,10 +27,10 @@ def render_bindings_page(deployer: bool):
             with ui.element("div").classes("mc-mgmt-table w-full"):
                 with ui.element("div").classes("mc-mgmt-thead"):
                     with ui.row().classes("items-center w-full no-wrap"):
-                        ui.element("div").text("绑定组").classes("mc-mgmt-th").style("flex: 2")
-                        ui.element("div").text("变量").classes("mc-mgmt-th").style("flex: 4")
+                        ui.label("绑定组").classes("mc-mgmt-th").style("flex: 2")
+                        ui.label("变量").classes("mc-mgmt-th").style("flex: 4")
                         if deployer:
-                            ui.element("div").text("操作").classes("mc-mgmt-th").style("flex: 1")
+                            ui.label("操作").classes("mc-mgmt-th").style("flex: 1")
 
                 for b in bindings:
                     _render_binding_row(b, deployer, refresh_bindings)
@@ -126,8 +126,8 @@ def _render_binding_row(b: dict, deployer: bool, refresh_cb):
 
     with ui.element("div").classes("mc-mgmt-row"):
         with ui.row().classes("items-center w-full no-wrap"):
-            ui.element("div").classes("mc-mgmt-td text-weight-medium").style("flex: 2").text(group_name or "-")
-            ui.element("div").classes("mc-mgmt-td font-mono text-caption").style("flex: 4").text(var_summary)
+            ui.label(group_name or "-").classes("mc-mgmt-td text-weight-medium").style("flex: 2")
+            ui.label(var_summary).classes("mc-mgmt-td font-mono text-caption").style("flex: 4")
             if deployer:
                 td_actions = ui.element("div").classes("mc-mgmt-td").style("flex: 1")
                 with td_actions:

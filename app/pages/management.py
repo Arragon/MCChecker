@@ -60,12 +60,12 @@ def _render_update_panel(deployer: bool):
                 # 表头
                 with ui.element("div").classes("mc-mgmt-thead"):
                     with ui.row().classes("items-center w-full no-wrap"):
-                        ui.element("div").text("文件名").classes("mc-mgmt-th").style("flex: 2")
-                        ui.element("div").text("更新时间").classes("mc-mgmt-th").style("flex: 1")
-                        ui.element("div").text("下载链接").classes("mc-mgmt-th").style("flex: 3")
-                        ui.element("div").text("状态").classes("mc-mgmt-th").style("flex: 1")
+                        ui.label("文件名").classes("mc-mgmt-th").style("flex: 2")
+                        ui.label("更新时间").classes("mc-mgmt-th").style("flex: 1")
+                        ui.label("下载链接").classes("mc-mgmt-th").style("flex: 3")
+                        ui.label("状态").classes("mc-mgmt-th").style("flex: 1")
                         if deployer:
-                            ui.element("div").text("操作").classes("mc-mgmt-th").style("flex: 1.2")
+                            ui.label("操作").classes("mc-mgmt-th").style("flex: 1.2")
 
                 for item in mapping:
                     _render_mapping_row(item, deployer, status_state, refresh_mapping_list)
@@ -172,10 +172,9 @@ def _render_mapping_row(item: dict, deployer: bool, status_state: dict, refresh_
 
     with ui.element("div").classes("mc-mgmt-row"):
         with ui.row().classes("items-center w-full no-wrap"):
-            ui.element("div").classes("mc-mgmt-td").style("flex: 2").text(name or "-")
-            ui.element("div").classes("mc-mgmt-td").style("flex: 1").text(file_time or "-")
-            td_link = ui.element("div").classes("mc-mgmt-td text-grey-8").style("flex: 3")
-            td_link.text(url if url else "未配置")
+            ui.label(name or "-").classes("mc-mgmt-td").style("flex: 2")
+            ui.label(file_time or "-").classes("mc-mgmt-td").style("flex: 1")
+            td_link = ui.label(url if url else "未配置").classes("mc-mgmt-td text-grey-8").style("flex: 3")
             # 状态
             td_status = ui.element("div").classes("mc-mgmt-td").style("flex: 1")
             if status and status_label:
@@ -184,7 +183,8 @@ def _render_mapping_row(item: dict, deployer: bool, status_state: dict, refresh_
                     if status_reason:
                         ui.label(status_reason).classes("text-caption text-grey")
             else:
-                td_status.text("-")
+                with td_status:
+                    ui.label("-")
 
             if deployer:
                 td_actions = ui.element("div").classes("mc-mgmt-td").style("flex: 1.2")
@@ -237,11 +237,11 @@ def _render_ip_panel(deployer: bool):
             with ui.element("div").classes("mc-mgmt-table w-full"):
                 with ui.element("div").classes("mc-mgmt-thead"):
                     with ui.row().classes("items-center w-full no-wrap"):
-                        ui.element("div").text("IP 地址").classes("mc-mgmt-th").style("flex: 2")
-                        ui.element("div").text("姓名").classes("mc-mgmt-th").style("flex: 2")
-                        ui.element("div").text("更新时间").classes("mc-mgmt-th").style("flex: 2")
+                        ui.label("IP 地址").classes("mc-mgmt-th").style("flex: 2")
+                        ui.label("姓名").classes("mc-mgmt-th").style("flex: 2")
+                        ui.label("更新时间").classes("mc-mgmt-th").style("flex: 2")
                         if deployer:
-                            ui.element("div").text("操作").classes("mc-mgmt-th").style("flex: 1")
+                            ui.label("操作").classes("mc-mgmt-th").style("flex: 1")
 
                 for item in items:
                     _render_ip_row(item, deployer, refresh_ip_mapping)
@@ -305,9 +305,9 @@ def _render_ip_row(item: dict, deployer: bool, refresh_cb):
 
     with ui.element("div").classes("mc-mgmt-row"):
         with ui.row().classes("items-center w-full no-wrap"):
-            ui.element("div").classes("mc-mgmt-td font-mono").style("flex: 2").text(ip or "-")
-            ui.element("div").classes("mc-mgmt-td").style("flex: 2").text(name or "-")
-            ui.element("div").classes("mc-mgmt-td text-grey-7").style("flex: 2").text(updated_at or "-")
+            ui.label(ip or "-").classes("mc-mgmt-td font-mono").style("flex: 2")
+            ui.label(name or "-").classes("mc-mgmt-td").style("flex: 2")
+            ui.label(updated_at or "-").classes("mc-mgmt-td text-grey-7").style("flex: 2")
             if deployer:
                 td_actions = ui.element("div").classes("mc-mgmt-td").style("flex: 1")
                 with td_actions:
@@ -337,10 +337,10 @@ def _render_admin_panel(deployer: bool):
             with ui.element("div").classes("mc-mgmt-table w-full"):
                 with ui.element("div").classes("mc-mgmt-thead"):
                     with ui.row().classes("items-center w-full no-wrap"):
-                        ui.element("div").text("姓名").classes("mc-mgmt-th").style("flex: 3")
-                        ui.element("div").text("更新时间").classes("mc-mgmt-th").style("flex: 3")
+                        ui.label("姓名").classes("mc-mgmt-th").style("flex: 3")
+                        ui.label("更新时间").classes("mc-mgmt-th").style("flex: 3")
                         if deployer:
-                            ui.element("div").text("操作").classes("mc-mgmt-th").style("flex: 1")
+                            ui.label("操作").classes("mc-mgmt-th").style("flex: 1")
 
                 for item in items:
                     _render_admin_row(item, deployer, refresh_admin_users)
@@ -387,8 +387,8 @@ def _render_admin_row(item: dict, deployer: bool, refresh_cb):
 
     with ui.element("div").classes("mc-mgmt-row"):
         with ui.row().classes("items-center w-full no-wrap"):
-            ui.element("div").classes("mc-mgmt-td").style("flex: 3").text(name or "-")
-            ui.element("div").classes("mc-mgmt-td text-grey-7").style("flex: 3").text(updated_at or "-")
+            ui.label(name or "-").classes("mc-mgmt-td").style("flex: 3")
+            ui.label(updated_at or "-").classes("mc-mgmt-td text-grey-7").style("flex: 3")
             if deployer:
                 td_actions = ui.element("div").classes("mc-mgmt-td").style("flex: 1")
                 with td_actions:
