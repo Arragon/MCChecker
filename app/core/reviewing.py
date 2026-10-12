@@ -487,39 +487,50 @@ def _apply_change_to_xml_element(
     """
     locator = remark.node_ref.locator
     if not locator.startswith("xml:"):
-        return
+        raise ReviewValidationError(f"非 XML locator，无法应用: {locator}")
 
     target = locator[4:]  # 去掉 "xml:"
+    attr_name = ""
+    at_pos = target.rfind("@")
+    if at_pos >= 0:
+        attr_name = target[at_pos + 1:]
+        target = target[:at_pos]
+
     bracket = target.rfind("[")
     if bracket < 0:
-        return
+        raise ReviewValidationError(f"locator 缺少 occurrence: {locator}")
     tag = target[:bracket]
     occ_str = target[bracket + 1:-1]
     try:
         target_occ = int(occ_str)
     except ValueError:
-        return
+        raise ReviewValidationError(f"locator occurrence 非法: {locator}")
 
     value_type = remark.node_ref.value_type
 
     # 在 Element 树中查找第 target_occ 个匹配 tag
     elem, parent = _find_xml_element_with_parent(root, tag, target_occ)
     if elem is None:
-        return
+        raise ReviewValidationError(f"locator 未匹配到节点: {locator}")
 
-    if value_type == "attribute":
-        # locator 格式: xml:<tag>[<occ>]@<attr_name>
-        attr_locator = locator
-        at_pos = attr_locator.rfind("@")
-        if at_pos >= 0:
-            attr_name = attr_locator[at_pos + 1:]
-            elem.set(attr_name, str(remark.suggested_value))
-    elif value_type == "text":
-        elem.text = str(remark.suggested_value)
-    elif value_type in ("element", "string", "number"):
-        elem.text = str(remark.suggested_value)
+    # T07: locator + 原值校验，防止误改已变化的节点
+    expected = remark.original_value
+    if value_type == "attribute" and attr_name:
+        if expected is not None and str(elem.get(attr_name) or "") != str(expected):
+            raise ReviewConflictError(f"attribute 原值已变化: {locator}")
+        elem.set(attr_name, str(remark.suggested_value))
+    elif value_type == "attribute":
+        raise ReviewValidationError(f"attribute locator 缺少属性名: {locator}")
     elif value_type == "tail":
+        if expected is not None and (elem.tail or "") != str(expected):
+            raise ReviewConflictError(f"tail 原值已变化: {locator}")
         elem.tail = str(remark.suggested_value)
+    else:
+        # element / text / string / number 均按元素文本修改
+        current = (elem.text or "").strip()
+        if expected is not None and str(expected).strip() != "" and current != str(expected).strip():
+            raise ReviewConflictError(f"节点原值已变化: {locator}")
+        elem.text = str(remark.suggested_value)
 
 
 def _find_xml_element_with_parent(

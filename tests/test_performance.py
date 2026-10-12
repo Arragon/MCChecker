@@ -336,7 +336,7 @@ class TestHiddenPageTimersStopped:
         # 直接读取源文件检查，避免 import 时 NiceGUI 依赖
         import os
         home_path = os.path.join(os.path.dirname(__file__), "..", "app", "pages", "home.py")
-        with open(home_path, "r") as f:
+        with open(home_path, "r", encoding="utf-8") as f:
             source = f.read()
         # 确认 refresh_overview 中有 active tab 检查
         assert 'session_active_tab["name"] != "overview"' in source
@@ -345,7 +345,7 @@ class TestHiddenPageTimersStopped:
         """侧边栏签名使用轻量信号（mapping mtime）"""
         import os
         home_path = os.path.join(os.path.dirname(__file__), "..", "app", "pages", "home.py")
-        with open(home_path, "r") as f:
+        with open(home_path, "r", encoding="utf-8") as f:
             source = f.read()
         assert "MAPPING_FILE" in source
 

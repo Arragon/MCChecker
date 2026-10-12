@@ -285,7 +285,10 @@ def unique_archive_name(base_name: str, dt: Optional[datetime] = None) -> str:
         dt = datetime.now()
     timestamp = dt.strftime("%Y%m%d_%H%M%S")
     unique = uuid.uuid4().hex[:8]
-    return f"{base_name}_{timestamp}_{unique}"
+    stem, dot, ext = base_name.rpartition(".")
+    if not dot or not stem:
+        return f"{base_name}_{timestamp}_{unique}"
+    return f"{stem}_{timestamp}_{unique}.{ext}"
 
 
 def _ensure_dirs():

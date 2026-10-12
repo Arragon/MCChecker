@@ -306,7 +306,7 @@ class TestXmlReviewOutput:
         source_hash = compute_content_hash(source_bytes)
         node_ref = NodeRef(
             content_hash=source_hash,
-            locator="xml:{name}[1]",
+            locator="xml:name[1]",
             value_type="element",
             original_value="old",
         )

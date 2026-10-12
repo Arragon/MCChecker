@@ -203,6 +203,8 @@ def _parse_xml_iterparse(source: Any, filename: str, allowed_attr_names: Optiona
     if root_node is None:
         raise ValueError(f"无法解析文件 {filename}: XML 内容为空")
 
+    _rewrite_sibling_ids(root_node)
+
     return {
         "id": "root",
         "label": filename,
@@ -210,6 +212,45 @@ def _parse_xml_iterparse(source: Any, filename: str, allowed_attr_names: Optiona
         "children": [root_node],
         "attrs": {"type": "xml"},
     }
+
+
+def _rewrite_sibling_ids(node: Dict[str, Any]) -> None:
+    """为同一父节点下的同名兄弟元素重写唯一 id（追加 [occurrence] 序号）。
+
+    旧树中 repeated XML sibling 会得到完全相同的 id/path，导致备注、收藏与
+    取值映射互相覆盖。这里与 ParsedDocument locator（xml:tag[occ]）保持同一
+    约定：仅当同名兄弟多于一个时，按出现顺序追加 [n]。
+    """
+    element_children = [
+        child
+        for child in node.get("children") or []
+        if (child.get("attrs") or {}).get("type") == "element"
+    ]
+    counts: Dict[str, int] = {}
+    for child in element_children:
+        counts[child["label"]] = counts.get(child["label"], 0) + 1
+
+    seen: Dict[str, int] = {}
+    for child in element_children:
+        label = child["label"]
+        if counts[label] > 1:
+            seen[label] = seen.get(label, 0) + 1
+            segment = f"{label}[{seen[label]}]"
+        else:
+            segment = label
+        _rewrite_subtree_ids(child, f"{node['id']}/{segment}")
+
+
+def _rewrite_subtree_ids(node: Dict[str, Any], new_id: str) -> None:
+    """把子树根节点 id 设为 new_id，并同步修正 attribute/#text 子节点 id。"""
+    node["id"] = new_id
+    for child in node.get("children") or []:
+        child_type = (child.get("attrs") or {}).get("type")
+        if child_type == "attribute":
+            child["id"] = f"{new_id}@{child['label'][1:]}"
+        elif child_type == "text":
+            child["id"] = f"{new_id}#text"
+    _rewrite_sibling_ids(node)
 
 
 def parse_xml_path(file_path: str, filename: str) -> Dict[str, Any]:
@@ -223,7 +264,7 @@ def parse_xml_path(file_path: str, filename: str) -> Dict[str, Any]:
         return _parse_xml_iterparse(file_path, filename, allowed_attr_names=allowed)
     except ET.ParseError as e:
         if "unbound prefix" not in str(e) and "junk after document element" not in str(e):
-            raise
+            raise ValueError(f"无法解析文件 {filename}: {e}") from e
     with open(file_path, "rb") as f:
         content = f.read()
     return parse_xml(content, filename)
@@ -239,12 +280,18 @@ def parse_xml(content: bytes, filename: str) -> Dict[str, Any]:
         if "junk after document element" in msg:
             cut = content.rfind(b">")
             if cut >= 0:
-                return _parse_xml_iterparse(io.BytesIO(content[: cut + 1]), filename, allowed_attr_names=allowed)
+                try:
+                    return _parse_xml_iterparse(io.BytesIO(content[: cut + 1]), filename, allowed_attr_names=allowed)
+                except ET.ParseError as retry_err:
+                    raise ValueError(f"无法解析文件 {filename}: {retry_err}") from retry_err
         if "unbound prefix" not in msg:
-            raise
+            raise ValueError(f"无法解析文件 {filename}: {e}") from e
     text = content.decode("utf-8-sig")
     text = _preprocess_xml_namespaces(text)
-    return _parse_xml_iterparse(io.BytesIO(text.encode("utf-8")), filename, allowed_attr_names=allowed)
+    try:
+        return _parse_xml_iterparse(io.BytesIO(text.encode("utf-8")), filename, allowed_attr_names=allowed)
+    except ET.ParseError as e:
+        raise ValueError(f"无法解析文件 {filename}: {e}") from e
 
 
 def _json_to_tree(data: Any, path: str) -> List[Dict[str, Any]]:
@@ -366,13 +413,27 @@ def get_all_values(tree: Dict[str, Any]) -> Dict[str, str]:
     return result
 
 
-def _collect_values(node: Dict[str, Any], prefix: str, result: Dict[str, str]):
-    """递归收集有值的节点"""
-    path = f"{prefix}/{node['label']}" if prefix else node["label"]
+def _collect_values(node: Dict[str, Any], prefix: str, result: Dict[str, str], name: Optional[str] = None):
+    """递归收集有值的节点。同名兄弟按出现顺序追加 [n]，与 id 重写规则一致。"""
+    label = name if name is not None else node["label"]
+    path = f"{prefix}/{label}" if prefix else label
     if node.get("value") is not None:
         result[path] = node["value"]
+    element_children = [
+        child
+        for child in node.get("children", [])
+        if (child.get("attrs") or {}).get("type") == "element"
+    ]
+    counts: Dict[str, int] = {}
+    for child in element_children:
+        counts[child["label"]] = counts.get(child["label"], 0) + 1
+    seen: Dict[str, int] = {}
     for child in node.get("children", []):
-        _collect_values(child, path, result)
+        child_name = child["label"]
+        if (child.get("attrs") or {}).get("type") == "element" and counts[child["label"]] > 1:
+            seen[child["label"]] = seen.get(child["label"], 0) + 1
+            child_name = f"{child['label']}[{seen[child['label']]}]"
+        _collect_values(child, path, result, child_name)
 
 
 # ---------------------------------------------------------------------------

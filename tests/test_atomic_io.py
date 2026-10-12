@@ -327,9 +327,11 @@ class TestSameSecondArchive:
         dt = datetime(2026, 9, 12, 14, 30, 45)
         name = unique_archive_name("config.xml", dt=dt)
         assert "20260912_143045" in name
-        # UUID 8 位 hex
-        parts = name.rsplit("_", 1)
-        assert len(parts[-1]) == 8
+        assert name.endswith(".xml")
+        # UUID 8 位 hex（位于扩展名前的最后一个 _ 段）
+        uuid_seg = name.rsplit("_", 1)[-1].rsplit(".", 1)[0]
+        assert len(uuid_seg) == 8
+        int(uuid_seg, 16)
 
     def test_unique_archive_names_differ(self):
         """多次调用生成不同名称"""
