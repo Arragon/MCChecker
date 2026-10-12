@@ -1,6 +1,9 @@
 """版本对比引擎
 
 基于 difflib 实现配置文件版本对比，支持变量绑定标注。
+
+binding_snapshot 由调用方注入，differ 不再直接读取 storage，
+保持 core 模块间单向依赖。
 """
 
 import difflib
@@ -9,7 +12,6 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import parser
-from .storage import get_bound_paths
 
 
 def compare_versions(
@@ -18,6 +20,7 @@ def compare_versions(
     filename_old: str,
     filename_new: str,
     use_bindings: bool = True,
+    binding_snapshot: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """对比两个版本的配置文件
 
@@ -27,9 +30,13 @@ def compare_versions(
         filename_old: 旧版本文件名
         filename_new: 新版本文件名
         use_bindings: 是否启用变量绑定标注
+        binding_snapshot: 绑定快照 {file_path: group_name}，
+            由调用方注入；为 None 且 use_bindings=True 时
+            退回读取 storage（兼容旧调用方）。
 
     Returns:
-        对比结果，包含统一差异和结构化差异
+        对比结果，包含统一差异和结构化差异（structural_diff 为惰性计算，
+        首次访问时才执行结构化对比）。
     """
     try:
         text_old = content_old.decode("utf-8-sig").splitlines(keepends=True)
@@ -49,13 +56,52 @@ def compare_versions(
         )
     )
 
-    struct_diff = _structural_diff(content_old, content_new, filename_old, filename_new, use_bindings)
+    # 惰性结构化差异：首次访问 structural_diff 时才计算
+    struct_diff_holder: Dict[str, Any] = {"_computed": False, "_result": None}
 
-    return {
-        "unified_diff": diff_lines,
-        "structural_diff": struct_diff,
-        "has_changes": len(diff_lines) > 0,
-    }
+    def _get_struct_diff():
+        if not struct_diff_holder["_computed"]:
+            struct_diff_holder["_result"] = _structural_diff(
+                content_old, content_new, filename_old, filename_new,
+                use_bindings, binding_snapshot,
+            )
+            struct_diff_holder["_computed"] = True
+        return struct_diff_holder["_result"]
+
+    return _LazyDiffResult(
+        unified_diff=diff_lines,
+        has_changes=len(diff_lines) > 0,
+        struct_diff_getter=_get_struct_diff,
+    )
+
+
+class _LazyDiffResult(dict):
+    """惰性 diff 结果：structural_diff 首次访问时才计算
+
+    保持 dict 接口兼容，现有调用方通过 result["structural_diff"] 访问时
+    自动触发计算。
+    """
+
+    def __init__(self, unified_diff, has_changes, struct_diff_getter):
+        super().__init__()
+        super().__setitem__("unified_diff", unified_diff)
+        super().__setitem__("has_changes", has_changes)
+        self._struct_diff_getter = struct_diff_getter
+
+    def __getitem__(self, key):
+        if key == "structural_diff":
+            return self._struct_diff_getter()
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        if key == "structural_diff":
+            return True
+        return super().__contains__(key)
+
+    def get(self, key, default=None):
+        if key == "structural_diff":
+            return self._struct_diff_getter()
+        return super().get(key, default)
 
 
 def _normalize_path(path: str) -> str:
@@ -77,6 +123,7 @@ def _structural_diff(
     filename_old: str,
     filename_new: str,
     use_bindings: bool,
+    binding_snapshot: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """结构化差异：键值级别对比"""
     try:
@@ -93,7 +140,14 @@ def _structural_diff(
     norm_old = {_normalize_path(k): (k, v) for k, v in values_old.items()}
     norm_new = {_normalize_path(k): (k, v) for k, v in values_new.items()}
 
-    bound_paths = get_bound_paths() if use_bindings else {}
+    # binding_snapshot 由调用方注入；None 时退回 storage（向后兼容）
+    if binding_snapshot is not None:
+        bound_paths = binding_snapshot
+    elif use_bindings:
+        from .storage import get_bound_paths
+        bound_paths = get_bound_paths()
+    else:
+        bound_paths = {}
 
     added = []
     removed = []
@@ -158,10 +212,11 @@ def compare_with_uploaded(
     server_content: bytes,
     server_filename: str,
     use_bindings: bool = True,
+    binding_snapshot: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """上传文件与服务端文件对比"""
     return compare_versions(
         server_content, uploaded_content,
         server_filename, uploaded_filename,
-        use_bindings,
+        use_bindings, binding_snapshot,
     )
