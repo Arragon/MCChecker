@@ -29,6 +29,8 @@
 
 ## 4. Testing Notes
 - 使用 pytest 运行测试，`pytest tests/ -v`
+- Python 3.9 兼容性不能只靠 `compileall`：函数注解里的 `X | None` 能编译，但在导入时求值才报 `TypeError`。验证方式是用 3.9 解释器实际导入模块（`python3.9 -c "import app.core.storage"`）；当前 v1.0.1 的 `storage.py`、`differ.py`、`dltool.py` 在 3.9.11 下导入即失败。
+- 前端模板（`app/web/`）的纯逻辑测试：浏览器打开 `app/web/tests/index.html`，或 `google-chrome --headless=new --dump-dom http://127.0.0.1:<port>/tests/index.html` 检查 `<title>ALL PASSED`。
 - 存储层测试使用 monkeypatch 替换 DATA_DIR 为临时目录
 - 下载器测试使用 unittest.mock.patch 模拟 urllib
 - 对比引擎测试需注意文件名不同导致路径不匹配的问题

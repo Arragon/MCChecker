@@ -495,9 +495,11 @@
     var k = 2;
     while (S.profiles[mid] || mid === "default") mid = slug + "-" + k++;
     var src = req.body.copy_from ? profile(req.body.copy_from) : null;
+    var copiedFiles = {};
+    if (src) Object.keys(src.files).forEach(function (n) { copiedFiles[n] = { current: { text: fileText(src.files[n].current), mtime: src.files[n].current.mtime }, archives: clone(src.files[n].archives), records: [] }; });
     S.profiles[mid] = src
-      ? Object.assign(clone(Object.assign({}, src, { files: {} })), { files: clone(src.files), remarks: [], admins: clone(src.admins), people: clone(src.people) })
-      : { files: {}, mapping: [], sourceStatus: {}, favorites: [], remarks: [], bindings: [], tools: [], schedule: { enabled: false, interval_hours: 24, last_run: null }, admins: [], people: clone(S.people), dl: null };
+      ? Object.assign(clone(Object.assign({}, src, { files: {} })), { files: copiedFiles, remarks: [], admins: [], people: [], sourceStatus: {} })
+      : { files: {}, mapping: [], sourceStatus: {}, favorites: [], remarks: [], bindings: [], tools: [], schedule: { enabled: false, interval_hours: 24, last_run: null }, admins: [], people: [], dl: null };
     rev[mid] = { files: 1, favorites: 1, remarks: 1, settings: 1, tasks: 1 };
     S.models.push({ id: mid, name: name });
     return ok({ profile: { id: mid, name: name } }, 201);

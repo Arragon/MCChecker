@@ -435,7 +435,7 @@
     function profileDialog() {
       var name = h("input.input", { type: "text", placeholder: "例如 DL-200 三号线" });
       var copy = h("select.select", h("option", { value: "" }, "不复制，创建空白机型"), app.session.profiles.map(function (m) { return h("option", { value: m.id }, "复制「" + m.name + "」的配置"); }));
-      var F = { name: MC.field({ label: "机型名称", required: true, control: name }), copy: MC.field({ label: "初始数据", control: copy, help: "复制内容：配置文件与历史版本、更新源、收藏、绑定、工具、定时、DL 参数、人员与管理员名单。不复制待审建议与缓存。" }) };
+      var F = { name: MC.field({ label: "机型名称", required: true, control: name }), copy: MC.field({ label: "初始数据", control: copy, help: "复制：配置文件与历史版本、更新源、收藏、变量绑定、工具菜单、定时设置、DL 参数。不复制：修改记录、待审建议、IP 对应表、管理员名单、缓存。" }) };
       MC.modal({
         title: "新增机型",
         body: h("div.col", { style: "gap:12px" }, F.name, F.copy),

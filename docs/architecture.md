@@ -2,8 +2,14 @@
 
 > 本文件是兼容入口，不再作为完整架构设计事实源。
 >
-> 当前正式架构设计：`docs/MCChecker_ARCHITECTURE.md`
-> 当前正式开发计划：`docs/MCChecker_ROADMAP.md`
+> **重构目标设计（2026-10-15 批准，尚未实现）**：`docs/MCChecker_REDESIGN_SPEC.md`
+> ——技术栈改为 Python 3.9.11 标准库 HTTP + JSON API + 原生前端（`app/web/`），零运行时依赖；
+> 与旧实现的功能实现差异见 `docs/MCChecker_FEATURE_CHANGES.md`。
+>
+> 此前的架构设计：`docs/MCChecker_ARCHITECTURE.md`（数据安全、定位、审阅校验等原则继续有效；“保留 NiceGUI”的结论已被上述重构设计取代）
+> 此前的开发计划：`docs/MCChecker_ROADMAP.md`
+>
+> 下方“Current Implementation”仍描述当前运行代码（NiceGUI 版本），重构完成前保持不变。
 
 ## Overview
 

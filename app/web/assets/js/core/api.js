@@ -63,7 +63,7 @@
    */
   function request(method, path, opts) {
     opts = opts || {};
-    var headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
+    var headers = Object.assign({ Accept: "application/json", "X-Requested-With": "MCChecker" }, opts.headers || {});
     if (MC.config && MC.config.mock) {
       return MC.mock
         .handle({ method: method, path: path, query: opts.query || {}, body: opts.body, raw: opts.raw, headers: headers })
