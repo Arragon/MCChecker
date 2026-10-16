@@ -2,20 +2,31 @@
 
 管理所有持久化数据，包括配置映射、收藏、变量绑定、工具配置等。
 服务端数据与客户端会话数据隔离。
+
+本模块是“兼容门面”（T-03、§5.4）：对外函数签名保持不变，内部统一走
+`core.fsutil` 的原子写与 `core.locks` 的机型锁。三条硬规则：
+
+* 权威 JSON 损坏 → `CorruptDataError` 向上抛，绝不退回空列表后再覆盖；
+* 任何“读-改-写”都在 `profile_lock` 内一气呵成，且经过写闸门；
+* 新建文件（归档、修改记录）先用独占创建拿到唯一名，再原子写入。
 """
 
 from __future__ import annotations
 
-import json
+import hashlib
+import logging
 import os
 import shutil
-import logging
 import contextvars
 import urllib.parse
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
+
+from . import fsutil
+from .errors import STORAGE_FAILURE, AppError, CorruptDataError
+from .locks import profile_lock, write_gate
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +61,13 @@ def set_active_profile(profile_id: Optional[str]) -> None:
 
 
 def get_active_profile() -> str:
-    pid_ctx = _normalize_profile_id(_profile_var.get())
-    if pid_ctx != DEFAULT_PROFILE:
-        return pid_ctx
-    try:
-        from nicegui import app
-        pid = app.storage.user.get("device_model")
-        if pid:
-            return _normalize_profile_id(pid)
-    except Exception:
-        pass
-    return pid_ctx
+    """当前机型（配置空间）。
+
+    只认 `set_active_profile()` / `use_profile()` 写入的上下文变量。原先会
+    回落到 NiceGUI 的 `app.storage.user["device_model"]`，那是把服务端数据与
+    浏览器会话绑在一起的隐式耦合（C28），已删除：调用方必须显式设置。
+    """
+    return _normalize_profile_id(_profile_var.get())
 
 
 @contextmanager
@@ -128,22 +135,62 @@ def _ensure_dirs():
 
 
 def _load_json(filepath: str, default: Any = None) -> Any:
-    """加载 JSON 文件"""
-    if not os.path.exists(filepath):
-        return default if default is not None else {}
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error("加载 %s 失败: %s", filepath, e)
-        return default if default is not None else {}
+    """加载 JSON 文件。
+
+    文件不存在 → 返回 `default`；存在但无法解析 → `CorruptDataError` 向上抛。
+    这里**不能**把损坏文件退化成空列表：那会让下一次保存把权威数据清空。
+    调用方若处理的是可重建的派生数据（如归档 diff 缓存），自行捕获。
+    """
+    return fsutil.read_json(filepath, default)
 
 
-def _save_json(filepath: str, data: Any):
-    """保存 JSON 文件"""
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _save_json(filepath: str, data: Any) -> None:
+    """保存 JSON 文件（原子写）。"""
+    fsutil.atomic_write_json(filepath, data)
+
+
+@contextmanager
+def _profile_write(profile_id: Optional[str] = None) -> Iterator[None]:
+    """进入写闸门并持有 `profile_id` 的机型锁（规范 §3.5、§5.4）。
+
+    所有“读-改-写”都必须包在这个上下文里，保证同一机型的并发修改串行化；
+    维护态（备份/恢复）期间 `write_gate` 直接抛 `AppError(MAINTENANCE)`。
+    锁内禁止做任何网络 I/O。
+    """
+    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
+    with write_gate.write():
+        with profile_lock(pid):
+            yield
+
+
+@contextmanager
+def _reserve_file(directory: str, candidates: Iterable[str]) -> Iterator[str]:
+    """按 §5.3 的顺序用独占创建（`O_CREAT | O_EXCL`）拿到第一个未被占用的名字。
+
+    先占位再写入：占位成功即代表这个名字归本次调用所有，后续原子写只会替换
+    占位文件。写入失败时删除占位，避免留下 0 字节的幽灵条目。
+    """
+    for candidate in candidates:
+        target = os.path.join(directory, candidate)
+        try:
+            fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            continue
+        os.close(fd)
+        try:
+            yield target
+        except BaseException:
+            try:
+                os.unlink(target)
+            except OSError:
+                pass
+            raise
+        return
+    raise AppError(STORAGE_FAILURE, "无法为文件生成唯一名")
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 # ===================== 全量配置映射表 =====================
@@ -153,6 +200,11 @@ LEGACY_MAPPING_FILE = MAPPING_FILE
 
 
 def ensure_profile_layout(migrate_legacy: bool = True) -> None:
+    with _profile_write(DEFAULT_PROFILE):
+        _ensure_profile_layout_locked(migrate_legacy)
+
+
+def _ensure_profile_layout_locked(migrate_legacy: bool) -> None:
     os.makedirs(PROFILES_DIR, exist_ok=True)
     default_base = _profile_base_dir(DEFAULT_PROFILE)
     os.makedirs(default_base, exist_ok=True)
@@ -198,28 +250,31 @@ def load_config_mapping() -> List[Dict[str, str]]:
 def save_config_mapping(mapping: List[Dict[str, str]]):
     """保存配置映射表"""
     profile = get_active_profile()
-    _save_json(_get_profile_json_file("config_mapping.json", profile), mapping)
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("config_mapping.json", profile), mapping)
 
 
 def add_config_mapping(name: str, url: str) -> bool:
     """添加一条映射"""
-    mapping = load_config_mapping()
-    for item in mapping:
-        if item["name"] == name:
-            item["url"] = url
-            save_config_mapping(mapping)
-            return True
-    mapping.append({"name": name, "url": url, "record_url": ""})
-    save_config_mapping(mapping)
-    return True
+    with _profile_write():
+        mapping = load_config_mapping()
+        for item in mapping:
+            if item["name"] == name:
+                item["url"] = url
+                save_config_mapping(mapping)
+                return True
+        mapping.append({"name": name, "url": url, "record_url": ""})
+        save_config_mapping(mapping)
+        return True
 
 
 def remove_config_mapping(name: str) -> bool:
     """删除一条映射"""
-    mapping = load_config_mapping()
-    new_mapping = [item for item in mapping if item["name"] != name]
-    save_config_mapping(new_mapping)
-    return len(new_mapping) < len(mapping)
+    with _profile_write():
+        mapping = load_config_mapping()
+        new_mapping = [item for item in mapping if item["name"] != name]
+        save_config_mapping(new_mapping)
+        return len(new_mapping) < len(mapping)
 
 
 def _sanitize_config_filename(name: str) -> str:
@@ -250,6 +305,24 @@ def update_config_mapping(
     if not url:
         raise ValueError("下载链接不能为空")
 
+    with _profile_write():
+        return _update_config_mapping_locked(
+            original,
+            target,
+            url,
+            new_record_url=new_record_url,
+            migrate_files=migrate_files,
+        )
+
+
+def _update_config_mapping_locked(
+    original: str,
+    target: str,
+    url: str,
+    *,
+    new_record_url: Optional[str],
+    migrate_files: bool,
+) -> bool:
     mapping = load_config_mapping()
     found = None
     for item in mapping:
@@ -315,22 +388,24 @@ def update_config_mapping(
 
 def update_config_record_url(name: str, record_url: str) -> bool:
     target = _sanitize_config_filename(name)
-    mapping = load_config_mapping()
-    for item in mapping:
-        if item.get("name") == target:
-            item["record_url"] = (record_url or "").strip()
-            save_config_mapping(mapping)
-            return True
-    return False
+    with _profile_write():
+        mapping = load_config_mapping()
+        for item in mapping:
+            if item.get("name") == target:
+                item["record_url"] = (record_url or "").strip()
+                save_config_mapping(mapping)
+                return True
+        return False
 
 
 def delete_config_mapping(name: str, *, delete_files: bool = False) -> bool:
     target = _sanitize_config_filename(name)
-    removed = remove_config_mapping(target)
-    if not delete_files:
+    with _profile_write():
+        removed = remove_config_mapping(target)
+        if not delete_files:
+            return removed
+        _delete_config_artifacts(target)
         return removed
-    _delete_config_artifacts(target)
-    return removed
 
 
 # ===================== 修改记录文件存储 =====================
@@ -354,7 +429,14 @@ def get_record_path(name: str, record_filename: str) -> str:
     return os.path.join(get_record_dir(target), rf)
 
 
-def save_record_file(name: str, content: bytes, *, source_url: str | None = None) -> str:
+def save_record_file(name: str, content: bytes, *, source_url: Optional[str] = None) -> str:
+    """保存一份修改记录原文，返回写入路径。
+
+    命名按 §5.3：`record_<YYYYMMDD>_<HHMMSS><ext>`，扩展名取自 `source_url`
+    的路径（≤10 个字母数字），取不到则 `.txt`。同名时独占创建重试，依次追加
+    `_2`、`_3`…，避免同一秒内的两条记录互相覆盖。
+    """
+    fsutil.validate_filename(name)
     _ensure_dirs()
     target = _sanitize_config_filename(name)
     ext = ".txt"
@@ -366,11 +448,14 @@ def save_record_file(name: str, content: bytes, *, source_url: str | None = None
                 ext = ext2
         except Exception:
             pass
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    record_filename = f"record_{ts}{ext}"
-    record_path = os.path.join(get_record_dir(target), record_filename)
-    with open(record_path, "wb") as f:
-        f.write(content)
+    base = f"record_{ts}"
+    candidates = [f"{base}{ext}"] + [f"{base}_{index}{ext}" for index in range(2, 1000)]
+
+    with _profile_write():
+        with _reserve_file(get_record_dir(target), candidates) as record_path:
+            fsutil.atomic_write_bytes(record_path, content)
     logger.info("保存修改记录文件: %s -> %s", target, record_path)
     return record_path
 
@@ -424,10 +509,19 @@ def _get_archive_diff_path(name: str, archive_filename: str) -> str:
 
 
 def load_archive_diff(name: str, archive_filename: str) -> Optional[Dict[str, Any]]:
+    """读取归档 diff 摘要。
+
+    这是可从归档原文重算的派生数据，因此损坏时按“缺失”处理（只记日志），
+    不像权威 JSON 那样向上抛。
+    """
     path = _get_archive_diff_path(name, archive_filename)
     if not os.path.exists(path):
         return None
-    return _load_json(path, None)
+    try:
+        return _load_json(path, None)
+    except CorruptDataError:
+        logger.warning("归档 diff 缓存损坏，按缺失处理: %s", path)
+        return None
 
 
 def _save_archive_diff(name: str, archive_filename: str, data: Dict[str, Any]) -> None:
@@ -435,6 +529,11 @@ def _save_archive_diff(name: str, archive_filename: str, data: Dict[str, Any]) -
 
 
 def ensure_archive_diffs(name: str) -> None:
+    with _profile_write():
+        _ensure_archive_diffs_locked(name)
+
+
+def _ensure_archive_diffs_locked(name: str) -> None:
     archive_dir = get_archive_dir(name)
     if not os.path.exists(archive_dir):
         return
@@ -509,68 +608,128 @@ def ensure_archive_diffs(name: str) -> None:
         )
 
 
-def save_config_file(name: str, content: bytes) -> str:
-    """保存配置文件，返回保存路径
+class SaveResult(NamedTuple):
+    """`save_config_file_detailed` 的返回值。
 
-    如果已有同名文件，将旧版移至归档目录
+    * `path`——当前文件（`configs/<name>`）的绝对路径；
+    * `archived`——本次产生的归档文件名，`None` 表示没有归档；
+    * `unchanged`——内容与磁盘上的当前文件完全一致，未做任何写入。
     """
+
+    path: str
+    archived: Optional[str]
+    unchanged: bool
+
+
+def _archive_candidates(name: str, now: datetime) -> Iterator[str]:
+    """归档名的候选序列（规范 §5.3）。
+
+    先 `<stem>_<YYYYMMDD><.ext>`；已存在 → `<stem>_<YYYYMMDD>_<HHMMSS><.ext>`；
+    仍存在 → 依次追加 `_2`、`_3`… 旧实现在同一秒内第二次保存会直接覆盖
+    前一个归档，历史版本就此丢失，这里用独占创建彻底堵住。
+    """
+    stamp = now.strftime("%Y%m%d")
+    precise = now.strftime("%Y%m%d_%H%M%S")
+    yield _add_date_suffix(name, stamp)
+    yield _add_date_suffix(name, precise)
+    for index in range(2, 1000):
+        yield _add_date_suffix(name, f"{precise}_{index}")
+
+
+def save_config_file(name: str, content: bytes) -> str:
+    """保存配置文件，返回保存路径。
+
+    详见 `save_config_file_detailed`——本函数只保留历史签名与返回值。
+    """
+    return save_config_file_detailed(name, content).path
+
+
+def save_config_file_detailed(name: str, content: bytes) -> SaveResult:
+    """保存配置文件（规范 §5.4 第 2~5 步）。
+
+    流程全部在机型锁内完成：
+
+    1. `validate_filename(name)`；
+    2. 当前文件存在且 sha256 相同 → **不归档、不写**，返回 `unchanged=True`；
+    3. 内容不同 → 先以**复制**方式把旧内容原子写入归档，成功后再原子替换
+       当前文件。归档在前，任一步失败当前文件都保持旧内容；
+    4. 计算并写入 diff 摘要缓存（派生数据，失败只记日志）；
+    5. 失效该文件的解析缓存。
+    """
+    fsutil.validate_filename(name)
     _ensure_dirs()
     filepath = get_config_path(name)
 
-    # 归档旧版本
-    if os.path.exists(filepath):
-        try:
+    with _profile_write():
+        old_content: Optional[bytes] = None
+        if os.path.exists(filepath):
             with open(filepath, "rb") as f:
                 old_content = f.read()
-        except OSError:
-            old_content = None
+            if _sha256(old_content) == _sha256(content):
+                logger.info("保存配置文件: %s（内容未变化，跳过写入与归档）", name)
+                return SaveResult(path=filepath, archived=None, unchanged=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d")
-        archive_name = _add_date_suffix(name, timestamp)
-        archive_path = os.path.join(get_archive_dir(name), archive_name)
-        # 如果同名归档已存在，添加时间戳精确到秒
-        if os.path.exists(archive_path):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archive_name = _add_date_suffix(name, timestamp)
-            archive_path = os.path.join(get_archive_dir(name), archive_name)
-        shutil.move(filepath, archive_path)
-        logger.info("归档旧版本: %s -> %s", name, archive_path)
+        archived: Optional[str] = None
+        if old_content is not None:
+            archive_dir = get_archive_dir(name)
+            with _reserve_file(archive_dir, _archive_candidates(name, datetime.now())) as archive_path:
+                fsutil.atomic_write_bytes(archive_path, old_content)
+                archived = os.path.basename(archive_path)
+            logger.info("归档旧版本: %s -> %s", name, os.path.join(archive_dir, archived or ""))
 
-    with open(filepath, "wb") as f:
-        f.write(content)
-    logger.info("保存配置文件: %s", name)
+        fsutil.atomic_write_bytes(filepath, content)
+        logger.info("保存配置文件: %s", name)
 
-    if os.path.exists(filepath) and "old_content" in locals() and old_content is not None:
+        if archived is not None:
+            # diff 摘要是派生数据：原文已经落盘，它写失败不能让整个保存失败。
+            try:
+                _write_archive_diff(name, archived, old_content or b"", content)
+            except Exception as exc:
+                logger.warning("写入归档 diff 失败 %s/%s: %s", name, archived, exc)
+
         try:
-            from . import differ
-            result = differ.compare_versions(old_content, content, archive_name, name)
-            struct = result.get("structural_diff") or {}
-            summary = (struct.get("summary") or {}) if isinstance(struct, dict) else {}
-            _save_archive_diff(
-                name,
-                archive_name,
-                {
-                    "has_changes": bool(result.get("has_changes")),
-                    "compared_to": name,
-                    "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "structural_type": struct.get("type"),
-                    "summary": {
-                        "added_count": int(summary.get("added_count", 0) or 0),
-                        "removed_count": int(summary.get("removed_count", 0) or 0),
-                        "modified_count": int(summary.get("modified_count", 0) or 0),
-                        "bound_count": int(summary.get("bound_count", 0) or 0),
-                    },
-                },
-            )
+            from . import parse_cache
+
+            parse_cache.invalidate(filepath)
         except Exception:
             pass
 
+    return SaveResult(path=filepath, archived=archived, unchanged=False)
+
+
+def _write_archive_diff(
+    name: str,
+    archive_name: str,
+    old_content: bytes,
+    new_content: bytes,
+) -> None:
+    """计算并写入归档的 diff 摘要缓存。失败只记日志——它不影响原文。"""
     try:
-        from . import parse_cache
-        parse_cache.invalidate(filepath)
-    except Exception:
-        pass
-    return filepath
+        from . import differ
+
+        result = differ.compare_versions(old_content, new_content, archive_name, name)
+    except Exception as exc:
+        logger.warning("计算归档 diff 失败 %s/%s: %s", name, archive_name, exc)
+        return
+
+    struct = result.get("structural_diff") or {}
+    summary = (struct.get("summary") or {}) if isinstance(struct, dict) else {}
+    _save_archive_diff(
+        name,
+        archive_name,
+        {
+            "has_changes": bool(result.get("has_changes")),
+            "compared_to": name,
+            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "structural_type": struct.get("type"),
+            "summary": {
+                "added_count": int(summary.get("added_count", 0) or 0),
+                "removed_count": int(summary.get("removed_count", 0) or 0),
+                "modified_count": int(summary.get("modified_count", 0) or 0),
+                "bound_count": int(summary.get("bound_count", 0) or 0),
+            },
+        },
+    )
 
 
 def _add_date_suffix(filename: str, date_str: str) -> str:
@@ -715,9 +874,10 @@ def _delete_config_artifacts(target: str) -> bool:
 
 def delete_config_file(name: str, *, remove_mapping: bool = True) -> bool:
     target = _sanitize_config_filename(name)
-    removed = remove_config_mapping(target) if remove_mapping else False
-    deleted = _delete_config_artifacts(target)
-    return removed or deleted
+    with _profile_write():
+        removed = remove_config_mapping(target) if remove_mapping else False
+        deleted = _delete_config_artifacts(target)
+        return removed or deleted
 
 
 # ===================== 收藏变量 =====================
@@ -742,7 +902,9 @@ def load_favorites() -> List[Dict[str, Any]]:
 
 def save_favorites(favorites: List[Dict[str, Any]]):
     """保存收藏变量列表"""
-    _save_json(_get_profile_json_file("favorites.json", get_active_profile()), favorites)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("favorites.json", profile), favorites)
 
 
 def add_favorite(
@@ -758,27 +920,28 @@ def add_favorite(
     如果 children 非空，表示该收藏项是一个打包了子变量的父级节点，
     主页将以单个卡片展示，卡片内可展开查看层级结构。
     """
-    favorites = load_favorites()
-    for fav in favorites:
-        if fav["path"] == variable_path and fav["source_file"] == source_file:
-            fav["note"] = note
-            if children is not None:
-                fav["children"] = children
-            save_favorites(favorites)
-            return True
-    favorites.append(
-        {
-            "path": variable_path,
-            "label": variable_label,
-            "value": variable_value,
-            "source_file": source_file,
-            "note": note,
-            "children": children or [],
-            "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-    save_favorites(favorites)
-    return True
+    with _profile_write():
+        favorites = load_favorites()
+        for fav in favorites:
+            if fav["path"] == variable_path and fav["source_file"] == source_file:
+                fav["note"] = note
+                if children is not None:
+                    fav["children"] = children
+                save_favorites(favorites)
+                return True
+        favorites.append(
+            {
+                "path": variable_path,
+                "label": variable_label,
+                "value": variable_value,
+                "source_file": source_file,
+                "note": note,
+                "children": children or [],
+                "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        save_favorites(favorites)
+        return True
 
 
 def _collect_fav_paths(entry: dict) -> set:
@@ -805,25 +968,27 @@ def find_parent_favorite(path: str, source_file: str) -> Optional[str]:
 
 def remove_favorite(variable_path: str, source_file: str) -> bool:
     """移除收藏变量"""
-    favorites = load_favorites()
-    new_favs = [
-        f
-        for f in favorites
-        if not (f["path"] == variable_path and f["source_file"] == source_file)
-    ]
-    save_favorites(new_favs)
-    return len(new_favs) < len(favorites)
+    with _profile_write():
+        favorites = load_favorites()
+        new_favs = [
+            f
+            for f in favorites
+            if not (f["path"] == variable_path and f["source_file"] == source_file)
+        ]
+        save_favorites(new_favs)
+        return len(new_favs) < len(favorites)
 
 
 def update_favorite_note(variable_path: str, source_file: str, note: str) -> bool:
     """更新收藏变量备注"""
-    favorites = load_favorites()
-    for fav in favorites:
-        if fav["path"] == variable_path and fav["source_file"] == source_file:
-            fav["note"] = note
-            save_favorites(favorites)
-            return True
-    return False
+    with _profile_write():
+        favorites = load_favorites()
+        for fav in favorites:
+            if fav["path"] == variable_path and fav["source_file"] == source_file:
+                fav["note"] = note
+                save_favorites(favorites)
+                return True
+        return False
 
 
 # ===================== IP 对应表 =====================
@@ -846,7 +1011,9 @@ def load_ip_mapping() -> List[Dict[str, str]]:
 
 
 def save_ip_mapping(mapping: List[Dict[str, str]]) -> None:
-    _save_json(_get_profile_json_file("ip_mapping.json", get_active_profile()), mapping)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("ip_mapping.json", profile), mapping)
 
 
 def upsert_ip_mapping(ip: str, name: str) -> bool:
@@ -855,31 +1022,33 @@ def upsert_ip_mapping(ip: str, name: str) -> bool:
     if not ip_text or not name_text:
         raise ValueError("IP 和姓名不能为空")
 
-    mapping = load_ip_mapping()
-    for item in mapping:
-        if (item.get("ip") or "").strip() == ip_text:
-            item["name"] = name_text
-            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            save_ip_mapping(mapping)
-            return True
+    with _profile_write():
+        mapping = load_ip_mapping()
+        for item in mapping:
+            if (item.get("ip") or "").strip() == ip_text:
+                item["name"] = name_text
+                item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_ip_mapping(mapping)
+                return True
 
-    mapping.append(
-        {
-            "ip": ip_text,
-            "name": name_text,
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-    save_ip_mapping(mapping)
-    return True
+        mapping.append(
+            {
+                "ip": ip_text,
+                "name": name_text,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        save_ip_mapping(mapping)
+        return True
 
 
 def remove_ip_mapping(ip: str) -> bool:
     ip_text = str(ip or "").strip()
-    mapping = load_ip_mapping()
-    new_mapping = [item for item in mapping if (item.get("ip") or "").strip() != ip_text]
-    save_ip_mapping(new_mapping)
-    return len(new_mapping) < len(mapping)
+    with _profile_write():
+        mapping = load_ip_mapping()
+        new_mapping = [item for item in mapping if (item.get("ip") or "").strip() != ip_text]
+        save_ip_mapping(new_mapping)
+        return len(new_mapping) < len(mapping)
 
 
 def resolve_person_by_ip(ip: str) -> str:
@@ -912,7 +1081,9 @@ def load_admin_users() -> List[Dict[str, str]]:
 
 
 def save_admin_users(users: List[Dict[str, str]]) -> None:
-    _save_json(_get_profile_json_file("admin_users.json", get_active_profile()), users)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("admin_users.json", profile), users)
 
 
 def upsert_admin_user(name: str) -> bool:
@@ -920,29 +1091,31 @@ def upsert_admin_user(name: str) -> bool:
     if not name_text:
         raise ValueError("管理员姓名不能为空")
 
-    users = load_admin_users()
-    for item in users:
-        if (item.get("name") or "").strip() == name_text:
-            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            save_admin_users(users)
-            return True
+    with _profile_write():
+        users = load_admin_users()
+        for item in users:
+            if (item.get("name") or "").strip() == name_text:
+                item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_admin_users(users)
+                return True
 
-    users.append(
-        {
-            "name": name_text,
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-    save_admin_users(users)
-    return True
+        users.append(
+            {
+                "name": name_text,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        save_admin_users(users)
+        return True
 
 
 def remove_admin_user(name: str) -> bool:
     name_text = str(name or "").strip()
-    users = load_admin_users()
-    new_users = [item for item in users if (item.get("name") or "").strip() != name_text]
-    save_admin_users(new_users)
-    return len(new_users) < len(users)
+    with _profile_write():
+        users = load_admin_users()
+        new_users = [item for item in users if (item.get("name") or "").strip() != name_text]
+        save_admin_users(new_users)
+        return len(new_users) < len(users)
 
 
 def is_admin_user(name: str) -> bool:
@@ -972,7 +1145,9 @@ def load_edit_remarks() -> List[Dict[str, Any]]:
 
 
 def save_edit_remarks(items: List[Dict[str, Any]]) -> None:
-    _save_json(_get_profile_json_file("edit_remarks.json", get_active_profile()), items)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("edit_remarks.json", profile), items)
 
 
 def add_edit_remark(
@@ -999,32 +1174,62 @@ def add_edit_remark(
     actor_name_text = str(actor_name or "").strip()
     actor_display = actor_name_text or actor_ip_text
 
-    items = load_edit_remarks()
-    item_id = uuid.uuid4().hex
-    items.append(
-        {
-            "id": item_id,
-            "source_file": source_name,
-            "node_key": str(node_key),
-            "node_path": str(node_path or ""),
-            "node_label": str(node_label or ""),
-            "original_value": str(original_value or ""),
-            "proposed_value": proposed_text,
-            "node_type": str(node_type or ""),
-            "tree_type": str(tree_type or ""),
-            "actor_ip": actor_ip_text,
-            "actor_name": actor_name_text,
-            "actor_display": actor_display,
-            "status": "pending",
-            "reviewed_by": "",
-            "reviewer_ip": "",
-            "reviewed_at": "",
-            "generated_file": "",
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-    save_edit_remarks(items)
+    with _profile_write():
+        items = load_edit_remarks()
+        item_id = uuid.uuid4().hex
+        items.append(_build_edit_remark_item(
+            item_id=item_id,
+            source_name=source_name,
+            node_key=node_key,
+            node_path=node_path,
+            node_label=node_label,
+            original_value=original_value,
+            proposed_text=proposed_text,
+            node_type=node_type,
+            tree_type=tree_type,
+            actor_ip_text=actor_ip_text,
+            actor_name_text=actor_name_text,
+            actor_display=actor_display,
+        ))
+        save_edit_remarks(items)
     return item_id
+
+
+def _build_edit_remark_item(
+    *,
+    item_id: str,
+    source_name: str,
+    node_key: str,
+    node_path: str,
+    node_label: str,
+    original_value: str,
+    proposed_text: str,
+    node_type: str,
+    tree_type: str,
+    actor_ip_text: str,
+    actor_name_text: str,
+    actor_display: str,
+) -> Dict[str, Any]:
+    return {
+        "id": item_id,
+        "source_file": source_name,
+        "node_key": str(node_key),
+        "node_path": str(node_path or ""),
+        "node_label": str(node_label or ""),
+        "original_value": str(original_value or ""),
+        "proposed_value": proposed_text,
+        "node_type": str(node_type or ""),
+        "tree_type": str(tree_type or ""),
+        "actor_ip": actor_ip_text,
+        "actor_name": actor_name_text,
+        "actor_display": actor_display,
+        "status": "pending",
+        "reviewed_by": "",
+        "reviewer_ip": "",
+        "reviewed_at": "",
+        "generated_file": "",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def build_edit_remark_map(
@@ -1096,32 +1301,33 @@ def apply_review_results(
     reviewer_ip_text = str(reviewer_ip or "").strip()
     generated_map = generated_files or {}
 
-    items = load_edit_remarks()
-    approved_count = 0
-    rejected_count = 0
-    changed = False
+    with _profile_write():
+        items = load_edit_remarks()
+        approved_count = 0
+        rejected_count = 0
+        changed = False
 
-    for item in items:
-        item_id = str(item.get("id") or "")
-        if item_id in approved:
-            item["status"] = "approved"
-            item["reviewed_by"] = reviewer_name_text
-            item["reviewer_ip"] = reviewer_ip_text
-            item["reviewed_at"] = now
-            item["generated_file"] = generated_map.get(item.get("source_file") or "", "")
-            approved_count += 1
-            changed = True
-        elif item_id in rejected:
-            item["status"] = "rejected"
-            item["reviewed_by"] = reviewer_name_text
-            item["reviewer_ip"] = reviewer_ip_text
-            item["reviewed_at"] = now
-            item["generated_file"] = ""
-            rejected_count += 1
-            changed = True
+        for item in items:
+            item_id = str(item.get("id") or "")
+            if item_id in approved:
+                item["status"] = "approved"
+                item["reviewed_by"] = reviewer_name_text
+                item["reviewer_ip"] = reviewer_ip_text
+                item["reviewed_at"] = now
+                item["generated_file"] = generated_map.get(item.get("source_file") or "", "")
+                approved_count += 1
+                changed = True
+            elif item_id in rejected:
+                item["status"] = "rejected"
+                item["reviewed_by"] = reviewer_name_text
+                item["reviewer_ip"] = reviewer_ip_text
+                item["reviewed_at"] = now
+                item["generated_file"] = ""
+                rejected_count += 1
+                changed = True
 
-    if changed:
-        save_edit_remarks(items)
+        if changed:
+            save_edit_remarks(items)
 
     return {"approved": approved_count, "rejected": rejected_count}
 
@@ -1148,7 +1354,9 @@ def load_bindings() -> List[Dict[str, Any]]:
 
 def save_bindings(bindings: List[Dict[str, Any]]):
     """保存变量绑定关系"""
-    _save_json(_get_profile_json_file("bindings.json", get_active_profile()), bindings)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("bindings.json", profile), bindings)
 
 
 def add_binding(group_name: str, variables: List[Dict[str, str]]) -> bool:
@@ -1156,23 +1364,25 @@ def add_binding(group_name: str, variables: List[Dict[str, str]]) -> bool:
 
     variables: [{"file": str, "path": str}]
     """
-    bindings = load_bindings()
-    for b in bindings:
-        if b["group_name"] == group_name:
-            b["variables"] = variables
-            save_bindings(bindings)
-            return True
-    bindings.append({"group_name": group_name, "variables": variables})
-    save_bindings(bindings)
-    return True
+    with _profile_write():
+        bindings = load_bindings()
+        for b in bindings:
+            if b["group_name"] == group_name:
+                b["variables"] = variables
+                save_bindings(bindings)
+                return True
+        bindings.append({"group_name": group_name, "variables": variables})
+        save_bindings(bindings)
+        return True
 
 
 def remove_binding(group_name: str) -> bool:
     """删除变量绑定组"""
-    bindings = load_bindings()
-    new_bindings = [b for b in bindings if b["group_name"] != group_name]
-    save_bindings(new_bindings)
-    return len(new_bindings) < len(bindings)
+    with _profile_write():
+        bindings = load_bindings()
+        new_bindings = [b for b in bindings if b["group_name"] != group_name]
+        save_bindings(new_bindings)
+        return len(new_bindings) < len(bindings)
 
 
 def get_bound_paths() -> Dict[str, str]:
@@ -1211,43 +1421,48 @@ def load_tools() -> List[Dict[str, str]]:
 
 def save_tools(tools: List[Dict[str, str]]):
     """保存工具菜单配置"""
-    _save_json(_get_profile_json_file("tools.json", get_active_profile()), tools)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("tools.json", profile), tools)
 
 
 def add_tool(name: str, description: str, url: str) -> bool:
     """添加工具"""
-    tools = load_tools()
-    tools.append(
-        {
-            "name": name,
-            "description": description,
-            "url": url,
-            "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-    save_tools(tools)
-    return True
+    with _profile_write():
+        tools = load_tools()
+        tools.append(
+            {
+                "name": name,
+                "description": description,
+                "url": url,
+                "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        save_tools(tools)
+        return True
 
 
 def remove_tool(name: str) -> bool:
     """删除工具"""
-    tools = load_tools()
-    new_tools = [t for t in tools if t["name"] != name]
-    save_tools(new_tools)
-    return len(new_tools) < len(tools)
+    with _profile_write():
+        tools = load_tools()
+        new_tools = [t for t in tools if t["name"] != name]
+        save_tools(new_tools)
+        return len(new_tools) < len(tools)
 
 
 def update_tool(original_name: str, name: str, description: str, url: str) -> bool:
     """更新工具配置"""
-    tools = load_tools()
-    for t in tools:
-        if t["name"] == original_name:
-            t["name"] = name
-            t["description"] = description
-            t["url"] = url
-            save_tools(tools)
-            return True
-    return False
+    with _profile_write():
+        tools = load_tools()
+        for t in tools:
+            if t["name"] == original_name:
+                t["name"] = name
+                t["description"] = description
+                t["url"] = url
+                save_tools(tools)
+                return True
+        return False
 
 
 # ===================== 调度配置 =====================
@@ -1272,7 +1487,9 @@ def load_schedule() -> Dict[str, Any]:
 
 def save_schedule(schedule: Dict[str, Any]):
     """保存调度配置"""
-    _save_json(_get_profile_json_file("schedule.json", get_active_profile()), schedule)
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("schedule.json", profile), schedule)
 
 
 def copy_profile_data(source_profile: str, target_profile: str) -> None:
@@ -1281,6 +1498,14 @@ def copy_profile_data(source_profile: str, target_profile: str) -> None:
     if dst == DEFAULT_PROFILE:
         raise ValueError("target_profile cannot be default")
 
+    # 复制是一次跨机型的读改写：两个机型锁都拿住，按 dst→src 的固定顺序取，
+    # 避免与别的跨机型操作互相等待。
+    with _profile_write(dst):
+        with _profile_write(src):
+            _copy_profile_data_locked(src, dst)
+
+
+def _copy_profile_data_locked(src: str, dst: str) -> None:
     dst_base = _profile_base_dir(dst)
     os.makedirs(dst_base, exist_ok=True)
 
@@ -1332,5 +1557,6 @@ def delete_profile_data(profile_id: str) -> None:
     if pid == DEFAULT_PROFILE:
         raise ValueError("cannot delete default profile data")
     base = _profile_base_dir(pid)
-    if os.path.exists(base):
-        shutil.rmtree(base, ignore_errors=True)
+    with _profile_write(pid):
+        if os.path.exists(base):
+            shutil.rmtree(base, ignore_errors=True)
