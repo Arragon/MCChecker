@@ -1,0 +1,108 @@
+/*
+ * MCChecker design tokens.
+ * 所有颜色、间距、字号、圆角、阴影只允许在此定义；其他 CSS 只能引用变量。
+ * 语义色约定（与历史版本一致）：绿=新增/成功，红=删除/危险，橙=修改/警告，紫=绑定变量。
+ */
+:root {
+  /* ---------- 中性色 ---------- */
+  --c-bg: #f5f6f8;
+  --c-surface: #ffffff;
+  --c-surface-2: #f9fafb;
+  --c-surface-hover: #f2f4f7;
+  --c-surface-active: #eaecf0;
+  --c-border: #e4e7ec;
+  --c-border-strong: #d0d5dd;
+  --c-text: #101828;
+  --c-text-2: #344054;
+  --c-text-3: #5d6676;
+  --c-text-disabled: #98a2b3;
+  --c-guide: #e4e7ec;
+
+  /* ---------- 品牌 / 强调 ---------- */
+  --c-primary: #2563eb;
+  --c-primary-hover: #1d4ed8;
+  --c-primary-soft: #eef4ff;
+  --c-primary-border: #c7d7fe;
+  --c-primary-text: #1d4ed8;
+
+  /* ---------- 语义色 ---------- */
+  --c-success: #16a34a;
+  --c-success-text: #15803d;
+  --c-success-soft: #ecfdf3;
+  --c-success-border: #abefc6;
+  --c-danger: #dc2626;
+  --c-danger-text: #b42318;
+  --c-danger-soft: #fef3f2;
+  --c-danger-border: #fecdca;
+  --c-warning: #d97706;
+  --c-warning-text: #b54708;
+  --c-warning-soft: #fffaeb;
+  --c-warning-border: #fedf89;
+  --c-bind: #7c3aed;
+  --c-bind-text: #6d28d9;
+  --c-bind-soft: #f5f3ff;
+  --c-bind-border: #ddd6fe;
+  --c-star: #f5a524;
+
+  /* ---------- 字体 ---------- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "SF Mono", Menlo,
+    "Microsoft YaHei", monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --lh: 1.5;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ---------- 间距（4px 基线） ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ---------- 形状 ---------- */
+  --r-sm: 4px;
+  --r: 6px;
+  --r-lg: 8px;
+  --r-pill: 999px;
+  --sh-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --sh-pop: 0 4px 12px rgba(16, 24, 40, 0.1), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --sh-overlay: 0 12px 32px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.28);
+
+  /* ---------- 布局尺寸 ---------- */
+  --header-h: 48px;
+  --sidebar-w: 264px;
+  --inspector-w: 344px;
+  --tabbar-h: 38px;
+  --row-h: 28px;
+  --control-h: 32px;
+  --control-h-sm: 28px;
+  --indent: 18px;
+
+  /* ---------- 动效 ---------- */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---------- 层级 ---------- */
+  --z-sticky: 10;
+  --z-dropdown: 100;
+  --z-drawer: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+  }
+}

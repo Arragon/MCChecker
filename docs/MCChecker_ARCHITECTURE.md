@@ -5,6 +5,8 @@
 执行计划：[MCChecker_ROADMAP.md](MCChecker_ROADMAP.md)  
 Linear：[MCChecker › Overview](https://linear.app/inhandy/project/mcchecker-9275450a22c3/overview)
 
+> **决策变更（2026-10-15）**：项目负责人决定采用“Python 标准库 HTTP + JSON API + 原生前端、零运行时依赖”的重构方案，取代本文 §1 与 §17 中“保留 NiceGUI 单体、不做独立前端重写”的结论。新目标设计见 [`MCChecker_REDESIGN_SPEC.md`](MCChecker_REDESIGN_SPEC.md)；本文其余的数据安全、原子写、定位符、审阅校验、离线发布原则继续有效，并已落入新设计。
+>
 > 本文件是架构事实源。`MCChecker_ARCHITECTURE_v2.md`、`docs/architecture.md` 和其他旧设计文档只作为历史记录或兼容入口；实现状态仍以实际代码与测试为准。
 
 ## 1. 总体结论
