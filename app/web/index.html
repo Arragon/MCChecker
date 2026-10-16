@@ -16,15 +16,8 @@
     <noscript>MCChecker 需要启用 JavaScript。</noscript>
     <div id="app"></div>
 
-    <script>
-      /*
-       * 运行配置。
-       * 模板：mock=true，全部接口由 assets/js/mock/* 在浏览器内模拟，可直接双击打开或用任意静态服务器访问。
-       * 生产：服务端渲染本文件时注入 mock=false，并删除下方 “mock” 段的 4 个 <script>。
-       */
-      window.MC = window.MC || {};
-      window.MC.config = { mock: true };
-    </script>
+    <!-- 生产：运行配置由服务端生成（window.MC.config = {mock:false}） -->
+    <script src="config.js"></script>
 
     <!-- core -->
     <script src="assets/js/core/util.js"></script>
@@ -33,11 +26,6 @@
     <script src="assets/js/ui/components.js"></script>
     <script src="assets/js/ui/tree.js"></script>
 
-    <!-- mock（仅模板，生产删除） -->
-    <script src="assets/js/mock/docparse.js"></script>
-    <script src="assets/js/mock/dlmath.js"></script>
-    <script src="assets/js/mock/fixtures.js"></script>
-    <script src="assets/js/mock/mock-api.js"></script>
 
     <!-- views -->
     <script src="assets/js/views/shell.js"></script>

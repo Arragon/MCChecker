@@ -1,6 +1,6 @@
 /*
  * [模板专用] 内存版 API，实现 docs/MCChecker_REDESIGN_SPEC.md §7 的全部接口契约。
- * 前端代码只依赖 MC.api，切换到真实后端时删除 index.html 中的 mock 脚本并把 MC.config.mock 设为 false 即可。
+ * 前端代码只依赖 MC.api。模板入口 template.html 加载本目录；生产入口 index.html 不加载 mock，由服务端 /config.js 提供 {mock:false}。
  */
 (function (global) {
   "use strict";

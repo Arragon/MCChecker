@@ -167,7 +167,7 @@
     idBtn.addEventListener("click", function () { self.openIdentity(idBtn); });
 
     var demo = null;
-    if (MC.config.mock) {
+    if (MC.config && MC.config.mock) {
       demo = h("button.btn.btn-sm.demo-switch", { type: "button", title: "仅模板演示：切换模拟身份" }, icon("beaker"), "演示");
       demo.addEventListener("click", function () { self.openDemoMenu(demo); });
     }
@@ -539,12 +539,14 @@
     if (!inst) {
       var factory = MC.views[r.kind];
       if (!factory) return;
-      if (this.viewHost.querySelector(".state")) util.clear(this.viewHost);
+      var placeholder = this.viewHost.querySelector(":scope > .state");
+      if (placeholder) placeholder.remove();
       inst = factory(this, r);
       inst.el.classList.add("view");
       this.instances[key] = inst;
       this.viewHost.appendChild(inst.el);
     } else {
+      if (!inst.el.parentNode) this.viewHost.appendChild(inst.el);
       inst.el.classList.remove("hidden");
       if (inst.update) inst.update(r);
     }
