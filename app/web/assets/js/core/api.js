@@ -97,13 +97,10 @@
     );
   }
 
-  /** 下载：先取回 Blob 再保存，失败时可给出明确原因与重试入口。 */
-  function download(path, query, filename) {
+  /** 取回二进制，不触发浏览器保存。mock 与生产走同一返回形状 {blob, filename}。 */
+  function fetchBlob(path, query) {
     if (MC.config && MC.config.mock) {
-      return MC.mock.download({ path: path, query: query || {} }).then(function (res) {
-        util.downloadBlob(res.blob, res.filename || filename);
-        return true;
-      });
+      return MC.mock.download({ path: path, query: query || {} });
     }
     return fetch(BASE + path + buildQuery(query), { credentials: "same-origin" }).then(
       function (resp) {
@@ -118,20 +115,26 @@
         }
         var cd = resp.headers.get("Content-Disposition") || "";
         var m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
-        var name = m ? decodeURIComponent(m[1]) : filename;
-        return resp.blob().then(function (blob) {
-          util.downloadBlob(blob, name);
-          return true;
-        });
+        var name = m ? decodeURIComponent(m[1]) : "";
+        return resp.blob().then(function (blob) { return { blob: blob, filename: name }; });
       },
       function () { throw new ApiError(0, "NETWORK", NETWORK_MESSAGE); }
     );
+  }
+
+  /** 下载：先取回 Blob 再保存，失败时可给出明确原因与重试入口。 */
+  function download(path, query, filename) {
+    return fetchBlob(path, query).then(function (res) {
+      util.downloadBlob(res.blob, res.filename || filename);
+      return true;
+    });
   }
 
   MC.ApiError = ApiError;
   MC.api = {
     request: request,
     download: download,
+    fetchBlob: fetchBlob,
     seg: seg,
     p: profilePath,
     get: function (path, query) { return request("GET", path, { query: query }); },

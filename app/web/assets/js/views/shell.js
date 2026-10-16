@@ -310,7 +310,11 @@
       }
       var btn = h(
         "button.nav-item",
-        { type: "button", "aria-current": active && active.kind === n.kind ? "page" : null },
+        {
+          type: "button",
+          "aria-current": active && active.kind === n.kind ? "page" : null,
+          title: n.kind === "settings" && !self.can("deployer") ? "可以查看。只有部署者（在服务器本机访问）可以修改这些设置" : null,
+        },
         icon(n.icon),
         h("span", n.label),
         meta
@@ -459,6 +463,43 @@
   };
 
   /* ===================== tabs ===================== */
+  /**
+   * 标签淘汰与持久化。上限不含速览。dirty 由调用方根据视图 isDirty() 填入。
+   * 临时文件（kind=t）不写入 mc.tabs。
+   */
+  MC.tabs = {
+    persistable: function (tab) {
+      return !!(tab && !tab.pinned && tab.route && tab.route.kind !== "t");
+    },
+    victim: function (tabs, activeKey) {
+      var candidates = tabs.filter(function (t) {
+        return !t.pinned && t.key !== activeKey && !t.dirty;
+      });
+      if (!candidates.length) return null;
+      candidates.sort(function (a, b) {
+        return (a.lastUsed || a.opened || 0) - (b.lastUsed || b.opened || 0);
+      });
+      return candidates[0].key;
+    },
+    enforce: function (tabs, activeKey, limit) {
+      var list = tabs.map(function (t) {
+        return { key: t.key, pinned: !!t.pinned, dirty: !!t.dirty, lastUsed: t.lastUsed || 0, opened: t.opened || 0 };
+      });
+      var closed = [];
+      var warning = false;
+      while (list.length > limit + 1) {
+        var key = MC.tabs.victim(list, activeKey);
+        if (!key) {
+          warning = true;
+          break;
+        }
+        closed.push(key);
+        list = list.filter(function (t) { return t.key !== key; });
+      }
+      return { closed: closed, warning: warning, remaining: list.length };
+    },
+  };
+
   function keyOf(r) {
     if (r.kind === "f") return "f:" + r.arg;
     if (r.kind === "t") return "t:" + r.arg;
@@ -470,15 +511,17 @@
     this.tabs = [{ key: "overview", route: { kind: "overview" }, pinned: true }];
     var self = this;
     saved.forEach(function (t) {
-      if (t.key !== "overview" && t.route && t.route.kind) self.tabs.push({ key: t.key, route: t.route, title: t.title, opened: t.opened || 0 });
+      if (t.key !== "overview" && t.route && t.route.kind && MC.tabs.persistable(t)) {
+        self.tabs.push({ key: t.key, route: t.route, title: t.title, opened: t.opened || 0, lastUsed: t.lastUsed || t.opened || 0 });
+      }
     });
   };
 
   App.prototype.saveTabs = function () {
     util.storageSet(
       "mc.tabs." + this.pid,
-      this.tabs.filter(function (t) { return !t.pinned && t.route.kind !== "t"; }).map(function (t) {
-        return { key: t.key, route: t.route, title: t.title, opened: t.opened };
+      this.tabs.filter(MC.tabs.persistable).map(function (t) {
+        return { key: t.key, route: t.route, title: t.title, opened: t.opened, lastUsed: t.lastUsed || t.opened || 0 };
       })
     );
   };
@@ -514,17 +557,24 @@
     var limit = (this.session.limits && this.session.limits.tab_limit) || 15;
     var self = this;
     while (this.tabs.length > limit + 1) {
-      var candidates = this.tabs.filter(function (t) {
+      var snapshot = this.tabs.map(function (t) {
         var inst = self.instances[t.key];
-        return !t.pinned && t.key !== activeKey && !(inst && inst.isDirty && inst.isDirty());
+        return {
+          key: t.key,
+          pinned: !!t.pinned,
+          dirty: !!(inst && inst.isDirty && inst.isDirty()),
+          lastUsed: t.lastUsed || 0,
+          opened: t.opened || 0,
+        };
       });
-      if (!candidates.length) {
+      var victim = MC.tabs.victim(snapshot, activeKey);
+      if (!victim) {
         MC.toast.warning("已打开的页面过多", "其余页面都有未保存的修改，请先处理后再关闭");
         break;
       }
-      candidates.sort(function (a, b) { return (a.lastUsed || a.opened || 0) - (b.lastUsed || b.opened || 0); });
-      this.closeTab(candidates[0].key, true);
-      MC.toast.info("已自动关闭最久未用的页面", candidates[0].title || candidates[0].key);
+      var tab = this.tabs.filter(function (t) { return t.key === victim; })[0];
+      this._removeTab(victim, true);
+      MC.toast.info("已自动关闭最久未用的页面", (tab && (tab.title || tab.key)) || victim);
     }
   };
 
@@ -579,23 +629,29 @@
     delete this.instances[key];
   };
 
+  App.prototype._removeTab = function (key, silent) {
+    var idx = this.tabs.findIndex(function (t) { return t.key === key; });
+    if (idx < 0 || this.tabs[idx].pinned) return false;
+    this.destroyInstance(key);
+    this.tabs.splice(idx, 1);
+    this.saveTabs();
+    if (this.activeKey === key && !silent) {
+      var next = this.tabs[Math.min(idx, this.tabs.length - 1)];
+      this.go(next.route);
+    } else this.renderTabbar();
+    return true;
+  };
+
   App.prototype.closeTab = function (key, silent) {
     var self = this;
     var idx = this.tabs.findIndex(function (t) { return t.key === key; });
-    if (idx < 0 || this.tabs[idx].pinned) return;
+    if (idx < 0 || this.tabs[idx].pinned) return Promise.resolve(false);
     var inst = this.instances[key];
-    var proceed = !silent && inst && inst.isDirty && inst.isDirty()
-      ? MC.confirm({ title: "关闭页面", message: "该页面有未保存的修改，关闭后将丢失。", confirmText: "关闭并放弃修改", danger: true })
-      : Promise.resolve(true);
-    proceed.then(function (ok) {
-      if (!ok) return;
-      self.destroyInstance(key);
-      self.tabs.splice(idx, 1);
-      self.saveTabs();
-      if (self.activeKey === key && !silent) {
-        var next = self.tabs[Math.min(idx, self.tabs.length - 1)];
-        self.go(next.route);
-      } else self.renderTabbar();
+    var needsConfirm = !silent && inst && inst.isDirty && inst.isDirty();
+    if (!needsConfirm) return Promise.resolve(this._removeTab(key, silent));
+    return MC.confirm({ title: "关闭页面", message: "该页面有未保存的修改，关闭后将丢失。", confirmText: "关闭并放弃修改", danger: true }).then(function (ok) {
+      if (!ok) return false;
+      return self._removeTab(key, silent);
     });
   };
 
@@ -624,9 +680,23 @@
     });
     var moreBtn = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "标签操作", style: "margin:0 0 4px auto;flex:none" }, icon("more"));
     moreBtn.addEventListener("click", function () {
+      function closeMany(keys, goOverview) {
+        var dirty = keys.some(function (k) {
+          var inst = self.instances[k];
+          return inst && inst.isDirty && inst.isDirty();
+        });
+        var proceed = dirty
+          ? MC.confirm({ title: "关闭页面", message: "其中有未保存的修改，关闭后将丢失。", confirmText: "关闭并放弃修改", danger: true })
+          : Promise.resolve(true);
+        proceed.then(function (ok) {
+          if (!ok) return;
+          keys.forEach(function (k) { self._removeTab(k, true); });
+          if (goOverview) self.go({ kind: "overview" });
+        });
+      }
       MC.menu(moreBtn, [
-        { label: "关闭其他页面", onClick: function () { self.tabs.slice().forEach(function (t) { if (t.key !== self.activeKey) self.closeTab(t.key, true); }); self.renderTabbar(); } },
-        { label: "关闭全部页面", onClick: function () { self.tabs.slice().forEach(function (t) { self.closeTab(t.key, true); }); self.go({ kind: "overview" }); } },
+        { label: "关闭其他页面", onClick: function () { closeMany(self.tabs.filter(function (t) { return t.key !== self.activeKey; }).map(function (t) { return t.key; }), false); } },
+        { label: "关闭全部页面", onClick: function () { closeMany(self.tabs.map(function (t) { return t.key; }), true); } },
       ], { align: "end" });
     });
     util.replace(this.tabbar, scroll, moreBtn);

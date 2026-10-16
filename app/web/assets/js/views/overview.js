@@ -25,15 +25,18 @@
     ];
     var data = null;
     var sideHost = h("div.col", { style: "gap:16px" });
+    var loadGen = 0;
 
     function load(silent) {
+      var gen = ++loadGen;
       if (!silent) util.replace(bodyEl, MC.stateBlock({ kind: "loading" }));
       return Promise.all([api.get(app.p("/favorites")), api.get(app.p("/schedule")).then(null, function () { return null; })]).then(
         function (res) {
+          if (gen !== loadGen) return;
           data = { groups: res[0].groups, schedule: res[1] };
           render();
         },
-        function (err) { if (!silent) util.replace(bodyEl, MC.errorBlock(err, load)); }
+        function (err) { if (gen === loadGen && !silent) util.replace(bodyEl, MC.errorBlock(err, load)); }
       );
     }
 
@@ -113,7 +116,18 @@
         var rm = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "取消收藏 " + it.label, "data-tip": "取消收藏", "data-tip-pos": "left" }, icon("x"));
         rm.addEventListener("click", function () {
           api.del(app.p("/favorites"), { file: g.file, path: it.path }).then(function () {
-            MC.toast.info("已取消收藏 " + it.label, null, { action: { label: "撤销", onClick: function () { api.post(app.p("/favorites"), { file: g.file, id: it.path }).then(function (r) { if (it.note) api.patch(app.p("/favorites"), { file: g.file, path: it.path, note: it.note }); load(true); }); } } });
+            MC.toast.info("已取消收藏 " + it.label, null, { action: { label: "撤销", onClick: function () {
+              loadGen++;
+              var group = data && data.groups.filter(function (x) { return x.file === g.file; })[0];
+              if (group && !group.items.some(function (x) { return x.path === it.path; })) {
+                group.items.push(it);
+                render();
+              }
+              api.post(app.p("/favorites"), { file: g.file, id: it.path }).then(function () {
+                var note = it.note ? api.patch(app.p("/favorites"), { file: g.file, path: it.path, note: it.note }) : Promise.resolve();
+                return note.then(function () { return load(true); });
+              }, function (err) { MC.toastError("撤销失败", err); load(true); });
+            } } });
             app.syncRevision();
             load(true);
           }, function (err) { MC.toastError("操作失败", err); });

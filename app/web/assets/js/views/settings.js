@@ -42,11 +42,19 @@
       });
     }
 
+    var RO_TITLE = "只有部署者（在服务器本机访问）可以修改";
+
     function pageHead(sec, actions) {
-      var ro = !app.can("deployer");
+      var locked = !app.can("deployer");
+      if (actions && locked) {
+        actions.querySelectorAll("button").forEach(function (b) {
+          b.disabled = true;
+          if (!b.title) b.title = RO_TITLE;
+        });
+      }
       return [
-        h("div.page-head", h("div.col", h("h1", sec.label), h("div.small.muted", sec.desc)), actions && !ro ? actions : null),
-        ro ? h("div.banner.banner-neutral", { style: "margin-bottom:16px" }, icon("lock"), h("div.banner-body", "只读：当前身份为「" + app.identity.role_label + "」，只有部署者（在服务器本机访问）可以修改这些设置。")) : null,
+        h("div.page-head", h("div.col", h("h1", sec.label), h("div.small.muted", sec.desc)), actions || null),
+        locked ? h("div.banner.banner-neutral", { style: "margin-bottom:16px" }, icon("lock"), h("div.banner-body", "只读：当前身份为「" + app.identity.role_label + "」，只有部署者（在服务器本机访问）可以修改这些设置。")) : null,
       ];
     }
 
@@ -74,13 +82,13 @@
         var rows = res.items.map(function (it) {
           var st = it.last_result;
           var dot = !st ? "" : st.status === "success" ? ".dot-success" : st.status === "unchanged" ? ".dot-primary" : st.status === "skipped" ? "" : ".dot-danger";
-          var upd = h("button.btn.btn-sm", { type: "button", disabled: ro() }, icon("refresh"), "更新");
+          var upd = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, icon("refresh"), "更新");
           upd.addEventListener("click", function () {
             MC.withBusy(upd, function () {
               return app.startTask({ type: "update_source", name: it.name }).then(function () { MC.toast.info("已开始更新 " + it.name); }, function (err) { MC.toastError("无法开始更新", err); });
             });
           });
-          var more = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "更多操作", disabled: ro() }, icon("more"));
+          var more = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "更多操作", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, icon("more"));
           more.addEventListener("click", function () {
             MC.menu(more, [
               { label: "编辑", icon: "edit", onClick: function () { sourceDialog(it); } },
@@ -147,11 +155,12 @@
     function schedule(sec) {
       return api.get(app.p("/schedule")).then(function (s) {
         var days = s.interval_hours % 24 === 0 && s.interval_hours >= 24;
-        var amount = h("input.input", { type: "number", min: "1", step: "1", value: days ? s.interval_hours / 24 : s.interval_hours, style: "width:120px", disabled: ro() });
-        var unit = h("select.select", { style: "width:100px", disabled: ro() }, h("option", { value: "h", selected: !days }, "小时"), h("option", { value: "d", selected: days }, "天"));
+        var amount = h("input.input", { type: "number", min: "1", step: "1", value: days ? s.interval_hours / 24 : s.interval_hours, style: "width:120px", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null });
+        var unit = h("select.select", { style: "width:100px", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, h("option", { value: "h", selected: !days }, "小时"), h("option", { value: "d", selected: days }, "天"));
         var sw = MC.switchEl("启用定时更新", s.enabled, null, ro());
+        if (ro()) sw.title = "只有部署者（在服务器本机访问）可以修改";
         var amountField = MC.field({ label: "执行间隔", control: h("div.row", amount, unit) });
-        var save = h("button.btn.btn-primary", { type: "button", disabled: ro() }, "保存");
+        var save = h("button.btn.btn-primary", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, "保存");
         save.addEventListener("click", function () {
           amountField.setError("");
           var n = Number(amount.value);
@@ -196,8 +205,8 @@
         var admins = res[1].items;
         var adminSet = {};
         admins.forEach(function (a) { adminSet[a.name] = 1; });
-        var addP = h("button.btn.btn-sm", { type: "button", disabled: ro(), onclick: function () { personDialog(null); } }, icon("plus"), "登记人员");
-        var addA = h("button.btn.btn-sm", { type: "button", disabled: ro(), onclick: function () { adminDialog(); } }, icon("plus"), "添加管理员");
+        var addP = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { personDialog(null); } }, icon("plus"), "登记人员");
+        var addA = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { adminDialog(); } }, icon("plus"), "添加管理员");
         var me = app.identity;
         return [
           pageHead(sec),
@@ -212,7 +221,7 @@
                     h("td.cell-strong", p.name),
                     h("td", adminSet[p.name] ? h("span.badge.badge-primary", "管理员") : h("span.muted", "成员")),
                     h("td.muted.num", util.formatTime(p.updated_at)),
-                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { personDialog(p); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { removePerson(p); } }, "删除"))
+                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { personDialog(p); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removePerson(p); } }, "删除"))
                   );
                 }))))
               : MC.stateBlock({ kind: "empty", icon: "users", title: "尚未登记人员", desc: "未登记的访问者在建议中显示为其 IP 地址。" })
@@ -224,7 +233,7 @@
             admins.length
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "姓名"), h("th", "已登记 IP"), h("th", "更新时间"), h("th.cell-actions", ""))), h("tbody", admins.map(function (a) {
                   var ips = ppl.filter(function (p) { return p.name === a.name; }).map(function (p) { return p.ip; });
-                  return h("tr", h("td.cell-strong", a.name), h("td.mono", ips.length ? ips.join("、") : h("span", { style: "color:var(--c-warning-text);font-family:var(--font-ui)" }, "未登记 IP，暂不生效")), h("td.muted.num", util.formatTime(a.updated_at)), h("td.cell-actions", h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { removeAdmin(a); } }, "移除")));
+                  return h("tr", h("td.cell-strong", a.name), h("td.mono", ips.length ? ips.join("、") : h("span", { style: "color:var(--c-warning-text);font-family:var(--font-ui)" }, "未登记 IP，暂不生效")), h("td.muted.num", util.formatTime(a.updated_at)), h("td.cell-actions", h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeAdmin(a); } }, "移除")));
                 }))))
               : MC.stateBlock({ kind: "empty", title: "暂无管理员" })
           ),
@@ -307,7 +316,7 @@
                     "tr",
                     h("td", h("span.badge.badge-bind", b.group_name)),
                     h("td", h("ul.binding-vars", b.variables.map(function (v) { return h("li", util.fmtTag(v.file), h("span.mono", v.path)); }))),
-                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { bindingDialog(b); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { removeBinding(b); } }, "删除"))
+                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { bindingDialog(b); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeBinding(b); } }, "删除"))
                   );
                 }))))
               : MC.stateBlock({ kind: "empty", icon: "link", title: "暂无绑定组", desc: "例如把 A 文件的 timeout 与 B 文件的 time_out 绑定，对比时会同时标出。" })
@@ -369,7 +378,7 @@
             "div.panel",
             res.items.length
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "名称"), h("th", "说明"), h("th", "地址"), h("th.cell-actions", ""))), h("tbody", res.items.map(function (t) {
-                  return h("tr", h("td.cell-strong", t.name), h("td", t.description || h("span.muted", "—")), h("td.mono.xsmall.break-all", t.url), h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { toolDialog(t); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { removeTool(t); } }, "删除")));
+                  return h("tr", h("td.cell-strong", t.name), h("td", t.description || h("span.muted", "—")), h("td.mono.xsmall.break-all", t.url), h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { toolDialog(t); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeTool(t); } }, "删除")));
                 }))))
               : MC.stateBlock({ kind: "empty", icon: "tool", title: "暂无工具" })
           ),
@@ -421,8 +430,8 @@
                 h(
                   "td.cell-actions",
                   m.id !== app.pid ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.switchProfile(m.id); } }, "切换") : null,
-                  h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { renameProfile(m); } }, "重命名"),
-                  m.id !== "default" ? h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), onclick: function () { removeProfile(m); } }, "删除") : null
+                  h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { renameProfile(m); } }, "重命名"),
+                  m.id !== "default" ? h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeProfile(m); } }, "删除") : null
                 )
               );
             }))))

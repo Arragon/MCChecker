@@ -124,6 +124,33 @@
     eq(MC.util.fileFormat("A.JSON"), "json");
   });
 
+  test("标签淘汰：打开第 16 个文件时关掉最久未用的干净标签，有草稿的留下", function () {
+    var tabs = [{ key: "overview", pinned: true, opened: 0, lastUsed: 0 }];
+    for (var i = 0; i < 16; i++) {
+      tabs.push({ key: "f:" + i, pinned: false, opened: i + 1, lastUsed: i + 1, dirty: i === 0 });
+    }
+    var plan = MC.tabs.enforce(tabs, "f:15", 15);
+    eq(plan.closed, ["f:1"]);
+    ok(plan.warning === false, "还有可关闭的干净标签时不应警告");
+    eq(plan.remaining, 16);
+  });
+
+  test("标签淘汰：其余标签都有未保存修改时不关闭并标记警告", function () {
+    var tabs = [{ key: "overview", pinned: true }];
+    for (var i = 0; i < 16; i++) tabs.push({ key: "f:" + i, dirty: true, lastUsed: i, opened: i });
+    var plan = MC.tabs.enforce(tabs, "f:15", 15);
+    eq(plan.closed, []);
+    ok(plan.warning, "应警告");
+    eq(plan.remaining, 17);
+  });
+
+  test("标签持久化：临时文件不写入 mc.tabs，速览固定页也不写入", function () {
+    ok(!MC.tabs.persistable({ pinned: true, route: { kind: "overview" } }));
+    ok(!MC.tabs.persistable({ route: { kind: "t" } }));
+    ok(MC.tabs.persistable({ route: { kind: "f" } }));
+    ok(MC.tabs.persistable({ route: { kind: "search" } }));
+  });
+
   test("安全：h() 只插入文本节点", function () {
     var el = MC.util.h("div", '<img src=x onerror="window.__xss=1">');
     eq(el.children.length, 0);

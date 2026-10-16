@@ -225,11 +225,33 @@
     }
 
     function downloadTemp() {
-      api.download(app.p("/temp/" + api.seg(S.token) + "/raw"), {}, S.name).then(null, function (err) { MC.toastError("下载失败", err); });
+      api.download(app.p("/temp/" + api.seg(S.token) + "/raw"), {}, S.name).then(null, function (err) {
+        MC.toastError("下载失败", err, { action: { label: "重试", onClick: downloadTemp } });
+      });
     }
 
     function saveTempToServer() {
-      MC.toast.info("模板说明", "生产实现：PUT /p/{pid}/files/{name}，请求体为临时文件原文，同名时提示覆盖并归档");
+      if (!app.can("deployer")) {
+        MC.toast.warning("仅部署者可保存", "请在服务器本机访问后再把临时文件保存到服务器");
+        return;
+      }
+      var exists = app.files.some(function (f) { return f.name === S.name; });
+      var ask = exists
+        ? MC.confirm({ title: "覆盖 " + S.name, message: "服务器上已有同名文件。保存后当前版本会归档为历史版本；内容完全相同则不生成新的历史版本。", confirmText: "保存并归档" })
+        : MC.confirm({ title: "保存到服务器", message: "将把这份临时文件保存为 " + S.name + "，本机型的所有人都可以打开。", confirmText: "保存" });
+      ask.then(function (ok) {
+        if (!ok) return;
+        api.fetchBlob(app.p("/temp/" + api.seg(S.token) + "/raw")).then(function (res) {
+          return api.upload(app.p("/files/" + api.seg(S.name)), res.blob, S.name, exists ? { overwrite: "1" } : {});
+        }).then(function (r) {
+          MC.toast.success(r.unchanged ? "内容与服务器版本一致" : "已保存 " + S.name, r.archived ? "旧版本已归档为 " + r.archived : r.unchanged ? "未产生新的历史版本" : null);
+          app.syncRevision();
+          return app.refreshFiles().then(function () { app.openFile(S.name); });
+        }, function (err) {
+          if (err.code === "FILE_EXISTS") MC.toast.warning("已存在同名文件", "请确认后再保存");
+          else MC.toastError("保存失败", err);
+        });
+      });
     }
 
     /* ---------------- tree ---------------- */
@@ -395,9 +417,26 @@
       var id = S.idx.id[i];
       var fs = favState();
       if (fs.direct[id]) {
+        var removed = fs.direct[id];
         return api.del(app.p("/favorites"), { file: S.name, path: id }).then(function () {
           S.favs = S.favs.filter(function (f) { return f.path !== id; });
-          MC.toast.info("已取消收藏 " + S.idx.l[i]);
+          MC.toast.info("已取消收藏 " + S.idx.l[i], null, {
+            action: {
+              label: "撤销",
+              onClick: function () {
+                api.post(app.p("/favorites"), { file: S.name, id: id }).then(function (res) {
+                  var done = function () {
+                    if (!S.favs.some(function (f) { return f.path === id; })) S.favs.push(res.item);
+                    if (S.refreshFavDecor) S.refreshFavDecor();
+                    renderInspector();
+                    app.syncRevision();
+                  };
+                  if (removed.note) api.patch(app.p("/favorites"), { file: S.name, path: id, note: removed.note }).then(done, done);
+                  else done();
+                }, function (err) { MC.toastError("撤销失败", err); });
+              },
+            },
+          });
           app.syncRevision();
         }, function (err) { MC.toastError("取消收藏失败", err); });
       }
@@ -410,7 +449,10 @@
         var n = (res.item.children || []).length;
         MC.toast.success("已收藏 " + S.idx.l[i], n ? "包含 " + n + " 个子项，可在「速览」中查看" : "可在「速览」中查看实时值");
         app.syncRevision();
-      }, function (err) { MC.toastError("收藏失败", err); });
+      }, function (err) {
+        if (err.code === "FAVORITE_COVERED") MC.toast.warning("已被父级收藏包含", err.message || "请先取消父级收藏");
+        else MC.toastError("收藏失败", err);
+      });
     }
 
     /* ---------------- inspector ---------------- */

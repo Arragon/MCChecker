@@ -59,6 +59,7 @@
     BUSY: "已有相同任务正在执行",
     DOWNLOAD_FAILED: "从链接下载失败",
     PARSE_FAILED: "文件无法解析为 XML/JSON",
+    FAVORITE_COVERED: "该节点已被父级收藏包含，请先取消父级",
     STORAGE_FAILURE: "服务器写入失败，数据未保存",
     CORRUPT_DATA: "服务器数据文件损坏，已进入只读保护",
     NETWORK: "无法连接服务器",

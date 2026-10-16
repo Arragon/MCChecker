@@ -161,7 +161,7 @@
             }))))
           : null,
         reject.length ? h("div.small", "驳回 " + reject.length + " 个节点的全部建议") : null,
-        approve.length ? h("div.banner.banner-neutral", icon("info"), h("div.banner-body", "将生成新文件 ", h("code", f.file.replace(/(\.[^.]+)?$/, "_<时间戳>$1")), "，原文件 ", h("code", f.file), " 保持不变。")) : null
+        approve.length ? h("div.banner.banner-neutral", icon("info"), h("div.banner-body", "将生成新文件 ", h("code", f.file.replace(/(\.[^.]+)?$/, "_<时间戳>$1")), "，原文件 ", h("code", f.file), " 保持不变。标准库重写 XML 时可能把属性引号统一为双引号，并把空元素写成 ", h("code", "<a />"), "，业务值不变。")) : null
       );
       MC.confirm({ title: "提交审阅结果", detail: detailEl, confirmText: "确认提交" }).then(function (ok) {
         if (!ok) return;
