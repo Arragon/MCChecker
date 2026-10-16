@@ -1,5 +1,7 @@
 """NiceGUI UI 主题与全局资产注入"""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 

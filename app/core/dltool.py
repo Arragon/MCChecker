@@ -3,6 +3,8 @@
 八阶函数：f(x) = k₁x + k₂x² + k₃x³ + k₄x⁴ + k₅x⁵ + k₆x⁶ + k₇x⁷ + k₈x⁸ + b
 """
 
+from __future__ import annotations
+
 import json
 import os
 import logging

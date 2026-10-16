@@ -1,5 +1,7 @@
 """文件解析查看器页面"""
 
+from __future__ import annotations
+
 import hashlib
 import os
 

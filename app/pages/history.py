@@ -1,5 +1,7 @@
 """版本历史页面"""
 
+from __future__ import annotations
+
 import os
 
 from nicegui import ui

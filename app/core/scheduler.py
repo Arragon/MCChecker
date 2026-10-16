@@ -3,6 +3,8 @@
 使用 APScheduler 实现配置文件的定时自动更新。
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from typing import Dict, Optional

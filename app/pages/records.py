@@ -1,5 +1,7 @@
 """修改记录页面"""
 
+from __future__ import annotations
+
 import urllib.parse
 
 from nicegui import ui

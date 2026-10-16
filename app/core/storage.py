@@ -4,6 +4,8 @@
 服务端数据与客户端会话数据隔离。
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil

@@ -3,6 +3,8 @@
 基于 difflib 实现配置文件版本对比，支持变量绑定标注。
 """
 
+from __future__ import annotations
+
 import difflib
 import json
 import xml.etree.ElementTree as ET

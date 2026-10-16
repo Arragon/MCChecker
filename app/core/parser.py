@@ -4,6 +4,8 @@
 树形结构格式: {"id": str, "label": str, "value": Optional[str], "children": list, "attrs": dict}
 """
 
+from __future__ import annotations
+
 import json
 import os
 import io

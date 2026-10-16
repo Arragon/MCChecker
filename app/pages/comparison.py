@@ -1,5 +1,7 @@
 """版本对比页面"""
 
+from __future__ import annotations
+
 import json
 
 from nicegui import ui

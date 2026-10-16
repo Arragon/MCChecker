@@ -3,6 +3,8 @@
 基于客户端 IP 识别部署者，并结合 IP 对应表与管理员名单识别当前用户身份。
 """
 
+from __future__ import annotations
+
 import logging
 import socket
 from functools import wraps
