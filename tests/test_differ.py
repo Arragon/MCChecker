@@ -1,6 +1,10 @@
-"""版本对比引擎测试"""
+"""版本对比引擎测试
 
-import pytest
+数据目录隔离由 `tests/conftest.py` 的 `isolated_data_root` 夹具统一提供。
+"""
+
+from __future__ import annotations
+
 from app.core.differ import compare_versions, compare_with_uploaded
 from app.core import storage
 
@@ -79,9 +83,11 @@ class TestCompareVersions:
     def test_summary_counts(self):
         result = compare_versions(SAMPLE_JSON_V1, SAMPLE_JSON_V2, "v1.json", "v2.json")
         summary = result["structural_diff"]["summary"]
-        assert summary["added_count"] >= 0
-        assert summary["removed_count"] >= 0
-        assert summary["modified_count"] >= 0
+        # v1 -> v2 只动了两处：timeout 由 30 改 60，新增 debug；没有删除，也没有绑定组。
+        assert summary["added_count"] == 1
+        assert summary["removed_count"] == 0
+        assert summary["modified_count"] == 1
+        assert summary["bound_count"] == 0
 
 
 class TestCompareWithUploaded:
@@ -96,9 +102,7 @@ class TestCompareWithUploaded:
 class TestBindingAnnotation:
     """测试变量绑定标注功能"""
 
-    def test_bound_items_annotated(self, monkeypatch, tmp_path):
-        # 设置临时绑定
-        monkeypatch.setattr(storage, "BINDINGS_FILE", str(tmp_path / "bindings.json"))
+    def test_bound_items_annotated(self):
         storage.add_binding("timeout_group", [
             {"file": "v1.json", "path": "v1.json/timeout"},
             {"file": "v2.json", "path": "v2.json/timeout"},
@@ -106,8 +110,17 @@ class TestBindingAnnotation:
 
         result = compare_versions(SAMPLE_JSON_V1, SAMPLE_JSON_V2, "v1.json", "v2.json", use_bindings=True)
         struct = result["structural_diff"]
-        # 应有绑定项标注
-        assert len(struct["bound_items"]) >= 0  # 至少不报错
+        # timeout 是唯一被绑定的变量，应被标注，并带上分组名与两侧旧值/新值
+        assert struct["bound_items"] == [
+            {
+                "path": "/timeout",
+                "old_value": "30",
+                "new_value": "60",
+                "bound": True,
+                "bound_group": "timeout_group",
+            }
+        ]
+        assert struct["summary"]["bound_count"] == 1
 
     def test_no_bindings(self):
         result = compare_versions(SAMPLE_JSON_V1, SAMPLE_JSON_V2, "v1.json", "v2.json", use_bindings=False)
