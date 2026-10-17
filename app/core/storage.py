@@ -1277,10 +1277,14 @@ def add_edit_remark(
     tree_type: str,
     actor_ip: str,
     actor_name: str,
+    locator: str = "",
+    source_sha256: str = "",
+    schema_version: int = 1,
 ) -> str:
     source_name = _sanitize_config_filename(source_file)
     proposed_text = str(proposed_value or "").strip()
-    if not node_key.strip():
+    # v2 建议以 `locator` 唯一定位，`node_key` 允许为空（§6.7）；两者全空才是坏数据。
+    if not node_key.strip() and not locator.strip():
         raise ValueError("节点标识不能为空")
     if proposed_text == "":
         raise ValueError("修改值不能为空")
@@ -1305,6 +1309,9 @@ def add_edit_remark(
             actor_ip_text=actor_ip_text,
             actor_name_text=actor_name_text,
             actor_display=actor_display,
+            locator=locator,
+            source_sha256=source_sha256,
+            schema_version=schema_version,
         ))
         save_edit_remarks(items)
     return item_id
@@ -1324,6 +1331,9 @@ def _build_edit_remark_item(
     actor_ip_text: str,
     actor_name_text: str,
     actor_display: str,
+    locator: str = "",
+    source_sha256: str = "",
+    schema_version: int = 1,
 ) -> Dict[str, Any]:
     return {
         "id": item_id,
@@ -1344,6 +1354,10 @@ def _build_edit_remark_item(
         "reviewed_at": "",
         "generated_file": "",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # v2 新增的可选字段（§6.7）：旧记录没有这些键也仍能列出。
+        "locator": str(locator or ""),
+        "source_sha256": str(source_sha256 or ""),
+        "schema_version": int(schema_version),
     }
 
 
