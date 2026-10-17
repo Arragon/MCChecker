@@ -159,24 +159,31 @@
    * 每张前端卡在自己的改动里把对应键翻成 true；M4-08 全部为 true 后本机制删除。
    */
   var CAP_KEYS = [
-    "favorites", "remarks", "search", "review", "dl", "settings", "import",
+    "favorites", "remarks", "schedule", "search", "review", "dl", "settings", "import",
     "delete", "history", "compare", "records", "tools", "revision", "temp",
   ];
+
+  /* 已经接入真实后端的接口。后端卡在自己的 PR 里实现接口，紧随的前端卡在这里加一项，
+   * 视图代码本身不用改。必须始终是 CAP_KEYS 的子集（前端测试页有断言会红）。 */
+  var WIRED = ["favorites", "revision"];
 
   MC.capsFor = function (mock) {
     var caps = {};
     CAP_KEYS.forEach(function (k) {
-      caps[k] = !!mock;
+      caps[k] = !!mock || WIRED.indexOf(k) >= 0;
     });
     return caps;
   };
 
   MC.caps = MC.capsFor(!!(MC.config && MC.config.mock));
+  MC.capKeys = CAP_KEYS.slice();
+  MC.wiredCaps = WIRED.slice();
 
   /* 每项能力未接入时展示给用户的去向（卡号见 docs/MCChecker_DELIVERY_PLAN.md 第 6 节）。 */
   MC.unwired = {
     favorites: "收藏将在 M2-01 / M2-02 接入",
     remarks: "修改建议将在 M2-03 / M2-04 接入",
+    schedule: "定时更新状态将在 M3-08 接入",
     search: "全局搜索将在 M2-05 / M2-06 接入",
     review: "审阅页将在 M3-02 / M3-03 接入",
     dl: "DL 计算将在 M3-10 ~ M3-12 接入",

@@ -35,7 +35,8 @@
         render();
         return Promise.resolve();
       }
-      return Promise.all([api.get(app.p("/favorites")), api.get(app.p("/schedule")).then(null, function () { return null; })]).then(
+      var scheduleReq = MC.caps.schedule ? api.get(app.p("/schedule")).then(null, function () { return null; }) : Promise.resolve(null);
+      return Promise.all([api.get(app.p("/favorites")), scheduleReq]).then(
         function (res) {
           if (gen !== loadGen) return;
           data = { groups: res[0].groups, schedule: res[1] };

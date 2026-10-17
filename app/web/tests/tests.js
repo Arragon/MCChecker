@@ -165,15 +165,25 @@
     ok(MC.util.initials(MC.util.identityName({ registered: false, name: "10.0.0.9" })) !== "10", "头像首字不取自 IP");
   });
 
-  test("能力开关：模板全开、生产全关，且每项能力都有点名卡号的接入说明", function () {
+  test("能力开关：模板全开，生产只放行已接入项，且每项能力都有点名卡号的说明", function () {
+    var keys = MC.capKeys.slice().sort();
     var on = MC.capsFor(true);
     var off = MC.capsFor(false);
-    var keys = Object.keys(on).sort();
     ok(keys.length >= 10, "键集非空");
+    eq(Object.keys(on).sort(), keys, "capsFor 覆盖全部能力键");
     ok(keys.every(function (k) { return on[k] === true; }), "模板模式下全部可用");
-    ok(keys.every(function (k) { return off[k] === false; }), "生产模式下默认全部未接入");
+    ok(keys.every(function (k) { return off[k] === (MC.wiredCaps.indexOf(k) >= 0); }), "生产模式只放行已接入的接口");
+    ok(MC.wiredCaps.every(function (k) { return MC.capKeys.indexOf(k) >= 0; }), "WIRED 里不能有拼错或未登记的能力键");
     eq(Object.keys(MC.unwired).sort(), keys, "每项能力都要有未接入说明");
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
+  });
+
+  test("M2-02：收藏与修订号已在生产放行，未实现的接口不得提前打开", function () {
+    var prod = MC.capsFor(false);
+    ok(prod.favorites && prod.revision, "收藏与修订号已接真实后端");
+    ["remarks", "schedule", "search", "review", "dl", "settings", "import", "delete", "history", "compare", "records", "tools", "temp"].forEach(function (k) {
+      ok(!prod[k], k + " 尚未实现，不能提前放行");
+    });
   });
 
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
