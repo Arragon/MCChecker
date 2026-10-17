@@ -194,15 +194,15 @@ class TestCompareApi:
             # 文本差异仍然算得出来（不依赖解析）
             assert body["unified"]["total"] > 0
 
-    def test_temp_side_is_rejected_until_m2_10(self):
+    def test_temp_side_needs_ownership(self):
+        """temp 侧在 M2-10 落地：这里只验引用形状，所有者规则见 `test_api_temp.py`。"""
         with make_server() as server:
             status, _h, body = _compare(
                 as_role(server, "member"), self.pid,
                 {"temp": "opaque-token"}, self._ref("current"),
             )
-            assert status == 400, body
-            assert body["error"]["code"] == "INVALID_INPUT"
-            assert "M2-10" in body["error"]["message"]
+            assert status == 404, body
+            assert body["error"]["code"] == "NOT_FOUND"
 
     def test_bad_references(self):
         with make_server() as server:

@@ -576,8 +576,10 @@
       var exists = !!P.files[a.name];
       if (exists && req.query.overwrite !== "1") return fail(409, "FILE_EXISTS", "已存在同名文件 " + a.name, { name: a.name });
       var archived = saveVersion(P, a.name, text);
-      bump(a.pid, "files");
-      return ok({ file: { name: a.name }, archived: archived, unchanged: exists && !archived }, exists ? 200 : 201);
+      var unchanged = exists && !archived;
+      // 与后端一致：内容没变就不递增 files（决策 16——失败写与「什么都没改」都不 bump）。
+      if (!unchanged) bump(a.pid, "files");
+      return ok({ file: { name: a.name }, archived: archived, unchanged: unchanged }, exists ? 200 : 201);
     });
   });
 

@@ -285,7 +285,14 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         # §3.4 第 4 步：每个请求都重新解析身份（撤权后下一次请求即 403）；
         # 无 {pid} 的全局接口按 default 机型解析。
         actor = auth.resolve_actor(ip, pid or device_models.DEFAULT_MODEL_ID)
-        ctx = RequestContext(ip=ip, cid=cid, profile_id=pid or "", actor=actor)
+        ctx = RequestContext(
+            ip=ip,
+            cid=cid,
+            profile_id=pid or "",
+            actor=actor,
+            # C26：X-Filename 先按百分号解码，文件名合法性留给服务层用 validate_filename 判。
+            filename=urllib.parse.unquote(self.headers.get("X-Filename") or "") or None,
+        )
         if pid is None:
             self._send_response(handler(ctx, params, query_params, body))
             return

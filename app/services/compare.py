@@ -16,10 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core import differ, parser, storage
 from ..core.errors import INVALID_INPUT, AppError
-from . import documents
-
-#: 临时文件（上传后未保存的原文）属 M2-10，本卡先明确拒绝而不是静默返回空对比。
-TEMP_MESSAGE = "临时文件对比将在 M2-10 接入"
+from . import documents, temp_store
 
 
 def compare(
@@ -27,11 +24,13 @@ def compare(
     base_ref: Any,
     target_ref: Any,
     text_limit: int = differ.DEFAULT_TEXT_LIMIT,
+    cid: Optional[str] = None,
+    ip: str = "",
 ) -> Dict[str, Any]:
     """`POST /p/{pid}/compare`（§7.5）。只读，不动修订号。"""
     with storage.use_profile(profile_id):
-        base = _side(profile_id, base_ref, "base")
-        target = _side(profile_id, target_ref, "target")
+        base = _side(profile_id, base_ref, "base", cid, ip)
+        target = _side(profile_id, target_ref, "target", cid, ip)
         bindings = storage.load_bindings()
         return {
             "has_changes": base["text"] != target["text"],
@@ -56,12 +55,22 @@ def _limit(text_limit: int) -> int:
     return max(0, value)
 
 
-def _side(profile_id: str, raw: Any, field: str) -> Dict[str, Any]:
+def _side(
+    profile_id: str, raw: Any, field: str, cid: Optional[str], ip: str
+) -> Dict[str, Any]:
     """把一个引用解析成 `{name, label, logical, text, nodes}`。"""
     if not isinstance(raw, dict):
         raise AppError(INVALID_INPUT, "对比的一侧必须是对象", field=field)
-    if str(raw.get("temp") or "").strip():
-        raise AppError(INVALID_INPUT, TEMP_MESSAGE, field=field)
+    token = str(raw.get("temp") or "").strip()
+    if token:
+        meta, data = temp_store.take(profile_id, token, cid, ip)
+        return {
+            "name": meta["name"],
+            "label": "临时文件（仅自己可见）",
+            "logical": meta["name"],
+            "text": _decode(data),
+            "nodes": _nodes(meta["name"], data),
+        }
 
     name = str(raw.get("file") or "").strip()
     if not name:

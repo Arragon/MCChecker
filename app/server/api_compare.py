@@ -34,5 +34,7 @@ def compare_versions(
             payload.get("base"),
             payload.get("target"),
             payload.get("text_limit", differ.DEFAULT_TEXT_LIMIT),
+            ctx.cid,
+            ctx.ip,
         )
     )
