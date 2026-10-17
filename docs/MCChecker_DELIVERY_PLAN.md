@@ -240,6 +240,7 @@ PR: <url> · 提交 `<sha>`
 
 | #32 | M2-10 修正 | 非所有者按卡面返回 404（#31 用了 403；鉴权矩阵不变，`PUT`/`import-url` 权限不足仍是 403）；测试文件改名 `tests/test_api_import.py` 以对齐卡面验收命令 |
 | #33 | M2-11 | `api.js` 的 `WIRED` 放行 `import`/`temp`；`importer.js` 的同名覆盖先走 `MC.confirm`（原来静默带 `overwrite=1`）；临时标签标题改为「name（临时 · 仅自己可见）」与卡面一致；`tests/index.html` 补载 `importer.js`，新增导入对话框角色分支用例 + 外壳 caps 断言更新 |
+| #34 | M2-12 | 新增 `services/recovery.py`（§5.6 顺序：复制进 `data/recovery/` → 逐文件校验 sha256 → 才删源 → 才改四份 JSON → 写 `manifest.json`；失败逆序回滚，不留半删除、不谎报成功；`create_entry` 用 `os.mkdir` 独占占名）与 `server/api_delete.py`（`DELETE /files/{name}` 走 ADMIN）；`storage` 加 `get_recovery_root_dir()` 与公开 `profile_write()`，**`delete_config_file` 的旧硬删语义一行未动**；`conftest.DATA_SUBDIRS` 加 `recovery`；`api.js` 的 `WIRED` 放行 `delete`，toast 给出恢复区目录名；mock 的 DELETE 补齐绑定清理与「只 bump 真改动的分量」并把 `recovery` 改成目录名；UC-11 与 §7.4 的冲突按决策 19 处理 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
