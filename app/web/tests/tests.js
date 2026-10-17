@@ -178,10 +178,10 @@
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
   });
 
-  test("M2-04：收藏、修订号与修改建议已在生产放行，未实现的接口不得提前打开", function () {
+  test("M2-06：收藏、修订号、修改建议与搜索已在生产放行，未实现的接口不得提前打开", function () {
     var prod = MC.capsFor(false);
-    ok(prod.favorites && prod.revision && prod.remarks, "收藏、修订号与修改建议已接真实后端");
-    ["schedule", "search", "review", "dl", "settings", "import", "delete", "history", "compare", "records", "tools", "temp"].forEach(function (k) {
+    ok(prod.favorites && prod.revision && prod.remarks && prod.search, "收藏、修订号、建议与搜索已接真实后端");
+    ["schedule", "review", "dl", "settings", "import", "delete", "history", "compare", "records", "tools", "temp"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
   });
@@ -189,10 +189,27 @@
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
     var capOfKind = MC.App.prototype.capOfKind;
     MC.caps = MC.capsFor(false);
-    ok(capOfKind("overview") && capOfKind("f"), "速览与文件已接入真实后端");
-    ok(!capOfKind("settings") && !capOfKind("search") && !capOfKind("t"), "未接入的 kind 不可用");
+    ok(capOfKind("overview") && capOfKind("f") && capOfKind("search"), "速览、文件与搜索已接入真实后端");
+    ok(!capOfKind("settings") && !capOfKind("t"), "未接入的 kind 不可用");
     MC.caps = MC.capsFor(true);
     ok(capOfKind("settings") && capOfKind("t"), "接入后可用");
+  });
+
+  test("搜索高亮：用文本节点拆分关键词，关键字不进入 HTML（§9.8.8 / UC-25）", function () {
+    var frag = MC.util.highlight('Port <img src=x onerror="window.__hl=1">', "port");
+    var text = "";
+    var marks = 0;
+    frag.childNodes.forEach(function (n) {
+      if (n.nodeName === "MARK") marks++;
+      text += n.nodeType === 3 ? n.nodeValue : n.textContent || "";
+    });
+    window.__hl = 0;
+    eq(marks, 1, "命中片段被包进 <mark>");
+    eq(text, 'Port <img src=x onerror="window.__hl=1">', "原文按文本完整保留");
+    eq(frag.querySelectorAll("img").length, 0, "不把关键词拼进 HTML");
+    ok(!window.__hl, "载荷不执行");
+    eq(MC.util.highlight("PARAM_01", "param_0").childNodes.length >= 2, true, "大小写不敏感");
+    eq(MC.util.highlight("ab", "cd").querySelectorAll("mark").length, 0, "不命中时没有 mark");
   });
 
   test("组件：MC.menu 的未接入项真的 disabled 并带原因", function () {
