@@ -5,14 +5,14 @@
 
 from __future__ import annotations
 
-import json
 import os
 import logging
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 import math
 
-from . import storage
+from . import fsutil, storage
+from .errors import CorruptDataError
 
 logger = logging.getLogger(__name__)
 
@@ -68,19 +68,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 
 def load_config() -> Dict[str, Any]:
-    """加载 DL 工具配置"""
+    """加载 DL 工具配置。
+
+    `dltool_config.json` 是权威数据：损坏时抛 `CorruptDataError`（§5.4），
+    不能回退默认系数再写回——那会把用户调好的系数静默清空。
+    """
     cfg_file = _get_config_file()
-    if not os.path.exists(cfg_file):
+    cfg = fsutil.read_json(cfg_file, None)
+    if cfg is None:
         return deepcopy(DEFAULT_CONFIG)
-    try:
-        with open(cfg_file, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        # 补齐缺失字段
-        _ensure_defaults(cfg)
-        return cfg
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error("加载 dltool_config 失败: %s", e)
-        return deepcopy(DEFAULT_CONFIG)
+    if not isinstance(cfg, dict):
+        raise CorruptDataError(cfg_file)
+    _ensure_defaults(cfg)
+    return cfg
 
 
 def _ensure_defaults(cfg: dict):
@@ -108,13 +108,11 @@ def _ensure_defaults(cfg: dict):
 
 
 def save_config(cfg: Dict[str, Any]):
-    """保存 DL 工具配置"""
+    """保存 DL 工具配置（原子写，§5.4）"""
     cfg_file = _get_config_file()
-    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
     # 去除运行时字段（_inputs 等不可序列化的 UI 引用）
     clean = {k: v for k, v in cfg.items() if not k.startswith("_")}
-    with open(cfg_file, "w", encoding="utf-8") as f:
-        json.dump(clean, f, ensure_ascii=False, indent=2)
+    fsutil.atomic_write_json(cfg_file, clean)
 
 
 def poly_eval(x: float, coeffs: Dict[str, float]) -> float:
