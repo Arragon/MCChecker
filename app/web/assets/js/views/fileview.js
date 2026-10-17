@@ -642,7 +642,7 @@
           var picked = [];
           var cmpSel = h("button.btn.btn-primary.btn-sm", { type: "button", disabled: true }, icon("compare"), "对比所选");
           cmpSel.addEventListener("click", function () {
-            var sorted = picked.slice().sort(function (a, b) { return order(b) - order(a); });
+            var sorted = picked.slice().sort(function (a, b) { return order(a) - order(b); });
             nav({ view: "compare", base: sorted[0], target: sorted[1] });
           });
           function order(v) {
@@ -747,7 +747,14 @@
           if (archives.length) groups.push(h("optgroup", { label: "历史版本" }, archives.map(function (a) { return opt("archive:" + a.filename, a.filename + " · " + util.formatTime(a.date)); })));
           if (records.length) groups.push(h("optgroup", { label: "修改记录" }, records.map(function (a) { return opt("record:" + a.filename, a.filename); })));
           if (uploads.length) groups.push(h("optgroup", { label: "已上传" }, uploads.map(function (u) { return opt("temp:" + u.token, u.name); })));
-          groups.push(opt("__upload__", "上传本地文件…"));
+          // 上传入口在 M2-11 才接通：先让选项可见（UC-17），但禁用并说明原因，
+          // 免得在生产模式下点出 /temp 的 404。
+          var uploadOption = h("option", { value: "__upload__" }, MC.caps.temp ? "上传本地文件…" : "上传本地文件（M2-11 接入）");
+          if (!MC.caps.temp) {
+            uploadOption.disabled = true;
+            uploadOption.title = UNWIRED.temp;
+          }
+          groups.push(uploadOption);
           if (!C[side]) groups.unshift(h("option", { value: "", selected: true, disabled: true }, "请选择"));
           sel.append.apply(sel, groups);
           sel.addEventListener("change", function () {
@@ -926,7 +933,10 @@
 
     function drawRecords() {
       var res = S.records;
-      var refresh = h("button.btn.btn-sm", { type: "button", disabled: !app.can("deployer") || !res.record_url, title: !res.record_url ? "未配置修改记录链接" : !app.can("deployer") ? "仅部署者可手动拉取" : null }, icon("refresh"), "立即拉取");
+      // 「立即拉取」要 POST /tasks，属 M3-08；生产模式下禁用并说明原因，别打空接口。
+      var mayFetch = app.can("deployer") && res.record_url && MC.caps.tools;
+      var fetchTitle = !res.record_url ? "未配置修改记录链接" : !app.can("deployer") ? "仅部署者可手动拉取" : !MC.caps.tools ? "拉取修改记录需要任务接口（M3-07 / M3-09）" : null;
+      var refresh = h("button.btn.btn-sm", { type: "button", disabled: !mayFetch, title: fetchTitle }, icon("refresh"), "立即拉取");
       refresh.addEventListener("click", function () {
         MC.withBusy(refresh, function () {
           return app.startTask({ type: "refresh_records", name: S.name }).then(function () { MC.toast.info("已开始拉取修改记录", "完成后列表会自动刷新"); }, function (err) { MC.toastError("无法开始拉取", err); });
