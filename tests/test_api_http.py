@@ -137,19 +137,21 @@ class TestStaticFiles:
 
 
 class TestApiSession:
-    def test_placeholder_session(self, server):
+    def test_session_shape_and_local_identity(self, server):
+        """M1-03 起 /session 返回真实身份：本机回环地址即部署者（§4.1、C18）。"""
         status, headers, body = request(server, "GET", "/api/v1/session")
         assert status == 200
         assert headers["Content-Type"].startswith("application/json")
         # §3.4 第 7 步：UTF-8、ensure_ascii=False
-        assert "访客".encode("utf-8") in body
-        assert b"\\u8bbf" not in body
+        assert "部署者".encode("utf-8") in body
+        assert b"\\u90e8" not in body
 
         payload = json.loads(body.decode("utf-8"))
-        assert payload["identity"]["is_deployer"] is False
+        assert payload["identity"]["ip"] == "127.0.0.1"
+        assert payload["identity"]["is_deployer"] is True
         assert payload["identity"]["is_admin"] is False
         assert payload["identity"]["registered"] is False
-        assert payload["identity"]["role_label"] == "访客"
+        assert payload["identity"]["role_label"] == "部署者"
         assert payload["profile"]["id"] == "default"
         assert payload["profiles"] == [{"id": "default", "name": "默认机型"}]
         assert payload["server"]["version"] == __version__
