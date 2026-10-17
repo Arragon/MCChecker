@@ -59,14 +59,9 @@ def isolated_data_root(tmp_path, monkeypatch):
     # 机型清单路径由函数在运行期拼出，常量重绑定覆盖不到，单独钉住。
     monkeypatch.setattr(device_models, "_models_file", lambda: os.path.join(root, "device_models.json"))
 
+    # 机型只认 storage 自己的上下文变量（M0-06 已删除 NiceGUI 回退），因此
+    # 每个用例开头重置一次即可，不需要再清理浏览器会话。
     storage.set_active_profile(storage.DEFAULT_PROFILE)
-    # get_active_profile() 会回落到 NiceGUI 的 user storage，这里清空以免机型在测试间串台。
-    try:
-        from nicegui import app as nicegui_app
-
-        nicegui_app.storage.user.pop("device_model", None)
-    except Exception:
-        pass
     storage._ensure_dirs()
     yield
 
