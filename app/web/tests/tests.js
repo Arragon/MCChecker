@@ -178,12 +178,12 @@
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
   });
 
-  test("M2-09：历史、对比与修改记录已在生产放行，未实现的接口不得提前打开", function () {
+  test("M2-11：导入与临时文件已在生产放行，未实现的接口不得提前打开", function () {
     var prod = MC.capsFor(false);
-    ["favorites", "revision", "remarks", "search", "history", "compare", "records"].forEach(function (k) {
+    ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["schedule", "review", "dl", "settings", "import", "delete", "tools", "temp"].forEach(function (k) {
+    ["schedule", "review", "dl", "settings", "delete", "tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
   });
@@ -197,11 +197,42 @@
     ok(stats.textContent.indexOf("+2") >= 0 && stats.textContent.indexOf("−1") >= 0 && stats.textContent.indexOf("~3") >= 0);
   });
 
+  test("导入对话框：访客没有保存选项，部署者默认保存到服务器（§9.8.11 / UC-27、UC-28）", function () {
+    function stub(canDeployer) {
+      return {
+        can: function (kind) { return kind === "deployer" && canDeployer; },
+        session: { limits: { upload_max_bytes: 52428800, temp_ttl_hours: 24 } },
+        files: [],
+        p: function (rest) { return "/api/v1/p/default" + rest; },
+      };
+    }
+    function choices(m) {
+      return [...m.el.querySelectorAll("label.choice")].map(function (l) {
+        return { text: l.textContent, checked: l.querySelector("input").checked, disabled: l.querySelector("input").disabled };
+      });
+    }
+
+    var visitor = MC.openImport(stub(false), { source: "local" });
+    var vc = choices(visitor);
+    visitor.close();
+    eq(vc.length, 2, "两种导入方式");
+    ok(vc[0].text.indexOf("保存到服务器") >= 0 && vc[0].disabled === true, "访客的保存项必须禁用");
+    ok(/仅部署者|服务器本机/.test(vc[0].text), "禁用时要说明原因：" + vc[0].text);
+    ok(vc[1].checked === true, "访客默认落在「临时查看」");
+
+    var deployer = MC.openImport(stub(true), { source: "local" });
+    var dc = choices(deployer);
+    deployer.close();
+    ok(dc[0].disabled === false && dc[0].checked === true, "部署者默认可保存");
+    ok(/24 小时/.test(dc[1].text), "临时项要说明过期时间");
+  });
+
+
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
     var capOfKind = MC.App.prototype.capOfKind;
     MC.caps = MC.capsFor(false);
-    ok(capOfKind("overview") && capOfKind("f") && capOfKind("search"), "速览、文件与搜索已接入真实后端");
-    ok(!capOfKind("settings") && !capOfKind("t"), "未接入的 kind 不可用");
+    ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t"), "速览、文件、搜索与临时标签已接入真实后端");
+    ok(!capOfKind("settings"), "未接入的 kind 不可用");
     MC.caps = MC.capsFor(true);
     ok(capOfKind("settings") && capOfKind("t"), "接入后可用");
   });
