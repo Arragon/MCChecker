@@ -165,6 +165,10 @@ class TestFavoritesApi:
             assert status == 200, body
             assert body["item"]["note"] == "现场常用"
             assert _get(caller, self.pid)[0]["items"][0]["note"] == "现场常用"
+            # 备注必须落在 favorites.json 上（重启进程后仍在）
+            storage.set_active_profile(self.pid)
+            on_disk = storage.load_favorites()
+            assert on_disk[0]["note"] == "现场常用"
             status, _h, body = caller.json(
                 "PATCH", _favorites_url(self.pid), {"file": FILE_A, "path": "root/R/无", "note": "x"}
             )
@@ -189,6 +193,55 @@ class TestFavoritesApi:
             caller = as_role(server, "member")
             status, _h, body = caller.json("DELETE", _favorites_url(self.pid))
             assert status == 400 and body["error"]["detail"]["field"] == "file"
+
+    def test_restoring_the_file_returns_the_group(self):
+        """UC-11：文件放回后回到原组（收藏数据本身未被动过）。"""
+        with make_server() as server:
+            caller = as_role(server, "member")
+            _post(caller, self.pid, FILE_B, "root/R/only")
+            storage.set_active_profile(self.pid)
+            path = storage.get_config_path(FILE_B)
+            backup = open(path, "rb").read()
+            os.remove(path)
+            gone = _get(caller, self.pid)[0]
+            assert gone["exists"] is False and gone["items"][0]["missing"] is True
+
+            with open(path, "wb") as fh:
+                fh.write(backup)
+            back = _get(caller, self.pid)[0]
+            assert back["exists"] is True
+            assert back["items"][0]["missing"] is False
+            assert back["items"][0]["value"] == "42"
+
+    def test_legacy_favorites_json_is_readable(self):
+        """旧 favorites.json 字段不变：v1 写入的样本能被 GET /favorites 解析。"""
+        legacy = [
+            {
+                "path": "root/R/params/param_01",
+                "label": "param_01",
+                "value": "5",
+                "source_file": FILE_A,
+                "note": "旧备注",
+                "children": [
+                    {"label": "item", "value": "first", "path": ITEM_ID, "children": []}
+                ],
+                "added_at": "2026-05-24 10:00:00",
+            }
+        ]
+        storage.set_active_profile(self.pid)
+        storage.save_favorites(legacy)
+        with make_server() as server:
+            caller = as_role(server, "member")
+            groups = _get(caller, self.pid)
+            assert len(groups) == 1 and groups[0]["file"] == FILE_A
+            item = groups[0]["items"][0]
+            assert item["note"] == "旧备注"
+            assert item["saved_value"] == "5"
+            assert item["value"] == "5"
+            assert item["children"][0]["path"] == ITEM_ID
+            # 旧快照里 item 的值是 first，实时值应取同名兄弟的最后一个（second）
+            assert item["children"][0]["value"] == "second"
+            assert item["children"][0]["missing"] is False
 
     def test_all_roles_may_write_favorites(self):
         """§4.2：`favorites_write` 对所有角色开放（含访客）。"""
