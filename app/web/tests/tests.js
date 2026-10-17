@@ -178,10 +178,10 @@
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
   });
 
-  test("M2-02：收藏与修订号已在生产放行，未实现的接口不得提前打开", function () {
+  test("M2-04：收藏、修订号与修改建议已在生产放行，未实现的接口不得提前打开", function () {
     var prod = MC.capsFor(false);
-    ok(prod.favorites && prod.revision, "收藏与修订号已接真实后端");
-    ["remarks", "schedule", "search", "review", "dl", "settings", "import", "delete", "history", "compare", "records", "tools", "temp"].forEach(function (k) {
+    ok(prod.favorites && prod.revision && prod.remarks, "收藏、修订号与修改建议已接真实后端");
+    ["schedule", "search", "review", "dl", "settings", "import", "delete", "history", "compare", "records", "tools", "temp"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
   });

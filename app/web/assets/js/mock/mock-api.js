@@ -780,7 +780,7 @@
     if (!ix) return fail(404, "NOT_FOUND", "文件不存在");
     if (b.sha256 && b.sha256 !== ix.sha) return fail(409, "SOURCE_CHANGED", "文件已更新，请刷新后基于最新版本提交建议");
     var i = ix.byLoc[b.loc];
-    if (i === undefined || ix.N.v[i] === null) return fail(400, "INVALID_INPUT", "只能对有值的节点提交建议");
+    if (i === undefined || ix.N.v[i] === null) return fail(400, "INVALID_INPUT", "只能对有值的节点提交建议", { field: "loc" });
     if (proposed === ix.N.v[i]) return fail(400, "INVALID_INPUT", "建议值与当前值相同", { field: "proposed_value" });
     var need = requiredType(ix.format, ix.N.t[i], proposed);
     if (need) return fail(400, "INVALID_INPUT", "该节点需要" + need + "类型的值", { field: "proposed_value" });
