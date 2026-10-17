@@ -8,11 +8,11 @@ handler 只做三件事：取路径/查询参数 → 调 `services.documents` �
 from __future__ import annotations
 
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from ..services import documents
 from ..services.context import RequestContext
-from .router import Response
+from .router import Response, query_param
 
 
 def list_files(
@@ -26,7 +26,7 @@ def get_document(
     ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
 ) -> Response:
     # GET /api/v1/p/{pid}/files/{name}/document?version=
-    version = _param(query, "version", "current")
+    version = query_param(query, "version", "current")
     payload, etag = documents.document_bytes(params["pid"], params["name"], version)
     return Response(body=payload, headers={"ETag": etag, "Cache-Control": "no-cache"})
 
@@ -35,7 +35,7 @@ def get_raw(
     ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
 ) -> Response:
     # GET /api/v1/p/{pid}/files/{name}/raw?version=
-    version = _param(query, "version", "current")
+    version = query_param(query, "version", "current")
     raw = documents.load_raw(params["pid"], params["name"], version)
     return Response(
         body=raw.data,
@@ -57,12 +57,3 @@ def content_disposition(filename: str) -> str:
         fallback,
         urllib.parse.quote(filename, safe=""),
     )
-
-
-def _param(query: Dict[str, List[str]], key: str, default: str) -> str:
-    """查询参数：同名多次时取最后一个（后写覆盖），缺省用 `default`。"""
-    values: Any = query.get(key)
-    if not values:
-        return default
-    value = str(values[-1]).strip()
-    return value or default

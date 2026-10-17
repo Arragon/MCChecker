@@ -6,12 +6,14 @@ handler 不写文件（§3.3）。业务接口从 M1 起按 §3.2 拆到 `api_*.
 
 from __future__ import annotations
 
+import json
 import re
 import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..config import Settings
+from ..core.errors import INVALID_INPUT, AppError
 from ..services.context import RequestContext
 
 
@@ -37,6 +39,28 @@ Handler = Callable[
 ]
 
 _PARAM_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def query_param(query: Dict[str, List[str]], key: str, default: str = "") -> str:
+    """查询参数：同名多次时取最后一个（后写覆盖），空值回落 `default`（§7.4）。"""
+    values = query.get(key)
+    if not values:
+        return default
+    value = str(values[-1]).strip()
+    return value or default
+
+
+def json_body(body: Optional[bytes]) -> Dict[str, Any]:
+    """解析 JSON 请求体（写接口共用）。空体按 `{}`，非法 JSON → 400（§7.1）。"""
+    if not body:
+        return {}
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise AppError(INVALID_INPUT, "请求体必须是合法的 JSON")
+    if not isinstance(parsed, dict):
+        raise AppError(INVALID_INPUT, "请求体必须是 JSON 对象")
+    return parsed
 
 
 class Router:
@@ -73,13 +97,15 @@ def build_router(settings: Settings) -> Router:
     """组装路由表。
 
     M0-09 只有占位会话；M1 起按 §3.2 逐步挂上业务接口（当前：会话、文件列表、
-    compact 文档、原文下载）。
+    compact 文档、原文下载、收藏、修订号）。
     """
-    from . import api_documents, api_session
+    from . import api_documents, api_favorites, api_revision, api_session
 
     router = Router()
     api_session.register(router, settings)
     router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)
+    api_favorites.register(router)
+    router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
     return router
