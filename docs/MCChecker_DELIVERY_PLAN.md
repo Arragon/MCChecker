@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 7/12**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及差异摘要）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **440 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (23)**。下一个待做卡：**M2-08 / INH-1881 结构化对比 API**（§6.6 的逐行 `items` 与 `POST /compare`）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 8/12**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **462 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (23)**。下一个待做卡：**M2-09 / INH-1882 历史列表与对比选择器**（放行 `history`/`compare`/`records`）。
 
 ---
 
@@ -151,7 +151,7 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（7/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（8/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -162,8 +162,8 @@ PR: <url> · 提交 `<sha>`
 | M2-05 | INH-1878 | Done | 全局搜索 API 与命中计数（`services/search.py` + `core.searching.search_compact`） |
 | M2-06 | INH-1879 | Done | 搜索页与 Ctrl+K 命令面板（`WIRED` 放行 `search`） |
 | M2-07 | INH-1880 | Done | 历史与修改记录列表及差异摘要（`services/history.py` + `cache/diff_v2/`） |
-| **M2-08** | INH-1881 | Todo | **结构化对比 API ← 下一张** |
-| M2-09 | INH-1882 | In Progress | 历史列表与对比选择器 |
+| M2-08 | INH-1881 | Done | 结构化对比 API（`compare_documents` + `POST /compare`） |
+| **M2-09** | INH-1882 | In Progress | **历史列表与对比选择器 ← 下一张** |
 | M2-10 | INH-1883 | Todo | 临时文件、上传保存与链接导入 |
 | M2-11 | INH-1884 | In Progress | 导入对话框与临时文件标签 |
 | M2-12 | INH-1885 | Todo | 删除文件进入恢复区 |
@@ -232,6 +232,7 @@ PR: <url> · 提交 `<sha>`
 | #26 | M2-05 | `core/searching.py` 新增 `search_compact()` / `display_path()`（每个命中节点计 1，修掉父节点命中计 0 的旧缺陷）+ `services/search.py`（反序列化前按响应体字节预筛）+ `server/api_search.py`（`GET /p/{pid}/search`，`read` 档）；mock 补 `file` 未知 → 404 与 `limit`/`offset` 下限；新增 `scripts/bench_search.py` |
 | #27 | M2-06 | `api.js` 的 `WIRED` 放行 `search`；`views/search.js` 的 `update()` 同步写 `inst.title`，修掉「搜索标签停在第一次关键词」（`activate()` 会用 `inst.title` 回写标签名）；前端测试 +1 条高亮断言（文本节点拆分、mark 计数、载荷不执行） |
 | #28 | M2-07 | `core/differ.py` 新增 `DIFFER_VERSION` / `index_value_nodes` / `bound_reference` / `summarize_documents`（loc 键，bound 只对变化条目计数）+ `services/history.py`（archives/records 列表、`cache/diff_v2/` 摘要缓存、旧 `.diff.json` 降级为 `structural: false`、算不出来返回 `null`）+ `server/api_history.py`；mock 的 `diffSummary` 同步改为算不出来给 `null` |
+| #29 | M2-08 | `core/differ.py` 新增 `compare_documents()`（逐行 items：`op/loc/path/old/new/bound_group`）与 `unified_diff_text()`（>20 000 行跳过、`text_limit` 截断带 total），`summarize_documents` 改为委托它，保证摘要与条目同口径；**移除 `differ` 的模块级 `storage` import**（旧 `compare_versions` 改函数内 import）；新增 `services/compare.py` + `server/api_compare.py`（`POST /compare`，`read` 档）；mock 的 too_large 阈值改为「单侧 > 20 000 行」 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -302,4 +303,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-08（`INH-1881`）——结构化对比 API：把 §6.6 的逐行 `items`（`op/loc/path/old/new/bound_group`）补进 `core/differ.py::compare_documents`，接 `POST /p/{pid}/compare`；`services/history.py` 已经用 `summarize_documents` 的 loc 键口径，M2-08 的 items 必须给出与它一致的计数。临时侧（`temp:`）在 M2-10 之前一律 400。M2-07 已完成：archives/records 列表 + `cache/diff_v2/` 摘要 + 旧 `.diff.json` 降级 + 算不出来返回 `null`。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步**：M2-09（`INH-1882`）——历史列表与对比选择器：把 `history`/`compare`/`records` 加进 `api.js` 的 `WIRED`，接 `GET /files/{name}/archives`、`GET /files/{name}/records` 与 `POST /compare`，核对 UC-14（当前 + 归档、统计正确）、UC-15（历史直达对比：基准=该归档、目标=当前并自动运行）、UC-16（勾选两行 → 较旧为基准）。M2-08 已完成：`compare_documents()` 给出逐行 items，`summarize_documents()` 改为委托它（摘要与条目同口径），`differ` 不再在模块级 import `storage`。临时侧 `{"temp": …}` 现在返回 400「临时文件对比将在 M2-10 接入」，M2-10 要补上所有者校验与相应用例。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
