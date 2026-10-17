@@ -204,7 +204,7 @@
   function unified(a, b, an, bn, limit) {
     var A = a.split("\n");
     var B = b.split("\n");
-    if (A.length * B.length > 4e6) return { lines: [], total: 0, truncated: true, too_large: true };
+    if (A.length > 20000 || B.length > 20000) return { lines: [], total: 0, truncated: true, too_large: true };
     var n = A.length;
     var m = B.length;
     var dp = [];
