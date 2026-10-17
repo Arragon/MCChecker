@@ -1030,3 +1030,67 @@ gh pr merge <n> --merge
 ## 9. 待人工确认清单（不得写成「通过」，M4-08 收口）
 
 沿用 `DELIVERY_PLAN` 第 9 节：**UC-07**（数十万节点浏览不卡顿）、**UC-19**（收藏/复制体感）、**UC-40**（双浏览器 10 秒内看到对方更新 —— 卡 17 只自动化「计数递增」部分）、**UC-45**（手机/窄屏响应式）。M3 期间若新增体感依赖项，追加到该清单。
+
+---
+
+## 10. 执行期裁定（卡 1 执行中核代码得出，2026-10-17）
+
+以下是控制方逐张卡读真实代码得出的结论。**后续派发该卡时必须把对应条目随 brief 下发**，不要重新发现一遍。
+
+### 基线（实测，非引用文档）
+
+`pytest -q` → **506 passed in 16.22s**；`check_py39.sh` exit 0；`data/` 内容哈希 `478d9c26ea8dbb8f0d56c77a94a6cd849fee3c1369e209e697e02f94beb48d24`。
+`data/` 被 `.gitignore` 忽略且**完全未被跟踪** ⇒ H3 的前后哈希**只能在真实工作区测**，另开 worktree/clone 里没有 `data/`。仓库内**禁止**嵌套 clone（会被 pytest 从根目录连带收集，污染计数）。
+
+### 卡 2（M3-02）
+
+- **R1** 分组必须自己算 `group_key = locator or node_path or node_key`。**不得复用 `storage.list_review_items`** —— 它按 `(source_file, node_key or node_path)` 分组（storage.py:1441），对 M2-03 写的「`node_key=""` 且带 locator」新建议会退化成按旧 ID 分组，同名兄弟被错误并组，可能连带批准错建议。可复用 `storage.load_edit_remarks()` 取原始条目。
+- **R2** §6.7 第 8 步复用 `storage.apply_review_results`（storage.py:1462），两个 ID 列表由 service 算。**嵌套锁安全**：`locks.profile_lock` 返回 **RLock**（locks.py:26/33），外层 `profile_write(pid)` 与内部 `_profile_write()` 同 pid 可重入，不会自锁。
+- **R3** 幂等表落独立文件 `review_idempotency.json`；路径用 `_get_profile_json_file(...)` 在**调用期**求值，不得新增模块级常量；**不加入** `COPY_PROFILE_FILES`。属新增持久化文件，PR 与 Linear 须按高风险点名（v1.0.1 不读它，不破坏 §16.5 向后兼容）。
+- **R6** `current_value` 用 JSON `null` 表示节点无值，不能用空串（`review.js:137` 判 `=== null`）。
+- **R7** legacy 建议「定位不唯一」必须用 **`resolvable=false`** 表达 —— `review.js:103` 只看 `n.stale || !n.resolvable`。只标 `legacy=true` 会让前端给出可点的「通过」按钮而点下必 409。`legacy` 仅用于打「旧版」徽标。
+- **R8** `original_value` 与 `current_value` 每个节点都要给（:119 冲突横幅、:160 确认表直接用）。
+
+### 卡 4（M3-04）
+
+现状：`core/downloader.py` 仅 44 行，**scheme／大小上限／重定向策略全无**，超时是写死的模块常量。调用方 4 处，v2 活路径只有 `services/upload.py:79`；`app/pages/home.py`、`app/core/scheduler.py` 是 M4-07 才删的旧路径。
+- **R4** `TOO_LARGE` 必须**透传**，不得塌缩成 `None`。证据：`tests/test_api_import.py:153-165` 断言超限在服务边界是 413，`:292-301` 断言下载失败是 502。规则：下载类失败仍返回 `None`（保 502 与 UC-29 文案），超限让 `AppError(TOO_LARGE)` 向上抛（保 413）。
+- `upload.py:76` 的 http/https 前缀检查**要留着**（它给 400 + `field="url"`，fetch 给 502，两层是纵深防御）。
+- 现有 `logger.info("下载文件: %s", url)` 会把含 query/userinfo 的完整 URL 写进日志，违反 §11.5，本卡顺带修并加断言。
+
+### 卡 5（M3-05）
+
+- **R5** `unchanged` 判定用现成的 `storage.save_config_file_detailed` → `NamedTuple(path, archived, unchanged)`（storage.py:770-780），不必自己再比一次 sha256。据此：**仅当 `unchanged is False` 才 `revision.bump(pid, "files")`**，配守卫测试。
+- `update_status.json` **没有任何现成读写函数**（storage.py:1670 只有一句注释），本卡新建 `get_update_status_file/load/save_update_status`，同样属新增持久化文件。
+
+### 卡 6 / 卡 8（M3-07 / M3-08）
+
+现状：`run.py:72-79` 信号处理器用 `threading.Thread(target=server.shutdown, daemon=True)`；`http.py:422` `daemon_threads = True`。
+- **R9** 停止顺序必须 **先 `runner.shutdown(30)` 再 `server.shutdown()`**；`ThreadPoolExecutor` 保持非 daemon（正是「不残留非 daemon 工作线程」这条验收所需）。顺序反了会让主线程先退出、任务被丢或被悬挂线程拖住。`_handle_signal` 与正常退出路径两处都要改。
+- **R10** `shutdown()` 必须幂等（信号连按两次不得抛、不得重复 join）。
+- **R11** 调度线程是 daemon，`stop()` 靠 Event 唤醒自循环退出，「等任务跑完」由 `runner.shutdown` 负责，两者不要混。
+
+### 卡 10（M3-10）
+
+- **R15** `or` 混淆点已定位到 `dltool.py:295` `x_samples = max(int(x_samples or 0), 50)`。`:169` 的 `if not roots or abs(...)` 是根去重，属合法写法，**不要顺手改它**。
+- **R16** `tests/test_dltool_multi.py` **只有 2 个 test 函数**，回归基线极薄。本卡质量取决于新增用例：切触根 `(x-3)²`、越界标注、`input_index`、常数函数状态、功率转换系数 0 拒绝 —— **各自独立命名**，不要挤进一个大测试。
+
+### 卡 13 / 卡 16
+
+- **R13** 「删除管理员后下一次审阅 403」是**既有行为**：`auth.py:116` 每次解析身份都实时 `storage.is_admin_user(name)`，无 Actor 缓存。只写断言，**不要引入身份缓存或失效钩子**。
+- **R12** 卡 16 **不要新写恢复原语**：`recovery.py` docstring 第 10 行明写机型删除复用 `create_entry`/`move_in`/`write_manifest`，且 `move_in` 已支持「文件或整个目录」，`create_entry(op, ...)` 的 `op` 已参数化（加 `OP_DELETE_PROFILE`）。`move_profile_to_recovery` 必须是这三者的**组合函数**，重抄 copy/verify/rollback 会被判为「逐字复制逻辑块」。删除顺序：先 `device_models.remove_model(id, delete_data=False)` 摘注册表，再安置数据目录，失败回滚注册表。
+- **R18** `DELETE /profiles/default` → **400 `INVALID_INPUT` + `detail.field="id"`**，且**必须把底层裸 `ValueError` 转成 `AppError`** —— `storage.delete_profile_data` 与 `device_models.remove_model` 抛的是 `ValueError`，透传会让 HTTP 层按未知异常返回 **500**。前端 `settings.js:434` 对 default 根本不渲染删除按钮，所以这条只有非 UI 客户端能触发。
+
+### 卡 11 / 卡 17
+
+- **R17** `PUT /dl/{item}` 缺 `If-Match` → **409 `REVISION_CONFLICT`**（不用 400/428）。`dltool.js:84` 永远带该头，`:94` 只处理 `REVISION_CONFLICT`；响应必须回新 `rev`（`:86` 要 `S.rev = res.rev`）。
+- **R20** `POST /compare` 是 POST 但纯计算、不写权威数据 ⇒ **不递增**，必须列入「明确不递增」清单并配「5 个 part 全不变」的守卫测试，否则下一个审计者会误以为漏接而去加 bump。
+- **R21** `POST /temp` 与 `import-url` 的非持久分支**不递增**：临时区只对上传者可见，递增 `files` 会让所有客户端在 10 秒轮询后弹出虚假的「文件已更新」黄横幅。`import-url` 只在 `persist=true` 走 `save_bytes` 时命中既有 `files` 递增。
+- 卡 17 的审计基数 = **31 个写端点**（现存 10 + M3 新增 21）。
+
+### 全卡通用
+
+- **R19** `app/web/assets/js/mock/mock-api.js`（1261 行）**已实现 M3 全部端点**（`/review` :842、`/review/submit` :870、`/profiles` :489/:511/:522、任务 :391、`schedule.last_run` :401/:505、`/records` :669、绑定 :603、admins/people、dl）。每张后端卡开工前先读对应那条 `route(...)` —— 它是前端据以构建并被测试页验过的参考实现，字段名以它对齐。**但 mock 不是权威，SPEC 才是**：已发现 `mock-api.js:527` 的 `DELETE /profiles` 是硬删，与 §5.6 冲突，卡 16 要改 mock。**且模板模式下测试页一直是绿的，`ALL PASSED` 不能作为后端接对的证据**，真实验收只认 `tests/test_api_*.py` + 真实 `run.py` 走 `curl`。
+- **R14** D2 的分段门控只需插一处：`settings.js:62-67` 的 `renderSection()` 是唯一调度器，第 66 行的 `fn(sec)` 就是发请求处 —— 未接入时在其之前直接渲染只读横幅并 `return`，压根不调 `fn`。
+- **R22**（计划自身缺陷，控制方责任）：卡 1 的 D1 动作第 3 步原写「在 `tests/test_review_apply.py` 断言 NoneType 提 `"null"` 返回『与当前值相同』」**是错位的** —— 那是 §6.7 第 1 步、属 `services/review.py::submit`；`apply_edits` 不做此检查。正确归属 `tests/test_api_remarks.py`。若实现者为此把 service 判断塞进 core，是越层而非缺陷，由控制方改判。
+- **D4** `tasks` 能力键（`CAP_KEYS` 增至 16 项）落在卡 6；改完 `fileview.js` 后 `MC.caps.tools` 不应再出现在 `fileview.js` 里。
