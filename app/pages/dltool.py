@@ -1,5 +1,7 @@
 """DL 快捷计算工具 —— UI 页面"""
 
+from __future__ import annotations
+
 import json
 import os
 

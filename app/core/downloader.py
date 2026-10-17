@@ -3,6 +3,8 @@
 从 URL 下载配置文件，支持重试。
 """
 
+from __future__ import annotations
+
 import logging
 import urllib.request
 import urllib.error

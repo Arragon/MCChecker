@@ -3,6 +3,8 @@
 A web tool built with NiceGUI for parsing and inspecting XML/JSON config files.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import pathlib

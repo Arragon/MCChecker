@@ -1,5 +1,7 @@
 """主页渲染模块"""
 
+from __future__ import annotations
+
 import asyncio
 import time
 

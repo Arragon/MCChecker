@@ -1,5 +1,7 @@
 """更新设置页面"""
 
+from __future__ import annotations
+
 from nicegui import ui
 
 from app.core import storage, scheduler as sched

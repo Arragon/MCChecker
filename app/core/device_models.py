@@ -3,6 +3,8 @@
 用于为站点核心配置提供“机型维度”的隔离与切换。
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re

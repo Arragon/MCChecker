@@ -1,5 +1,7 @@
 """修改记录解析页"""
 
+from __future__ import annotations
+
 from fastapi import Request
 from nicegui import ui
 
