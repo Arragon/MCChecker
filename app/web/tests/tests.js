@@ -196,6 +196,72 @@
     anchor.remove();
   });
 
+  test("分段控件：未接入的分段真的不可点并说明原因", function () {
+    var clicked = [];
+    var seg = MC.segmented(
+      [{ value: "tree", label: "结构" }, { value: "history", label: "历史版本", disabled: true, title: MC.unwired.history }],
+      "tree",
+      function (v) { clicked.push(v); },
+      "文件视图"
+    );
+    var btns = seg.querySelectorAll("button");
+    eq(btns.length, 2);
+    ok(btns[1].disabled, "未接入分段必须真的 disabled");
+    eq(btns[1].getAttribute("aria-disabled"), "true");
+    ok((btns[1].getAttribute("title") || "").indexOf("M2-07") >= 0, "title 说明接入卡号");
+    btns[1].click();
+    btns[0].click();
+    eq(clicked, [], "禁用分段与重复点当前分段都不触发切换");
+  });
+
+  test("虚拟树：收藏未接入时星标渲染但禁用，键盘 S 给出原因", function () {
+    var idx = MC.doc.buildIndex({ nodes: MC.mockParse.parse('<R><a>1</a></R>', "s.xml").nodes });
+    var blocked = 0;
+    var tree = new MC.Tree(document.getElementById("host"), idx, { starReason: MC.unwired.favorites, onStarBlocked: function () { blocked++; } });
+    var star = tree.el.querySelector(".tr-star");
+    ok(star, "星标仍占位，行结构不因未接入而变");
+    ok(star.disabled, "未接入时星标禁用");
+    eq(star.getAttribute("title"), MC.unwired.favorites);
+    tree.select(1);
+    tree.el.dispatchEvent(new KeyboardEvent("keydown", { key: "S", bubbles: true }));
+    eq(blocked, 1, "按 S 给出未接入说明而不是静默失败");
+    tree.destroy();
+  });
+
+  test("显示属性开关：关闭后属性行不渲染，但 compact 数组未被裁剪", function () {
+    var idx = MC.doc.buildIndex({ nodes: MC.mockParse.parse(XML, "x.xml").nodes });
+    var tree = new MC.Tree(document.getElementById("host"), idx, { showAttrs: true });
+    function attrRows(t) {
+      return t.rows.filter(function (i) { return idx.t[i] === "attribute" && !idx.metaHidden[i]; }).length;
+    }
+    var n0 = idx.n;
+    ok(attrRows(tree) > 0, "默认显示属性行");
+    tree.setShowAttrs(false);
+    eq(attrRows(tree), 0, "关闭后不渲染属性行");
+    eq(idx.n, n0, "文档节点数量不变");
+    ok(idx.l.indexOf("@a") >= 0, "属性仍在服务端下发的文档里");
+    tree.destroy();
+  });
+
+  test("虚拟树：5 万节点全部展开时 DOM 行数不随总节点数增长", function () {
+    var parts = ["<R>"];
+    for (var g = 0; g < 250; g++) {
+      parts.push("<g" + g + ">");
+      for (var k = 0; k < 200; k++) parts.push("<v>" + (g * 1000 + k) + "</v>");
+      parts.push("</g" + g + ">");
+    }
+    parts.push("</R>");
+    var idx = MC.doc.buildIndex({ nodes: MC.mockParse.parse(parts.join(""), "big.xml").nodes });
+    ok(idx.n - 1 >= 50000, "样本至少 5 万节点，实际 " + (idx.n - 1));
+    var tree = new MC.Tree(document.getElementById("host"), idx, {});
+    ok(tree.rows.length < 1000, "默认只展开前两层，逻辑行数 " + tree.rows.length);
+    tree.expandAll();
+    ok(tree.rows.length > 50000, "全部展开后逻辑行数 " + tree.rows.length);
+    var domRows = tree.el.querySelectorAll(".tr").length;
+    ok(domRows > 0 && domRows <= 80, "可视区 DOM 行数与总节点数无关，实测 " + domRows);
+    tree.destroy();
+  });
+
   var out = document.getElementById("out");
   var failed = 0;
   results.forEach(function (r) {

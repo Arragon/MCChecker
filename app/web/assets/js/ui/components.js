@@ -353,8 +353,12 @@
             {
               type: "button",
               role: "tab",
+              disabled: !!it.disabled,
+              "aria-disabled": it.disabled ? "true" : null,
               "aria-selected": String(it.value === v),
+              title: it.title || null,
               onclick: function () {
+                if (it.disabled) return;
                 if (it.value !== v) onChange(it.value);
               },
             },

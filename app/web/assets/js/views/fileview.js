@@ -10,6 +10,7 @@
   var h = util.h;
   var icon = MC.icon;
   var api = MC.api;
+  var UNWIRED = MC.unwired;
 
   function sideToBody(fileName, v) {
     if (!v) return null;
@@ -80,6 +81,7 @@
     function applyRoute(r) {
       var q = r.query || {};
       var view = q.view || "tree";
+      if (view !== "tree" && !MC.caps[view]) view = "tree";
       var version = isTemp ? "temp" : q.version || "current";
       var needDoc = !S.doc || S.doc.file.version !== version;
       S.view = view;
@@ -140,6 +142,7 @@
     }
 
     function loadFavs() {
+      if (!MC.caps.favorites) { S.favs = []; return Promise.resolve(); }
       return api.get(app.p("/favorites")).then(function (res) {
         var g = res.groups.filter(function (x) { return x.file === S.name; })[0];
         S.favs = g ? g.items : [];
@@ -147,11 +150,12 @@
     }
 
     function loadRemarks() {
+      if (!MC.caps.remarks) { S.remarks = []; return Promise.resolve(); }
       return api.get(app.p("/remarks"), { file: S.name, status: "pending" }).then(function (res) { S.remarks = res.items; }, function () { S.remarks = []; });
     }
 
     function checkStale() {
-      if (isTemp || !S.doc || S.version !== "current") return;
+      if (isTemp || !MC.caps.history || !S.doc || S.version !== "current") return;
       var f = app.files.filter(function (x) { return x.name === S.name; })[0];
       api.get(app.p("/files/" + api.seg(S.name) + "/archives")).then(function (res) {
         if (res.current.sha256 !== S.doc.file.sha256 && !S.stale) {
@@ -187,13 +191,14 @@
         h("button.btn", { type: "button", onclick: function () { isTemp ? downloadTemp() : app.downloadFile(S.name, S.version); } }, icon("download"), S.version === "current" || isTemp ? "下载" : "下载此版本"),
         moreButton()
       );
+      var segOff = function (cap) { return { disabled: !MC.caps[cap], title: MC.caps[cap] ? null : UNWIRED[cap] }; };
       var views = isTemp
-        ? [{ value: "tree", label: "结构", icon: "list" }, { value: "compare", label: "对比", icon: "compare" }]
+        ? [{ value: "tree", label: "结构", icon: "list" }, Object.assign({ value: "compare", label: "对比", icon: "compare" }, segOff("compare"))]
         : [
             { value: "tree", label: "结构", icon: "list" },
-            { value: "history", label: "历史版本", icon: "history", count: f ? f.archive_count : null },
-            { value: "compare", label: "对比", icon: "compare" },
-            { value: "records", label: "修改记录", icon: "records", count: f ? f.record_count : null },
+            Object.assign({ value: "history", label: "历史版本", icon: "history", count: f ? f.archive_count : null }, segOff("history")),
+            Object.assign({ value: "compare", label: "对比", icon: "compare" }, segOff("compare")),
+            Object.assign({ value: "records", label: "修改记录", icon: "records", count: f ? f.record_count : null }, segOff("records")),
           ];
       var seg = MC.segmented(views, S.view, function (v) {
         var q = { view: v };
@@ -217,7 +222,7 @@
         if (isTemp) {
           items.push("sep", { label: "保存到服务器…", icon: "upload", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅部署者可保存", onClick: saveTempToServer });
         } else if (f) {
-          items.push("sep", { label: "删除文件…", icon: "trash", danger: true, disabled: !app.can("admin"), title: app.can("admin") ? null : "仅管理员可删除文件", onClick: function () { app.deleteFile(f); } });
+          items.push("sep", { label: "删除文件…", icon: "trash", danger: true, disabled: !app.can("admin") || !MC.caps.delete, title: !MC.caps.delete ? UNWIRED.delete : app.can("admin") ? null : "仅管理员可删除文件", onClick: function () { app.deleteFile(f); } });
         }
         MC.menu(b, items, { align: "end" });
       });
@@ -381,9 +386,11 @@
           S.selected = i;
           renderInspector();
         },
-        onStar: isTemp
+        onStar: isTemp || !MC.caps.favorites
           ? null
           : function (i) { toggleFav(i).then(function () { fs = favState(); S.tree.refresh(); renderInspector(); }); },
+        starReason: isTemp || MC.caps.favorites ? null : UNWIRED.favorites,
+        onStarBlocked: isTemp ? null : function () { MC.toast.info("收藏暂不可用", UNWIRED.favorites); },
       });
       S.refreshFavDecor = function () { fs = favState(); S.tree.refresh(); };
       paneHost.append(status);
@@ -395,7 +402,7 @@
           h("span", "显示 " + S.tree.rows.length + " 行"),
           S.loadMs !== undefined ? h("span", "加载 " + S.loadMs + " ms") : null,
           h("span.spacer"),
-          h("span", h("kbd", "↑"), h("kbd", "↓"), " 浏览 ", h("kbd", "←"), h("kbd", "→"), " 折叠/展开 ", isTemp ? null : [h("kbd", "S"), " 收藏 "], h("kbd", "Enter"), " 详情")
+          h("span", h("kbd", "↑"), h("kbd", "↓"), " 浏览 ", h("kbd", "←"), h("kbd", "→"), " 折叠/展开 ", isTemp ? null : [h("kbd", "S"), MC.caps.favorites ? " 收藏 " : " 收藏（未接入） "], h("kbd", "Enter"), " 详情")
         );
       }
       updateStatus();
@@ -529,12 +536,14 @@
 
       if (!isTemp) {
         var favBtn;
-        if (fs.direct[id]) favBtn = h("button.btn", { type: "button" }, h("span", { style: "color:var(--c-star)" }, icon("star", "is-filled")), "取消收藏");
+        if (!MC.caps.favorites) favBtn = h("button.btn", { type: "button", disabled: true, title: UNWIRED.favorites }, icon("star"), value === null ? "收藏此节点及子项" : "收藏到速览");
+        else if (fs.direct[id]) favBtn = h("button.btn", { type: "button" }, h("span", { style: "color:var(--c-star)" }, icon("star", "is-filled")), "取消收藏");
         else if (fs.covered[id]) favBtn = h("button.btn", { type: "button", disabled: true, title: "已被父级收藏「" + fs.covered[id].label + "」包含" }, icon("star"), "已被父级收藏包含");
         else favBtn = h("button.btn", { type: "button" }, icon("star"), value === null ? "收藏此节点及子项" : "收藏到速览");
-        favBtn.addEventListener("click", function () {
-          MC.withBusy(favBtn, function () { return toggleFav(i).then(function () { if (S.refreshFavDecor) S.refreshFavDecor(); renderInspector(); }); });
-        });
+        if (MC.caps.favorites)
+          favBtn.addEventListener("click", function () {
+            MC.withBusy(favBtn, function () { return toggleFav(i).then(function () { if (S.refreshFavDecor) S.refreshFavDecor(); renderInspector(); }); });
+          });
         var fav = fs.direct[id];
         parts.push(section("收藏", h("div.col", favBtn, fav && fav.note ? h("div.small.muted", "备注：" + fav.note) : null)));
         parts.push(renderSuggest(i));
@@ -580,12 +589,14 @@
       var form = null;
       if (S.version !== "current") {
         form = h("div.field-help", "只能对当前版本提交修改建议。");
+      } else if (!MC.caps.remarks) {
+        form = h("div.field-help", UNWIRED.remarks + "；接入后可在此对当前版本提交建议值。");
       } else if (value === null) {
         form = h("div.field-help", "该节点没有直接值，请选择具体的值节点。");
       } else {
         var input = h("input.input.input-mono", { type: "text", placeholder: "输入建议值", "aria-label": "建议值" });
         S.draftInput = input;
-        var fld = MC.field({ label: "提交修改建议", control: input, help: "提交人：" + app.identity.name + "。建议由管理员审阅，通过后生成新文件，不会直接覆盖原文件。" });
+        var fld = MC.field({ label: "提交修改建议", control: input, help: "提交人：" + util.identityName(app.identity) + "。建议由管理员审阅，通过后生成新文件，不会直接覆盖原文件。" });
         var submit = h("button.btn.btn-primary", { type: "button" }, icon("message"), "提交建议");
         input.addEventListener("input", function () { app.renderTabbar(); fld.setError(""); });
         input.addEventListener("keydown", function (e) { if (e.key === "Enter") submit.click(); });
