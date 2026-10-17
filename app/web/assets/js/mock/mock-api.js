@@ -677,8 +677,9 @@
   route("GET", "/p/{pid}/search", function (a, req, P) {
     var q = String(req.query.q || "").trim().toLowerCase();
     if (!q) return fail(400, "INVALID_INPUT", "请输入搜索关键词", { field: "q" });
-    var limit = Math.min(+req.query.limit || 200, 1000);
-    var offset = +req.query.offset || 0;
+    var limit = Math.max(1, Math.min(+req.query.limit || 200, 1000));
+    var offset = Math.max(0, +req.query.offset || 0);
+    if (req.query.file && !P.files[req.query.file]) return fail(404, "NOT_FOUND", "文件不存在");
     var notes = {};
     P.favorites.forEach(function (f) { if (f.note) notes[f.source_file + "|" + f.path] = f.note; });
     var hits = [];

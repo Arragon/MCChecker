@@ -97,9 +97,16 @@ def build_router(settings: Settings) -> Router:
     """组装路由表。
 
     M0-09 只有占位会话；M1 起按 §3.2 逐步挂上业务接口（当前：会话、文件列表、
-    compact 文档、原文下载、收藏、修订号）。
+    compact 文档、原文下载、收藏、修订号、搜索）。
     """
-    from . import api_documents, api_favorites, api_remarks, api_revision, api_session
+    from . import (
+        api_documents,
+        api_favorites,
+        api_remarks,
+        api_revision,
+        api_search,
+        api_session,
+    )
 
     router = Router()
     api_session.register(router, settings)
@@ -108,5 +115,6 @@ def build_router(settings: Settings) -> Router:
     router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)
     api_favorites.register(router)
     api_remarks.register(router)
+    api_search.register(router)
     router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
     return router

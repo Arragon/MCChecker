@@ -53,6 +53,7 @@
 - 使用 `ui.notify()` 显示操作反馈
 
 ## 7. Do Not Do
+- 不要在 pytest 之外直接跑临时脚本调用 `app.core.storage` / `app.services.*`：数据根重绑定只发生在 `tests/conftest.py` 的夹具里，`storage.DATA_DIR = tmp` 这类手工赋值改不到由它派生的其它常量，脚本会把样本和 `cache/doc_v2` 写进仓库真实的 `data/`。要么写成 pytest 用例（自动隔离），要么显式用 `run.py --data-dir $(mktemp -d)`。
 - 不要使用小众第三方库
 - 不要在日志中输出敏感信息
 - 不要修改用户上传的原始文件
