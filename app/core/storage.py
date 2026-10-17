@@ -163,6 +163,15 @@ def get_temporary_dir(token: Optional[str] = None) -> str:
     return path
 
 
+def get_recovery_root_dir() -> str:
+    """恢复区根目录 `data/recovery/`（§5.6）。
+
+    同样**运行期取 `DATA_DIR`**。恢复区不分机型——条目目录名里带 pid 与操作名，
+    只做移入、不做自动清理，也不参与机型布局与备份。
+    """
+    return os.path.join(DATA_DIR, "recovery")
+
+
 def validate_temp_token(token: Any) -> str:
     """token 只允许 `secrets.token_urlsafe` 的字符集，防止路径穿越。"""
     text = str(token or "")
@@ -224,6 +233,18 @@ def _profile_write(profile_id: Optional[str] = None) -> Iterator[None]:
     with write_gate.write():
         with profile_lock(pid):
             yield
+
+
+@contextmanager
+def profile_write(profile_id: Optional[str] = None) -> Iterator[None]:
+    """`_profile_write` 的公开入口。
+
+    service 层需要**跨多次存储调用保持同一把机型锁**时才用它（§5.6 的删除：先把原文
+    移进恢复区、再改四份 JSON，中间不能插入别的写）。单份读-改-写请继续用各 `save_*`，
+    它们自带锁。
+    """
+    with _profile_write(profile_id):
+        yield
 
 
 @contextmanager

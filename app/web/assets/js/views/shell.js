@@ -492,9 +492,10 @@
     }).then(function (ok) {
       if (!ok) return;
       api.del(self.p("/files/" + api.seg(f.name))).then(
-        function () {
-          MC.toast.success("已删除 " + f.name);
+        function (r) {
+          MC.toast.success("已删除 " + f.name, "原文与历史已移入恢复区 " + r.recovery + "，需部署者在服务器上手工恢复");
           self.closeTab("f:" + f.name);
+          self.syncRevision();
           self.refreshFiles();
         },
         function (err) { MC.toastError("删除失败", err); }
