@@ -119,7 +119,7 @@
           S.doc = res[0];
           if (isTemp) {
             S.name = S.doc.file.name;
-            inst.title = S.name + "（临时）";
+            inst.title = S.name + "（临时 · 仅自己可见）";
             app.setTabTitle(inst, inst.title);
           }
           S.idx = MC.doc.buildIndex(S.doc);

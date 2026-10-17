@@ -165,7 +165,7 @@
 
   /* 已经接入真实后端的接口。后端卡在自己的 PR 里实现接口，紧随的前端卡在这里加一项，
    * 视图代码本身不用改。必须始终是 CAP_KEYS 的子集（前端测试页有断言会红）。 */
-  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records"];
+  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp"];
 
   MC.capsFor = function (mock) {
     var caps = {};

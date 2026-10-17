@@ -122,34 +122,41 @@
       var exists = app.files.some(function (f) { return f.name === name; });
 
       MC.withBusy(submit, function () {
-        var p;
-        if (state.source === "local") {
-          p = state.persist
-            ? api.upload(app.p("/files/" + api.seg(name)), state.file, name, exists ? { overwrite: "1" } : {}).then(function (r) { return { persisted: true, name: name, archived: r.archived, unchanged: r.unchanged }; })
-            : api.upload(app.p("/temp"), state.file, name).then(function (r) { return { persisted: false, token: r.token, name: name }; });
-        } else {
-          p = api.post(app.p("/import-url"), { url: urlInput.value.trim(), name: name, persist: state.persist, overwrite: exists }).then(function (r) {
-            return { persisted: r.persisted, token: r.token, name: name, archived: r.archived };
-          });
-        }
-        return p.then(
-          function (r) {
-            close();
-            if (r.persisted) {
-              MC.toast.success(r.unchanged ? "内容与服务器版本一致" : "已保存 " + r.name, r.archived ? "旧版本已归档为 " + r.archived : r.unchanged ? "未产生新的历史版本" : null);
-              app.syncRevision();
-              app.refreshFiles().then(function () { app.openFile(r.name); });
-            } else {
-              MC.toast.info("已打开临时文件 " + r.name, "仅你可见，不影响服务器文件");
-              app.go({ kind: "t", arg: r.token });
-            }
-          },
-          function (err) {
-            if (err.code === "FILE_EXISTS") nameField.setError("已存在同名文件");
-            else if (err.detail && err.detail.field === "url") urlField.setError(MC.errorText(err));
-            else MC.toastError(err.code === "PARSE_FAILED" ? "无法解析该文件" : "导入失败", err);
+        // 同名覆盖前先确认（卡面要求）：确认框与临时文件「保存到服务器」同一套说法。
+        var ask = state.persist && exists
+          ? MC.confirm({ title: "覆盖 " + name, message: "服务器上已有同名文件。保存后当前版本会归档为历史版本；内容完全相同则不生成新的历史版本。", confirmText: "保存并归档" })
+          : Promise.resolve(true);
+        return ask.then(function (ok) {
+          if (!ok) return null;
+          var p;
+          if (state.source === "local") {
+            p = state.persist
+              ? api.upload(app.p("/files/" + api.seg(name)), state.file, name, exists ? { overwrite: "1" } : {}).then(function (r) { return { persisted: true, name: name, archived: r.archived, unchanged: r.unchanged }; })
+              : api.upload(app.p("/temp"), state.file, name).then(function (r) { return { persisted: false, token: r.token, name: name }; });
+          } else {
+            p = api.post(app.p("/import-url"), { url: urlInput.value.trim(), name: name, persist: state.persist, overwrite: exists }).then(function (r) {
+              return { persisted: r.persisted, token: r.token, name: name, archived: r.archived };
+            });
           }
-        );
+          return p.then(
+            function (r) {
+              close();
+              if (r.persisted) {
+                MC.toast.success(r.unchanged ? "内容与服务器版本一致" : "已保存 " + r.name, r.archived ? "旧版本已归档为 " + r.archived : r.unchanged ? "未产生新的历史版本" : null);
+                app.syncRevision();
+                app.refreshFiles().then(function () { app.openFile(r.name); });
+              } else {
+                MC.toast.info("已打开临时文件 " + r.name, "仅你可见，不影响服务器文件");
+                app.go({ kind: "t", arg: r.token });
+              }
+            },
+            function (err) {
+              if (err.code === "FILE_EXISTS") nameField.setError("已存在同名文件");
+              else if (err.detail && err.detail.field === "url") urlField.setError(MC.errorText(err));
+              else MC.toastError(err.code === "PARSE_FAILED" ? "无法解析该文件" : "导入失败", err);
+            }
+          );
+        });
       });
     }
     return m;
