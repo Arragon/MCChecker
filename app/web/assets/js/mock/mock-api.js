@@ -762,6 +762,16 @@
     return ok({ items: clone(items) });
   });
 
+  /* §6.7 第 4 步：JSON 节点按原类型校验建议值，XML 不做类型检查。与 services/review.py 保持一致。 */
+  function requiredType(fmt, t, proposed) {
+    if (fmt !== "json") return "";
+    if (t === "int") return /^-?\d+$/.test(proposed) ? "" : "整数";
+    if (t === "float") return proposed !== "" && isFinite(Number(proposed)) ? "" : "数字";
+    if (t === "bool") return proposed === "true" || proposed === "false" ? "" : "true 或 false";
+    if (t === "NoneType") return proposed === "null" ? "" : "null";
+    return "";
+  }
+
   route("POST", "/p/{pid}/remarks", function (a, req, P, id) {
     var b = req.body;
     var proposed = String(b.proposed_value || "").trim();
@@ -772,6 +782,8 @@
     var i = ix.byLoc[b.loc];
     if (i === undefined || ix.N.v[i] === null) return fail(400, "INVALID_INPUT", "只能对有值的节点提交建议");
     if (proposed === ix.N.v[i]) return fail(400, "INVALID_INPUT", "建议值与当前值相同", { field: "proposed_value" });
+    var need = requiredType(ix.format, ix.N.t[i], proposed);
+    if (need) return fail(400, "INVALID_INPUT", "该节点需要" + need + "类型的值", { field: "proposed_value" });
     var r = {
       id: util.uid("rm"),
       source_file: b.file,
@@ -797,7 +809,6 @@
     };
     P.remarks.push(r);
     bump(a.pid, "remarks");
-    bump(a.pid, "files");
     return ok({ item: r }, 201);
   });
 
