@@ -1104,7 +1104,7 @@ gh pr merge <n> --merge
 
 **后台实现代理**：仍在跑最终验证（全量测试 + 变异验证），完成后会写 `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-1-report.md` 并提交。该文件与 SDD 台账是 git-ignored，恢复会话时先读它们。
 
-**恢复后的前四步**：
+**恢复后的前四步**（评审 BASE 用快照自身的提交号 `6d1d87c`，不是 `830731b`；若恢复时 HEAD 已推进，以 `git log --oneline 6d1d87c..HEAD` 的实际范围为准）：
 1. `git log --oneline 830731b..HEAD` 看是否已提交；已提交则 `scripts/review-package docs/MCChecker_M3_M4_PLAN.md 830731b HEAD` 生成评审包，派独立评审（双判决：规格合规 + 代码质量）。
 2. **必须作为 Critical 提出的未闭合发现（R23）**：代理在 `DELIVERY_PLAN` 第 11 节写了「M3-01 已完成」，而当时未提交、未评审、未合并 —— 违反 H4/H5「未运行的检查不得报告为通过」，且该文档是后续 agent 的接力入口。要求改成「已实现待评审/待合并」，真合并后再由控制方写实。同节的**决策 20（D1 全文）口径正确，保留**。
 3. 评审通过后：`gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge` → `INH-1886` 置 Done + 证据注释（**顺带补发三次 `-32603` 失败的那条中期通报**：`LookupError`→`PARSE_FAILED` 的分支、`_INT_RE` 在 core/services 两处重复需守住、R22 归属）。
