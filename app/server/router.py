@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..config import Settings
+from ..services.context import RequestContext
 
 
 @dataclass
@@ -29,9 +30,11 @@ class Response:
     headers: Dict[str, str] = field(default_factory=dict)
 
 
-#: handler(params, query, body) -> Response；body 只对 BODY_METHODS 非 None。
-#: M1 起会按 §3.4 第 4 步扩展成 handler(ctx, params, query, body)。
-Handler = Callable[[Dict[str, str], Dict[str, List[str]], Optional[bytes]], Response]
+#: handler(ctx, params, query, body) -> Response（§3.4 第 4、6 步）。
+Handler = Callable[
+    [RequestContext, Dict[str, str], Dict[str, List[str]], Optional[bytes]],
+    Response,
+]
 
 _PARAM_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -75,11 +78,7 @@ def build_router(settings: Settings) -> Router:
     from . import api_documents, api_session
 
     router = Router()
-    router.add(
-        "GET",
-        "/api/v1/session",
-        lambda params, query, body: Response(payload=api_session.session_payload(settings)),
-    )
+    api_session.register(router, settings)
     router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)

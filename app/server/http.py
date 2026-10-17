@@ -22,6 +22,8 @@ from .. import __version__
 from ..config import Settings
 from ..core import device_models, fsutil, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, STORAGE_FAILURE, TOO_LARGE, AppError
+from ..services import auth
+from ..services.context import RequestContext
 from .router import Response, Router
 
 logger = logging.getLogger(__name__)
@@ -251,16 +253,20 @@ class MCRequestHandler(BaseHTTPRequestHandler):
             raise AppError(NOT_FOUND, "接口不存在")
         query_params = urllib.parse.parse_qs(query, keep_blank_values=True)
 
-        # §3.4 第 5、6 步：路径含 {pid} 时先校验机型存在（不回落 default），
-        # 再在 `use_profile(pid)` 上下文里调用 handler。
+        # §3.4 第 4、5、6 步：解析客户端 IP 与会话 cookie，组装 RequestContext；
+        # 路径含 {pid} 时先校验机型存在（不回落 default），再在
+        # `use_profile(pid)` 上下文里按该机型解析身份并调用 handler。
+        ip = auth.client_ip(self)
+        cid = auth.cookie_cid(self.headers.get("Cookie"))
         pid = params.get("pid") if params else None
         if pid is None:
-            self._send_response(handler(params, query_params, body))
+            self._send_response(handler(RequestContext(ip=ip, cid=cid), params, query_params, body))
             return
         if not device_models.exists(pid):
             raise AppError(NOT_FOUND, "机型不存在")
+        ctx = RequestContext(ip=ip, cid=cid, profile_id=pid, actor=auth.resolve_actor(ip, pid))
         with storage.use_profile(pid):
-            self._send_response(handler(params, query_params, body))
+            self._send_response(handler(ctx, params, query_params, body))
 
     # ===================== 请求体 =====================
 

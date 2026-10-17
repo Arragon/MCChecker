@@ -11,22 +11,29 @@ import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from ..services import documents
+from ..services.context import RequestContext
 from .router import Response
 
 
-def list_files(params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]) -> Response:
+def list_files(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
     # GET /api/v1/p/{pid}/files
     return Response(payload={"items": documents.list_files(params["pid"])})
 
 
-def get_document(params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]) -> Response:
+def get_document(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
     # GET /api/v1/p/{pid}/files/{name}/document?version=
     version = _param(query, "version", "current")
     payload, etag = documents.document_bytes(params["pid"], params["name"], version)
     return Response(body=payload, headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
-def get_raw(params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]) -> Response:
+def get_raw(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
     # GET /api/v1/p/{pid}/files/{name}/raw?version=
     version = _param(query, "version", "current")
     raw = documents.load_raw(params["pid"], params["name"], version)
