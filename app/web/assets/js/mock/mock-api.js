@@ -287,17 +287,19 @@
     })(fav.children);
     return out;
   }
+  /* §7.7：实时值按旧 ID 匹配，同名兄弟共享旧 ID 时取先序**最后一个**
+   * （与 v1 favorites_live 的“后写覆盖”一致）。 */
   function resolveLive(ix, item) {
     var ids = ix.byId[item.path];
     var live = clone(item);
     live.missing = !ids;
     live.saved_value = item.value;
-    if (ids) live.value = ix.N.v[ids[0]];
+    if (ids) live.value = ix.N.v[ids[ids.length - 1]];
     (function walk(list) {
       (list || []).forEach(function (c) {
         var cid = ix.byId[c.path];
         c.missing = !cid;
-        if (cid) c.value = ix.N.v[cid[0]];
+        if (cid) c.value = ix.N.v[cid[cid.length - 1]];
         walk(c.children);
       });
     })(live.children);
@@ -725,7 +727,7 @@
     if (dup) return ok({ item: dup });
     var parent = P.favorites.filter(function (f) { return f.source_file === req.body.file && coveredPaths(f)[req.body.id]; })[0];
     if (parent) return fail(409, "FAVORITE_COVERED", "该节点已被父级收藏「" + parent.label + "」包含", { parent: parent.path });
-    var i = ids[0];
+    var i = ids[ids.length - 1];
     var N = ix.N;
     var children = N.v[i] === null ? snapshotChildren(N, i) : [];
     if (N.v[i] === null && !children.length) return fail(400, "INVALID_INPUT", "该节点下没有可收藏的变量");

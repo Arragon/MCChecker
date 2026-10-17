@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0 全部 9 卡完成**；**M1 全部 7 卡完成**；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **349 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (21)**。下一个待做卡：**M2-01 / INH-1874 收藏 API 与实时值**（同时落地 `services/revision.py` 与 `GET /p/{pid}/revision`，见第 8 节决策 14）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 1/12**（M2-01 收藏 API 与修订号）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **376 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (21)**。下一个待做卡：**M2-02 / INH-1875 速览页与结构树收藏**（把 `MC.caps.favorites` 与 `MC.caps.revision` 翻 true 并核对 UC-08～UC-12）。
 
 ---
 
@@ -151,12 +151,12 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（0/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（1/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
-| **M2-01** | INH-1874 | Todo | **收藏 API 与实时值 ← 下一张**（含 `services/revision.py` + `GET /p/{pid}/revision`） |
-| M2-02 | INH-1875 | In Progress | 速览页与结构树收藏 |
+| M2-01 | INH-1874 | Done | 收藏 API 与实时值（含 `services/revision.py` + `GET /revision`） |
+| **M2-02** | INH-1875 | In Progress | **速览页与结构树收藏 ← 下一张** |
 | M2-03 | INH-1876 | Todo | 修改建议提交与定位符 |
 | M2-04 | INH-1877 | In Progress | 详情面板提交修改建议 |
 | M2-05 | INH-1878 | Todo | 全局搜索 API 与命中计数 |
@@ -224,6 +224,7 @@ PR: <url> · 提交 `<sha>`
 | #18 | M1-04 | `services/authz.py` 权限矩阵、HTTP 层 `X-Requested-With` 硬条件、`tests/authz_fixtures.py` 四角色夹具 |
 | #19 | M1-05 | 生产外壳切真实后端：`MC.caps`/`MC.unwired` 能力开关、未接入入口 `disabled`+原因、速览降级状态块、顶栏不再显示未登记 IP |
 | #20 | M1-06 | 文件工作区接真实后端：`MC.segmented` 支持 item 级 `disabled`/`title`、`MC.Tree` 新增 `starReason`/`onStarBlocked`、`fileview.js` 按 caps 跳过 `/favorites`·`/remarks`·`/archives` 并禁用未接入分段与建议表单 |
+| #21 | M2-01 | `services/favorites.py`（§7.7 四端点，实时值按旧 ID 取先序最后一个）+ `services/revision.py` 与 `GET /revision`（§7.3）+ `router.query_param`/`json_body` 收口；mock 的 `resolveLive` 同步改为取最后一个 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -247,6 +248,8 @@ PR: <url> · 提交 `<sha>`
 12. **测试隔离**：`tests/conftest.py` 的 autouse 夹具把数据根重定向到 tmp；新增模块若在 import 期派生 data 路径，需同步加入夹具的「前缀替换」逻辑。
 13. **未做的housekeeping**：Linear 卡之间尚未补齐 `blockedBy` 关系（当前以本文件第 6 节的顺序为准）；`.nicegui/` 的 5 个已跟踪文件按 §15 T-30 留到 M4-07。
 14. **`MC.caps` 能力开关（M1-05 起，前端逐卡必须遵守）**：`app/web/assets/js/core/api.js` 里的 `MC.caps` 是「哪些后端接口已接入」的唯一事实源，由 `MC.config.mock` 推导（模板全开、生产默认全关），`MC.unwired` 存每项能力的接入去向文案。未接入的入口一律 `disabled` + `title`，并且**不发请求**（不要靠后端假接口消除 404）。每张前端卡在自己的 PR 里把对应键翻 true：M2-02 `favorites`+`revision`、M2-04 `remarks`、M2-06 `search`、M2-09 `history`/`compare`/`records`、M2-11 `import`/`temp`、M3 各卡 `review`/`dl`/`settings`/`tools`。新增能力键时 `CAP_KEYS` 与 `MC.unwired` 必须同步（前端测试页有断言会红）。M4-08 全绿后该机制连同条件分支一起删除。
+15. **同名兄弟的实时值取「先序最后一个」**：`favorite["path"]` 是旧节点 ID，同名兄弟共享它，因此实时值必须按 §7.7 取先序**最后一个**（与 v1 `favorites_live._build_id_index` 的后写覆盖结果一致）。`mock-api.js` 的 `resolveLive` 原先取第一个，已在 M2-01 按决策 4 与后端一起改正，并留了断言测试（`test_live_value_uses_last_sibling_in_preorder`）。今后这类双轨语义调整，都要 mock + 后端 + SPEC 同 PR 改。
+16. **修订号提前到 M2-01 落地**：`services/revision.py` + `GET /api/v1/p/{pid}/revision` 已在 M2-01 建好（原表排在 M3-17），因为 §7.1 要求「所有写接口在成功后递增对应修订计数」——没有计数器，每张写卡都无法满足该条。规则：只在 service 写成功后 `revision.bump(pid, part)`，handler 不碰计数；读接口、失败写（400/403/404/409）与「删了 0 条」都不递增（有守卫测试）。M3-17 只剩多用户横幅 UX 与 `settings`/`tasks` 计数的接入。
 
 ---
 
@@ -286,4 +289,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-01（`INH-1874`）——`services/favorites.py` + `server/api_favorites.py` 实现 §7.7 四个端点（实时值按旧 `id` 匹配、同 id 取先序最后一个、无值节点存子树快照、被父级覆盖 → 409 `FAVORITE_COVERED`），并落地 `services/revision.py` + `GET /p/{pid}/revision`（每机型内存 5 计数、不读盘、P99 < 5 ms，见决策 14）。M1 收尾时实测到的两处残留已在 M1-06 处理完毕（`/favorites`·`/remarks` 已按 caps 跳过、提交人改用 `MC.util.identityName`）。M2-02 起把 `MC.caps.favorites` 与 `MC.caps.revision` 翻 true。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试。
+**下一步**：M2-02（`INH-1875`）——速览页与结构树收藏接上 M2-01 的真实接口：把 `MC.caps.favorites` 与 `MC.caps.revision` 翻 true（其余 caps 保持 false），逐条核对 UC-08～UC-12（叶子/父级覆盖/速览备注/源文件消失回到原组/取消收藏可撤销），并确认 `template.html` 无回归。随后 M2-03（`INH-1876` 修改建议提交与定位符，§6.7）。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
