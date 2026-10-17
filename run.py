@@ -1,95 +1,104 @@
-"""MCChecker - Configuration File Parser & Checker
+"""MCChecker 启动入口（规范 §3.2、§14.2；T-04、C25、F28）。
 
-A web tool built with NiceGUI for parsing and inspecting XML/JSON config files.
+`main.py` 仍是 `from run import main; main()`，保持旧命令行兼容。
+
+本模块只做：解析配置 → 初始化（数据根、日志、布局、单实例锁）→ 启动 HTTP →
+有序停止。业务接口挂在 `app/server/router.py`（M1 起逐步补齐）。
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import pathlib
-import secrets
+import signal
+import sys
+import threading
+from typing import List, Optional
 
-from nicegui import app as nice_app, ui
+from app import __version__
+from app.config import SettingsError, load_settings
+from app.core import storage
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("mcchecker")
 
-from app.core import storage, scheduler as sched
-from app.utils.auth import is_deployer, get_client_ip
-from app.pages.home import render_home_page
-from app.pages.file_downloads import register_download_routes
-import app.pages.record_view
-
-nice_app.add_static_files(
-    "/static",
-    str(pathlib.Path(__file__).parent / "app" / "static"),
-)
-register_download_routes()
-
-storage.ensure_profile_layout(migrate_legacy=True)
-storage._ensure_dirs()
-
-try:
-    sched.setup_scheduled_update()
-    sched.setup_cache_cleanup()
-except Exception as e:
-    logger.warning("Failed to initialize scheduler: %s", e)
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
-@ui.page("/")
-def index():
-    render_home_page()
+def configure_logging(level: str) -> None:
+    logging.basicConfig(level=getattr(logging, level, logging.INFO), format=LOG_FORMAT)
 
 
-def _get_storage_secret() -> str:
-    env_secret = os.getenv("NICEGUI_STORAGE_SECRET")
-    if env_secret:
-        return env_secret
+def _count_profiles() -> int:
+    from app.core import device_models
 
-    secret_file = os.path.join(storage.DATA_DIR, "nicegui_storage_secret.txt")
     try:
-        if os.path.exists(secret_file):
-            with open(secret_file, "r", encoding="utf-8") as f:
-                s = f.read().strip()
-            if s:
-                return s
-    except OSError:
-        pass
+        return len(device_models.load_models())
+    except Exception as exc:  # 注册表损坏时不阻断启动，日志里说明（§5.4）
+        logger.warning("读取机型注册表失败：%s", exc)
+        return 0
 
-    s = secrets.token_urlsafe(32)
+
+def main(argv: Optional[List[str]] = None) -> int:
     try:
-        os.makedirs(os.path.dirname(secret_file), exist_ok=True)
-        with open(secret_file, "w", encoding="utf-8") as f:
-            f.write(s)
-    except OSError:
-        pass
-    return s
+        settings = load_settings(argv)
+    except SettingsError as exc:
+        print("启动失败：%s" % exc, file=sys.stderr)
+        return 2
 
+    # 数据根必须在导入「导入期派生路径」的模块之前切换（例如 dltool.DLTOOL_FILE），
+    # 因此 HTTP 层在下面按需导入。
+    storage.configure_data_dir(settings.data_dir)
+    configure_logging(settings.log_level)
+    storage.ensure_profile_layout(migrate_legacy=False)
 
-def _get_port() -> int:
-    raw = os.getenv("MCHECKER_PORT")
-    if not raw:
-        return 50001
+    from app.server.http import MCServer, SingleInstanceLock
+    from app.server.router import build_router
+
+    lock = SingleInstanceLock(settings.data_dir, settings.port)
     try:
-        port = int(str(raw).strip())
-    except ValueError:
-        return 50001
-    if port < 1 or port > 65535:
-        return 50001
-    return port
+        lock.acquire()
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        print("启动失败：%s" % exc, file=sys.stderr)
+        return 3
+
+    try:
+        server = MCServer(settings, build_router(settings))
+    except OSError as exc:
+        lock.release()
+        logger.error("无法监听 %s:%d：%s", settings.host, settings.port, exc)
+        print("启动失败：无法监听 %s:%d（%s）" % (settings.host, settings.port, exc), file=sys.stderr)
+        return 4
+
+    def _handle_signal(signum, _frame):
+        logger.info("收到信号 %s，正在停止…", signum)
+        # serve_forever 跑在主线程，shutdown() 必须从别的线程调用。
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handle_signal)
+        except (ValueError, OSError):  # 非主线程或不支持的平台
+            pass
+
+    logger.info("启动环境：Python %s", sys.version.split()[0])
+    logger.info(
+        "MCChecker %s listening on http://%s:%d (data=%s, profiles=%d, scheduler=%s)",
+        __version__,
+        settings.host,
+        settings.port,
+        settings.data_dir,
+        _count_profiles(),
+        "off",
+    )
+
+    try:
+        server.serve_forever(poll_interval=0.2)
+    finally:
+        server.server_close()
+        lock.release()
+        logger.info("已停止，锁文件已删除")
+    return 0
 
 
-ui.run(
-    title="MCChecker",
-    favicon=pathlib.Path(__file__).parent / "app" / "static" / "favicon.ico",
-    host="0.0.0.0",
-    # port=_get_port(),
-    port=50002,
-    reload=False,
-    show=False,
-    storage_secret=_get_storage_secret(),
-)
+if __name__ == "__main__":
+    raise SystemExit(main())

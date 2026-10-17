@@ -92,6 +92,33 @@ def use_profile(profile_id: Optional[str]):
         _profile_var.reset(token)
 
 
+def configure_data_dir(data_dir: str) -> str:
+    """把数据根切到 `data_dir`（§3.6 的 `--data-dir` / `MCHECKER_DATA_DIR`）。
+
+    必须在导入 `dltool`、`device_models` 等「按数据根派生路径」的模块**之前**
+    调用（`run.py` 的初始化顺序保证了这一点），否则它们已固化的常量不会跟着走。
+
+    实现与 `tests/conftest.py` 的隔离夹具一致：整体改写所有以旧数据根开头的
+    模块级路径常量，今后新增 `XXX_FILE` 无需回来维护清单。返回新的数据根。
+    """
+    global DATA_DIR
+
+    new_root = os.path.abspath(os.path.expanduser(data_dir))
+    old_root = DATA_DIR
+    if new_root == old_root:
+        return DATA_DIR
+
+    for name, value in list(globals().items()):
+        if not isinstance(value, str):
+            continue
+        if value == old_root:
+            globals()[name] = new_root
+        elif value.startswith(old_root + os.sep):
+            globals()[name] = new_root + value[len(old_root):]
+    DATA_DIR = new_root
+    return DATA_DIR
+
+
 def _profile_base_dir(profile_id: Optional[str] = None) -> str:
     pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
     return os.path.join(PROFILES_DIR, pid)
