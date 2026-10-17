@@ -22,6 +22,9 @@
 
   var POLL_MS = 10000;
 
+  /** MC.caps 为 false 时对外展示的接入去向，与 CAP_KEYS 一一对应（见 core/api.js）。 */
+  var UNWIRED = MC.unwired;
+
   function App(root) {
     this.root = root;
     this.session = null;
@@ -92,6 +95,12 @@
     return true;
   };
 
+  /** 速览与文件工作区（结构分段）已接入真实后端；其余页面由 MC.caps 决定可用性。 */
+  App.prototype.capOfKind = function (kind) {
+    if (kind === "overview" || kind === "f") return true;
+    return !!MC.caps[kind === "t" ? "temp" : kind];
+  };
+
   App.prototype.p = function (rest) {
     return api.p(this.pid, rest);
   };
@@ -127,6 +136,7 @@
   App.prototype.renderHeader = function () {
     var self = this;
     var id = this.identity;
+    var shownName = util.identityName(id);
     var profileName = this.session.profile.name;
 
     var profileBtn = h(
@@ -159,9 +169,9 @@
     this.taskSlot = h("div.row");
     var idBtn = h(
       "button.identity-chip",
-      { type: "button", "aria-haspopup": "dialog", "aria-label": "当前身份：" + id.name + "，" + id.role_label },
-      h("span.avatar" + (id.is_admin || id.is_deployer ? ".is-admin" : ""), util.initials(id.name)),
-      h("span.identity-name", id.name),
+      { type: "button", "aria-haspopup": "dialog", "aria-label": "当前身份：" + shownName + "，" + id.role_label },
+      h("span.avatar" + (id.is_admin || id.is_deployer ? ".is-admin" : ""), util.initials(shownName)),
+      h("span.identity-name", shownName),
       h("span.badge" + (id.is_admin || id.is_deployer ? ".badge-primary" : ""), id.role_label)
     );
     idBtn.addEventListener("click", function () { self.openIdentity(idBtn); });
@@ -188,13 +198,14 @@
 
   App.prototype.openIdentity = function (anchor) {
     var id = this.identity;
+    var shown = util.identityName(id);
     function cap(ok, text) {
       return h("li.row", { style: "gap:8px;padding:3px 0" }, h("span", { style: { color: ok ? "var(--c-success)" : "var(--c-text-disabled)" } }, icon(ok ? "check" : "x")), h("span" + (ok ? "" : ".muted"), text));
     }
     var body = h(
       "div",
       { style: "padding:10px 10px 6px;width:300px" },
-      h("div.row", h("span.avatar.is-admin", util.initials(id.name)), h("div.col", { style: "gap:0" }, h("strong", id.name), h("span.xsmall.muted", id.role_label + (id.registered === false ? " · 未登记姓名" : "")))),
+      h("div.row", h("span.avatar.is-admin", util.initials(shown)), h("div.col", { style: "gap:0" }, h("strong", shown), h("span.xsmall.muted", id.role_label + (id.registered === false ? " · 未登记姓名" : "")))),
       h("div.divider"),
       h(
         "ul",
@@ -274,7 +285,17 @@
       self.fileFilter = filter.value;
       self.renderFileList();
     });
-    var importBtn = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "导入配置文件", "data-tip": "导入配置文件" }, icon("plus"));
+    var importBtn = h(
+      "button.btn.btn-ghost.btn-icon.btn-sm",
+      {
+        type: "button",
+        "aria-label": "导入配置文件",
+        "data-tip": MC.caps.import ? "导入配置文件" : null,
+        disabled: !MC.caps.import,
+        title: MC.caps.import ? null : UNWIRED.import,
+      },
+      icon("plus")
+    );
     importBtn.addEventListener("click", function () { MC.openImport(self); });
 
     util.replace(
@@ -308,12 +329,19 @@
         var pending = self.files.reduce(function (s, f) { return s + (f.pending_remarks || 0); }, 0);
         if (pending) meta = h("span.badge-count.nav-meta", { "aria-label": pending + " 条待审" }, String(pending));
       }
+      var unwired = n.kind !== "overview" && !MC.caps[n.kind];
+      var title = unwired
+        ? UNWIRED[n.kind]
+        : n.kind === "settings" && !self.can("deployer")
+        ? "可以查看。只有部署者（在服务器本机访问）可以修改这些设置"
+        : null;
       var btn = h(
         "button.nav-item",
         {
           type: "button",
+          disabled: unwired,
           "aria-current": active && active.kind === n.kind ? "page" : null,
-          title: n.kind === "settings" && !self.can("deployer") ? "可以查看。只有部署者（在服务器本机访问）可以修改这些设置" : null,
+          title: title,
         },
         icon(n.icon),
         h("span", n.label),
@@ -342,6 +370,11 @@
 
   App.prototype.refreshTools = function () {
     var self = this;
+    if (!MC.caps.tools) {
+      this.tools = [];
+      this.renderTools();
+      return Promise.resolve();
+    }
     return api.get(this.p("/tools")).then(function (res) {
       self.tools = res.items;
       self.renderTools();
@@ -357,7 +390,7 @@
     util.clear(this.fileListEl);
     if (!this.files.length) {
       this.fileListEl.appendChild(
-        h("li", MC.stateBlock({ kind: "empty", icon: "file", title: "暂无配置文件", desc: "点击上方 + 导入本地文件或链接", }))
+        h("li", MC.stateBlock({ kind: "empty", icon: "file", title: "暂无配置文件", desc: MC.caps.import ? "点击上方 + 导入本地文件或链接" : "暂无配置文件；" + UNWIRED.import }))
       );
       return;
     }
@@ -389,8 +422,8 @@
             label: "删除文件…",
             icon: "trash",
             danger: true,
-            disabled: !self.can("admin"),
-            title: self.can("admin") ? null : "仅管理员可删除文件",
+            disabled: !self.can("admin") || !MC.caps.delete,
+            title: !MC.caps.delete ? UNWIRED.delete : self.can("admin") ? null : "仅管理员可删除文件",
             onClick: function () { self.deleteFile(f); },
           },
         ], { align: "end" });
@@ -413,7 +446,14 @@
     util.clear(this.toolListEl);
     var self = this;
     if (!this.tools.length) {
-      this.toolListEl.appendChild(h("div.xsmall.muted", { style: "padding:4px 8px" }, "暂无外部工具", self.can("deployer") ? h("span", "，可在「设置 › 工具菜单」添加") : null));
+      this.toolListEl.appendChild(
+        h(
+          "div.xsmall.muted",
+          { style: "padding:4px 8px" },
+          MC.caps.tools ? "暂无外部工具" : UNWIRED.tools,
+          MC.caps.tools && self.can("deployer") ? h("span", "，可在「设置 › 工具菜单」添加") : null
+        )
+      );
       return;
     }
     this.tools.forEach(function (t) {
@@ -541,6 +581,7 @@
       Object.keys(this.instances).forEach(function (k) { self.destroyInstance(k); });
       return this.loadSession(r.pid).then(function () { self.onRoute(r); });
     }
+    if (!this.capOfKind(r.kind)) return this.showUnwired(r);
     var key = keyOf(r);
     var tab = this.tabs.filter(function (t) { return t.key === key; })[0];
     var routeData = { kind: r.kind, arg: r.arg, query: r.query };
@@ -551,6 +592,29 @@
     } else tab.route = routeData;
     util.storageSet("mc.active." + this.pid, global.location.hash);
     this.activate(key, r);
+  };
+
+  /**
+   * 尚未接入真实后端的页面（来自粘贴的分享链接或浏览器前进后退）：
+   * 说明什么时候接入，且不建立标签——避免把占位页当成真实页面持久化。
+   */
+  App.prototype.showUnwired = function (r) {
+    var self = this;
+    Object.keys(this.instances).forEach(function (k) {
+      self.instances[k].el.classList.add("hidden");
+    });
+    var placeholder = this.viewHost.querySelector(":scope > .state");
+    if (placeholder) placeholder.remove();
+    this.viewHost.appendChild(
+      MC.stateBlock({
+        kind: "locked",
+        title: defaultTitle({ route: r }) + " 尚未接入",
+        desc: UNWIRED[r.kind === "t" ? "temp" : r.kind] || "该页面还没有接入真实后端。",
+        actions: [h("button.btn.btn-primary", { type: "button", onclick: function () { self.go({ kind: "overview" }); } }, "返回速览")],
+      })
+    );
+    this.activeKey = null;
+    this.renderTabbar();
   };
 
   App.prototype.enforceLimit = function (activeKey) {
@@ -718,7 +782,7 @@
   App.prototype.startPolling = function () {
     var self = this;
     function tick() {
-      if (document.hidden) return;
+      if (!MC.caps.revision || document.hidden) return;
       api.get(self.p("/revision")).then(function (r) {
         if (self.rev) {
           ["files", "favorites", "remarks", "settings"].forEach(function (part) {
@@ -819,7 +883,7 @@
       var q = input.value.trim();
       var ql = q.toLowerCase();
       items = [];
-      if (q) items.push({ icon: "search", title: "在全部文件中搜索 “" + q + "”", sub: "匹配变量名、值与收藏备注", run: function () { self.go({ kind: "search", query: { q: q } }); } });
+      if (q && MC.caps.search) items.push({ icon: "search", title: "在全部文件中搜索 “" + q + "”", sub: "匹配变量名、值与收藏备注", run: function () { self.go({ kind: "search", query: { q: q } }); } });
       self.files
         .filter(function (f) { return !ql || f.name.toLowerCase().indexOf(ql) >= 0; })
         .slice(0, 8)
@@ -828,6 +892,7 @@
         });
       NAV.forEach(function (n) {
         if (n.admin && !self.can("admin")) return;
+        if (n.kind !== "overview" && !MC.caps[n.kind]) return;
         if (ql && n.label.toLowerCase().indexOf(ql) < 0) return;
         items.push({ icon: n.icon, title: n.label, sub: "前往", run: function () { self.go({ kind: n.kind }); } });
       });

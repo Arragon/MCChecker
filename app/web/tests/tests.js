@@ -158,6 +158,44 @@
     ok(!window.__xss);
   });
 
+  test("身份：未登记时顶栏显示「未登记」而不是识别地址（§4.3 / C18）", function () {
+    eq(MC.util.identityName({ registered: false, name: "127.0.0.1" }), "未登记");
+    eq(MC.util.identityName({ registered: true, name: "张三" }), "张三");
+    eq(MC.util.identityName(null), "");
+    ok(MC.util.initials(MC.util.identityName({ registered: false, name: "10.0.0.9" })) !== "10", "头像首字不取自 IP");
+  });
+
+  test("能力开关：模板全开、生产全关，且每项能力都有点名卡号的接入说明", function () {
+    var on = MC.capsFor(true);
+    var off = MC.capsFor(false);
+    var keys = Object.keys(on).sort();
+    ok(keys.length >= 10, "键集非空");
+    ok(keys.every(function (k) { return on[k] === true; }), "模板模式下全部可用");
+    ok(keys.every(function (k) { return off[k] === false; }), "生产模式下默认全部未接入");
+    eq(Object.keys(MC.unwired).sort(), keys, "每项能力都要有未接入说明");
+    ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
+  });
+
+  test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
+    var capOfKind = MC.App.prototype.capOfKind;
+    MC.caps = MC.capsFor(false);
+    ok(capOfKind("overview") && capOfKind("f"), "速览与文件已接入真实后端");
+    ok(!capOfKind("settings") && !capOfKind("search") && !capOfKind("t"), "未接入的 kind 不可用");
+    MC.caps = MC.capsFor(true);
+    ok(capOfKind("settings") && capOfKind("t"), "接入后可用");
+  });
+
+  test("组件：MC.menu 的未接入项真的 disabled 并带原因", function () {
+    var anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    var pop = MC.menu(anchor, [{ label: "删除文件…", disabled: true, title: MC.unwired.delete }]);
+    var item = pop.el.querySelector(".menu-item");
+    ok(item.disabled, "未接入项必须真的 disabled");
+    ok((item.getAttribute("title") || "").indexOf("M2-12") >= 0, "title 说明接入卡号");
+    MC.closePopover();
+    anchor.remove();
+  });
+
   var out = document.getElementById("out");
   var failed = 0;
   results.forEach(function (r) {

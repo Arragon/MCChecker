@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0 全部 9 卡完成**；**M1 完成 5/7**（M1-01/02/03/04 + 历史 Done 的 M1-07）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **349 passed**（Python 3.9.11）。下一个待做卡：**M1-05 / M1-06（生产外壳接入会话与文件列表、结构树与详情面板——前端已就绪，需切真实后端）**。
+**M0 全部 9 卡完成**；**M1 完成 6/7**（M1-01/02/03/04/05 + 历史 Done 的 M1-07）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **349 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (17)**。下一个待做卡：**M1-06 结构树、详情面板与文件下载**（生产外壳已切真实后端，剩文件工作区的分段禁用与星标/建议的未接入说明）。
 
 ---
 
@@ -139,7 +139,7 @@ PR: <url> · 提交 `<sha>`
 | M0-08 | INH-1865 | Done | Settings：端口、数据目录与启动配置 |
 | M0-09 | INH-1866 | Done | HTTP 骨架、静态资源与单实例锁 |
 
-### M1 读取链路：解析、文档、身份与浏览（4/7 Done）
+### M1 读取链路：解析、文档、身份与浏览（6/7 Done）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -147,8 +147,8 @@ PR: <url> · 提交 `<sha>`
 | M1-02 | INH-1868 | Done | 文档服务：文件列表、原文与缓存 |
 | M1-03 | INH-1869 | Done | 身份解析、会话 cookie 与角色展示 |
 | M1-04 | INH-1870 | Done | 服务端权限入口与四角色测试夹具 |
-| M1-05 | INH-1871 | In Progress | 生产外壳接入会话与文件列表（前端已做） |
-| M1-06 | INH-1872 | In Progress | 结构树、详情面板与文件下载（前端已做） |
+| M1-05 | INH-1871 | Done | 生产外壳接入会话与文件列表 |
+| **M1-06** | INH-1872 | In Progress | 结构树、详情面板与文件下载 ← 下一张 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
 ### M2 写入链路：收藏、搜索、对比、导入与删除（0/12）
@@ -222,6 +222,7 @@ PR: <url> · 提交 `<sha>`
 | #16 | M1-03 | `services/auth.py`、`services/context.py`、完整 `/session`、HTTP 层 ctx 接线 |
 | #17 | 批次 1 | `docs/MCChecker_DELIVERY_PLAN.md` 执行手册 + `architecture.md` 指针 |
 | #18 | M1-04 | `services/authz.py` 权限矩阵、HTTP 层 `X-Requested-With` 硬条件、`tests/authz_fixtures.py` 四角色夹具 |
+| #19 | M1-05 | 生产外壳切真实后端：`MC.caps`/`MC.unwired` 能力开关、未接入入口 `disabled`+原因、速览降级状态块、顶栏不再显示未登记 IP |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -244,6 +245,7 @@ PR: <url> · 提交 `<sha>`
 11. **`linear` MCP 返回值/连接都不稳**：`save_issue`/`save_comment` 常需重试；创建 PR 用 `gh` 更可靠。
 12. **测试隔离**：`tests/conftest.py` 的 autouse 夹具把数据根重定向到 tmp；新增模块若在 import 期派生 data 路径，需同步加入夹具的「前缀替换」逻辑。
 13. **未做的housekeeping**：Linear 卡之间尚未补齐 `blockedBy` 关系（当前以本文件第 6 节的顺序为准）；`.nicegui/` 的 5 个已跟踪文件按 §15 T-30 留到 M4-07。
+14. **`MC.caps` 能力开关（M1-05 起，前端逐卡必须遵守）**：`app/web/assets/js/core/api.js` 里的 `MC.caps` 是「哪些后端接口已接入」的唯一事实源，由 `MC.config.mock` 推导（模板全开、生产默认全关），`MC.unwired` 存每项能力的接入去向文案。未接入的入口一律 `disabled` + `title`，并且**不发请求**（不要靠后端假接口消除 404）。每张前端卡在自己的 PR 里把对应键翻 true：M2-02 `favorites`+`revision`、M2-04 `remarks`、M2-06 `search`、M2-09 `history`/`compare`/`records`、M2-11 `import`/`temp`、M3 各卡 `review`/`dl`/`settings`/`tools`。新增能力键时 `CAP_KEYS` 与 `MC.unwired` 必须同步（前端测试页有断言会红）。M4-08 全绿后该机制连同条件分支一起删除。
 
 ---
 
@@ -283,4 +285,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M1-05/M1-06——把生产入口（`app/web/index.html` + `views/*.js`）从 mock 切到真实后端（会话、文件列表、结构树、详情面板、下载），逐条核对 §16.2 的 UC-01～UC-06；随后进入 M2（收藏/搜索/对比/导入/删除），此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试。
+**下一步**：M1-06——文件工作区接真实后端（结构树、详情面板、下载），逐条核对 §16.2 的 UC-02～UC-07。M1-05 留下的两处待办：① `views/fileview.js` 的 `loadFavs`/`loadRemarks` 仍会打 `/favorites`、`/remarks`（生产 404，需按 `MC.caps.favorites`/`MC.caps.remarks` 跳过）；② `fileview.js` 的「提交人：`app.identity.name`」在未登记时显示 IP，改用 `MC.util.identityName(app.identity)`。随后进入 M2（收藏/搜索/对比/导入/删除），此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试。
