@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 1/12**（M2-01 收藏 API 与修订号）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **376 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (21)**。下一个待做卡：**M2-02 / INH-1875 速览页与结构树收藏**（把 `MC.caps.favorites` 与 `MC.caps.revision` 翻 true 并核对 UC-08～UC-12）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 2/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **378 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (22)**。下一个待做卡：**M2-03 / INH-1876 修改建议提交与定位符**（§6.7 + §7.8 的 GET/POST remarks）。
 
 ---
 
@@ -151,13 +151,13 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（1/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（2/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
 | M2-01 | INH-1874 | Done | 收藏 API 与实时值（含 `services/revision.py` + `GET /revision`） |
-| **M2-02** | INH-1875 | In Progress | **速览页与结构树收藏 ← 下一张** |
-| M2-03 | INH-1876 | Todo | 修改建议提交与定位符 |
+| M2-02 | INH-1875 | Done | 速览页与结构树收藏 |
+| **M2-03** | INH-1876 | In Progress | **修改建议提交与定位符 ← 下一张** |
 | M2-04 | INH-1877 | In Progress | 详情面板提交修改建议 |
 | M2-05 | INH-1878 | Todo | 全局搜索 API 与命中计数 |
 | M2-06 | INH-1879 | In Progress | 搜索页与 Ctrl+K 命令面板 |
@@ -225,6 +225,8 @@ PR: <url> · 提交 `<sha>`
 | #19 | M1-05 | 生产外壳切真实后端：`MC.caps`/`MC.unwired` 能力开关、未接入入口 `disabled`+原因、速览降级状态块、顶栏不再显示未登记 IP |
 | #20 | M1-06 | 文件工作区接真实后端：`MC.segmented` 支持 item 级 `disabled`/`title`、`MC.Tree` 新增 `starReason`/`onStarBlocked`、`fileview.js` 按 caps 跳过 `/favorites`·`/remarks`·`/archives` 并禁用未接入分段与建议表单 |
 | #21 | M2-01 | `services/favorites.py`（§7.7 四端点，实时值按旧 ID 取先序最后一个）+ `services/revision.py` 与 `GET /revision`（§7.3）+ `router.query_param`/`json_body` 收口；mock 的 `resolveLive` 同步改为取最后一个 |
+| #22 | M2-01 | 补齐 INH-1874 验收剩余两条：文件放回回到原组、旧 `favorites.json` 样本可解析（含子节点实时值） |
+| #23 | M2-02 | 速览与结构树收藏接真实后端：能力开关改为 `CAP_KEYS` + `WIRED`（本卡加 `favorites`/`revision`），新增 `schedule` 能力避免速览白打 404，+2 条 caps 守卫测试 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -289,4 +291,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-02（`INH-1875`）——速览页与结构树收藏接上 M2-01 的真实接口：把 `MC.caps.favorites` 与 `MC.caps.revision` 翻 true（其余 caps 保持 false），逐条核对 UC-08～UC-12（叶子/父级覆盖/速览备注/源文件消失回到原组/取消收藏可撤销），并确认 `template.html` 无回归。随后 M2-03（`INH-1876` 修改建议提交与定位符，§6.7）。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步**：M2-03（`INH-1876`）——修改建议提交与定位符：`services/review.py`（提交部分）+ `server/api_remarks.py`，实现 §7.8 的 `GET/POST /p/{pid}/remarks`（`locator`/`source_sha256`/`schema_version: 2`、`node_key` 写空串兼容旧读取、sha 不符 → 409 `SOURCE_CHANGED`、建议值与当前值相同 → 400 + `detail.field`、JSON 类型检查而 XML 不检查）。写成功后 `revision.bump(pid, "remarks")`。M2-04 才把 `MC.caps.remarks` 加进 `WIRED`。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
