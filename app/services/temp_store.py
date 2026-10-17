@@ -1,7 +1,7 @@
 """临时文件（§7.4；T-14 / M2-10）。
 
 上传或链接导入的原文先落在这里，只给**上传者本人**看：所有者 = 同一个 `mc_cid`
-且同一个客户端 IP。区域是 `data/temporary/<token>/`，`meta.json` 记所有者、机型、
+且同一个客户端 IP（两个要素都不满足即 404，不承认 token 存在）。区域是 `data/temporary/<token>/`，`meta.json` 记所有者、机型、
 原名、大小与到期时间；它不属于权威数据，因此不参与机型目录布局、也不进备份。
 
 **惰性清理**（决策 4）：M2 阶段不引入定时器或后台线程——过期目录在每次创建/访问/
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import fsutil, parser, storage
-from ..core.errors import FORBIDDEN, NOT_FOUND, TOO_LARGE, AppError
+from ..core.errors import NOT_FOUND, TOO_LARGE, AppError
 
 CONTENT_FILE = "content"
 META_FILE = "meta.json"
@@ -93,7 +93,8 @@ def take(profile_id: str, token: str, cid: Optional[str], ip: str) -> Tuple[Dict
     if meta.get("profile") != profile_id:
         raise AppError(NOT_FOUND, "临时文件不存在或已过期", token=token)
     if (meta.get("owner_cid") or "") != (cid or "") or (meta.get("owner_ip") or "") != (ip or ""):
-        raise AppError(FORBIDDEN, "临时文件只对上传者可见")
+        # 卡面要求「其他人 404」：状态码不承认 token 存在，消息仍说清原因，便于 UI 提示。
+        raise AppError(NOT_FOUND, "临时文件只对上传者可见", token=token)
     path = os.path.join(directory, CONTENT_FILE)
     if not os.path.isfile(path):
         raise AppError(NOT_FOUND, EXPIRED_MESSAGE, token=token)

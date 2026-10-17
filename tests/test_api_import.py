@@ -1,6 +1,6 @@
 """临时文件、上传保存与链接导入（§7.4、§5.3、§5.4；M2-10）。
 
-覆盖：`POST /temp` 建档与解析校验、所有者 = 同 cid **且** 同 IP（他人 403）、过期 404
+覆盖：`POST /temp` 建档与解析校验、所有者 = 同 cid **且** 同 IP（他人 404）、过期 404
 且绝不回退读同名服务器文件（F01）、配额与体积上限、惰性清理、`PUT /files/{name}` 的
 201/200/409/unchanged 与权限、`POST /import-url` 的 http/https 校验与下载失败 502、
 以及 M2-08 遗留的「temp 侧参与对比」。
@@ -103,13 +103,13 @@ class TestTempUpload:
             other_cid = as_role(server, "member").request(
                 "GET", doc_url, headers={"Cookie": "mc_cid=%s" % OTHER}
             )
-            assert other_cid[0] == 403, other_cid[2]
+            assert other_cid[0] == 404, other_cid[2]
 
             other_ip = as_role(server, "visitor")
             status, _h, body = other_ip.request(
                 "GET", doc_url, headers={"Cookie": "mc_cid=%s" % MINE}
             )
-            assert status == 403, body
+            assert status == 404, body
 
     def test_expired_token_is_404_and_never_falls_back_to_server_file(self):
         """F01：临时文件过期后绝不退回读同名服务器文件。"""
