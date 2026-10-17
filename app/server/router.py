@@ -8,13 +8,30 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..config import Settings
 
-#: handler(params, query, body) -> (status, payload)；body 只对 BODY_METHODS 非 None。
+
+@dataclass
+class Response:
+    """handler 的返回值：JSON 载荷或原始字节，外加状态码与响应头。
+
+    `payload` 与 `body` 二选一：给了 `body` 就直接发字节（原文下载、已序列化
+    的 compact 文档），否则把 `payload` 序列化成 JSON。
+    """
+
+    status: int = 200
+    payload: Any = None
+    body: Optional[bytes] = None
+    content_type: Optional[str] = "application/json; charset=utf-8"
+    headers: Dict[str, str] = field(default_factory=dict)
+
+
+#: handler(params, query, body) -> Response；body 只对 BODY_METHODS 非 None。
 #: M1 起会按 §3.4 第 4 步扩展成 handler(ctx, params, query, body)。
-Handler = Callable[[Dict[str, str], Dict[str, List[str]], Optional[bytes]], Tuple[int, Any]]
+Handler = Callable[[Dict[str, str], Dict[str, List[str]], Optional[bytes]], Response]
 
 _PARAM_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -52,14 +69,18 @@ class Router:
 def build_router(settings: Settings) -> Router:
     """组装路由表。
 
-    M0-09 只挂占位会话；业务接口从 M1（读取链路）开始按 §3.2 加到 `api_*.py`。
+    M0-09 只有占位会话；M1 起按 §3.2 逐步挂上业务接口（当前：会话、文件列表、
+    compact 文档、原文下载）。
     """
-    from . import api_session
+    from . import api_documents, api_session
 
     router = Router()
     router.add(
         "GET",
         "/api/v1/session",
-        lambda params, query, body: (200, api_session.session_payload(settings)),
+        lambda params, query, body: Response(payload=api_session.session_payload(settings)),
     )
+    router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
+    router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
+    router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)
     return router
