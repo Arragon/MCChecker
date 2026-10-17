@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 from .. import __version__
 from ..config import Settings
-from ..core import fsutil
+from ..core import device_models, fsutil, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, STORAGE_FAILURE, TOO_LARGE, AppError
-from .router import Router
+from .router import Response, Router
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +250,17 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         if handler is None:
             raise AppError(NOT_FOUND, "接口不存在")
         query_params = urllib.parse.parse_qs(query, keep_blank_values=True)
-        status, payload = handler(params, query_params, body)
-        self._send_json(status, payload)
+
+        # §3.4 第 5、6 步：路径含 {pid} 时先校验机型存在（不回落 default），
+        # 再在 `use_profile(pid)` 上下文里调用 handler。
+        pid = params.get("pid") if params else None
+        if pid is None:
+            self._send_response(handler(params, query_params, body))
+            return
+        if not device_models.exists(pid):
+            raise AppError(NOT_FOUND, "机型不存在")
+        with storage.use_profile(pid):
+            self._send_response(handler(params, query_params, body))
 
     # ===================== 请求体 =====================
 
@@ -305,6 +314,24 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         self._send_bytes(200, data, _content_type(target), extra=headers)
 
     # ===================== 响应 =====================
+
+    def _send_response(self, response: Response) -> None:
+        """发送 handler 的响应；`ETag` 命中 `If-None-Match` 时降级为 304（§6.3）。"""
+        headers = dict(response.headers)
+        etag = headers.get("ETag")
+        if etag and self.headers.get("If-None-Match") == etag:
+            self._send_bytes(304, b"", None, extra=headers)
+            return
+        if response.body is not None:
+            self._send_bytes(response.status, response.body, response.content_type, extra=headers)
+            return
+        body = json.dumps(response.payload, ensure_ascii=False).encode("utf-8")
+        self._send_bytes(
+            response.status,
+            body,
+            response.content_type or "application/json; charset=utf-8",
+            extra=headers,
+        )
 
     def _send_json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
