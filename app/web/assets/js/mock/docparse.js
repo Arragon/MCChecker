@@ -29,6 +29,15 @@
     return { p: [], t: [], l: [], v: [], id: [], loc: [] };
   }
 
+  /*
+   * id/loc/occurrence 用「ET 原始 tag」形式（命名空间为 {uri}local），与服务端
+   * app/core/parser.py::to_compact 一致（规范 §6.2）；显示标签仍用 nodeName
+   * （有前缀时 prefix:local）。
+   */
+  function etTagOf(el) {
+    return el.namespaceURI ? "{" + el.namespaceURI + "}" + el.localName : el.nodeName;
+  }
+
   function push(N, p, t, l, v, id, loc) {
     N.p.push(p);
     N.t.push(t);
@@ -81,8 +90,9 @@
     var root = push(N, -1, "xml", filename, null, "root", "");
     function walk(el, parent, pid, ploc, occ) {
       var tag = el.nodeName;
-      var id = pid + "/" + tag;
-      var loc = ploc + "/" + tag + "[" + occ + "]";
+      var etTag = etTagOf(el);
+      var id = pid + "/" + etTag;
+      var loc = ploc + "/" + etTag + "[" + occ + "]";
       var hasChildEl = false;
       var text = "";
       for (var c = el.firstChild; c; c = c.nextSibling) {
@@ -96,14 +106,17 @@
       for (var a = 0; a < el.attributes.length; a++) {
         var at = el.attributes[a];
         if (at.name === "xmlns" || at.name.indexOf("xmlns:") === 0) continue;
-        push(N, me, "attribute", "@" + at.name, at.value, id + "@" + at.name, loc + "/@" + at.name);
+        var etAttr = etTagOf(at);
+        var attrLabel = at.prefix ? at.prefix + ":" + at.localName : at.localName;
+        push(N, me, "attribute", "@" + attrLabel, at.value, id + "@" + etAttr, loc + "/@" + etAttr);
       }
       if (hasChildEl && text) push(N, me, "text", "#text", text, id + "#text", loc + "/#text");
       var seen = {};
       for (c = el.firstChild; c; c = c.nextSibling) {
         if (c.nodeType !== 1) continue;
-        seen[c.nodeName] = (seen[c.nodeName] || 0) + 1;
-        walk(c, me, id, loc, seen[c.nodeName]);
+        var ctag = etTagOf(c);
+        seen[ctag] = (seen[ctag] || 0) + 1;
+        walk(c, me, id, loc, seen[ctag]);
       }
     }
     walk(dom.documentElement, root, "root", "", 1);
