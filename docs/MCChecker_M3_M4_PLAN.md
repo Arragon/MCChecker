@@ -1094,3 +1094,20 @@ gh pr merge <n> --merge
 - **R14** D2 的分段门控只需插一处：`settings.js:62-67` 的 `renderSection()` 是唯一调度器，第 66 行的 `fn(sec)` 就是发请求处 —— 未接入时在其之前直接渲染只读横幅并 `return`，压根不调 `fn`。
 - **R22**（计划自身缺陷，控制方责任）：卡 1 的 D1 动作第 3 步原写「在 `tests/test_review_apply.py` 断言 NoneType 提 `"null"` 返回『与当前值相同』」**是错位的** —— 那是 §6.7 第 1 步、属 `services/review.py::submit`；`apply_edits` 不做此检查。正确归属 `tests/test_api_remarks.py`。若实现者为此把 service 判断塞进 core，是越层而非缺陷，由控制方改判。
 - **D4** `tasks` 能力键（`CAP_KEYS` 增至 16 项）落在卡 6；改完 `fileview.js` 后 `MC.caps.tools` 不应再出现在 `fileview.js` 里。
+
+## 11. 执行状态快照（2026-10-17 20:57，恢复时从这里接）
+
+**里程碑计数**：54 卡 / 28 Done / 26 未完成。**本轮合并进集成分支的卡数：0**。卡 1（M3-01 / INH-1886）处于「代码写完、未提交、未评审、未合并」。
+
+**分支与工作区**：分支 `mc-v2/m3-01-review-apply`（基于 `feat/mc-v2-delivery` = `9660867`，远端未推送）。当前 `HEAD=830731b`。未提交改动 6 处，全部属于卡 1，是有效工作产物，**不要丢弃**：
+`M app/core/parser.py`（新增公开 `collect_ns_prefixes`）、`M app/core/reviewing.py`（`apply_edits` + `_verify_semantics`，约 +318 行）、`M app/web/assets/js/views/fileview.js`（NoneType 表单 disabled + 文案）、`M docs/MCChecker_REDESIGN_SPEC.md`（§6.7 补一句 null 只读）、`M docs/MCChecker_DELIVERY_PLAN.md`（第 8 节决策 20 + 第 11 节）、新文件 `tests/test_review_apply.py`。
+
+**后台实现代理**：仍在跑最终验证（全量测试 + 变异验证），完成后会写 `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-1-report.md` 并提交。该文件与 SDD 台账是 git-ignored，恢复会话时先读它们。
+
+**恢复后的前四步**：
+1. `git log --oneline 830731b..HEAD` 看是否已提交；已提交则 `scripts/review-package docs/MCChecker_M3_M4_PLAN.md 830731b HEAD` 生成评审包，派独立评审（双判决：规格合规 + 代码质量）。
+2. **必须作为 Critical 提出的未闭合发现（R23）**：代理在 `DELIVERY_PLAN` 第 11 节写了「M3-01 已完成」，而当时未提交、未评审、未合并 —— 违反 H4/H5「未运行的检查不得报告为通过」，且该文档是后续 agent 的接力入口。要求改成「已实现待评审/待合并」，真合并后再由控制方写实。同节的**决策 20（D1 全文）口径正确，保留**。
+3. 评审通过后：`gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge` → `INH-1886` 置 Done + 证据注释（**顺带补发三次 `-32603` 失败的那条中期通报**：`LookupError`→`PARSE_FAILED` 的分支、`_INT_RE` 在 core/services 两处重复需守住、R22 归属）。
+4. 派发卡 2（INH-1887）：brief = `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-2-brief.md`，JIT 计划 = 同目录 `task-2-plan.md`（4 个子任务、带真实测试代码与变异验证），并带上 §10 的 R1/R2/R3/R6/R7/R8/R19。
+
+**待办（不要在实现代理运行中做分支手术）**：`a165106` 与 `830731b` 两个文档提交目前混在卡 1 分支上，卡 1 合并前应拆成独立 `chore/m3-m4-plan-doc` PR，让卡 1 的 PR 只含本卡改动。
