@@ -14,13 +14,14 @@ from .auth import Actor
 
 @dataclass(frozen=True)
 class RequestContext:
-    """一次请求的已解析上下文。
+    """一次请求的已解析上下文（§3.4 第 4 步）。
 
-    * `ip`——已按 §4.1 解析的客户端 IP（所有接口都有）；
+    * `ip`——已按 §4.1 解析的客户端 IP；
     * `cid`——`mc_cid` cookie，None 表示尚未下发（由 /session 首访下发）；
     * `profile_id`——路径中的 `{pid}`；`/session` 这类无 pid 接口为空串；
-    * `actor`——有 `{pid}` 时已按该机型解析；`/session` 由 handler 按查询
-      参数（含回落 default 的特例）自行解析。
+    * `actor`——**每个请求都解析**：有 `{pid}` 时按该机型解析，否则按 `default`
+      机型解析（全局写接口如后续的 `/profiles`、`/tasks` 靠它做权限判定，
+      身份切换后下一次请求即生效）。
     """
 
     ip: str
