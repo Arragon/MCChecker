@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import shutil
 import contextvars
 import urllib.parse
@@ -40,6 +41,8 @@ CACHE_DIR = os.path.join(DATA_DIR, "cache")
 PARSE_CACHE_DIR = os.path.join(CACHE_DIR, "parse_tree")
 
 DEFAULT_PROFILE = "default"
+#: `secrets.token_urlsafe` 的字符集；同时用来挡住把 token 当路径用的穿越尝试。
+_TEMP_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _profile_var: contextvars.ContextVar[str] = contextvars.ContextVar("mc_profile", default=DEFAULT_PROFILE)
 
 #: 机型 id 的合法字符（规范 §5.2 `[A-Za-z0-9_-]+`）。
@@ -146,6 +149,26 @@ def get_cache_root_dir(profile_id: Optional[str] = None) -> str:
     if pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(CACHE_DIR):
         return CACHE_DIR
     return target
+
+
+def get_temporary_dir(token: Optional[str] = None) -> str:
+    """临时文件区 `data/temporary/<token>/`（§7.4）。
+
+    **运行期取 `DATA_DIR`**，不做 import 期常量：测试夹具靠重绑定 `DATA_DIR` 隔离数据根，
+    常量会绕开它写到真实目录；临时区也不属于权威数据，不参与机型目录布局。
+    """
+    path = os.path.join(DATA_DIR, "temporary")
+    if token is not None:
+        path = os.path.join(path, validate_temp_token(token))
+    return path
+
+
+def validate_temp_token(token: Any) -> str:
+    """token 只允许 `secrets.token_urlsafe` 的字符集，防止路径穿越。"""
+    text = str(token or "")
+    if not _TEMP_TOKEN_RE.match(text):
+        raise ValueError("临时文件标识不合法")
+    return text
 
 
 def get_parse_cache_dir(profile_id: Optional[str] = None) -> str:
