@@ -1,0 +1,6 @@
+# 开发与测试依赖（运行时代码不得 import 这些包；见 requirements.txt）
+# 版本与设计说明书 §14.4 一致：最后一批支持 3.7+ 且无额外编译依赖的稳定版本。
+# 离线安装：
+#   pip download -r requirements-dev.txt -d tools/wheels
+#   pip install --no-index --find-links tools/wheels -r requirements-dev.txt
+pytest==7.4.4
