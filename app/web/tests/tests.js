@@ -178,14 +178,51 @@
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
   });
 
-  test("M2-11：导入与临时文件已在生产放行，未实现的接口不得提前打开", function () {
+  test("M2-12：删除文件已在生产放行，未实现的接口不得提前打开", function () {
     var prod = MC.capsFor(false);
-    ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp"].forEach(function (k) {
+    ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["schedule", "review", "dl", "settings", "delete", "tools"].forEach(function (k) {
+    ["schedule", "review", "dl", "settings", "tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
+  });
+
+  test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
+    var calls = [];
+    var origDel = MC.api.del;
+    MC.api.del = function (path) { calls.push(path); return Promise.resolve({ deleted: true, recovery: "x" }); };
+    var app = {
+      p: function (rest) { return "/api/v1/p/default" + rest; },
+      closeTab: function () {},
+      refreshFiles: function () {},
+      syncRevision: function () {},
+    };
+    try {
+      MC.App.prototype.deleteFile.call(app, { name: "config.xml", archive_count: 3, record_count: 1 });
+      var backdrops = document.body.querySelectorAll(".modal-backdrop");
+      var backdrop = backdrops[backdrops.length - 1];
+      var dialog = backdrop.querySelector(".modal");
+      var text = dialog.textContent;
+      ok(/3 个历史版本/.test(text) && /1 条修改记录/.test(text), "确认框要说明影响数量：" + text);
+      ok(/恢复区/.test(text), "要说明删除后去哪里恢复：" + text);
+      var input = dialog.querySelector("input");
+      var okBtn = dialog.querySelector(".btn-danger");
+      ok(input && okBtn, "危险操作要有输入确认与红色按钮");
+      ok(/config\.xml/.test(text), "标题里带上被删的文件名");
+      ok(okBtn.disabled, "没敲文件名之前不能确认");
+      input.value = "configxm";
+      input.dispatchEvent(new Event("input"));
+      ok(okBtn.disabled, "打错文件名仍然禁用");
+      input.value = "config.xml";
+      input.dispatchEvent(new Event("input"));
+      ok(!okBtn.disabled, "敲对文件名后确认按钮解锁");
+      ok(calls.length === 0, "光打字不发请求，点了才发");
+    } finally {
+      MC.api.del = origDel;
+      var left = document.body.querySelectorAll(".modal-backdrop");
+      if (left.length) left[left.length - 1].remove();
+    }
   });
 
   test("差异摘要统计：null 显示未计算，有值时给出 +/−/~ 与文字", function () {

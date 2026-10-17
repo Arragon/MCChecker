@@ -29,6 +29,7 @@ DATA_SUBDIRS = (
     "cache",
     "cache/parse_tree",
     "temporary",
+    "recovery",
 )
 
 

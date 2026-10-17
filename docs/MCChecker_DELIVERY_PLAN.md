@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 11/12**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API、M2-09 历史列表与对比选择器、M2-10 临时文件与上传/链接导入、M2-11 导入对话框与临时标签）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **482 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (25)**。下一个待做卡：**M2-12 / INH-1885 删除文件进入恢复区**（M2 最后一张，破坏性操作按高风险卡处理）（`services/temp_store.py` + `POST /temp` + 惰性过期清理，并补 M2-08 留下的 `temp` 对比用例）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 全部完成（12/12）**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API、M2-09 历史列表与对比选择器、M2-10 临时文件与上传/链接导入、M2-11 导入对话框与临时标签、M2-12 删除文件进入恢复区）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准）；全量测试 **506 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (26)**、`data/` 哈希 `478d9c26ea8dbb8f` 不变。**本轮批准的交付范围（M1 收尾 + M2 全量）到此结束**。M3 尚未开始，下一张是 **M3-01 / INH-1886 审阅写回**（`reviewing.apply_edits` + `/review`），开工前需要再次确认范围。
 
 ---
 
@@ -151,7 +151,7 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（11/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（12/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -166,8 +166,7 @@ PR: <url> · 提交 `<sha>`
 | M2-09 | INH-1882 | Done | 历史列表与对比选择器（`WIRED` 放行 `history`/`compare`/`records`） |
 | M2-10 | INH-1883 | Done | 临时文件、上传保存与链接导入（`services/temp_store.py` + `upload.py`）+ 修正 PR #32 |
 | M2-11 | INH-1884 | Done | 导入对话框与临时文件标签（`WIRED` 放行 `import`/`temp`） |
-| **M2-12** | INH-1885 | Todo | **删除文件进入恢复区 ← 下一张** |
-| M2-12 | INH-1885 | Todo | 删除文件进入恢复区 |
+| M2-12 | INH-1885 | Done | 删除文件进入恢复区（`services/recovery.py` + `DELETE /files/{name}`，`WIRED` 放行 `delete`） |
 
 ### M3 审阅、更新、DL 与设置（0/17）
 
@@ -241,6 +240,7 @@ PR: <url> · 提交 `<sha>`
 
 | #32 | M2-10 修正 | 非所有者按卡面返回 404（#31 用了 403；鉴权矩阵不变，`PUT`/`import-url` 权限不足仍是 403）；测试文件改名 `tests/test_api_import.py` 以对齐卡面验收命令 |
 | #33 | M2-11 | `api.js` 的 `WIRED` 放行 `import`/`temp`；`importer.js` 的同名覆盖先走 `MC.confirm`（原来静默带 `overwrite=1`）；临时标签标题改为「name（临时 · 仅自己可见）」与卡面一致；`tests/index.html` 补载 `importer.js`，新增导入对话框角色分支用例 + 外壳 caps 断言更新 |
+| #34 | M2-12 | 新增 `services/recovery.py`（§5.6 顺序：复制进 `data/recovery/` → 逐文件校验 sha256 → 才删源 → 才改四份 JSON → 写 `manifest.json`；失败逆序回滚，不留半删除、不谎报成功；`create_entry` 用 `os.mkdir` 独占占名）与 `server/api_delete.py`（`DELETE /files/{name}` 走 ADMIN）；`storage` 加 `get_recovery_root_dir()` 与公开 `profile_write()`，**`delete_config_file` 的旧硬删语义一行未动**；`conftest.DATA_SUBDIRS` 加 `recovery`；`api.js` 的 `WIRED` 放行 `delete`，toast 给出恢复区目录名；mock 的 DELETE 补齐绑定清理与「只 bump 真改动的分量」并把 `recovery` 改成目录名；UC-11 与 §7.4 的冲突按决策 19 处理 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -272,6 +272,7 @@ PR: <url> · 提交 `<sha>`
     - 30 文件 × 30 000 节点（90 万，超出 24 项）：预热 **731 ms**（未达 §12 的 500 ms，也未达卡面 300 ms）。把条目数临时提到 64 后同一批文件降到 **279.5 ms**，`cache_info` 从 90 次 miss 变 30 次。
     结论：修 §12 的方式是让缓存容量按「机型内文件数」而不是写死 24（256 MB 字节上限已经是真正的护栏），或按 §7.6 建议缓存小写数组。**这属于 M1-02 / §6.5 已定的缓存策略，改它要在 M4-05 里做并回写 SPEC，不在 M2-05 顺手改。**
 18. **临时脚本不要在 pytest 之外跑 storage**：见 `docs/know-how.md` 第 7 节。M2-05 有一次为了拆分耗时直接在 shell 里 `storage.DATA_DIR = tmp`，结果样本和 `cache/doc_v2` 落进了仓库真实 `data/`（已删除，`data/` 哈希回到 `478d9c26ea8dbb8f`）。
+19. **M2-12：卡面 UC-11 与 §7.4 不能同时成立，按 §7.4 实现**：§7.4 明文要求删除时**移除**映射/收藏/绑定/建议，而 UC-11 描述「删除后收藏组变为源文件不存在，文件恢复后回到原组」——收藏被移除后根本不会留在「源文件已不存在」的组里（`GET /favorites` 的 `exists=false` 分组只在**文件没了但收藏还在**时出现）。因此 v2 按 §7.4 移除，并把被移除项原样写进 `manifest.json`；UC-11 改为在 API 层验证「按 manifest 放回原文与收藏后，重新按源文件成组且 `exists=true`」（`tests/test_api_delete.py::TestUC11FavoritesRegroup`）。「删除即移除引用」还有一条副作用要记着：**只把文件放回 `configs/` 而不放回引用，文件会变成未映射、无收藏的空文件**，所以手工恢复（§14.6）必须原文与 manifest 里的引用一起做。若产品要求保留收藏（走「源文件不存在」分组），那是语义变更，要另开卡改 §7.4 与 mock 三处，不要在本卡顺手改。
 
 ---
 
@@ -311,4 +312,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-12（`INH-1885`）——删除文件进入恢复区（M2 最后一张）：`DELETE /files/{name}` 走 ADMIN，当前版本 + `archive/<name>/` + `records/<name>/` **移动**到 `data/recovery/<ts>_<op>_<pid>_<name>/` 并写 `manifest.json`，同时清理映射/收藏/绑定/建议并把被移除的引用写进清单；**`storage.delete_config_file` 的旧硬删语义不得改**（v1 页面与既有测试依赖它），v2 走新的 `services/recovery.py`；`conftest.DATA_SUBDIRS` 加 `recovery`；403 用例要断言文件字节未变；UC-11（恢复后收藏回到原组）在 API 层验。M2-11 已完成：导入对话框、链接导入与临时标签在真实后端逐项验过（UC-17/27/28/29）；小遗留——链接导入拿 URL 末段当文件名，遇到 `…/raw` 这类结尾会得到 `raw` 这个名字，用户可在对话框里改，更聪明的默认值另开卡：把 `import`/`temp` 加进 `WIRED`，接 `views/importer.js` 与临时标签，核对 UC-17、UC-27～UC-29；**临时标签不得写进 `mc.tabs.<pid>`**（C24），1 GB / 20 个上限要有明确前端文案。M2-10 已完成：`POST /temp`、`GET /temp/{token}/document|raw`、`PUT /files/{name}`、`POST /import-url` 全在真实后端验过，temp 侧对比（M2-08 遗留）也已补上；**SSRF 白名单仍属 M3-04**，本卡只做 http/https 前缀校验：`services/temp_store.py`（`data/temporary/<token>/`、`meta.json` 所有者、同一所有者 ≤ 20 个、全局 ≤ 1 GB、惰性过期清理）、`POST /temp`、`GET /temp/{token}/document|raw`（仅上传者）、`POST /import-url`；顺手补 M2-08 留下的 `temp` 侧对比用例，并把 `api.js` 的 `temp` 放进 `WIRED`。M2-09 已完成：`history`/`compare`/`records` 放行，UC-14/15/16/18/19 在真实后端逐项验过（UC-16 的基准反向缺陷已修）：把 `history`/`compare`/`records` 加进 `api.js` 的 `WIRED`，接 `GET /files/{name}/archives`、`GET /files/{name}/records` 与 `POST /compare`，核对 UC-14（当前 + 归档、统计正确）、UC-15（历史直达对比：基准=该归档、目标=当前并自动运行）、UC-16（勾选两行 → 较旧为基准）。M2-08 已完成：`compare_documents()` 给出逐行 items，`summarize_documents()` 改为委托它（摘要与条目同口径），`differ` 不再在模块级 import `storage`。临时侧 `{"temp": …}` 现在返回 400「临时文件对比将在 M2-10 接入」，M2-10 要补上所有者校验与相应用例。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步**：本轮批准的范围（M1 收尾 + M2 全量）已全部完成，M2 = 12/12。M3 尚未开始，要继续得先确认范围；M3 第一张是 M3-01（`INH-1886`）审阅写回：`reviewing.apply_edits` + 语义校验 + `/review`、`/review/submit`（§6.7），验收 UC-20～UC-24 与 `tests/test_review_apply.py`；M3-01 开工前先解决 M2-03 遗留的 NoneType 建议语义（见本节末）。M2-12 已完成：`services/recovery.py` 先把当前版本 + `archive/<name>/` + `records/<name>/` **复制**进 `data/recovery/<ts>_delete_file_<pid>_<name>/` 并逐文件比对 sha256，校验通过才删源，然后才清映射/收藏/绑定/建议并写 `manifest.json`；中途失败逆序回滚（原文放回、JSON 回到删除前快照、恢复区只留空目录、不谎报成功）；`storage.delete_config_file` 的旧硬删语义未动；`conftest.DATA_SUBDIRS` 加了 `recovery`；`WIRED` 放行 `delete`，前端确认框用 `requireText` 敲文件名；UC-11 的口径见第 8 节决策 19。M2-11 已完成：导入对话框、链接导入与临时标签在真实后端逐项验过（UC-17/27/28/29）；小遗留——链接导入拿 URL 末段当文件名，遇到 `…/raw` 这类结尾会得到 `raw` 这个名字，用户可在对话框里改，更聪明的默认值另开卡：把 `import`/`temp` 加进 `WIRED`，接 `views/importer.js` 与临时标签，核对 UC-17、UC-27～UC-29；**临时标签不得写进 `mc.tabs.<pid>`**（C24），1 GB / 20 个上限要有明确前端文案。M2-10 已完成：`POST /temp`、`GET /temp/{token}/document|raw`、`PUT /files/{name}`、`POST /import-url` 全在真实后端验过，temp 侧对比（M2-08 遗留）也已补上；**SSRF 白名单仍属 M3-04**，本卡只做 http/https 前缀校验：`services/temp_store.py`（`data/temporary/<token>/`、`meta.json` 所有者、同一所有者 ≤ 20 个、全局 ≤ 1 GB、惰性过期清理）、`POST /temp`、`GET /temp/{token}/document|raw`（仅上传者）、`POST /import-url`；顺手补 M2-08 留下的 `temp` 侧对比用例，并把 `api.js` 的 `temp` 放进 `WIRED`。M2-09 已完成：`history`/`compare`/`records` 放行，UC-14/15/16/18/19 在真实后端逐项验过（UC-16 的基准反向缺陷已修）：把 `history`/`compare`/`records` 加进 `api.js` 的 `WIRED`，接 `GET /files/{name}/archives`、`GET /files/{name}/records` 与 `POST /compare`，核对 UC-14（当前 + 归档、统计正确）、UC-15（历史直达对比：基准=该归档、目标=当前并自动运行）、UC-16（勾选两行 → 较旧为基准）。M2-08 已完成：`compare_documents()` 给出逐行 items，`summarize_documents()` 改为委托它（摘要与条目同口径），`differ` 不再在模块级 import `storage`。临时侧 `{"temp": …}` 现在返回 400「临时文件对比将在 M2-10 接入」，M2-10 要补上所有者校验与相应用例。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。

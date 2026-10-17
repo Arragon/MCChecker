@@ -54,6 +54,7 @@
 
 ## 7. Do Not Do
 - 不要在 pytest 之外直接跑临时脚本调用 `app.core.storage` / `app.services.*`：数据根重绑定只发生在 `tests/conftest.py` 的夹具里，`storage.DATA_DIR = tmp` 这类手工赋值改不到由它派生的其它常量，脚本会把样本和 `cache/doc_v2` 写进仓库真实的 `data/`。要么写成 pytest 用例（自动隔离），要么显式用 `run.py --data-dir $(mktemp -d)`。
+- 不要只 `realpath` 一侧就算相对路径（`os.path.relpath(源, storage.DATA_DIR)`）：`fsutil.resolve_within()` 返回 realpath，而 `get_archive_root_dir()` / `get_records_root_dir()` 拼出来的是未解析的路径；macOS 上 `/var` 又是指向 `/private/var` 的符号链接，于是恢复区 manifest 的 `from` 会变成 `../../../../../../private/var/…` 这种没法照着放回去的废值（M2-12 真实后端跑出来才发现，pytest 的 tmp 两侧恰好一致所以没抓到）。要两侧都 `os.path.realpath()` 再 `relpath`。
 - 不要使用小众第三方库
 - 不要在日志中输出敏感信息
 - 不要修改用户上传的原始文件

@@ -598,9 +598,32 @@
     P.mapping = P.mapping.filter(function (m) { return m.name !== a.name; });
     P.remarks = P.remarks.filter(function (r) { return r.source_file !== a.name; });
     P.favorites = P.favorites.filter(function (x) { return x.source_file !== a.name; });
-    ["files", "favorites", "remarks", "settings"].forEach(function (k) { bump(a.pid, k); });
-    return ok({ deleted: true, removed: removed, recovery: "已移入 data/recovery/，可由部署者恢复" });
+    // 绑定：只摘掉该文件的变量；只有**因本次删除而变空**的组才删掉（后端同规则）。
+    var bindingChanged = false;
+    P.bindings = P.bindings.reduce(function (out, b) {
+      var all = b.variables || [];
+      var kept = all.filter(function (v) { return v.file !== a.name; });
+      if (kept.length === all.length) {
+        out.push(b);
+        return out;
+      }
+      bindingChanged = true;
+      if (kept.length) out.push(Object.assign({}, b, { variables: kept }));
+      return out;
+    }, []);
+    // 与后端一致：只有真正改动了的权威数据才递增对应修订分量（决策 16）。
+    bump(a.pid, "files");
+    if (removed.favorites) bump(a.pid, "favorites");
+    if (removed.remarks) bump(a.pid, "remarks");
+    if (bindingChanged) bump(a.pid, "settings");
+    return ok({ deleted: true, removed: removed, recovery: recoveryDir(a.pid, a.name) });
   });
+
+  /** §5.6 的恢复区目录名：`<时间>_delete_file_<机型>_<文件>`。 */
+  function recoveryDir(pid, name) {
+    var stamp = util.nowString().replace(/[-: ]/g, "").replace(/(\d{8})(\d{6})/, "$1_$2");
+    return stamp + "_delete_file_" + pid + "_" + name;
+  }
 
   route("POST", "/p/{pid}/temp", function (a, req, P) {
     var name = decodeURIComponent(req.headers["X-Filename"] || "upload");
