@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 3/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏、M2-03 修改建议提交）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **394 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (22)**。下一个待做卡：**M2-04 / INH-1877 详情面板提交修改建议**（把 `remarks` 加进 `WIRED` 并核对 UC-13）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 4/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏、M2-03 修改建议提交、M2-04 详情面板提交建议接真实后端）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **394 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (22)**。下一个待做卡：**M2-05 / INH-1878 搜索接口**（`GET /p/{pid}/search`，只读，不动修订号）。
 
 ---
 
@@ -151,15 +151,15 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（3/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（4/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
 | M2-01 | INH-1874 | Done | 收藏 API 与实时值（含 `services/revision.py` + `GET /revision`） |
 | M2-02 | INH-1875 | Done | 速览页与结构树收藏 |
 | M2-03 | INH-1876 | Done | 修改建议提交与定位符（含 `services/review.py` 提交部分） |
-| **M2-04** | INH-1877 | In Progress | **详情面板提交修改建议 ← 下一张** |
-| M2-05 | INH-1878 | Todo | 全局搜索 API 与命中计数 |
+| M2-04 | INH-1877 | Done | 详情面板提交修改建议（`WIRED` 放行 `remarks`） |
+| **M2-05** | INH-1878 | Todo | **全局搜索 API 与命中计数 ← 下一张** |
 | M2-06 | INH-1879 | In Progress | 搜索页与 Ctrl+K 命令面板 |
 | M2-07 | INH-1880 | Todo | 历史与修改记录列表及差异摘要 |
 | M2-08 | INH-1881 | Todo | 结构化对比 API |
@@ -228,6 +228,7 @@ PR: <url> · 提交 `<sha>`
 | #22 | M2-01 | 补齐 INH-1874 验收剩余两条：文件放回回到原组、旧 `favorites.json` 样本可解析（含子节点实时值） |
 | #23 | M2-02 | 速览与结构树收藏接真实后端：能力开关改为 `CAP_KEYS` + `WIRED`（本卡加 `favorites`/`revision`），新增 `schedule` 能力避免速览白打 404，+2 条 caps 守卫测试 |
 | #24 | M2-03 | `services/review.py`（§6.7 提交五步）+ `server/api_remarks.py`（GET/POST remarks）；`storage.add_edit_remark` 新增 `locator`/`source_sha256`/`schema_version` 可选字段并放宽 `node_key` 空值；mock 补 JSON 类型检查并去掉多余的 `files` 递增 |
+| #25 | M2-04 | `api.js` 的 `WIRED` 放行 `remarks`（详情面板建议表单在生产可用），mock 的「只能对有值的节点提交建议」补 `field: "loc"` 以对齐 `services/review.py`；前端测试页 caps 断言随卡改名并覆盖新放行项 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -292,4 +293,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-04（`INH-1877`）——详情面板提交修改建议：把 `remarks` 加进 `api.js` 的 `WIRED`，核对 UC-13（选中有值节点输入建议提交 → 建议出现在列表、侧栏与树显示建议数、与当前值相同时报字段错误）与备注/建议里的 `<img onerror>` 文本渲染。M2-03 遗留的一处规范疑问（NoneType 节点唯一合法值恰好等于当前值，被 §6.7 第 1 步拦下，导致 null 节点永远无法提建议）需在 M3-01 之前找产品确认，不要静默改语义。随后 M2-05（`INH-1878` 全局搜索 API，§7.6）。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步**：M2-05（`INH-1878`）——全局搜索 API 与命中计数（§7.6）：只读接口，跨机型内所有配置文件按 `loc` 返回命中，不动修订号；随后 M2-06（`INH-1879`）把 `search` 加进 `WIRED` 并接 Ctrl+K 命令面板。M2-03 遗留的一处规范疑问（NoneType 节点唯一合法值恰好等于当前值，被 §6.7 第 1 步拦下，导致 null 节点永远无法提建议）需在 M3-01 之前找产品确认，不要静默改语义；M2-04 的真实后端验收确认了相邻的另一条：`note=null` 这类节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它**是**有值节点、可以提建议，被拦下的只是「建议改回 null」。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
