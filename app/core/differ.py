@@ -13,6 +13,92 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import parser
 from .storage import get_bound_paths
 
+#: 结构化对比口径版本，参与 §6.6 的 `cache/diff_v2/` 缓存键。
+DIFFER_VERSION = 1
+
+
+def _paths(parents: List[Any], labels: List[Any], index: int) -> Tuple[str, str]:
+    """`(display_path, value_path)`：都去掉文件名节点（§6.6 第 1 步）。"""
+    parts: List[str] = []
+    i = index
+    while i > 0:
+        parts.append(str(labels[i]))
+        i = parents[i]
+    parts.reverse()
+    return " › ".join(parts), "/".join(parts)
+
+
+def index_value_nodes(nodes: Dict[str, List[Any]]) -> Dict[str, Tuple[str, str, str]]:
+    """`loc -> (value, display_path, value_path)`，只取有值节点。
+
+    键是 `loc` 而不是标签路径，所以同名兄弟不会互相覆盖（C11）。
+    """
+    parents = nodes["p"]
+    labels = nodes["l"]
+    values = nodes["v"]
+    locs = nodes["loc"]
+    out: Dict[str, Tuple[str, str, str]] = {}
+    for i in range(len(labels)):
+        value = values[i]
+        if value is None:
+            continue
+        display, value_path = _paths(parents, labels, i)
+        out[locs[i]] = (value, display, value_path)
+    return out
+
+
+def bound_reference(
+    bindings: List[Dict[str, Any]], base_name: str, target_name: str
+) -> Dict[str, str]:
+    """把绑定表展平成 `value_path -> 组名`，只收本次对比涉及的两个逻辑文件。
+
+    绑定里的 `path` 第一段是文件名（v1 格式），去掉之后才和 `value_path` 同形（§6.6 第 3 步）。
+    """
+    ref: Dict[str, str] = {}
+    for group in bindings or []:
+        wanted = str(group.get("group_name") or "")
+        for var in group.get("variables") or []:
+            if str(var.get("file") or "") not in (base_name, target_name):
+                continue
+            parts = str(var.get("path") or "").split("/")
+            if len(parts) <= 1:
+                continue
+            ref["/".join(parts[1:])] = wanted
+    return ref
+
+
+def summarize_documents(
+    base_nodes: Dict[str, List[Any]],
+    target_nodes: Dict[str, List[Any]],
+    base_name: str,
+    target_name: str,
+    bindings: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """统计级结构化差异（§6.6）。逐行 `items` 由 M2-08 的 `compare_documents` 提供。
+
+    `bound` 只对**差异条目**计数——旧版把没变化的绑定项也算进去，所以数字虚高。
+    """
+    base = index_value_nodes(base_nodes)
+    target = index_value_nodes(target_nodes)
+    bound_ref = bound_reference(bindings, base_name, target_name)
+
+    summary = {"added": 0, "removed": 0, "modified": 0, "bound": 0}
+    for loc in sorted(set(base) | set(target)):
+        before = base.get(loc)
+        after = target.get(loc)
+        if before is None:
+            summary["added"] += 1
+        elif after is None:
+            summary["removed"] += 1
+        elif before[0] != after[0]:
+            summary["modified"] += 1
+        else:
+            continue
+        entry = after or before
+        if entry is not None and entry[2] in bound_ref:
+            summary["bound"] += 1
+    return {"type": "structural", "summary": summary}
+
 
 def compare_versions(
     content_old: bytes,

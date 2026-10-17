@@ -251,7 +251,8 @@
 
   function diffSummary(P, a, an, b, bn) {
     var st = structural(P, a, an, b, bn);
-    return { has_changes: a !== b, summary: st.summary, structural: st.type === "structural" };
+    if (st.type !== "structural") return null;
+    return { has_changes: a !== b, summary: st.summary, structural: true };
   }
 
   /* ---------------- favorites ---------------- */
