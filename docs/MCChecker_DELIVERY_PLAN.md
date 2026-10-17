@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 4/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏、M2-03 修改建议提交、M2-04 详情面板提交建议接真实后端）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **394 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (22)**。下一个待做卡：**M2-05 / INH-1878 搜索接口**（`GET /p/{pid}/search`，只读，不动修订号）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 5/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏、M2-03 修改建议提交、M2-04 详情面板建议放行、M2-05 全局搜索 API）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **422 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (22)**。下一个待做卡：**M2-06 / INH-1879 搜索页与 Ctrl+K 命令面板**（把 `search` 加进 `WIRED`）。
 
 ---
 
@@ -151,7 +151,7 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（4/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（5/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -159,7 +159,8 @@ PR: <url> · 提交 `<sha>`
 | M2-02 | INH-1875 | Done | 速览页与结构树收藏 |
 | M2-03 | INH-1876 | Done | 修改建议提交与定位符（含 `services/review.py` 提交部分） |
 | M2-04 | INH-1877 | Done | 详情面板提交修改建议（`WIRED` 放行 `remarks`） |
-| **M2-05** | INH-1878 | Todo | **全局搜索 API 与命中计数 ← 下一张** |
+| **M2-05** | INH-1878 | Done | 全局搜索 API 与命中计数（`services/search.py` + `core.searching.search_compact`） |
+| **M2-06** | INH-1879 | In Progress | **搜索页与 Ctrl+K 命令面板 ← 下一张** |
 | M2-06 | INH-1879 | In Progress | 搜索页与 Ctrl+K 命令面板 |
 | M2-07 | INH-1880 | Todo | 历史与修改记录列表及差异摘要 |
 | M2-08 | INH-1881 | Todo | 结构化对比 API |
@@ -229,6 +230,7 @@ PR: <url> · 提交 `<sha>`
 | #23 | M2-02 | 速览与结构树收藏接真实后端：能力开关改为 `CAP_KEYS` + `WIRED`（本卡加 `favorites`/`revision`），新增 `schedule` 能力避免速览白打 404，+2 条 caps 守卫测试 |
 | #24 | M2-03 | `services/review.py`（§6.7 提交五步）+ `server/api_remarks.py`（GET/POST remarks）；`storage.add_edit_remark` 新增 `locator`/`source_sha256`/`schema_version` 可选字段并放宽 `node_key` 空值；mock 补 JSON 类型检查并去掉多余的 `files` 递增 |
 | #25 | M2-04 | `api.js` 的 `WIRED` 放行 `remarks`（详情面板建议表单在生产可用），mock 的「只能对有值的节点提交建议」补 `field: "loc"` 以对齐 `services/review.py`；前端测试页 caps 断言随卡改名并覆盖新放行项 |
+| #26 | M2-05 | `core/searching.py` 新增 `search_compact()` / `display_path()`（每个命中节点计 1，修掉父节点命中计 0 的旧缺陷）+ `services/search.py`（反序列化前按响应体字节预筛）+ `server/api_search.py`（`GET /p/{pid}/search`，`read` 档）；mock 补 `file` 未知 → 404 与 `limit`/`offset` 下限；新增 `scripts/bench_search.py` |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -254,6 +256,12 @@ PR: <url> · 提交 `<sha>`
 14. **`MC.caps` 能力开关（M1-05 起，前端逐卡必须遵守）**：`app/web/assets/js/core/api.js` 里的 `MC.caps` 是「哪些后端接口已接入」的唯一事实源，由 `MC.config.mock` 推导（模板全开、生产默认全关），`MC.unwired` 存每项能力的接入去向文案。未接入的入口一律 `disabled` + `title`，并且**不发请求**（不要靠后端假接口消除 404）。每张前端卡在自己的 PR 里把对应键加进 `api.js` 的 `WIRED`（必须是 `CAP_KEYS` 的子集，测试页有断言）：M2-02 `favorites`+`revision`、M2-04 `remarks`、M2-06 `search`、M2-09 `history`/`compare`/`records`、M2-11 `import`/`temp`、M3 各卡 `review`/`dl`/`settings`/`tools`。新增能力键时 `CAP_KEYS` 与 `MC.unwired` 必须同步（前端测试页有断言会红）。M4-08 全绿后该机制连同条件分支一起删除。
 15. **同名兄弟的实时值取「先序最后一个」**：`favorite["path"]` 是旧节点 ID，同名兄弟共享它，因此实时值必须按 §7.7 取先序**最后一个**（与 v1 `favorites_live._build_id_index` 的后写覆盖结果一致）。`mock-api.js` 的 `resolveLive` 原先取第一个，已在 M2-01 按决策 4 与后端一起改正，并留了断言测试（`test_live_value_uses_last_sibling_in_preorder`）。今后这类双轨语义调整，都要 mock + 后端 + SPEC 同 PR 改。
 16. **修订号提前到 M2-01 落地**：`services/revision.py` + `GET /api/v1/p/{pid}/revision` 已在 M2-01 建好（原表排在 M3-17），因为 §7.1 要求「所有写接口在成功后递增对应修订计数」——没有计数器，每张写卡都无法满足该条。规则：只在 service 写成功后 `revision.bump(pid, part)`，handler 不碰计数；读接口、失败写（400/403/404/409）与「删了 0 条」都不递增（有守卫测试）。M3-17 只剩多用户横幅 UX 与 `settings`/`tasks` 计数的接入。
+17. **全局搜索的预算瓶颈在文档缓存条目数，不在扫描（M2-05 实测）**：`scripts/bench_search.py` 在 Apple Silicon / 3.9.11 上量到单节点均摊约 **0.33 µs**，所以扫描本身不是问题。真正的超预算来自 `services/documents.MEMORY_CACHE_MAX_ENTRIES = 24`：机型里超过 24 个文件时，一次全量搜索会把 LRU 打满循环逐出（每次重取都要 gunzip → `json.loads` → `json.dumps`）。实测同一台机器：
+    - 12 文件 × 5 000 节点（6 万节点，现实规模）：预热 **19.6 ms**，无命中 **4.6 ms**。
+    - 20 文件 × 30 000 节点（60 万，未超条目数）：预热 **198.6 ms**，无命中 **35.0 ms** ✔ §12 的 500 ms。
+    - 30 文件 × 30 000 节点（90 万，超出 24 项）：预热 **731 ms**（未达 §12 的 500 ms，也未达卡面 300 ms）。把条目数临时提到 64 后同一批文件降到 **279.5 ms**，`cache_info` 从 90 次 miss 变 30 次。
+    结论：修 §12 的方式是让缓存容量按「机型内文件数」而不是写死 24（256 MB 字节上限已经是真正的护栏），或按 §7.6 建议缓存小写数组。**这属于 M1-02 / §6.5 已定的缓存策略，改它要在 M4-05 里做并回写 SPEC，不在 M2-05 顺手改。**
+18. **临时脚本不要在 pytest 之外跑 storage**：见 `docs/know-how.md` 第 7 节。M2-05 有一次为了拆分耗时直接在 shell 里 `storage.DATA_DIR = tmp`，结果样本和 `cache/doc_v2` 落进了仓库真实 `data/`（已删除，`data/` 哈希回到 `478d9c26ea8dbb8f`）。
 
 ---
 
@@ -293,4 +301,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-05（`INH-1878`）——全局搜索 API 与命中计数（§7.6）：只读接口，跨机型内所有配置文件按 `loc` 返回命中，不动修订号；随后 M2-06（`INH-1879`）把 `search` 加进 `WIRED` 并接 Ctrl+K 命令面板。M2-03 遗留的一处规范疑问（NoneType 节点唯一合法值恰好等于当前值，被 §6.7 第 1 步拦下，导致 null 节点永远无法提建议）需在 M3-01 之前找产品确认，不要静默改语义；M2-04 的真实后端验收确认了相邻的另一条：`note=null` 这类节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它**是**有值节点、可以提建议，被拦下的只是「建议改回 null」。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步**：M2-06（`INH-1879`）——搜索页与 Ctrl+K 命令面板：把 `search` 加进 `api.js` 的 `WIRED`，接 `GET /p/{pid}/search?q=&file=&limit=&offset=`，核对 UC-25（Ctrl+K 输入关键词 → 分组结果 → 点击打开文件并选中节点）与 UC-26（命中父节点名时结果不为 0）。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
