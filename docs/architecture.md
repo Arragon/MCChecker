@@ -9,6 +9,8 @@
 > 此前的架构设计：`docs/MCChecker_ARCHITECTURE.md`（数据安全、定位、审阅校验等原则继续有效；“保留 NiceGUI”的结论已被上述重构设计取代）
 > 此前的开发计划：`docs/MCChecker_ROADMAP.md`
 >
+> **执行手册（进度台账、分支/PR 协议、单卡 SOP、接力入口）**：`docs/MCChecker_DELIVERY_PLAN.md`
+>
 > 下方“Current Implementation”仍描述当前运行代码（NiceGUI 版本），重构完成前保持不变。
 
 ## Overview
