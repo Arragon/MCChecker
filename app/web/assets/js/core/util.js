@@ -239,6 +239,16 @@
     return s.slice(0, 2).toUpperCase();
   }
 
+  /**
+   * 顶栏要显示的身份名称。未登记时服务端把识别地址（IP）当作 name 返回，
+   * 而 §4.3 规定地址只在身份弹层里显示（带复制按钮），所以顶栏不能直接用它。
+   */
+  function identityName(id) {
+    if (!id) return "";
+    if (id.registered === false) return "未登记";
+    return id.name || "";
+  }
+
   /** 安全外链：仅允许 http/https。 */
   function safeUrl(url) {
     try {
@@ -269,6 +279,7 @@
     storageGet: storageGet,
     storageSet: storageSet,
     initials: initials,
+    identityName: identityName,
     safeUrl: safeUrl,
   };
 })(window);

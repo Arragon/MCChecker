@@ -151,6 +151,46 @@
     },
   };
 
+  /* ===================== 能力开关 ===================== */
+  /*
+   * 后端接口按里程碑逐卡接入（docs/MCChecker_DELIVERY_PLAN.md 第 6 节），而 index.html 与
+   * template.html 共享同一批视图代码，两者唯一差别是 MC.config.mock。因此"哪些接口已经可用"
+   * 集中在这里：生产模式下未接入的入口一律 disabled 并说明接入卡号，且不发请求（避免 404 噪声）。
+   * 每张前端卡在自己的改动里把对应键翻成 true；M4-08 全部为 true 后本机制删除。
+   */
+  var CAP_KEYS = [
+    "favorites", "remarks", "search", "review", "dl", "settings", "import",
+    "delete", "history", "compare", "records", "tools", "revision", "temp",
+  ];
+
+  MC.capsFor = function (mock) {
+    var caps = {};
+    CAP_KEYS.forEach(function (k) {
+      caps[k] = !!mock;
+    });
+    return caps;
+  };
+
+  MC.caps = MC.capsFor(!!(MC.config && MC.config.mock));
+
+  /* 每项能力未接入时展示给用户的去向（卡号见 docs/MCChecker_DELIVERY_PLAN.md 第 6 节）。 */
+  MC.unwired = {
+    favorites: "收藏将在 M2-01 / M2-02 接入",
+    remarks: "修改建议将在 M2-03 / M2-04 接入",
+    search: "全局搜索将在 M2-05 / M2-06 接入",
+    review: "审阅页将在 M3-02 / M3-03 接入",
+    dl: "DL 计算将在 M3-10 ~ M3-12 接入",
+    settings: "设置页将在 M3-06 / M3-13 ~ M3-16 接入",
+    import: "导入本地文件或链接将在 M2-10 / M2-11 接入",
+    delete: "删除文件（移入恢复区）将在 M2-12 接入",
+    history: "历史版本将在 M2-07 / M2-09 接入",
+    compare: "结构化对比将在 M2-08 / M2-09 接入",
+    records: "修改记录将在 M3-09 接入",
+    tools: "外部工具将在 M3-15 接入",
+    revision: "多用户更新提示将在 M2-01 接入",
+    temp: "临时文件将在 M2-10 / M2-11 接入",
+  };
+
   /* ===================== Router (hash) ===================== */
   /*
    * #/p/{pid}/overview

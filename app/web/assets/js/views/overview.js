@@ -30,6 +30,11 @@
     function load(silent) {
       var gen = ++loadGen;
       if (!silent) util.replace(bodyEl, MC.stateBlock({ kind: "loading" }));
+      if (!MC.caps.favorites) {
+        data = { groups: [], schedule: null };
+        render();
+        return Promise.resolve();
+      }
       return Promise.all([api.get(app.p("/favorites")), api.get(app.p("/schedule")).then(null, function () { return null; })]).then(
         function (res) {
           if (gen !== loadGen) return;
@@ -43,17 +48,26 @@
     function render() {
       var groups = data.groups;
       var main = h("div.col", { style: "gap:16px" });
+      var openFirst = app.files[0] ? [h("button.btn.btn-primary", { type: "button", onclick: function () { app.openFile(app.files[0].name); } }, "打开 " + app.files[0].name)] : null;
       if (!groups.length) {
         main.append(
           h(
             "div.panel",
-            MC.stateBlock({
-              kind: "empty",
-              icon: "star",
-              title: "还没有收藏变量",
-              desc: "打开任意配置文件，点击节点前的 ☆（或选中后按 S）即可收藏。收藏对本机型的所有用户可见。",
-              actions: app.files[0] ? [h("button.btn.btn-primary", { type: "button", onclick: function () { app.openFile(app.files[0].name); } }, "打开 " + app.files[0].name)] : null,
-            })
+            MC.caps.favorites
+              ? MC.stateBlock({
+                  kind: "empty",
+                  icon: "star",
+                  title: "还没有收藏变量",
+                  desc: "打开任意配置文件，点击节点前的 ☆（或选中后按 S）即可收藏。收藏对本机型的所有用户可见。",
+                  actions: openFirst,
+                })
+              : MC.stateBlock({
+                  kind: "empty",
+                  icon: "star",
+                  title: "收藏尚未接入",
+                  desc: MC.unwired.favorites + "；接入后这里显示你收藏的关键变量在当前版本里的值。",
+                  actions: openFirst,
+                })
           )
         );
       }
