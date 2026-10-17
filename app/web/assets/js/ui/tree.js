@@ -158,7 +158,8 @@
    * new MC.Tree(host, idx, {
    *   showAttrs: true,
    *   decor(i) -> {star: 'on'|'covered'|null, remarks: n},
-   *   onSelect(i), onStar(i), onActivate(i)
+   *   onSelect(i), onStar(i), onActivate(i),
+   *   starReason, onStarBlocked(i)  // 收藏接口未接入时：星标渲染但禁用，按 S 给出原因
    * })
    */
   function Tree(host, idx, opts) {
@@ -278,16 +279,18 @@
           icon("chevron-right")
         )
       );
-      if (this.opts.onStar) {
+      if (this.opts.onStar || this.opts.starReason) {
         var starState = d.star || "";
+        var starBlocked = !this.opts.onStar;
         row.appendChild(
           h(
             "button.tr-star" + (starState === "on" ? ".is-on" : starState === "covered" ? ".is-covered" : ""),
             {
               type: "button",
               tabindex: "-1",
+              disabled: starBlocked,
               "aria-label": starState === "on" ? "取消收藏" : starState === "covered" ? "已被父级收藏包含" : "收藏",
-              title: starState === "covered" ? "已被父级收藏包含" : null,
+              title: starBlocked ? this.opts.starReason : starState === "covered" ? "已被父级收藏包含" : null,
               dataset: { act: "star" },
             },
             icon("star")
@@ -382,7 +385,9 @@
         break;
       case "s":
       case "S":
-        if (i >= 0 && this.opts.onStar && !e.ctrlKey && !e.metaKey) this.opts.onStar(i);
+        if (i < 0 || e.ctrlKey || e.metaKey) break;
+        if (this.opts.onStar) this.opts.onStar(i);
+        else if (this.opts.onStarBlocked) this.opts.onStarBlocked(i);
         break;
       default:
         return;
