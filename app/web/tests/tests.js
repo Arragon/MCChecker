@@ -178,12 +178,23 @@
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
   });
 
-  test("M2-06：收藏、修订号、修改建议与搜索已在生产放行，未实现的接口不得提前打开", function () {
+  test("M2-09：历史、对比与修改记录已在生产放行，未实现的接口不得提前打开", function () {
     var prod = MC.capsFor(false);
-    ok(prod.favorites && prod.revision && prod.remarks && prod.search, "收藏、修订号、建议与搜索已接真实后端");
-    ["schedule", "review", "dl", "settings", "import", "delete", "history", "compare", "records", "tools", "temp"].forEach(function (k) {
+    ["favorites", "revision", "remarks", "search", "history", "compare", "records"].forEach(function (k) {
+      ok(prod[k], k + " 已接真实后端");
+    });
+    ["schedule", "review", "dl", "settings", "import", "delete", "tools", "temp"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
+  });
+
+  test("差异摘要统计：null 显示未计算，有值时给出 +/−/~ 与文字", function () {
+    var none = MC.diffStats(null);
+    ok(none.textContent.indexOf("未计算") >= 0, "diff 为 null 时不能崩，也不能谎报无变更");
+    ok(MC.diffStats({ has_changes: false }).textContent.indexOf("无变更") >= 0);
+    var stats = MC.diffStats({ has_changes: true, summary: { added: 2, removed: 1, modified: 3, bound: 4 } });
+    eq(stats.getAttribute("aria-label"), "新增 2，删除 1，修改 3", "不只靠颜色，读屏要有文字");
+    ok(stats.textContent.indexOf("+2") >= 0 && stats.textContent.indexOf("−1") >= 0 && stats.textContent.indexOf("~3") >= 0);
   });
 
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
