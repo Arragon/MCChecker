@@ -614,3 +614,30 @@ class TestMaintenanceGate:
 
         storage.add_favorite("/root/z", "z", "3", "cfg.xml")
         assert len(storage.load_favorites()) == 2
+
+
+class TestConfigureDataDir:
+    """`--data-dir` / `MCHECKER_DATA_DIR` 的落地（§3.6；M0-09 由 run.py 调用）。"""
+
+    def test_configure_data_dir_rewrites_derived_paths(self, tmp_path):
+        from app.core import storage
+
+        old_root = storage.DATA_DIR
+        new_root = os.path.abspath(str(tmp_path / "elsewhere"))
+
+        assert storage.configure_data_dir(new_root) == new_root
+        assert storage.DATA_DIR == new_root
+        assert storage.PROFILES_DIR == os.path.join(new_root, "profiles")
+        assert storage.MAPPING_FILE == os.path.join(new_root, "config_mapping.json")
+        assert storage.CACHE_DIR == os.path.join(new_root, "cache")
+        assert storage.PARSE_CACHE_DIR == os.path.join(new_root, "cache", "parse_tree")
+        assert old_root != new_root
+
+    def test_configure_data_dir_is_idempotent(self, tmp_path):
+        from app.core import storage
+
+        target = os.path.abspath(str(tmp_path / "same"))
+        storage.configure_data_dir(target)
+        assert storage.configure_data_dir(target) == target
+        assert storage.DATA_DIR == target
+        assert storage.PROFILES_DIR == os.path.join(target, "profiles")
