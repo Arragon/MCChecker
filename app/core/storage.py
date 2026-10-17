@@ -21,11 +21,12 @@ import contextvars
 import urllib.parse
 import uuid
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
 from . import fsutil
-from .errors import STORAGE_FAILURE, AppError, CorruptDataError
+from .errors import FILE_EXISTS, NOT_FOUND, STORAGE_FAILURE, AppError, CorruptDataError
 from .locks import profile_lock, write_gate
 
 logger = logging.getLogger(__name__)
@@ -41,18 +42,30 @@ PARSE_CACHE_DIR = os.path.join(CACHE_DIR, "parse_tree")
 DEFAULT_PROFILE = "default"
 _profile_var: contextvars.ContextVar[str] = contextvars.ContextVar("mc_profile", default=DEFAULT_PROFILE)
 
+#: 机型 id 的合法字符（规范 §5.2 `[A-Za-z0-9_-]+`）。
+_PROFILE_ID_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+)
+
 
 def _normalize_profile_id(profile_id: Optional[str]) -> str:
-    if not profile_id:
+    """规范化机型 id（规范 §5.2、C26）。
+
+    `None` 或纯空白表示"未指定"，落到 `default`——这是内部"用当前上下文"的
+    常规写法，不算非法。
+
+    显式传入的非空 id 必须匹配 `[A-Za-z0-9_-]+` 且不是 `.` / `..`。非法时抛
+    `AppError(NOT_FOUND)`，**不再**静默回退 `default`：否则 `/p/<非法>/files`
+    会读到 default 的数据，等于越权。调用方（HTTP 层）应先校验 exists；只有
+    `GET /session` 允许回落 default（那个例外在 M1-03 实现）。
+    """
+    if profile_id is None:
         return DEFAULT_PROFILE
     pid = str(profile_id).strip()
     if not pid:
         return DEFAULT_PROFILE
-    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
-    if any(ch not in allowed for ch in pid):
-        return DEFAULT_PROFILE
-    if pid in (".", ".."):
-        return DEFAULT_PROFILE
+    if pid in (".", "..") or any(ch not in _PROFILE_ID_CHARS for ch in pid):
+        raise AppError(NOT_FOUND, "机型不存在", profile=pid)
     return pid
 
 
@@ -323,6 +336,12 @@ def _update_config_mapping_locked(
     new_record_url: Optional[str],
     migrate_files: bool,
 ) -> bool:
+    """改名的实际执行体，调用方已持有机型锁。
+
+    改名涉及多处数据与文件：映射表、当前文件、归档目录、修改记录目录、以及
+    收藏/绑定/建议/DL 绑定里的文件名引用。任一步失败都要**整体回滚**——半改
+    名状态比改名失败难修得多。回滚用逆序 undo 栈实现。
+    """
     mapping = load_config_mapping()
     found = None
     for item in mapping:
@@ -333,57 +352,126 @@ def _update_config_mapping_locked(
         return False
 
     if target != original and any(item.get("name") == target for item in mapping):
-        raise ValueError("目标文件名已存在")
+        raise AppError(FILE_EXISTS, "目标文件名已存在", name=target)
 
-    if new_record_url is not None:
-        found["record_url"] = (new_record_url or "").strip()
+    undo: List[Any] = []
+    try:
+        original_mapping = deepcopy(mapping)
+        if new_record_url is not None:
+            found["record_url"] = (new_record_url or "").strip()
 
-    found["name"] = target
-    found["url"] = url
-    save_config_mapping(mapping)
+        found["name"] = target
+        found["url"] = url
+        save_config_mapping(mapping)
+        undo.append(("json", save_config_mapping, original_mapping))
 
-    if migrate_files and target != original:
-        _ensure_dirs()
+        if migrate_files and target != original:
+            _ensure_dirs()
+            _migrate_config_artifacts(original, target, undo)
+            _migrate_config_references(original, target, undo)
 
-        old_file = get_config_path(original)
-        new_file = get_config_path(target)
-        if os.path.exists(old_file) and not os.path.exists(new_file):
-            os.makedirs(os.path.dirname(new_file), exist_ok=True)
-            shutil.move(old_file, new_file)
+        return True
+    except BaseException:
+        _rollback(undo)
+        raise
 
-        old_archive_dir = os.path.join(get_archive_root_dir(), original)
-        new_archive_dir = os.path.join(get_archive_root_dir(), target)
-        if os.path.exists(old_archive_dir) and not os.path.exists(new_archive_dir):
-            os.makedirs(os.path.dirname(new_archive_dir), exist_ok=True)
-            shutil.move(old_archive_dir, new_archive_dir)
 
+def _rollback(undo: List[Any]) -> None:
+    """逆序撤销已完成的步骤。回滚本身出错只记日志，不能盖掉原始异常。"""
+    for entry in reversed(undo):
         try:
-            from . import parse_cache
-            parse_cache.invalidate(old_file)
-            parse_cache.invalidate(new_file)
-        except Exception:
-            pass
+            if entry[0] == "move":
+                _, src, dst = entry
+                if os.path.exists(src) and not os.path.exists(dst):
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.move(src, dst)
+            elif entry[0] == "json":
+                _, saver, original_data = entry
+                saver(deepcopy(original_data))
+        except Exception as exc:
+            logger.error("改名回滚失败 %r: %s", entry, exc)
 
-        favorites = load_favorites()
-        changed = False
+
+def _migrate_config_artifacts(original: str, target: str, undo: List[Any]) -> None:
+    """搬走当前文件与两个随文件名走的目录；目标已存在则失败。"""
+    old_file = get_config_path(original)
+    new_file = get_config_path(target)
+    if os.path.exists(new_file):
+        raise AppError(FILE_EXISTS, "目标文件已存在", name=target)
+    if os.path.exists(old_file):
+        os.makedirs(os.path.dirname(new_file), exist_ok=True)
+        shutil.move(old_file, new_file)
+        undo.append(("move", new_file, old_file))
+
+    for label, old_dir, new_dir in (
+        ("归档目录", os.path.join(get_archive_root_dir(), original), os.path.join(get_archive_root_dir(), target)),
+        ("修改记录目录", _records_dir_path(original), _records_dir_path(target)),
+    ):
+        if os.path.exists(new_dir):
+            raise AppError(FILE_EXISTS, f"目标{label}已存在", name=target)
+        if os.path.exists(old_dir):
+            os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+            shutil.move(old_dir, new_dir)
+            undo.append(("move", new_dir, old_dir))
+
+    try:
+        from . import parse_cache
+
+        parse_cache.invalidate(old_file)
+        parse_cache.invalidate(new_file)
+    except Exception:
+        pass
+
+
+def _migrate_config_references(original: str, target: str, undo: List[Any]) -> None:
+    """把收藏、绑定、建议、DL 绑定里的文件名引用从 `original` 改成 `target`。"""
+    favorites = load_favorites()
+    if any(fav.get("source_file") == original for fav in favorites):
+        undo.append(("json", save_favorites, deepcopy(favorites)))
         for fav in favorites:
             if fav.get("source_file") == original:
                 fav["source_file"] = target
-                changed = True
-        if changed:
-            save_favorites(favorites)
+        save_favorites(favorites)
 
-        bindings = load_bindings()
-        b_changed = False
+    bindings = load_bindings()
+    if any(v.get("file") == original for b in bindings for v in b.get("variables", [])):
+        undo.append(("json", save_bindings, deepcopy(bindings)))
         for b in bindings:
             for v in b.get("variables", []):
                 if v.get("file") == original:
                     v["file"] = target
-                    b_changed = True
-        if b_changed:
-            save_bindings(bindings)
+        save_bindings(bindings)
 
-    return True
+    remarks = load_edit_remarks()
+    if any(item.get("source_file") == original for item in remarks):
+        undo.append(("json", save_edit_remarks, deepcopy(remarks)))
+        for item in remarks:
+            if item.get("source_file") == original:
+                item["source_file"] = target
+        save_edit_remarks(remarks)
+
+    _migrate_dltool_references(original, target, undo)
+
+
+def _migrate_dltool_references(original: str, target: str, undo: List[Any]) -> None:
+    """DL 计算项绑定的 `source_file` 也要跟着改名，否则改名后计算取不到值。"""
+    try:
+        from . import dltool
+    except Exception:
+        return
+
+    config = dltool.load_config()
+    changed = False
+    for item in (config.get("items") or {}).values():
+        if not isinstance(item, dict):
+            continue
+        binding = item.get("binding") or {}
+        if binding.get("source_file") == original:
+            binding["source_file"] = target
+            changed = True
+    if changed:
+        undo.append(("json", dltool.save_config, deepcopy(config)))
+        dltool.save_config(config)
 
 
 def update_config_record_url(name: str, record_url: str) -> bool:
@@ -1492,6 +1580,34 @@ def save_schedule(schedule: Dict[str, Any]):
         _save_json(_get_profile_json_file("schedule.json", profile), schedule)
 
 
+#: 复制机型时带上的目录（规范 §7.2、C27）。
+#: `cache/` 可重建；`records/`、`edit_remarks.json`、`ip_mapping.json`、
+#: `admin_users.json`、`update_status.json` 属于运行期数据，不随机型复制。
+COPY_PROFILE_DIRS = ("configs", "archive")
+
+#: 复制机型时带上的 JSON（规范 §7.2）。
+COPY_PROFILE_FILES = (
+    "config_mapping.json",
+    "favorites.json",
+    "bindings.json",
+    "tools.json",
+    "schedule.json",
+    "dltool_config.json",
+)
+
+#: `default` 机型在新位置缺文件时按旧位置回退（§5.5 旧布局）。
+_LEGACY_PROFILE_FILES = {
+    "config_mapping.json": LEGACY_MAPPING_FILE,
+    "favorites.json": LEGACY_FAVORITES_FILE,
+    "bindings.json": LEGACY_BINDINGS_FILE,
+    "tools.json": LEGACY_TOOLS_FILE,
+    "schedule.json": LEGACY_SCHEDULE_FILE,
+}
+
+#: 复制机型时带上的目录 → 取目录的函数（§7.2）。
+_COPY_DIR_GETTERS = {"configs": get_configs_dir, "archive": get_archive_root_dir}
+
+
 def copy_profile_data(source_profile: str, target_profile: str) -> None:
     src = _normalize_profile_id(source_profile)
     dst = _normalize_profile_id(target_profile)
@@ -1509,45 +1625,26 @@ def _copy_profile_data_locked(src: str, dst: str) -> None:
     dst_base = _profile_base_dir(dst)
     os.makedirs(dst_base, exist_ok=True)
 
-    src_mapping = _get_profile_json_file("config_mapping.json", src)
-    if src == DEFAULT_PROFILE and not os.path.exists(src_mapping) and os.path.exists(LEGACY_MAPPING_FILE):
-        src_mapping = LEGACY_MAPPING_FILE
+    for basename in COPY_PROFILE_FILES:
+        src_path = _get_profile_json_file(basename, src)
+        if src == DEFAULT_PROFILE and not os.path.exists(src_path):
+            legacy = _LEGACY_PROFILE_FILES.get(basename)
+            if legacy and os.path.exists(legacy):
+                src_path = legacy
+        if not os.path.exists(src_path):
+            continue
+        dst_path = os.path.join(dst_base, basename)
+        if basename == "schedule.json":
+            # 调度周期照抄，但"上次执行结果"属于源机型的历史，落到新机型上会
+            # 让人误以为它跑过（规范 §7.2）。
+            schedule = _load_json(src_path, {"enabled": False, "interval_hours": 24})
+            schedule["last_run"] = None
+            _save_json(dst_path, schedule)
+            continue
+        shutil.copy2(src_path, dst_path)
 
-    src_favs = _get_profile_json_file("favorites.json", src)
-    if src == DEFAULT_PROFILE and not os.path.exists(src_favs) and os.path.exists(LEGACY_FAVORITES_FILE):
-        src_favs = LEGACY_FAVORITES_FILE
-
-    src_bindings = _get_profile_json_file("bindings.json", src)
-    if src == DEFAULT_PROFILE and not os.path.exists(src_bindings) and os.path.exists(LEGACY_BINDINGS_FILE):
-        src_bindings = LEGACY_BINDINGS_FILE
-
-    src_tools = _get_profile_json_file("tools.json", src)
-    if src == DEFAULT_PROFILE and not os.path.exists(src_tools) and os.path.exists(LEGACY_TOOLS_FILE):
-        src_tools = LEGACY_TOOLS_FILE
-
-    src_schedule = _get_profile_json_file("schedule.json", src)
-    if src == DEFAULT_PROFILE and not os.path.exists(src_schedule) and os.path.exists(LEGACY_SCHEDULE_FILE):
-        src_schedule = LEGACY_SCHEDULE_FILE
-
-    src_files = {
-        "config_mapping.json": src_mapping,
-        "favorites.json": src_favs,
-        "bindings.json": src_bindings,
-        "tools.json": src_tools,
-        "schedule.json": src_schedule,
-        "dltool_config.json": os.path.join(_profile_base_dir(src), "dltool_config.json"),
-    }
-
-    for basename, src_path in src_files.items():
-        if os.path.exists(src_path):
-            shutil.copy2(src_path, os.path.join(dst_base, basename))
-
-    src_dirs = {
-        "configs": get_configs_dir(src),
-        "archive": get_archive_root_dir(src),
-        "cache": get_cache_root_dir(src),
-    }
-    for name, src_dir in src_dirs.items():
+    for name in COPY_PROFILE_DIRS:
+        src_dir = _COPY_DIR_GETTERS[name](src)
         if os.path.exists(src_dir):
             shutil.copytree(src_dir, os.path.join(dst_base, name), dirs_exist_ok=True)
 
