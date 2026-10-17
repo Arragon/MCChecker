@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 5/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏、M2-03 修改建议提交、M2-04 详情面板建议放行、M2-05 全局搜索 API）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **422 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (22)**。下一个待做卡：**M2-06 / INH-1879 搜索页与 Ctrl+K 命令面板**（把 `search` 加进 `WIRED`）。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 完成 6/12**（M2-01 收藏 API 与修订号、M2-02 速览与结构树收藏、M2-03 修改建议提交、M2-04 详情面板建议放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **422 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (23)**。下一个待做卡：**M2-07 / INH-1880 历史与修改记录列表及差异摘要**（后端接口，前端放行留在 M2-09）。
 
 ---
 
@@ -151,7 +151,7 @@ PR: <url> · 提交 `<sha>`
 | M1-06 | INH-1872 | Done | 结构树、详情面板与文件下载 |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
 
-### M2 写入链路：收藏、搜索、对比、导入与删除（5/12）
+### M2 写入链路：收藏、搜索、对比、导入与删除（6/12）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -159,10 +159,9 @@ PR: <url> · 提交 `<sha>`
 | M2-02 | INH-1875 | Done | 速览页与结构树收藏 |
 | M2-03 | INH-1876 | Done | 修改建议提交与定位符（含 `services/review.py` 提交部分） |
 | M2-04 | INH-1877 | Done | 详情面板提交修改建议（`WIRED` 放行 `remarks`） |
-| **M2-05** | INH-1878 | Done | 全局搜索 API 与命中计数（`services/search.py` + `core.searching.search_compact`） |
-| **M2-06** | INH-1879 | In Progress | **搜索页与 Ctrl+K 命令面板 ← 下一张** |
-| M2-06 | INH-1879 | In Progress | 搜索页与 Ctrl+K 命令面板 |
-| M2-07 | INH-1880 | Todo | 历史与修改记录列表及差异摘要 |
+| M2-05 | INH-1878 | Done | 全局搜索 API 与命中计数（`services/search.py` + `core.searching.search_compact`） |
+| M2-06 | INH-1879 | Done | 搜索页与 Ctrl+K 命令面板（`WIRED` 放行 `search`） |
+| **M2-07** | INH-1880 | Todo | **历史与修改记录列表及差异摘要 ← 下一张** |
 | M2-08 | INH-1881 | Todo | 结构化对比 API |
 | M2-09 | INH-1882 | In Progress | 历史列表与对比选择器 |
 | M2-10 | INH-1883 | Todo | 临时文件、上传保存与链接导入 |
@@ -231,6 +230,7 @@ PR: <url> · 提交 `<sha>`
 | #24 | M2-03 | `services/review.py`（§6.7 提交五步）+ `server/api_remarks.py`（GET/POST remarks）；`storage.add_edit_remark` 新增 `locator`/`source_sha256`/`schema_version` 可选字段并放宽 `node_key` 空值；mock 补 JSON 类型检查并去掉多余的 `files` 递增 |
 | #25 | M2-04 | `api.js` 的 `WIRED` 放行 `remarks`（详情面板建议表单在生产可用），mock 的「只能对有值的节点提交建议」补 `field: "loc"` 以对齐 `services/review.py`；前端测试页 caps 断言随卡改名并覆盖新放行项 |
 | #26 | M2-05 | `core/searching.py` 新增 `search_compact()` / `display_path()`（每个命中节点计 1，修掉父节点命中计 0 的旧缺陷）+ `services/search.py`（反序列化前按响应体字节预筛）+ `server/api_search.py`（`GET /p/{pid}/search`，`read` 档）；mock 补 `file` 未知 → 404 与 `limit`/`offset` 下限；新增 `scripts/bench_search.py` |
+| #27 | M2-06 | `api.js` 的 `WIRED` 放行 `search`；`views/search.js` 的 `update()` 同步写 `inst.title`，修掉「搜索标签停在第一次关键词」（`activate()` 会用 `inst.title` 回写标签名）；前端测试 +1 条高亮断言（文本节点拆分、mark 计数、载荷不执行） |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -301,4 +301,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M2-06（`INH-1879`）——搜索页与 Ctrl+K 命令面板：把 `search` 加进 `api.js` 的 `WIRED`，接 `GET /p/{pid}/search?q=&file=&limit=&offset=`，核对 UC-25（Ctrl+K 输入关键词 → 分组结果 → 点击打开文件并选中节点）与 UC-26（命中父节点名时结果不为 0）。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步**：M2-07（`INH-1880`）——历史与修改记录列表及差异摘要：后端补齐 `archive`/`record` 列表与差异摘要接口（`history`/`compare`/`records` 三个能力仍不放行，留给 M2-09 的前端卡）。M2-06 已完成：`search` 进入 `WIRED`，UC-25/26 与 XSS 关键词都在真实后端验过。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的规范疑问：NoneType 节点在 compact 文档里 `v` 是字符串 `"null"`、`t` 是 `NoneType`，所以它是有值节点、可以提建议，但「建议又写回 null」会被 §6.7 第 1 步当成「与当前值相同」拦下——需在 M3-01 之前找产品确认，不要静默改语义。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。

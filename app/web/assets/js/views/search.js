@@ -118,7 +118,9 @@
         S.file = file;
         input.value = q;
         fillScope();
-        app.setTabTitle(this, q ? "搜索：" + q : "全局搜索");
+        // activate() 会用 inst.title 回写标签名，所以两者都要更新，否则标签停在第一次的关键词。
+        this.title = q ? "搜索：" + q : "全局搜索";
+        app.setTabTitle(this, this.title);
         run(false);
       },
       onShow: function () { setTimeout(function () { if (!S.q) input.focus(); }, 0); },
