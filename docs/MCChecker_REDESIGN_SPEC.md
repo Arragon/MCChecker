@@ -606,6 +606,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 2. 读取当前文档；若请求带 `sha256` 且与当前不同 → 409 `SOURCE_CHANGED`。
 3. 用 `loc` 找到节点；节点无值 → 400。
 4. JSON 类型检查：原类型 `int` 要求匹配 `^-?\d+$`；`float` 要求可 `float()` 且有限；`bool` 要求 `true|false`；`NoneType` 只允许 `null`；不匹配 → 400 `INVALID_INPUT`，提示需要的类型。XML 不做类型检查。
+   `NoneType` 节点的值恒为 `null`，对它提交建议会被第 1 步判为「与当前值相同」而拒绝；也不允许把 `int/float/bool/str` 节点改成 `null`。即 **null 是只读值**（D1，M3-01 裁定）。若将来需要「清空为 null」，属语义变更，需另开卡同时改本节、`services/review.py::_required_type`、`core/reviewing.apply_edits` 的类型转换与 `mock-api.js` 四处。
 5. 锁内追加记录（§5.2 字段，`node_key=""`，`schema_version=2`）。
 
 **审阅提交** `POST /review/submit`，请求见 §7.8。服务端步骤（全部在机型锁内完成第 3–8 步）：

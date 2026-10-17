@@ -129,7 +129,7 @@ class TestRemarkSubmit:
             ("/b", "yes", 400),      # bool ← 非 true/false
             ("/b", "false", 201),
             ("/z", "0", 400),        # NoneType ← 只允许 null
-            ("/z", "null", 400),     # 唯一合法值恰好等于当前值，被 §6.7 第 1 步拦下（规范疑问已在 PR 记录）
+            ("/z", "null", 400),     # NoneType 唯一合法值等于当前值 → 被第 1 步拦下（D1：null 只读）
             ("/s", "任意文本", 201),  # str 不限制
         ]
         with make_server() as server:
@@ -141,6 +141,11 @@ class TestRemarkSubmit:
                 assert status == expected, (loc, value, expected, body)
                 if expected == 400:
                     assert body["error"]["detail"]["field"] == "proposed_value", (loc, body)
+                if (loc, value) == ("/z", "null"):
+                    # D1 裁定（§6.7 第 4 步注 / DELIVERY_PLAN 第 8 节决策 20）：null 是只读值。
+                    # NoneType 节点的 `v` 恒为字符串 "null"，所以「建议写回 null」只可能是
+                    # 「与当前值相同」；不为它开任何代码分支，这条断言就是它的回归。
+                    assert "与当前值相同" in body["error"]["message"], body
 
     def test_xml_skips_type_check(self):
         """§6.7：XML 不做类型检查（属性值本质是字符串）。"""
