@@ -169,10 +169,11 @@ class TestApiSession:
         assert error["detail"] == {}
 
     def test_post_without_content_length(self, server):
-        # 不支持 chunked：没有 Content-Length 按 §3.4 第 3 步处理
+        # 不支持 chunked：没有 Content-Length 按 §3.4 第 3 步处理（写请求需带自定义头）
         data = raw_request(
             server,
-            "POST /api/v1/session HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n",
+            "POST /api/v1/session HTTP/1.1\r\nHost: test\r\n"
+            "X-Requested-With: MCChecker\r\nConnection: close\r\n\r\n",
         )
         assert b"413" in data.split(b"\r\n", 1)[0]
         assert b"TOO_LARGE" in data
@@ -183,6 +184,7 @@ class TestApiSession:
         data = raw_request(
             server,
             "POST /api/v1/session HTTP/1.1\r\nHost: test\r\n"
+            "X-Requested-With: MCChecker\r\n"
             "Content-Type: application/json\r\n"
             "Content-Length: %d\r\nConnection: close\r\n\r\n" % (JSON_BODY_LIMIT + 1),
         )
@@ -196,9 +198,21 @@ class TestApiSession:
             "POST",
             "/api/v1/session",
             body=b"{}",
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "X-Requested-With": "MCChecker"},
         )
         assert status == 404
+
+    def test_write_without_csrf_header_is_forbidden(self, server):
+        # §11.4：状态变更请求必须带自定义头（其它安全头在 M4-02）
+        status, _, body = request(
+            server,
+            "POST",
+            "/api/v1/session",
+            body=b"{}",
+            headers={"Content-Type": "application/json"},
+        )
+        assert status == 403
+        assert json.loads(body.decode("utf-8"))["error"]["code"] == "FORBIDDEN"
 
 
 class TestSingleInstanceLock:

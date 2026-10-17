@@ -21,7 +21,14 @@ from typing import Any, Dict, Optional
 from .. import __version__
 from ..config import Settings
 from ..core import device_models, fsutil, storage
-from ..core.errors import INVALID_INPUT, NOT_FOUND, STORAGE_FAILURE, TOO_LARGE, AppError
+from ..core.errors import (
+    FORBIDDEN,
+    INVALID_INPUT,
+    NOT_FOUND,
+    STORAGE_FAILURE,
+    TOO_LARGE,
+    AppError,
+)
 from ..services import auth
 from ..services.context import RequestContext
 from .router import Response, Router
@@ -40,6 +47,12 @@ BLOCKED_PATHS = ("/template.html",)
 
 #: 可能带请求体的方法；GET/HEAD/DELETE 不要求 `Content-Length`。
 BODY_METHODS = ("POST", "PUT", "PATCH")
+
+#: §11.4：状态变更接口必须带自定义头（跨站表单无法设置自定义头）。
+#: 其余安全头策略（Content-Type 白名单、CSP 等）在 M4-02。
+CSRF_HEADER = "X-Requested-With"
+CSRF_VALUE = "MCChecker"
+WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 #: §8.9 第 2 条要求的确切内容。
 CONFIG_JS = "window.MC=window.MC||{};window.MC.config={mock:false};"
@@ -218,6 +231,13 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         started = time.time()
         split = urllib.parse.urlsplit(self.path)
         try:
+            if method in WRITE_METHODS and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
+                # 未读 body 即拒绝：连接里可能残留未读数据，必须关闭连接
+                self.close_connection = True
+                raise AppError(
+                    FORBIDDEN,
+                    "状态变更请求必须带 %s: %s" % (CSRF_HEADER, CSRF_VALUE),
+                )
             path = urllib.parse.unquote(split.path)
             body = self._read_body() if method in BODY_METHODS else None
             self._handle(method, path, split.query, body)
@@ -259,12 +279,16 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         ip = auth.client_ip(self)
         cid = auth.cookie_cid(self.headers.get("Cookie"))
         pid = params.get("pid") if params else None
-        if pid is None:
-            self._send_response(handler(RequestContext(ip=ip, cid=cid), params, query_params, body))
-            return
-        if not device_models.exists(pid):
+        if pid is not None and not device_models.exists(pid):
             raise AppError(NOT_FOUND, "机型不存在")
-        ctx = RequestContext(ip=ip, cid=cid, profile_id=pid, actor=auth.resolve_actor(ip, pid))
+
+        # §3.4 第 4 步：每个请求都重新解析身份（撤权后下一次请求即 403）；
+        # 无 {pid} 的全局接口按 default 机型解析。
+        actor = auth.resolve_actor(ip, pid or device_models.DEFAULT_MODEL_ID)
+        ctx = RequestContext(ip=ip, cid=cid, profile_id=pid or "", actor=actor)
+        if pid is None:
+            self._send_response(handler(ctx, params, query_params, body))
+            return
         with storage.use_profile(pid):
             self._send_response(handler(ctx, params, query_params, body))
 

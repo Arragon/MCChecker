@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0 全部 9 卡完成**；**M1 完成 4/7**（M1-01/02/03 + 历史 Done 的 M1-07）；集成分支 `feat/mc-v2-delivery` tip **`77a0663`**，工作区干净、无未推送提交；全量测试 **323 passed**（Python 3.9.11）。下一个待做卡：**M1-04 服务端权限入口与四角色测试夹具**。
+**M0 全部 9 卡完成**；**M1 完成 5/7**（M1-01/02/03/04 + 历史 Done 的 M1-07）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准），工作区干净、无未推送提交；全量测试 **349 passed**（Python 3.9.11）。下一个待做卡：**M1-05 / M1-06（生产外壳接入会话与文件列表、结构树与详情面板——前端已就绪，需切真实后端）**。
 
 ---
 
@@ -146,7 +146,7 @@ PR: <url> · 提交 `<sha>`
 | M1-01 | INH-1867 | Done | compact 解析器：完整属性与稳定定位符 |
 | M1-02 | INH-1868 | Done | 文档服务：文件列表、原文与缓存 |
 | M1-03 | INH-1869 | Done | 身份解析、会话 cookie 与角色展示 |
-| **M1-04** | INH-1870 | Todo | **服务端权限入口与四角色测试夹具 ← 下一张** |
+| M1-04 | INH-1870 | Done | 服务端权限入口与四角色测试夹具 |
 | M1-05 | INH-1871 | In Progress | 生产外壳接入会话与文件列表（前端已做） |
 | M1-06 | INH-1872 | In Progress | 结构树、详情面板与文件下载（前端已做） |
 | M1-07 | INH-1873 | Done | 标签工作区、本地状态与可分享链接（纯前端） |
@@ -220,6 +220,8 @@ PR: <url> · 提交 `<sha>`
 | #14 | M1-01 | `parser.to_compact`（完整属性、稳定定位符、显式栈）+ mock 命名空间契约同步 |
 | #15 | M1-02 | `services/documents.py` + `/files`、`/document`、`/raw`（缓存/ETag/版本校验） |
 | #16 | M1-03 | `services/auth.py`、`services/context.py`、完整 `/session`、HTTP 层 ctx 接线 |
+| #17 | 批次 1 | `docs/MCChecker_DELIVERY_PLAN.md` 执行手册 + `architecture.md` 指针 |
+| #18 | M1-04 | `services/authz.py` 权限矩阵、HTTP 层 `X-Requested-With` 硬条件、`tests/authz_fixtures.py` 四角色夹具 |
 
 （另有 PR #2 设计说明书 + 前端模板；PR #3 前端补齐，已并入集成分支基点并关闭。）
 
@@ -281,4 +283,4 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：M1-04（`INH-1870`）——在已接线的 `RequestContext` 上实现 `authorize(ctx, action)` 全矩阵（§4.2）与四角色测试夹具；完成后 M1-05/M1-06 把生产入口切换为真实后端（前端模板已就绪），再进入 M2。
+**下一步**：M1-05/M1-06——把生产入口（`app/web/index.html` + `views/*.js`）从 mock 切到真实后端（会话、文件列表、结构树、详情面板、下载），逐条核对 §16.2 的 UC-01～UC-06；随后进入 M2（收藏/搜索/对比/导入/删除），此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试。
