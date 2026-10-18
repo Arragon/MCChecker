@@ -49,10 +49,42 @@ BLOCKED_PATHS = ("/template.html",)
 BODY_METHODS = ("POST", "PUT", "PATCH")
 
 #: §11.4：状态变更接口必须带自定义头（跨站表单无法设置自定义头）。
-#: 其余安全头策略（Content-Type 白名单、CSP 等）在 M4-02。
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "MCChecker"
 WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+#: §11.3 全站响应头，逐字按规范（`default-src 'self'`，不得放宽成 `*`）。
+#: 生产页只有外链脚本（`index.html` 里全是 `<script src=…>`，无内联 `on*=`），所以
+#: `script-src 'self'` 不需要 `unsafe-inline`；`style-src` 的 `'unsafe-inline'` 是
+#: `MC.util.h()` 写 `style` 属性所必需的，规范也照此写明。图标是内联 SVG sprite
+#: （`icons.js:69` 注入的是**固定常量**标记，不含运行期数据），字体走系统本地字体、
+#: 不发网络请求，因此 `default-src 'self'` 的兜底够用。
+SECURITY_CSP = (
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+)
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Content-Security-Policy": SECURITY_CSP,
+}
+
+#: §16.8 第 3 条：路径参数里的编码分隔符 / 空字节。
+#:
+#: `_dispatch` 会对整个请求路径做一次 `unquote`，所以 `..%2F..%2Fetc%2Fpasswd` 解码后
+#: 就成了 `../../etc/passwd`：路由的 `[^/]+` 不再匹配，请求以 **404「接口不存在」**收场，
+#: 而规范要求的是 **400/403**。危险本身不存在（越界的一直是 `validate_filename` +
+#: `resolve_within` 两关），但状态码把「被安全层拒绝」说成了「没有这个接口」，
+#: M4-08 的 §16.8 门禁按规范字面判。所以在分发之前按 `validate_filename` 的同一口径
+#: （`/` 与 `\` 本就是文件名非法字符）提前拒掉。
+#:
+#: 检查**解码后**的那一份是为了盖住二次编码（`%252F` 解一层成字面 `%2F`）；二次编码
+#: 本来也逃不掉——它只会变成一个含 `%` 的字面文件名，仍被关在根内，这里只是让响应码
+#: 也一致。代价：文件名里真含字面 `%2f`/`%5c`/`%00` 的配置无法经 URL 寻址（`api.seg()`
+#: 用 `encodeURIComponent`，正常路径不会走到这一步）。
+_ENCODED_UNSAFE = ("%2f", "%5c", "%00")
 
 #: §8.9 第 2 条要求的确切内容。
 CONFIG_JS = "window.MC=window.MC||{};window.MC.config={mock:false};"
@@ -239,10 +271,11 @@ class MCRequestHandler(BaseHTTPRequestHandler):
                     "状态变更请求必须带 %s: %s" % (CSRF_HEADER, CSRF_VALUE),
                 )
             path = urllib.parse.unquote(split.path)
+            _reject_encoded_separators(split.path, path)
             body = self._read_body() if method in BODY_METHODS else None
             self._handle(method, path, split.query, body)
         except AppError as exc:
-            self._send_json(exc.http_status, {"error": exc.to_payload()})
+            self._send_json(exc.http_status, {"error": _client_error_payload(exc)})
         except Exception:  # 未知异常：日志留堆栈，响应不含堆栈（§3.4 第 8 步）
             logger.exception("未处理异常：%s %s", method, split.path)
             self._send_json(
@@ -382,6 +415,10 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         extra: Optional[Dict[str, str]] = None,
     ) -> None:
         headers = dict(extra or {})
+        # §11.3：安全头在**唯一的发送出口**上统一加，304 与错误封套也不例外
+        # （handler 显式给了同名头时以 handler 的为准，所以用 setdefault）。
+        for name, value in SECURITY_HEADERS.items():
+            headers.setdefault(name, value)
         compressible = content_type is not None and content_type.startswith(_COMPRESSIBLE_PREFIXES)
         if status != 304 and compressible and len(body) > GZIP_MIN_BYTES and self._accepts_gzip():
             body = gzip.compress(body, compresslevel=6)
@@ -403,6 +440,38 @@ class MCRequestHandler(BaseHTTPRequestHandler):
     def _accepts_gzip(self) -> bool:
         return "gzip" in self.headers.get("Accept-Encoding", "").lower()
 
+    def send_error(self, code, message=None, explain=None):  # noqa: N802 - 基类同名方法
+        """§11.3：把标准库的 `send_error` 旁路也接回统一出口（含全站安全头）。
+
+        501「未实现的方法」（OPTIONS/TRACE/…）、400「请求行畸形」、414「URI 过长」、
+        505「版本不支持」都发生在 `_dispatch` **之前**，走的是 `BaseHTTPRequestHandler`
+        自己的 `send_response`，所以这些响应原先一条安全头都没有（实测 OPTIONS 只回
+        `Server/Date/Connection/Content-Type: text/html;charset=utf-8` 加一段 HTML 错误页）。
+        「全站统一」要包括它们，否则「安全头在 HTTP 层统一加」这句话就是假的。
+
+        同时把响应体换成本仓统一的 JSON 错误封套（§3.4）：这段 HTML 错误页会把请求行
+        回显进 `text/html`，而我们已经不再声明页面可以在任何帧里被嵌（`frame-ancestors 'none'`）。
+        保留基类的 `Connection: close` 与「连接已断时不抛」两个语义。
+        """
+        try:
+            short, _long = self.responses[code]
+        except KeyError:
+            short = "服务器错误"
+        # `explain` 是基类为那段 HTML 错误页准备的长文案，JSON 封套里不收（§11.5）。
+        summary = message or short
+        self.log_error("code %d, message %s", code, summary)
+        self.close_connection = True
+        body = json.dumps(
+            {"error": {"code": _transport_error_code(code), "message": summary, "detail": {}}},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        try:
+            self._send_bytes(code, body, "application/json; charset=utf-8",
+                             extra={"Connection": "close"})
+        except OSError:
+            # 与基类一致：畸形请求常常在半途断开，这里没有可以补救的对象。
+            pass
+
     def log_message(self, fmt: str, *args: Any) -> None:
         # 访问日志的正式格式（含 request_id）在 T-25/M4-03；这里先降噪到 DEBUG。
         logger.debug("%s %s", self.address_string(), fmt % args)
@@ -414,6 +483,58 @@ class MCRequestHandler(BaseHTTPRequestHandler):
 def _content_type(path: str) -> str:
     _, ext = os.path.splitext(path)
     return _CONTENT_TYPES.get(ext.lower(), "application/octet-stream")
+
+
+def _reject_encoded_separators(raw_path: str, decoded_path: str) -> None:
+    """§16.8 第 3 条：编码的分隔符/空字节一律 400，不让它退化成「404 接口不存在」。"""
+    haystacks = (raw_path.lower(), decoded_path.lower())
+    for token in _ENCODED_UNSAFE:
+        if any(token in hay for hay in haystacks):
+            raise AppError(INVALID_INPUT, "请求路径含编码的分隔符或空字节")
+
+
+def _transport_error_code(status: int) -> str:
+    """`send_error` 旁路的错误码（§7.1 那套 `code` 口径，但触发方是标准库不是业务）。
+
+    本应用实际只会走到 400（请求行畸形）、414、501、505；403/404 一并给出映射，
+    是因为任何「绕过 `_dispatch` 的错误」将来也应当能从状态码读出封套里的 `code`。
+    """
+    if status == 403:
+        return FORBIDDEN
+    if status == 404:
+        return NOT_FOUND
+    if status in (413, 414):
+        return TOO_LARGE
+    # 501（方法没实现）与 505（版本不支持）跟 4xx 同源：坏的是请求，服务器没有真的故障，
+    # 所以不许它挂 `STORAGE_FAILURE`——那个码在前端按「服务器内部错误」口径呈现。
+    return INVALID_INPUT if status in (501, 505) or status < 500 else STORAGE_FAILURE
+
+
+def _redact_absolute_path(value: Any) -> Any:
+    """§11.5：绝对路径不出服务器。只认「整个值就是一个绝对路径」这一种形状。
+
+    刻意不做子串替换：`detail.path` 也可能是收藏定位符（`root/R/params/param_01`），
+    那不是磁盘路径，改它会把前端用来定位的键改坏。
+    """
+    if isinstance(value, str) and os.path.isabs(value):
+        return os.path.basename(value)
+    return value
+
+
+def _client_error_payload(exc: AppError) -> Dict[str, Any]:
+    """送给客户端的错误封套。
+
+    `CorruptDataError` 们（`errors.py:80`，由 `storage.py:1745`、`dltool.py:81` 等以绝对
+    路径抛出）会把磁盘布局写进 `detail.path`。那些文件不在本卡可改范围，而且将来还会
+    有新的抛点是常态，所以在这里——响应离开进程前的最后一步——统一收敛。服务端日志
+    不受影响（`logger.exception` 仍拿到完整信息）。
+    """
+    payload = exc.to_payload()
+    payload["message"] = _redact_absolute_path(payload.get("message"))
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        payload["detail"] = {k: _redact_absolute_path(v) for k, v in detail.items()}
+    return payload
 
 
 class MCServer(ThreadingHTTPServer):
