@@ -362,17 +362,16 @@ def remove_config_mapping(name: str) -> bool:
 
 
 def _sanitize_config_filename(name: str) -> str:
-    n = (name or "").strip()
-    if not n:
-        raise ValueError("文件名不能为空")
-    if any(sep in n for sep in ("/", "\\", ":", "\0")):
-        raise ValueError("文件名不合法")
-    if n in (".", ".."):
-        raise ValueError("文件名不合法")
-    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
-    if any(ch not in allowed for ch in n):
-        raise ValueError("文件名包含非法字符")
-    return n
+    """文件名校验**一律委托 `fsutil.validate_filename`**（§11.2、C26）。
+
+    M0-07 落这层时用的是本地实现的 `A-Za-z0-9-_.` ASCII 白名单，而「新建更新源」走的是
+    `fsutil`（允许中文），两套字符集让中文源「建得出来却永远改不了名」（N1 / INH-1912）。
+    收敛只统一字符集，不放松边界：`fsutil.ILLEGAL_CHARS`（路径分隔符与 Windows 非法字符）、
+    控制字符、`.` / `..`、保留设备名与超长名仍然非法，所以 `configs/` 与 `records/`
+    下的拼法照旧安全。不合法抛 `AppError(INVALID_INPUT)`（不再是裸 `ValueError`），
+    HTTP 层照旧翻 400。
+    """
+    return fsutil.validate_filename(name)
 
 
 def update_config_mapping(

@@ -222,9 +222,8 @@ def list_sources(pid: str) -> List[Dict[str, Any]]:
 def create_source(pid: str, name: Any, url: Any, record_url: Any) -> Dict[str, Any]:
     """新增更新源（部署者）。`name` 走 `fsutil.validate_filename`（允许中文，C26）。
 
-    不走 `storage.add_config_mapping`：那个函数对同名项是「覆盖 url」，而 §7.9 要的是
-    409；并且它后面那步 `update_config_record_url` 走 M0-07 的 ASCII 白名单，
-    会拒掉中文名。这里在一次机型锁里读-改-写整份映射，字段仍是 `name/url/record_url`。
+    不走 `storage.add_config_mapping`：那个函数对同名项是「覆盖 url」，而 §7.9 要的是 409。
+    这里在一次机型锁里读-改-写整份映射，字段仍是 `name/url/record_url`。
     """
     clean_name = _validated_name(name)
     item = {
@@ -284,11 +283,12 @@ def rename_source(
                 exc.detail.setdefault("field", "name")
             raise
         except ValueError as exc:
-            # `storage._sanitize_config_filename`（M0-07 的改名迁移）仍是 ASCII 白名单，
-            # 裸 `ValueError` 到 HTTP 层会变成 500；这里只把它翻成 400，不改那条边界本身。
-            # 上面已经把「名字（`fsutil`）与两个 url」都校验过，`update_config_mapping` 里
-            # 唯一还能抛 `ValueError` 的就是那步净化。留一条 WARNING：万一净化内部真出了
-            # 别的 `ValueError`，400 不会把它一路掩成「用户文件名写错了」。
+            # `storage.update_config_mapping` 里剩下的裸 `ValueError` 到 HTTP 层会变成 500，
+            # 所以这里翻成 400。文件名净化那一步已在 N1 收敛到 `fsutil.validate_filename`
+            # （它抛 `AppError`，走上面那条分支），这条兜的是「下载链接不能为空」之类的
+            # 存储层校验。上面已经把两个名字与两个 url 都校验过，正常情况下到这里就该是
+            # 存储层的意外，所以留一条 WARNING：裸 `ValueError` 不加日志会被一路掩成
+            # 「用户文件名写错了」，bug 就没痕迹了。
             logger.warning("更新源改名在净化步被拒（%s -> %s）：%s", original, target, exc)
             raise AppError(INVALID_INPUT, str(exc), field="name") from exc
         if target != original:
