@@ -13,11 +13,18 @@
 
 需要 `pytest.ini` 的 `addopts = -p pytester` 才能拿到 `pytester` 夹具；那行被删掉时
 这里不会静默跳过，而是整组用例一起报 `fixture 'pytester' not found`。
+
+未执法那一态还要再证一层（复审 I1）：终端文案机器读不出来——两种绿都是退出码 0 加
+同一句「N passed」，CI 日志、JUnit 消费者和卡片上贴的数字都分不清。于是加上三条：
+不带 `MCCHECKER_REQUIRE_H3` 时必须以「1 warning」收尾且仍绿；带它时必须非 0 退出并
+点名失败原因；执法那一态两者都没有。**三个状态的统计行必须两两不同**，这才是本卡的
+落点——不是「多打一行黄字」，是「让抄数字的人抄到不同的数字」。
 """
 
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict
 
 import pytest
@@ -34,6 +41,15 @@ BASELINE_FILES: Dict[str, str] = {
 #: 公告的判据子串（正文在 `data_guard.py`，这里只认前缀，别把文案钉死两遍）。
 NOT_ENFORCING_MARK = "H3 守卫未执法："
 ENFORCING_MARK = "H3 守卫执法中："
+#: 第三态（硬要求）的判据：警告类别名、开关名与失败文案的前缀。
+NON_ENFORCEMENT_WARNING = "H3NonEnforcementWarning"
+REQUIRE_ENV_VAR = "MCCHECKER_REQUIRE_H3"
+REQUIRE_FAIL_MARK = "H3 守卫执法要求未满足"
+
+#: pytest 自己写结果的区段起点（报错节 / 失败节 / 简短摘要节）。
+_SUMMARY_REGION = re.compile(
+    r"^\s*=+\s*(?:ERRORS|FAILURES|short test summary info)", re.MULTILINE
+)
 
 # ---------------------------------------------------------------------------
 # 生成内部会话用的两份模板
@@ -134,12 +150,53 @@ def _text(result) -> str:
     return result.stdout.str() + "\n" + result.stderr.str()
 
 
-def _run_guard_session(pytester, data_root: str, body: str = "    assert True", seed: bool = True):
+def _stats_line(result) -> str:
+    """内部会话最后一行结果统计，例：`1 passed, 1 warning in 0.4s`。
+
+    三态可区分的**判据**就在这一行：它是 CI、JUnit 消费者和卡片抄数字的人唯一会看
+    的东西，所以断言只认这一行，不认上面的黄字。
+    """
+    lines = [line for line in _text(result).splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def _result_region(out: str) -> str:
+    """只看 pytest 报结果的区段：报错/失败节一直到结尾（含最后那行统计）。
+
+    整段 stdout+stderr 上断言「ERROR 不出现」会被任何将来自动加载的插件顺手打的
+    ERROR 字样判红，理由还跟守卫无关（复审 Minor）。守卫真红时这一节一定存在
+    （`=== ERRORS ===` + `ERROR at teardown`）并且统计行带 error 计数，跑不掉。
+    """
+    match = _SUMMARY_REGION.search(out)
+    if match is not None:
+        return out[match.start() :]
+    lines = [line for line in out.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def _run_guard_session(
+    pytester,
+    monkeypatch,
+    data_root: str,
+    body: str = "    assert True",
+    seed: bool = True,
+    require: bool = False,
+):
     """起一次独立进程的 pytest 会话：真实守卫接线 + `data_root` 作数据根。
 
     `seed=False` 时一个文件都不建（用来复现「干净检出没有 data/」）；`body` 是
     内部用例的函数体，默认不破坏任何东西，用作对照。
+
+    `require` 显式决定内部会话有没有 `MCCHECKER_REQUIRE_H3`，**并且一律先覆盖外部环境
+    变量**（`pytester.runpytest_subprocess` 是继承 `os.environ` 的）。不这么做的话，在这台
+    权威开发机上带着 `MCCHECKER_REQUIRE_H3=1` 跑全量时，每个内部会话都会继承开关，
+    「未执法必须是绿 + 警告」那两条对照当场变红——假红的守卫训练人把开关关掉，
+    正是本卡要躲开的坑（复审裁定 C1 的同一口径）。
     """
+    if require:
+        monkeypatch.setenv(REQUIRE_ENV_VAR, "1")
+    else:
+        monkeypatch.delenv(REQUIRE_ENV_VAR, raising=False)
     if seed:
         _make_tree(data_root, BASELINE_FILES)
     pytester.makeconftest(INNER_CONFTEST.format(tests_dir=TESTS_DIR, data_root=data_root))
@@ -156,10 +213,10 @@ def _run_guard_session(pytester, data_root: str, body: str = "    assert True", 
 
 
 @pytest.mark.parametrize("category", sorted(CATEGORIES))
-def test_each_damage_category_fails_the_session(pytester, tmp_path, category) -> None:
+def test_each_damage_category_fails_the_session(pytester, tmp_path, monkeypatch, category) -> None:
     """执法路径的四类各证一遍：不是只证 `created`，也不是只证纯函数会分类。"""
     spec = CATEGORIES[category]
-    result = _run_guard_session(pytester, str(tmp_path / "h3_root"), body=spec["body"])
+    result = _run_guard_session(pytester, monkeypatch, str(tmp_path / "h3_root"), body=spec["body"])
     out = _text(result)
 
     assert result.ret == 1, out
@@ -170,20 +227,115 @@ def test_each_damage_category_fails_the_session(pytester, tmp_path, category) ->
     assert ENFORCING_MARK in out, out
 
 
-def test_untouched_temp_root_is_green_and_announces_enforcing(pytester, tmp_path) -> None:
+def test_untouched_temp_root_is_green_and_announces_enforcing(pytester, tmp_path, monkeypatch) -> None:
     """对照：干净临时树绿，且公告「执法中」——绿要有执法者背书，不是没人说话。"""
-    result = _run_guard_session(pytester, str(tmp_path / "h3_root"))
+    result = _run_guard_session(pytester, monkeypatch, str(tmp_path / "h3_root"))
     out = _text(result)
 
     assert result.ret == 0, out
     assert "1 passed" in out, out
-    assert "ERROR" not in out, out
+    # 守卫红一定长成「结果区里有 ERROR」；只在这段里查，别被无关插件的 ERROR 字样冤枉
+    # （复审 Minor）。teardown 那条标记是全输出级的，守卫的假绿在这里跑不掉。
+    assert "ERROR" not in _result_region(out), _result_region(out)
+    assert "ERROR at teardown" not in out, out
     assert ENFORCING_MARK in out, out
     assert NOT_ENFORCING_MARK not in out, out
     assert "基线快照 {} 个文件".format(len(BASELINE_FILES)) in out, out
 
 
-def test_missing_data_root_is_green_but_announces_non_enforcement(pytester, tmp_path) -> None:
+def test_non_enforcement_changes_the_summary_line_not_only_the_prose(
+    pytester, tmp_path, monkeypatch
+) -> None:
+    """I1：未执法不许只有文案。默认（不设开关）依然是绿——干净检出与 CI 不许因此变红
+    （那是本守卫当初那条 Critical）——但统计行必须自己承认「1 warning」，
+    并且警告类别点名 `H3NonEnforcementWarning`，机器按名就能 grep。
+    """
+    absent_root = str(tmp_path / "data_absent")
+    assert not os.path.exists(absent_root)
+
+    result = _run_guard_session(pytester, monkeypatch, absent_root, seed=False)
+    out = _text(result)
+
+    assert result.ret == 0, out
+    assert NOT_ENFORCING_MARK in out, out
+    assert NON_ENFORCEMENT_WARNING in out, out
+    assert "warning" in _stats_line(result), _stats_line(result)
+    assert "error" not in _stats_line(result) and "failed" not in _stats_line(result)
+    assert REQUIRE_FAIL_MARK not in out, out
+    assert ENFORCING_MARK not in out, out
+
+
+def test_require_h3_env_var_turns_non_enforcement_into_a_failure(pytester, tmp_path, monkeypatch) -> None:
+    """I1 的另一半：`MCCHECKER_REQUIRE_H3=1` 时「没在执法」必须红，而且要能被点名。
+
+    红走的是已证明的执法路径（session 级夹具 teardown），所以形状和四类破坏一致：
+    非 0 退出 + teardown ERROR + 文案里带开关名，读者不用猜是谁判的红。
+    开关不在这里裸 `setenv`，而是交给 `_run_guard_session(require=...)` 统一覆盖外部
+    环境（理由见它的 docstring）。
+    """
+    absent_root = str(tmp_path / "data_absent")
+
+    result = _run_guard_session(pytester, monkeypatch, absent_root, seed=False, require=True)
+    out = _text(result)
+
+    assert result.ret != 0, out
+    assert result.ret == 1, out
+    assert REQUIRE_FAIL_MARK in out, out
+    assert REQUIRE_ENV_VAR in out, out
+    assert "ERROR at teardown" in out, out
+    # 文案与警告两条通道都还在（红不是把它们换掉，而是叠上去）。
+    assert NOT_ENFORCING_MARK in out, out
+    assert NON_ENFORCEMENT_WARNING in out, out
+
+
+def test_enforcing_session_with_the_switch_on_stays_green(pytester, tmp_path, monkeypatch) -> None:
+    """开关只治「没执法」，不许把执法的绿一起判红：否则第二天就有人把它关掉。"""
+    result = _run_guard_session(pytester, monkeypatch, str(tmp_path / "h3_root"), require=True)
+    out = _text(result)
+
+    assert result.ret == 0, out
+    assert ENFORCING_MARK in out, out
+    assert REQUIRE_FAIL_MARK not in out, out
+    assert "warning" not in _stats_line(result), _stats_line(result)
+
+
+def test_the_three_states_are_distinguishable_from_the_summary_line(pytester, tmp_path, monkeypatch) -> None:
+    """本卡的落点：三个状态在**输出**上两两不同，不是同一句「1 passed」加一行黄字。
+
+    三态各起一次独立进程，只比统计行与标记词——抄数字的人只会抄统计行，
+    那一行不同才算真的分开：
+    - 未执法 + 默认：`1 passed, 1 warning`（ret 0）
+    - 未执法 + 硬要求：`1 passed, 1 error`（ret 1）
+    - 执法中且干净：`1 passed`（ret 0，既无警告也无失败）
+    """
+    plain = _run_guard_session(pytester, monkeypatch, str(tmp_path / "absent_plain"), seed=False)
+    required = _run_guard_session(
+        pytester, monkeypatch, str(tmp_path / "absent_required"), seed=False, require=True
+    )
+    enforcing = _run_guard_session(pytester, monkeypatch, str(tmp_path / "seeded_root"))
+
+    stats = [_stats_line(plain), _stats_line(required), _stats_line(enforcing)]
+    assert len(set(stats)) == 3, stats
+    assert "passed" in stats[0] and "warning" in stats[0] and "error" not in stats[0], stats
+    assert "error" in stats[1], stats
+    assert "warning" not in stats[2] and "error" not in stats[2], stats
+    assert (plain.ret, required.ret, enforcing.ret) == (0, 1, 0), stats
+
+    plain_out, required_out, enforcing_out = _text(plain), _text(required), _text(enforcing)
+    assert ENFORCING_MARK not in plain_out and ENFORCING_MARK not in required_out, stats
+    assert ENFORCING_MARK in enforcing_out, enforcing_out
+    assert NOT_ENFORCING_MARK in plain_out and NOT_ENFORCING_MARK in required_out, stats
+    assert NOT_ENFORCING_MARK not in enforcing_out, enforcing_out
+    assert REQUIRE_FAIL_MARK not in plain_out and REQUIRE_FAIL_MARK not in enforcing_out, stats
+    assert REQUIRE_FAIL_MARK in required_out, required_out
+    # 执法那一态必须当场报出自己的价格（字节 + 秒），否则「代价可见」只是文档里的话。
+    assert "字节" in enforcing_out and "秒" in enforcing_out, enforcing_out
+    assert NON_ENFORCEMENT_WARNING not in enforcing_out, enforcing_out
+
+
+def test_missing_data_root_is_green_but_announces_non_enforcement(
+    pytester, tmp_path, monkeypatch
+) -> None:
     """C1：数据根不存在（干净检出、CI、别人的 clone）时不许冒充「已保护」。
 
     断言的是**两个分支的观测结果不同**：这一轮的绿必须带「未执法」公告，
@@ -192,7 +344,7 @@ def test_missing_data_root_is_green_but_announces_non_enforcement(pytester, tmp_
     absent_root = str(tmp_path / "data_absent")
     assert not os.path.exists(absent_root)
 
-    result = _run_guard_session(pytester, absent_root, seed=False)
+    result = _run_guard_session(pytester, monkeypatch, absent_root, seed=False)
     out = _text(result)
 
     assert result.ret == 0, out
@@ -202,11 +354,13 @@ def test_missing_data_root_is_green_but_announces_non_enforcement(pytester, tmp_
     assert ENFORCING_MARK not in out, out
 
 
-def test_root_appearing_from_nothing_still_fails(pytester, tmp_path) -> None:
+def test_root_appearing_from_nothing_still_fails(pytester, tmp_path, monkeypatch) -> None:
     """未执法**不等于放行**：基线为空（根不存在）时长出来的文件照样点名判红。"""
     absent_root = str(tmp_path / "data_absent")
 
-    result = _run_guard_session(pytester, absent_root, body=CREATE_FROM_NOTHING_BODY, seed=False)
+    result = _run_guard_session(
+        pytester, monkeypatch, absent_root, body=CREATE_FROM_NOTHING_BODY, seed=False
+    )
     out = _text(result)
 
     assert result.ret == 1, out
