@@ -1123,7 +1123,20 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
   HTTP 形态另有两种抖动（dump 抢在 `report()` 前 ⇒ 标题停在初始值；dump 抢在某个外部 `.js` 执行完 ⇒ 一批 `X is not a function`，**长得像真回归但不是**）：**判据只认 `ALL PASSED (n)` / `n FAILED / m`，其它一律重跑，不许为此改代码，也不许为了「稳」退回 `file://`**——`file://` 确实稳，而它的稳正是瞎。
 
 
-## 11. 执行状态快照（2026-10-18 07:10，恢复时从这里接）
+## 11. 执行状态快照（2026-10-18 18:11 UTC 更新，恢复时从这里接）
+
+**本轮增量（覆盖下方 07:10 那份快照里的计数，旧段落只作过程记录）**：**N2 / INH-1913 已合并**（PR #53，合并 commit `5ca9611`，评审 0 Critical / 0 Important / 4 Minor，全量 **924 passed**、基线 **917** 为分支自测）。**M3 = 7/17，项目 36 Done / 21 未完成**，集成分支 tip 现查。
+
+在跑的 4 条链（恢复时先逐条查状态再动作）：
+1. **M3-10 / INH-1895**（`mcc-dl`，分支 `mc-v2/m3-10-dl-math` @ `1b55e7f`）：评审已 **Approved for merge**，但 2 条 Important 未闭合，修复代理在跑（`task-10-fix-report.md`）。修复后**必须 scoped 复评**（R34）才能开 PR。`trans_coeff=0` 的裁定已写进 `task-11-brief.md` 的「必带裁定」段——M3-11 开工必读。
+2. **M3-08 / INH-1893**（`mcc-m3-08`，分支 `mc-v2/m3-08-scheduler` @ `13b13b8`）：崩溃抢救的调度器实现代理在跑，工作树里曾有 13 个未提交文件（约 2132 行抢救件，**是有效产物，不许丢弃**）。这张卡动 `storage.py`/`router.py`/`api.js`/`conftest.py`，因此 **M3-09 与设置链四张必须等它合并**（共用文件表见 `settings-chain-handdowns.md` §0）。
+3. **M4-02 / INH-1904**（`mcc-sec`，分支 `mc-v2/m4-02-security` @ `cecb58a`）：安全响应头 + 跨站写保护回归在跑。**已知瑕疵**：派发词与 commit 消息里写的是 `INH-1906`，真实编号是 `INH-1904`（M4 映射：01→1903、02→1904、03→1905、04→1906、05→1907、06→1908）。**不要改写历史**，PR 正文里更正即可。
+4. **M4-06 / INH-1908**（`mc-rel`，分支 `mc-v2/m4-06-release` @ `bd961c8`）：离线发布包在跑。验收边界已交代：§16.7 的「断网浏览器实测」**不得**由本卡报绿，只能报「构建产物里不存在外部主机引用」，并要求负向对照（种一条 `https://cdn…` 必须让构建失败）。
+5. **N1 / INH-1912**（`mcc-n1`，分支 `mc-v2/n1-rename-charset` @ `5ca9611`）：刚开工，要求**先复现再修**。控制方已排除两层：创建与改名共用同一校验（`updates.py:229`/`:263-264` → `fsutil.py:130`，允许中文），HTTP 路由也正常（`http.py:232`/`:241` 已 unquote、`router.py:77` 用 `[^/]+`）。剩余嫌疑：`api.seg` 前端编码、映射键归一化（NFC/NFD）、`update_config_mapping` 搬文件、`update_status.json` 搬键。
+
+**评审工作树**：`mcc-review-m3-10`（detached @ `1b55e7f`，M3-10 复评前先 `git -C … checkout --detach <新 SHA>` 并让评审者回显 `git log --oneline -1`，见 R42）；`mcc-review-n2`（@ `8fdac3f`，已可 `git worktree remove` 清掉）。
+
+**Linear 已同步到**：INH-1913 → Done + 完整证据注释；INH-1895 → 进行中（评审结论 + 两条 Important 的处置）；INH-1912 → In Progress。发送方式仍是转发给会话 `f08af9f1-…`（MCP 连接器在会话启动时快照，中途授权不生效）。**仍欠**：INH-1893（M3-08）Done、M4-02/M4-06 的开工与完成注释。
 
 **里程碑**：**57 卡 / 34 Done / 23 未完成**。已合入集成分支：M3-01…M3-05、M3-07（卡 6，PR #43）、H3 守卫（INH-1914，PR #44），加上文档 chore。**集成分支 tip 一律用 `git log --oneline -1 origin/feat/mc-v2-delivery` 现查**，别信本文任何写死的 SHA（R43）。
 
