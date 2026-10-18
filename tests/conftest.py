@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from typing import List
+from typing import Dict, List, Optional
 
 import pytest
 
@@ -18,9 +18,37 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from app.core import device_models, dltool, storage  # noqa: E402
+from data_guard import compare_snapshots, format_diff_report, has_differences, snapshot_data_tree  # noqa: E402
 
 # 真实数据根必须在任何 monkeypatch 发生之前采集，作为后续重绑定的基准。
 REAL_DATA_DIR = storage.DATA_DIR
+
+#: H3 守卫的会话基线（{归一化相对路径: sha256}），由 `pytest_sessionstart` 在
+#: collection 之前填好——session 级夹具是「首次使用才实例化」的，把快照放在夹具
+#: 装序里理论上来得及（第一个用例的 setup 先于任何写入），但放在钩子里才是真正
+#: 的「会话一开始就拍」，不给未来的 collection 期写入留窗口。
+_H3_BASELINE: Optional[Dict[str, str]] = None
+
+
+def pytest_sessionstart(session):
+    """H3 守卫（INH-1914）：在任何测试写入之前对真实 `data/` 拍基线快照。"""
+    global _H3_BASELINE
+    _H3_BASELINE = snapshot_data_tree(REAL_DATA_DIR)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def h3_data_guard():
+    """会话结束重新快照真实 `data/` 并比对，任何差异都判失败（H3 的自动执法）。
+
+    纯函数在 `tests/data_guard.py`（快照与分类比对），这里只接线。排除
+    `.mcchecker.lock`（运行时产物）与目录；口径见该模块 docstring。本夹具
+    **不**替代 `isolated_data_root` / `isolated_task_runner` 的事前隔离，是它们
+    漏网之后的事后网；也不参与那两个夹具的装/拆序（那是卡 6 复审刻意钉住的）。
+    """
+    yield
+    diffs = compare_snapshots(_H3_BASELINE, snapshot_data_tree(REAL_DATA_DIR))
+    if has_differences(diffs):
+        pytest.fail(format_diff_report(diffs), pytrace=False)
 
 #: 测试里「任务闸门」（Event）自锁的兜底上限：万一没人放行，工作线程最多阻塞这么久
 #: （防整轮 pytest 卡死）。`tests/test_api_tasks.py` 从这里取，别再写字面量。
