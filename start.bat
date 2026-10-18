@@ -8,6 +8,8 @@ rem
 rem 优先级：MCHECKER_PYTHON（必须是单个 exe 路径，不能带参数）
 rem          -> runtime\python\python.exe（§14.3 的内嵌 embeddable 包，可选）
 rem          -> python -> py
+rem 数据根与端口的打印口径跟 start.sh 一致：--data-dir / --port 覆盖环境变量，环境变量覆盖默认。
+rem 注意：本文件只能在 Windows 的 cmd.exe 下验证；开发机（macOS）上它只做过静态核对。
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
@@ -25,17 +27,14 @@ if not defined PYEXE goto :no_python
 
 set "PORT=50002"
 if defined MCHECKER_PORT set "PORT=%MCHECKER_PORT%"
-set "PREV="
-for %%A in (%*) do (
-    set "ARG=%%~A"
-    if "!PREV!"=="--port" set "PORT=!ARG!"
-    set "EQ=!ARG:~0,7!"
-    if "!EQ!"=="--port=" set "PORT=!ARG:~7!"
-    set "PREV=!ARG!"
-)
+set "DATA=%ROOT%data"
+if defined MCHECKER_DATA_DIR set "DATA=%MCHECKER_DATA_DIR%"
+rem 只为「打印出来的端口/数据根 = 实际生效的那一个」而扫命令行（§3.6），真正的参数原样交给 run.py。
+call :scan_args %*
 
-echo MCChecker 启动中：解释器 %PYEXE%，数据根默认为 %ROOT%data（--data-dir 可改，§3.6）
-echo 访问地址：http://127.0.0.1:%PORT%/（默认监听 0.0.0.0，内网其他机器用 http://本机IP:%PORT%/）
+echo MCChecker 启动中：解释器 !PYEXE!，数据根 !DATA!
+echo   （§3.6 优先级：--data-dir ^> 环境变量 MCHECKER_DATA_DIR ^> 默认 %ROOT%data；升级要整份备份的是这个目录）
+echo 访问地址：http://127.0.0.1:!PORT!/（默认监听 0.0.0.0；内网其他机器把 127.0.0.1 换成本机 IP，端口不变）
 echo 停止：Ctrl+C，或直接关闭本窗口（有序停止见 §14.2）
 
 cd /d "%ROOT%"
@@ -54,6 +53,32 @@ if defined PYEXE exit /b 0
 if errorlevel 1 exit /b 0
 set "PYEXE=%~1"
 exit /b 0
+
+:scan_args
+rem 只为显示而扫命令行：用 call + shift 逐个取，不用 `for %%A in (%*)`——后者把用户原文
+rem 重新解析一遍（未加引号的带空格路径被切、`%%~A` 剥掉引号、`&` 走到解析器、`!` 被延迟展开
+rem 吃掉）。这里按位置取值，绝不把用户文本再拼回任何命令行；算出来的 PORT/DATA 只喂上面
+rem 两行 echo，传给 run.py 的仍然是原始 %*。
+:scan_next
+if "%~1"=="" exit /b 0
+if /i "%~1"=="--port" goto :scan_port
+if /i "%~1"=="--data-dir" goto :scan_data
+for /f "tokens=1,* delims==" %%A in ("%~1") do (
+    if /i "%%A"=="--port" if not "%%B"=="" set "PORT=%%B"
+    if /i "%%A"=="--data-dir" if not "%%B"=="" set "DATA=%%B"
+)
+shift
+goto :scan_next
+:scan_port
+if not "%~2"=="" set "PORT=%~2"
+shift
+shift
+goto :scan_next
+:scan_data
+if not "%~2"=="" set "DATA=%~2"
+shift
+shift
+goto :scan_next
 
 :missing_entry
 echo 启动失败：%ROOT% 下没有 run.py，发布包不完整（应含 run.py、main.py、app\、start.bat，见规范 §14.3）。

@@ -30,8 +30,10 @@ EXPECTED_MEMBERS = {
     "app/config.py",
     "app/core/__init__.py",
     "app/core/storage.py",
+    "app/static/favicon.svg",
     "app/web/assets/css/base.css",
     "app/web/assets/js/app.js",
+    "app/web/assets/js/ui/icons.js",
     "app/web/index.html",
     "docs/manual.md",
     "main.py",
@@ -94,7 +96,7 @@ def source_tree(tmp_path: Path) -> Path:
     root = tmp_path / "src"
     files: Dict[str, str] = {
         "README.md": "# MCChecker\n\n内网工具，默认端口 50002。\n",
-        "run.py": '"""入口。"""\nfrom __future__ import annotations\n',
+        "run.py": '"""入口。"""\nfrom __future__ import annotations\n\nprint("listening on http://%s:%d")\n',
         "main.py": "from run import main\n",
         "start.sh": "#!/bin/sh\necho start\n",
         "start.bat": "@echo off\r\nrem start\r\n",
@@ -104,7 +106,13 @@ def source_tree(tmp_path: Path) -> Path:
         "app/core/storage.py": "def load():\n    return {}\n",
         "app/web/index.html": CLEAN_INDEX_HTML,
         "app/web/assets/css/base.css": "body { font-family: sans-serif; }\n",
-        "app/web/assets/js/app.js": 'h("input", {placeholder: "http://10.20.1.15/cfg.xml"});\n',
+        # 只有 `INERT_URL_LITERALS` 上逐条列过的 (路径, 地址) 才是惰性的；这台假树里放的
+        # 就是名单上的两条，未列过的一律由下面的负向用例证明会红。
+        "app/web/assets/js/app.js": 'h("input", {placeholder: "http://127.0.0.1:50002/cfg.xml"});\n',
+        "app/web/assets/js/ui/icons.js": 'var NS = "http://www.w3.org/2000/svg";\n',
+        "app/static/favicon.svg": (
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"></svg>\n"
+        ),
         "docs/manual.md": "# 使用手册\n\n启动：`python run.py`。\n",
         "docs/MCChecker_FEATURE_CHANGES.md": "# 变更\n\n" + FC_HEADINGS,
     }
@@ -155,10 +163,17 @@ def test_decoys_never_become_members(source_tree: Path, tmp_path: Path) -> None:
 
 
 def test_missing_whitelisted_entry_fails_loudly(source_tree: Path, tmp_path: Path) -> None:
-    """白名单不是「工作目录有什么就压什么」：条目缺失必须报错，不能静默少打。"""
+    """白名单不是「工作目录有什么就压什么」：条目缺失必须**在这一步**报错，不能静默少打。
+
+    匹配钉在「名单缺失」这句本身，而不是 `run.py` 这个文件名：产物成员集合的核对也会抱怨
+    `run.py` 少了（`产物成员与发布名单不一致…缺少：run.py`），只匹配文件名的话，把
+    `collect_members()` 里那条 raise 删掉、让它一路跑到验收，这条用例照样绿——
+    那样「缺失即失败」就不再被执法了（M4-06 复审 Minor 2 实测就是这个红不起来的机制）。
+    """
     (source_tree / "run.py").unlink()
-    with pytest.raises(mr.ReleaseError, match="run.py"):
+    with pytest.raises(mr.ReleaseError, match="发布名单里的条目在源目录不存在") as exc:
         build(source_tree, tmp_path / "out")
+    assert "run.py" in str(exc.value)
 
 
 def test_refuses_overwrite_until_force(source_tree: Path, tmp_path: Path) -> None:
@@ -303,23 +318,129 @@ def test_reference_positions_are_all_caught(source_tree: Path, tmp_path: Path, s
         build(source_tree, tmp_path / "out")
 
 
-def test_inert_text_urls_are_reported_not_rejected(source_tree: Path, tmp_path: Path) -> None:
-    """命名空间 URI、校验正则、输入框提示文字都不该让构建失败，但要被逐条列出来当证据。"""
-    js = source_tree / "app" / "web" / "assets" / "js" / "app.js"
+def test_inert_urls_are_accepted_only_because_they_are_listed(source_tree: Path, tmp_path: Path) -> None:
+    """惰性项不是「看着像文本」，而是「被逐条列进名单」：列过的照常绿并被点名出来。"""
+    js = source_tree / "app" / "web" / "assets" / "js" / "ui" / "icons.js"
     js.write_text(
         'var NS = "http://www.w3.org/2000/svg";\n'
         'if (!/^https?:\\/\\//i.test(url)) return fail(400, "需以 http:// 开头");\n'
-        'var e = h("input", {placeholder: "http://10.20.1.15/cfg/config.xml"});\n'
         'document.body.appendChild(el)\n',
         encoding="utf-8",
     )
-    zip_path = build(source_tree, tmp_path / "out")  # 不失败
+    zip_path = build(source_tree, tmp_path / "out")  # 名单上的 (路径, 地址) ⇒ 不失败
     report = mr.verify_release(zip_path, source_root=source_tree)
-    inert = report["inert_references"]["app/web/assets/js/app.js"]
+    inert = report["inert_references"]["app/web/assets/js/ui/icons.js"]
     urls = [url for _line, url in inert]
-    assert any("www.w3.org" in u for u in urls), urls
-    assert any("10.20.1.15" in u for u in urls), urls
+    assert urls == ["http://www.w3.org/2000/svg"], urls  # 校验正则里没有主机，不进气泡
     assert report["violations"] == []
+
+
+def test_same_url_in_an_unlisted_file_is_a_violation(source_tree: Path, tmp_path: Path) -> None:
+    """放行名单按 (路径, 地址) 生效：同一个命名空间 URI 换个文件就不再是惰性的。"""
+    js = source_tree / "app" / "web" / "assets" / "js" / "app.js"
+    js.write_text('var NS = "http://www.w3.org/2000/svg";\n', encoding="utf-8")
+    out = tmp_path / "out"
+    zip_path = out / "MCChecker-2.0.0.zip"
+    with pytest.raises(mr.ReleaseError, match=re.escape("www.w3.org")):
+        mr.build_release(source_tree, zip_path)
+    assert not zip_path.exists()
+
+
+def test_stale_inert_entry_fails_the_build(source_tree: Path, tmp_path: Path) -> None:
+    """名单里的地址在产物里找不到 ⇒ 名单已经脱节，必须红（不许一边失效一边放行）。"""
+    svg = source_tree / "app" / "static" / "favicon.svg"
+    svg.write_text("<svg viewBox='0 0 16 16'></svg>\n", encoding="utf-8")
+    with pytest.raises(mr.ReleaseError, match="已经找不到"):
+        build(source_tree, tmp_path / "out")
+
+
+@pytest.mark.parametrize(
+    "rel, snippet, host",
+    [
+        # Important 1 复审点名的五种形状：过去全都能带着产物出门（exit 0），现在每种都红。
+        (
+            "app/web/assets/js/core/api.js",
+            'var MC_BASE = "https://telemetry.example.com"; fetch(MC_BASE + "/ping");',
+            "telemetry.example.com",
+        ),
+        (
+            "app/web/index.html",
+            '<img srcset="/local.png 1x, https://evil.example.com/remote.png 2x">',
+            "evil.example.com",
+        ),
+        (
+            "app/web/index.html",
+            '<meta http-equiv="refresh" content="0;url=https://evil.example.com/x">',
+            "evil.example.com",
+        ),
+        (
+            "run.py",
+            'urllib.request.urlopen("https://telemetry.example.com/report")',
+            "telemetry.example.com",
+        ),
+        (
+            "docs/manual.md",
+            '<img src="https://docs.example.com/diagram.png">',
+            "docs.example.com",
+        ),
+        # 同一批语法漏洞的协议相对形态（不带 scheme，所以老的位置模式也看不见第二个候选）。
+        (
+            "app/web/index.html",
+            '<img srcset="/local.png 1x, //evil.example.com/remote.png 2x">',
+            "evil.example.com",
+        ),
+        (
+            "app/web/assets/js/app.js",
+            'var MC_BASE = "//telemetry.example.com"; fetch(MC_BASE + "/ping");',
+            "telemetry.example.com",
+        ),
+        # 藏法：主机段里塞换行——WHATWG URL 解析会先把它删掉，所以这里也必须跟着删。
+        (
+            "app/web/index.html",
+            '<img src="http://evil.example.co\nm/x">',
+            "evil.example.com",
+        ),
+        # IPv6 字面量：按 `:` 切会把 `[2001:db8::1]` 切成空串，等于给外链放行。
+        ("app/web/index.html", '<img src="http://[2001:db8::1]/x">', "2001:db8::1"),
+        # 不是前端的文件也在射程内：Markdown 与 shell 里的地址一样红。
+        ("start.sh", 'printf "see https://telemetry.example.com/x\\n"', "telemetry.example.com"),
+    ],
+)
+def test_planted_shapes_fail_the_build(
+    source_tree: Path, tmp_path: Path, rel: str, snippet: str, host: str
+) -> None:
+    """倒过来判定的执法证明：把地址放进任何一种写法/任何一种文件，构建红且不落地。"""
+    target = source_tree / rel
+    if not target.is_file():  # 假树里没有的真实条目（例如 core/api.js）照样进包，直接造出来
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("", encoding="utf-8")
+    target.write_text(target.read_text(encoding="utf-8") + "\n" + snippet + "\n", encoding="utf-8")
+    out = tmp_path / "out"
+    zip_path = out / "MCChecker-2.0.0.zip"
+    with pytest.raises(mr.ReleaseError, match=re.escape(host)):
+        mr.build_release(source_tree, zip_path)
+    assert not zip_path.exists(), "验收没过的包不许落地"
+    assert not list(out.glob("*.part")), "临时文件不许留下"
+
+
+def test_ipv6_loopback_still_local(source_tree: Path, tmp_path: Path) -> None:
+    """回环放行不含 IPv6 之外的口子：`[::1]` 是本机，仍然可以出现。"""
+    index = source_tree / "app" / "web" / "index.html"
+    index.write_text(
+        index.read_text(encoding="utf-8") + '<img src="http://[::1]:50002/x.png">\n',
+        encoding="utf-8",
+    )
+    assert build(source_tree, tmp_path / "out").is_file()
+
+
+def test_nonlocal_ipv6_literal_is_rejected(source_tree: Path, tmp_path: Path) -> None:
+    index = source_tree / "app" / "web" / "index.html"
+    index.write_text(
+        index.read_text(encoding="utf-8") + '<img src="http://[2606:4700::6810::8422]/x">\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(mr.ReleaseError, match="2606"):
+        build(source_tree, tmp_path / "out")
 
 
 def test_localhost_reference_is_not_a_violation(source_tree: Path, tmp_path: Path) -> None:
@@ -345,12 +466,13 @@ def run_start_sh(root: Path, env: Dict[str, str], extra_args: List[str] = None) 
 
 
 def start_sh_env(tmp_path: Path, path_dirs: List[str]) -> Dict[str, str]:
-    """干净环境：PATH 只剩给定目录，且不带 MCHECKER_PYTHON（否则会被当成指定解释器）。"""
-    env = {"PATH": os.pathsep.join(path_dirs), "HOME": str(tmp_path / "home")}
-    for var in ("MCHECKER_PYTHON", "MCHECKER_PORT", "MCHECKER_DATA_DIR"):
-        env.pop(var, None)
-        os.environ.pop(var, None)
-    return env
+    """干净环境：`env=` 是给子进程的全部世界（PATH + HOME），不带 MCHECKER_PYTHON。
+
+    以前这里还顺手 `os.environ.pop(...)`——那是白改：子进程根本不看父进程的环境，
+    却把 pytest 自己的进程环境永久改坏了（后面的用例、包括 `run_cli` 那条继承父环境的，
+    都在一个被摘掉变量的环境里跑）。要断干净就把话说到子环境上，别动进程全局（复审 Minor 3）。
+    """
+    return {"PATH": os.pathsep.join(path_dirs), "HOME": str(tmp_path / "home")}
 
 
 def test_start_sh_fails_when_no_interpreter(tmp_path: Path) -> None:
@@ -407,6 +529,123 @@ def test_start_sh_reports_url_and_launches_packaged_app(tmp_path: Path) -> None:
     assert "listening on http://0.0.0.0:50599" in proc.stdout, proc.stdout
 
 
+def start_sh_release_root(tmp_path: Path, run_py_text: str) -> Path:
+    """一个最小发布目录：真 start.sh + 一个只打印、不起服务的 run.py。"""
+    root = tmp_path / "release"
+    root.mkdir()
+    (root / "run.py").write_text(run_py_text, encoding="utf-8")
+    (root / "start.sh").write_text((REPO_ROOT / "start.sh").read_text(encoding="utf-8"), encoding="utf-8")
+    (root / "start.sh").chmod(0o755)
+    return root
+
+
+def printed_data_root(stdout: str) -> str:
+    """start.sh 打印出来的那一个数据根（运维就是照着它备份 §14.3 说的「整个 data/」）。"""
+    match = re.search(r"数据根 (.+)$", stdout, re.M)
+    assert match is not None, stdout
+    return match.group(1).strip()
+
+
+def test_start_sh_prints_the_data_root_run_py_uses(tmp_path: Path) -> None:
+    """`--data-dir` 传了以后，屏幕上报的必须是实际用的那一个（复审 Minor 1）。
+
+    旧实现无论怎么传都印 `<发布目录>/data`，而进程日志里是另一个目录——§14.3 的升级说明是
+    「把整个 data/ 复制走」，报错目录等于把人引去备份错的根。
+    """
+    chosen = tmp_path / "operator-data"
+    root = start_sh_release_root(tmp_path, "import sys\nprint('argv=%s' % sys.argv[1:])\n")
+    env = start_sh_env(tmp_path, [str(Path(sys.executable).parent)])
+    env["MCHECKER_PYTHON"] = sys.executable
+
+    proc = run_start_sh(root, env, extra_args=["--data-dir", str(chosen)])
+    assert proc.returncode == 0, proc.stderr
+    assert printed_data_root(proc.stdout) == str(chosen), proc.stdout
+    assert "argv=['--data-dir', %r]" % str(chosen) in proc.stdout, proc.stdout  # 参数原样交给 run.py
+
+    proc = run_start_sh(root, env, extra_args=["--data-dir=%s" % chosen])
+    assert printed_data_root(proc.stdout) == str(chosen), proc.stdout
+
+    default_proc = run_start_sh(root, env)
+    assert printed_data_root(default_proc.stdout) == os.path.realpath(str(root / "data"))
+
+
+def test_start_sh_data_root_matches_config_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """同一份 `--data-dir` / 环境变量，start.sh 打印的与 run.py 解析出的必须是一个值。"""
+    from app import config as app_config  # 只跑解析，不碰 storage（§7 那条红线在这儿不适用）
+
+    chosen = tmp_path / "operator-data"
+    from_env = tmp_path / "env-data"
+    root = start_sh_release_root(tmp_path, "print('ok')\n")
+    env = start_sh_env(tmp_path, [str(Path(sys.executable).parent)])
+    env["MCHECKER_PYTHON"] = sys.executable
+
+    monkeypatch.delenv("MCHECKER_DATA_DIR", raising=False)
+    settings = app_config.load_settings(argv=["--data-dir", str(chosen)])
+    proc = run_start_sh(root, env, extra_args=["--data-dir", str(chosen)])
+    assert proc.returncode == 0, proc.stderr
+    assert printed_data_root(proc.stdout) == settings.data_dir == str(chosen)
+
+    env["MCHECKER_DATA_DIR"] = str(from_env)
+    monkeypatch.setenv("MCHECKER_DATA_DIR", str(from_env))
+    settings = app_config.load_settings(argv=[])
+    proc = run_start_sh(root, env)
+    assert proc.returncode == 0, proc.stderr
+    assert printed_data_root(proc.stdout) == settings.data_dir == str(from_env), proc.stdout
+
+    proc = run_start_sh(root, env, extra_args=["--data-dir", str(chosen)])  # 命令行压过环境变量
+    assert printed_data_root(proc.stdout) == str(chosen), proc.stdout
+
+
+def test_start_sh_uses_the_documented_runtime_python_dir(tmp_path: Path) -> None:
+    """内嵌运行时按 §14.3 放在 `runtime/python/`，和 start.bat 同一个目录（复审 Minor 4）。
+
+    旧 start.sh 找的是 `runtime/bin/`——那既是文档里不存在的目录，也让「随包分发解释器」
+    在类 Unix 上其实是哑的。这里两个目录都摆上假解释器，选中的必须是文档那一个。
+    """
+    root = start_sh_release_root(tmp_path, "print('started')\n")
+    for rel in ("runtime/python/bin/python3", "runtime/bin/python3"):
+        stub = root / rel
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        stub.write_text('#!/bin/sh\nif [ "$1" = "-c" ]; then exit 0; fi\necho "RUNTIME=$0 ARGS=$*"\n', encoding="utf-8")
+        stub.chmod(0o755)
+    env = start_sh_env(tmp_path, [str(tmp_path / "empty-bin")])  # PATH 里没有 python，MCHECKER_PYTHON 也不给
+    proc = run_start_sh(root, env)
+    assert proc.returncode == 0, proc.stderr
+    assert str(root / "runtime/python/bin/python3") in proc.stdout, proc.stdout
+    assert "runtime/bin/python3" not in proc.stdout, proc.stdout
+    assert "ARGS=run.py" in proc.stdout, proc.stdout  # 被选中的那个真的接到了 run.py
+
+
+def test_start_sh_library_mode_exposes_the_resolvers(tmp_path: Path) -> None:
+    """`MCHECKER_START_LIB=0` 不是摆设（复审 Minor 5）：source 进来只取函数，不 exec run.py。
+
+    这一条同时也是端口/数据根两个解析函数的执法用例——它们只在 start.sh 内部被调用，
+    光跑整脚本只能看见打印结果，看不见 `--port=` / `--data-dir=` 这两种写法的解析。
+    """
+    env = start_sh_env(tmp_path, [str(Path(sys.executable).parent)])
+    env["MCHECKER_START_LIB"] = "0"
+    env["MCHECKER_DATA_DIR"] = str(tmp_path / "from-env")
+    script = (
+        ". '%s'; printf '%%s|%%s|%%s|%%s\\n' "
+        '"$(mcc_resolve_port --port 50701)" "$(mcc_resolve_port --port=50702)" '
+        '"$(mcc_resolve_data_dir --data-dir %s)" "$(mcc_resolve_data_dir)"'
+        % (REPO_ROOT / "start.sh", tmp_path / "arg-data")
+    )
+    proc = subprocess.run(
+        ["/bin/sh", "-c", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "50701|50702|%s|%s" % (
+        tmp_path / "arg-data",
+        tmp_path / "from-env",
+    ), proc.stdout
+
+
 def test_start_sh_needs_run_py(tmp_path: Path) -> None:
     """包不完整（没有 run.py）时也要给一句能看懂的话，而不是 ImportError。"""
     root = tmp_path / "release"
@@ -436,8 +675,10 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 13 个" in first.stdout, first.stdout
-    assert "外部主机引用（会被浏览器取回的）：0 个" in first.stdout, first.stdout
+    assert "成员 15 个" in first.stdout, first.stdout
+    assert "外部主机引用：0 个" in first.stdout, first.stdout
+    # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
+    assert "已放行 app/static/favicon.svg" in first.stdout, first.stdout
 
     refused = run_cli(common)
     assert refused.returncode == 1 and "已存在" in refused.stderr, refused.stderr
@@ -462,8 +703,23 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
 
 # ------------------------------------------------------------------ 真实仓库冒烟
 
+def test_inert_allowlist_is_a_list_of_pairs_not_a_directory_rule() -> None:
+    """放行名单的结构检查：`(路径, 地址, 理由)` 一条一个理由，键不许重复。
+
+    目录级/后缀级的口子（「整个 app/pages 都放行」「非前端文件不看」）就是复审 Important 1
+    出事的方式，这里把它钉成结构：条目必须指到具体文件、必须带地址、必须带理由，键不许撞车。
+    """
+    keys = [(rel, url) for rel, url, _why in mr.INERT_URL_LITERALS]
+    assert keys, "一条放行都没有的话，这条用例就成了空断言"
+    assert len(keys) == len(set(keys)), "同一路径+地址列了两遍，第二条永远是死的"
+    for rel, url, why in mr.INERT_URL_LITERALS:
+        assert not rel.endswith("/") and "." in rel.rsplit("/", 1)[-1], rel  # 指文件，不指目录
+        assert "://" in url or url.startswith("//"), (rel, url)
+        assert why.strip(), (rel, url)
+
+
 def test_real_repo_artifact_is_offline_clean(tmp_path: Path) -> None:
-    """对本仓真源树跑一遍：验收通过、前端外链引用为 0、app/web 的生产文件都在包里。"""
+    """对本仓真源树跑一遍：验收通过、外部主机引用为 0、app/web 的生产文件都在包里。"""
     zip_path = build(REPO_ROOT, tmp_path / "out")
     names = set(content_members(zip_path))
     report = mr.verify_release(zip_path, source_root=REPO_ROOT)
@@ -475,6 +731,23 @@ def test_real_repo_artifact_is_offline_clean(tmp_path: Path) -> None:
     assert not any(n.startswith("app/web/tests/") for n in names)
     assert "app/web/template.html" not in names
     assert len(names) > 50
+
+
+def test_real_repo_every_listed_inert_entry_is_actually_present(tmp_path: Path) -> None:
+    """真产物里：放行名单的每条都必须被闸门看见（没看见就是脱节），且不能多出一条没列的。"""
+    zip_path = build(REPO_ROOT, tmp_path / "out")
+    with zipfile.ZipFile(str(zip_path)) as archive:
+        blob = {n: archive.read(n) for n in archive.namelist() if n != mr.MANIFEST_NAME}
+    listed = {(rel, url) for rel, url, _why in mr.INERT_URL_LITERALS}
+    seen = set()
+    for rel, data in blob.items():
+        for _line, url in mr.url_literals(mr._as_text(data)):
+            host = mr._host_of(url)
+            if not host or host in mr.LOCAL_HOSTS:
+                continue
+            seen.add((rel, url))
+    assert seen <= listed, "出现了没被逐条放行的地址：%s" % sorted(seen - listed)
+    assert not mr.find_stale_inert_entries(blob), "名单里有产物已经不再包含的条目"
 
 
 def test_real_repo_zip_is_deterministic_apart_from_timestamp(tmp_path: Path) -> None:

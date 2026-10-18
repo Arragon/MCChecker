@@ -7,6 +7,13 @@
    名单条目在源树里缺失就直接报错（§14.3 的「包含」与「不包含」都在这儿落实）。
 2. 产物要**验收后才落地**：先写临时文件，`verify_release()` 通过后改名到位，
    磁盘上不会留下「没过验收的包」。
+3. 外链判定是**默认拒绝**（M4-06 复审 Important 1 之后倒过来的）：产物里**每一个**成员文件
+   （Python、Markdown、shell、bat、前端全在内）出现的每一个带主机的绝对地址字面量都是违规，
+   除非主机是本机回环，除非这条 `(路径, 地址)` 被单独写进 `INERT_URL_LITERALS`。
+   旧实现按「引用位置」放行，等于给绕过留了语法课：变量里的基地址、srcset 的第二个候选、
+   `meta http-equiv=refresh`、`.py` 里的 `urlopen("https://…")`、Markdown 里的 `<img src>`
+   都能躲开，而它们照样能让一台没外网的机器发出请求。名单本身也会腐坏，所以
+   `find_stale_inert_entries()` 反向检查：条目对应的文件在产物里却找不到那条地址，一样失败。
 
 确定性：同一棵源树 → 同一成员集合、同一逐文件 sha256；zip 条目时间戳固定为 1980-01-01，
 唯一每次不同的是 `MANIFEST.json` 里的 `built_at_utc`（它记录的就是「这次构建」）。
@@ -78,12 +85,29 @@ EXCLUDED_PATHS: Tuple[str, ...] = (
 #: 由发布人员在有网环境放入，本脚本既不生成也不校验它。
 OPTIONAL_RUNTIME_DIR = "runtime/python"
 
-#: 会被浏览器直接取回的资源类型，因此需要逐文件做外链检查（§16.7）。
-FRONTEND_SUFFIXES: Tuple[str, ...] = (".html", ".htm", ".js", ".mjs", ".css", ".svg")
-
 #: 本机地址不算外网（§16.7 说的是「非本服务器的请求」）。
 LOCAL_HOSTS = frozenset(
     {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]", "0:0:0:0:0:0:0:1"}
+)
+
+#: 逐条核对过、确认**不是网络目标**的绝对地址字面量（§16.7 唯一的例外出口）。
+#: 键是 `(成员相对路径, 地址字面量)`：换文件、换地址都要另开一条，目录级的放行不存在。
+#: 加一条之前必须读懂那一处为什么发不出请求；`_check_inert_entries()` 会反过来查——
+#: 名单里的路径一旦进了产物却找不到这条字面量，验收照样失败，所以这份名单不会
+#: 一边失效一边继续放行（也不会攒着「反正绿着」的僵尸条目）。
+INERT_URL_LITERALS: Tuple[Tuple[str, str, str], ...] = (
+    # XML 命名空间标识符：SVG 规范要求的固定 URI，解析器拿它做名字，不会去取。
+    ("app/static/favicon.svg", "http://www.w3.org/2000/svg", "SVG XML 命名空间"),
+    ("app/web/assets/js/ui/icons.js", "http://www.w3.org/2000/svg", "内联 SVG 的 XML 命名空间"),
+    ("app/web/index.html", "http://www.w3.org/2000/svg", "data: URI 里的 SVG XML 命名空间"),
+    # 输入框提示文字与示例文案：值是给用户看的，不参与任何请求。
+    ("app/web/assets/js/views/importer.js", "http://10.20.1.15/cfg/config.xml", "placeholder 提示文字"),
+    ("app/web/assets/js/views/settings.js", "http://…", "示例文案里的主机占位（省略号不是主机名）"),
+    ("app/core/reviewing.py", "http://…}tag", "注释里的 XML 命名空间举例（`…` 与 `}` 都当不了主机名）"),
+    # 文档字符串/格式串：地址部分是占位词或运行期参数，构建期没有主机可解析。
+    ("app/core/downloader.py", "scheme://host/path", "docstring 里的地址格式示意"),
+    ("app/core/downloader.py", "scheme://...", "docstring 里的地址格式示意"),
+    ("run.py", "http://%s:%d", "启动日志打印访问地址的格式串（主机端口运行期才知道）"),
 )
 
 #: DELIVERY_PLAN §10：发布说明必须列出的行为变更（相对 v1.0.1）。
@@ -95,15 +119,25 @@ ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 _VERSION_RE = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.M)
 _FEATURE_HEADING_RE = re.compile(r"""^###\s+(C\d+)\s+(.+?)\s*$""", re.M)
-_URL_RE = re.compile(r"""https?://[^\s'"()<>\];,`]+""", re.I)
 
-#: 「引用位置」= 浏览器/JS 真的会拿去发请求的地方。判定用位置而不是用主机白名单，
-#: 这样 `xmlns='http://www.w3.org/2000/svg'`（命名空间标识符，不发请求）、
-#: `/^https?:\/\//i`（校验正则）、`placeholder: "http://10.20.1.15/…"`（输入框提示文字）
-#: 都会被判为惰性文本，而 `<script src="https://cdn…">` 一定判为违规。
+#: 带 scheme 的绝对地址前缀（不限 http/https：`ftp://`、`gopher://`、自定义 scheme 都能被
+#: 浏览器或 urllib 拿去发请求，所以一律当网络目标看待）。
+_SCHEME_PREFIX_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*://""")
+#: 引号后面直接跟 `//`：写进字符串常量的协议相对地址（运行期拼一下就是 `http://host/…`）。
+#: 限定「紧跟引号」是为了不把 JS/Python 的行注释 `// 说明` 和整除 `a // b` 当成地址。
+_QUOTED_RELATIVE_RE = re.compile(r"""(?<=["'`])//""")
+#: srcset 的值是「地址 描述符」的逗号列表，必须逐候选切；整条属性一起匹配只会看见第一个候选。
+_SRCSET_ATTR_RE = re.compile(r"""\bsrcset\s*=\s*["']([^"']*)["']""", re.I)
+#: `<meta http-equiv="refresh" content="0;url=…">`：跳转地址藏在 content 值里面，不是属性值开头。
+_META_REFRESH_RE = re.compile(
+    r"""\bcontent\s*=\s*["'][^"']*\burl\s*=\s*((?:https?:)?//[^"'\s>]+)""", re.I
+)
+#: 「引用位置」模式：比上面三条多抓到的只有**既不带 scheme、也不在引号里**的写法
+#: （如 CSS `url(//host/a.png)`）。它们是追加的捕网，不再是放行与否的判据——
+#: M4-06 复审 Important 1 已经证明「按位置放行」可以靠换一个写法整体绕过。
 _REFERENCE_PATTERNS: Tuple[str, ...] = (
-    # HTML 属性：src/href/srcset/... 的值直接是绝对地址或协议相对地址
-    r"""\b(?:src|href|srcset|data|xlink:href|action|formaction|poster|codebase|manifest)\s*=\s*["']?((?:https?:)?//[^"'\s<>]+)""",
+    # HTML 属性：src/href/data/... 的值直接是绝对地址或协议相对地址（srcset 见 `_SRCSET_ATTR_RE`）
+    r"""\b(?:src|href|data|xlink:href|action|formaction|poster|codebase|manifest)\s*=\s*["']?((?:https?:)?//[^"'\s<>]+)""",
     # CSS：url(...) 与 @import
     r"""(?:url\s*\(\s*["']?|@import\s+["'])((?:https?:)?//[^"'\s)]+)""",
     # JS：把绝对地址当目标参数的调用与赋值
@@ -112,6 +146,12 @@ _REFERENCE_PATTERNS: Tuple[str, ...] = (
     r"""\.open\s*\(\s*["'][^"'`]*["']\s*,\s*["']?((?:https?:)?//[^"'`\s)]+)""",
 )
 _COMPILED_REFERENCE_PATTERNS = [re.compile(p, re.I) for p in _REFERENCE_PATTERNS]
+
+#: 地址 token 的终止字符（和浏览器一致：引号、尖括号、空白、常见标点都不算地址的一部分）。
+#: 换行/回车/制表符**不终止** token：WHATWG URL 解析会把它们从地址里删掉再解析，
+#: `src="http://\n evil.example/x"` 照样发得出去，所以这里跟着删（复审裁定「安全判据
+#: 至少要和安全判据一样安全」——能删的必须是浏览器也删的）。
+_URL_STOP_CHARS = frozenset(" '\"()<>,;`]")
 
 
 class ReleaseError(RuntimeError):
@@ -219,78 +259,152 @@ def collect_release_notes(source_root: Path) -> List[str]:
 
 # ------------------------------------------------------------------- 外链与泄漏检查
 
+_INERT_KEYS = frozenset((rel, url) for rel, url, _why in INERT_URL_LITERALS)
+
+
+def _as_text(data: bytes) -> str:
+    """成员内容当文本看：UTF-8 解不动就按字节逐位看（二进制里藏 URL 同样要抓）。"""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("latin-1")
+
+
 def _host_of(url: str) -> str:
-    body = url[2:] if url.startswith("//") else url.split("://", 1)[1]
+    """地址的权威段（主机）；`data:`、`file:///…`、`http://` 这种没有主机的返回 ""。
+
+    方括号里是 IPv6 字面量，整段取回：按 `:` 切会把 `[2001:db8::1]` 切成空串，
+    那等于给一个外部 IPv6 目标放行。
+    """
+    if url.startswith("//"):
+        body = url[2:]
+    elif "://" in url:
+        body = url.split("://", 1)[1]
+    else:
+        return ""
     for sep in ("?", "#", "/"):
         body = body.split(sep, 1)[0]
-    return body.rsplit("@", 1)[-1].split(":", 1)[0].strip("[]").lower()
-
-
-def reference_spans(text: str) -> List[Tuple[int, int]]:
-    """所有「引用位置」上 URL 的字符区间。"""
-    spans: List[Tuple[int, int]] = []
-    for pattern in _COMPILED_REFERENCE_PATTERNS:
-        for match in pattern.finditer(text):
-            spans.append((match.start(1), match.end(1)))
-    return spans
-
-
-def scan_external_references(rel_path: str, text: str) -> Tuple[List[str], List[Tuple[int, str]]]:
-    """返回 (违规说明, 惰性出现项 [(行号, URL)])。
-
-    违规 = URL 出现在引用位置且主机不是本机；惰性项 = 只作为文本出现的 URL
-    （命名空间、校验正则、输入框提示），逐条列出来作为 §16.7 的证据，不当成失败。
-    """
-    violations: List[str] = []
-    spans = reference_spans(text)
-    for start, _end in spans:
-        url = _match_at(text, start)
-        if url is None:
-            continue
-        host = _host_of(url)
-        if host and host not in LOCAL_HOSTS:
-            line = text.count("\n", 0, start) + 1
-            violations.append(
-                "%s:%d 引用了非本机主机 %s（%s）" % (rel_path, line, host, url)
-            )
-    inert: List[Tuple[int, str]] = []
-    for match in _URL_RE.finditer(text):
-        if any(start == match.start() for start, _ in spans):
-            continue
-        url = _read_url(text, match.start())
-        if _host_of(url) in LOCAL_HOSTS:
-            continue
-        inert.append((text.count("\n", 0, match.start()) + 1, url))
-    return violations, inert
-
-
-def _match_at(text: str, start: int) -> Optional[str]:
-    """从引用位置抓出完整 URL 文本（引用模式捕获到的那段）。"""
-    if _URL_RE.match(text, start) is not None or text.startswith("//", start):
-        return _read_url(text, start)
-    return None
+    if body.startswith("["):
+        literal, _closes, _rest = body.partition("]")
+        return literal[1:].lower()
+    body = body.rsplit("@", 1)[-1]
+    return body.split(":", 1)[0].lower()
 
 
 def _read_url(text: str, start: int) -> str:
-    end = start
-    stop = set(" \t\r\n'\"()<>,;`]")
-    while end < len(text) and text[end] not in stop:
-        end += 1
-    return text[start:end]
+    """从 `start` 起读一个地址 token。
+
+    权威段（主机）里的 tab/换行/回车，浏览器会在解析前删掉，所以这里跟着删——
+    `src="http://\\n evil.example/x"` 是真发得出去的。路径段就不跟着删了：删下去只会把
+    后面整行吞进「地址」，而「联系哪台机器」在权威段结束时就定死了。
+    """
+    if text.startswith("//", start):
+        body = start + 2
+    else:
+        scheme = _SCHEME_PREFIX_RE.match(text, start)
+        body = scheme.end() if scheme is not None else start
+    chars: List[str] = list(text[start:body])
+    index = body
+    past_authority = False
+    while index < len(text):
+        ch = text[index]
+        if ch in "\t\r\n":
+            if past_authority:
+                break
+            index += 1
+            continue
+        if ch in _URL_STOP_CHARS:
+            break
+        if ch == "/":
+            past_authority = True
+        chars.append(ch)
+        index += 1
+    return "".join(chars)
 
 
-def frontend_scan(members: Dict[str, bytes]) -> Tuple[List[str], Dict[str, List[Tuple[int, str]]]]:
+def _srcset_candidate_starts(value: str, base: int) -> List[int]:
+    """`srcset="a.png 1x, //host/b.png 2x"` 的每个候选起点（偏移是源文本里的绝对位置）。"""
+    starts: List[int] = []
+    offset = 0
+    for chunk in value.split(","):
+        stripped = chunk.lstrip()
+        tokens = stripped.split()
+        if tokens:
+            starts.append(base + offset + (len(chunk) - len(stripped)))
+        offset += len(chunk) + 1
+    return starts
+
+
+def url_literals(text: str) -> List[Tuple[int, str]]:
+    """文本里所有「可能成为网络目标」的地址字面量：[(行号, 字面量)]，去重后按位置排序。
+
+    四条来源取并集，**判定不看它出现在哪个语法位置**（Important 1 的教训：位置判据可以
+    整体绕过——变量里的地址、srcset 的第二个候选、meta 刷新、Python/Markdown 里的地址
+    都不在旧的位置模式里）：scheme 前缀、引号后的协议相对地址、引用位置模式、srcset 候选。
+    没有主机的写法（`http://`、`file:///d:/…`、`data:`）不在这里，它们指不了任何机器。
+    """
+    starts: List[int] = []
+    for regex in (_SCHEME_PREFIX_RE, _QUOTED_RELATIVE_RE):
+        for match in regex.finditer(text):
+            starts.append(match.start())
+    for regex in (_META_REFRESH_RE,) + tuple(_COMPILED_REFERENCE_PATTERNS):
+        for match in regex.finditer(text):
+            starts.append(match.start(1))
+    for match in _SRCSET_ATTR_RE.finditer(text):
+        starts.extend(_srcset_candidate_starts(match.group(1), match.start(1)))
+
+    found: Dict[Tuple[int, str], None] = {}
+    for start in starts:
+        url = _read_url(text, start)
+        if not url or not _host_of(url):
+            continue
+        found[(text.count("\n", 0, start) + 1, url)] = None
+    return sorted(found)
+
+
+def scan_member(rel_path: str, text: str) -> Tuple[List[str], List[Tuple[int, str]]]:
+    """倒过来的默认：带主机的绝对地址就是违规，除非主机是本机或这条被单独放行。
+
+    返回 (违规说明, 已放行的惰性项)；不再有「看着不像引用位置所以算文本」这条路。
+    """
+    violations: List[str] = []
+    inert: List[Tuple[int, str]] = []
+    for line, url in url_literals(text):
+        host = _host_of(url)
+        if not host or host in LOCAL_HOSTS:
+            continue
+        if (rel_path, url) in _INERT_KEYS:
+            inert.append((line, url))
+            continue
+        violations.append(
+            "%s:%d 引用了非本机主机 %s（%s；不在惰性名单 INERT_URL_LITERALS 上）"
+            % (rel_path, line, host, url)
+        )
+    return violations, inert
+
+
+def scan_artifact(members: Dict[str, bytes]) -> Tuple[List[str], Dict[str, List[Tuple[int, str]]]]:
+    """逐成员扫**全部**产物文件（§14.3 名单里的 .py/.md/.sh/.bat 和前端文件一样在射程内）。"""
     violations: List[str] = []
     inert: Dict[str, List[Tuple[int, str]]] = {}
     for rel, data in sorted(members.items()):
-        if not rel.lower().endswith(FRONTEND_SUFFIXES):
-            continue
-        text = data.decode("utf-8", errors="replace")
-        hits, skipped = scan_external_references(rel, text)
+        hits, skipped = scan_member(rel, _as_text(data))
         violations.extend(hits)
         if skipped:
             inert[rel] = skipped
     return violations, inert
+
+
+def find_stale_inert_entries(members: Dict[str, bytes]) -> List[str]:
+    """放行名单里已经找不到对应文本的条目——名单一旦和产物脱节，它就在替未知地址放行。"""
+    stale: List[str] = []
+    for rel, url, why in INERT_URL_LITERALS:
+        data = members.get(rel)
+        if data is None:
+            continue
+        if url not in _as_text(data):
+            stale.append("%s 的放行条目 %s（%s）在产物里已经找不到" % (rel, url, why))
+    return stale
 
 
 def find_leaked_paths(members: Dict[str, bytes], forbidden: Sequence[str]) -> List[str]:
@@ -492,12 +606,14 @@ def verify_release(
     if leaks:
         raise ReleaseError("产物里泄漏了本机绝对路径：\n  " + "\n  ".join(leaks))
 
-    # 5) 前端文件的外链引用（§16.7 的真正失败模式）。
-    violations, inert = frontend_scan(blob)
-    if violations:
+    # 5) 产物里每一个带主机的地址字面量：不是本机，就必须被单独放行（§16.7 的真正失败模式）。
+    violations, inert = scan_artifact(blob)
+    stale = find_stale_inert_entries(blob)
+    if violations or stale:
+        detail = violations + stale
         raise ReleaseError(
-            "打包产物里存在会被浏览器取回的外部主机引用（§16.7 离线会失败）：\n  "
-            + "\n  ".join(violations)
+            "打包产物里出现未被放行的外部主机引用（§16.7 离线会失败），或惰性名单已脱节：\n  "
+            + "\n  ".join(detail)
         )
 
     return {
@@ -518,13 +634,13 @@ def _print_result(result: Dict[str, object], stream=sys.stdout) -> None:
     inert = result["inert_references"] or {}
     total = sum(len(v) for v in inert.values())
     print(
-        "  外部主机引用（会被浏览器取回的）：0 个；仅作为文本出现的 URL %d 处，分布在 %d 个前端文件"
-        % (total, len(inert)),
+        "  外部主机引用：0 个；逐条放行、确认发不出请求的地址字面量 %d 处（分布在 %d 个文件，名单共 %d 条）"
+        % (total, len(inert), len(INERT_URL_LITERALS)),
         file=stream,
     )
     for rel, hits in sorted(inert.items()):
         for line, url in hits:
-            print("    惰性文本 %s:%d %s" % (rel, line, url), file=stream)
+            print("    已放行 %s:%d %s" % (rel, line, url), file=stream)
     print("  发布说明（取自 %s）：" % FEATURE_CHANGES_DOC, file=stream)
     for note in result["release_notes"]:
         print("    %s" % note, file=stream)
