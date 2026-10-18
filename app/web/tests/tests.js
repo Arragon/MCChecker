@@ -657,6 +657,54 @@
     ok(later.textContent.indexOf("2/5") >= 0 && later.textContent.indexOf("准备中") < 0, "total 已发布 ⇒ 正常 n/m");
   });
 
+  test("M3-06 / R19：mock 与后端 /tasks 契约同步——单条任务 0/0 起步、三类两两互斥 409+task_id、未知名 404", function () {
+    /* 模板模式的绿不算后端接对的证据（R19），但 mock 必须与后端同口径——这条用例
+     * 直接打 MC.mock.handle，钉住卡 6 移交的三处契约：
+     * ① 单条任务入队不预发 total（下载期间 0/0 ⇒ UI「准备中」）；
+     * ② 互斥面 = 后端 _CONFLICTING_TYPES：三类两两互斥、撞车 409 BUSY + detail.task_id；
+     * ③ 名字不在映射表 ⇒ 404 NOT_FOUND（不是那条「什么都没做却已完成」的绿任务）。 */
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    var first = null;
+    return call("POST", "/p/default/tasks", { type: "update_source", name: "scenario_a.xml" })
+      .then(function (r) {
+        eq(r.status, 202, "单条更新走 POST /tasks");
+        first = r.body.task;
+        eq([first.progress.done, first.progress.total], [0, 0], "契约 ①：入队时不预发 total，下载期间就是 0/0");
+        eq(first.result.items.length, 0, "入队响应里没有结果条目");
+        /* 互斥断言与在跑任务**并发**下发：mock 的模拟下载约 900ms 后完成，串行等待会
+         * 撞上完成时刻变成随机红。并发 ⇒ 每条都在同一个 dispatch 窗口（≤260ms）里被
+         * BUSY 挡住，与后端行为一致且不受延迟抖动影响。 */
+        return Promise.all([
+          call("POST", "/p/default/tasks", { type: "update_all" }),
+          call("POST", "/p/default/tasks", { type: "update_source", name: "scenario_a.xml" }),
+          call("POST", "/p/default/tasks", { type: "refresh_records", name: "scenario_a.xml" }),
+          call("POST", "/p/default/tasks", { type: "bogus" }),
+          call("POST", "/p/default/tasks", { type: "update_source", name: "bad/name" }),
+          call("POST", "/p/default/tasks", { type: "update_source", name: "没配置.xml" }),
+          call("GET", "/tasks/nope-not-here"),
+        ]);
+      })
+      .then(function (rs) {
+        var all = rs[0], same = rs[1], rec = rs[2], bogus = rs[3], badname = rs[4], ghost = rs[5], gone = rs[6];
+        eq(all.status, 409, "契约 ②：update_source 在跑 ⇒ update_all 必 409（与后端加宽后的互斥面一致）");
+        eq(all.body.error.code, "BUSY", "409 是 BUSY 业务结果，不是服务器故障");
+        ok(all.body.error.detail && all.body.error.detail.task_id === first.id, "detail.task_id 指回正在跑的那条，前端据此给跳转入口");
+        eq(same.status, 409, "同 (机型,类型,目标) 重复提交也 409，不排队不重试");
+        eq(rec.status, 409, "契约 ②：三类两两互斥 ⇒ refresh_records 撞进行中的 update_source（卡 6 复审 F2）");
+        eq(bogus.status, 400, "未知 type ⇒ 400 且落 field=type（校验在入队之前）");
+        eq(bogus.body.error.detail.field, "type");
+        eq(badname.status, 400, "非法文件名 ⇒ 400 且落 field=name（后端 _validated_target 同款）");
+        eq(badname.body.error.detail.field, "name");
+        eq(ghost.status, 404, "契约 ③：名字不在映射表 ⇒ 404，不给「什么都没做却显示已完成」的绿任务");
+        eq(ghost.body.error.code, "NOT_FOUND");
+        eq(ghost.body.error.detail.name, "没配置.xml", "detail.name 供前端按业务结果显示");
+        eq(gone.status, 404, "未知任务 id 404，消息与后端同口径（不存在或已结束太久）");
+        ok(gone.body.error.message.indexOf("已结束太久") >= 0, "消息口径：" + gone.body.error.message);
+      });
+  });
+
   test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
     var calls = [];
     var origDel = MC.api.del;
