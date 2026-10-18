@@ -165,7 +165,7 @@
 
   /* 已经接入真实后端的接口。后端卡在自己的 PR 里实现接口，紧随的前端卡在这里加一项，
    * 视图代码本身不用改。必须始终是 CAP_KEYS 的子集（前端测试页有断言会红）。 */
-  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review", "tasks", "settings"];
+  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review", "tasks", "settings", "schedule"];
 
   MC.capsFor = function (mock) {
     var caps = {};
@@ -179,7 +179,9 @@
   MC.capKeys = CAP_KEYS.slice();
   MC.wiredCaps = WIRED.slice();
 
-  /* 每项能力未接入时展示给用户的去向（卡号见 docs/MCChecker_DELIVERY_PLAN.md 第 6 节）。 */
+  /* 每项能力未接入时展示给用户的去向（卡号见 docs/MCChecker_DELIVERY_PLAN.md 第 6 节）。
+   * 已放行的键**也留着文案**：`MC.unwired` 的键集必须等于 CAP_KEYS（前端测试页有断言），
+   * 而跨版本书签/旧页面仍可能读到它（与 M3-06/M3-07 对 settings、tasks 的处理一致）。 */
   MC.unwired = {
     favorites: "收藏将在 M2-01 / M2-02 接入",
     remarks: "修改建议将在 M2-03 / M2-04 接入",
@@ -215,7 +217,7 @@
    * （前端测试页有断言会红）。M4-08 全绿后与 MC.caps 一起删除。
    */
   var SETTINGS_SEGMENTS = ["sources", "schedule", "people", "bindings", "tools", "profiles"];
-  var WIRED_SETTINGS = ["sources"];
+  var WIRED_SETTINGS = ["sources", "schedule"];
 
   MC.settingsSegments = SETTINGS_SEGMENTS.slice();
   MC.wiredSettingsSegments = WIRED_SETTINGS.slice();
@@ -223,9 +225,10 @@
     return !!(MC.config && MC.config.mock) || WIRED_SETTINGS.indexOf(seg) >= 0;
   };
 
-  /* 每个未接入分段展示给用户的去向，与 MC.unwired 同风格（卡号即后端接口的接入卡）。 */
+  /* 每个未接入分段展示给用户的去向，与 MC.unwired 同风格（卡号即后端接口的接入卡）。
+   * 键集必须**恰好等于**「SETTINGS_SEGMENTS 里没被 WIRED_SETTINGS 放行的那些」——
+   * `schedule` 已随 M3-08 落地，所以它的去向文案一并撤掉（多留会让前端测试页红）。 */
   MC.unwiredSettings = {
-    schedule: "定时更新将在 M3-08 接入",
     people: "人员与权限将在 M3-13 接入",
     bindings: "变量绑定将在 M3-14 接入",
     tools: "外部工具将在 M3-15 接入",
