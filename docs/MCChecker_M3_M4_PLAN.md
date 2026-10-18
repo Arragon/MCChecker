@@ -1107,7 +1107,7 @@ gh pr merge <n> --merge
 **恢复后的前四步**（评审 BASE 用快照自身的提交号 `6d1d87c`，不是 `830731b`；若恢复时 HEAD 已推进，以 `git log --oneline 6d1d87c..HEAD` 的实际范围为准）：
 1. `git log --oneline 830731b..HEAD` 看是否已提交；已提交则 `scripts/review-package docs/MCChecker_M3_M4_PLAN.md 830731b HEAD` 生成评审包，派独立评审（双判决：规格合规 + 代码质量）。
 2. **必须作为 Critical 提出的未闭合发现（R23）**：代理在 `DELIVERY_PLAN` 第 11 节写了「M3-01 已完成」，而当时未提交、未评审、未合并 —— 违反 H4/H5「未运行的检查不得报告为通过」，且该文档是后续 agent 的接力入口。要求改成「已实现待评审/待合并」，真合并后再由控制方写实。同节的**决策 20（D1 全文）口径正确，保留**。
-3. 评审通过后：`gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge` → `INH-1886` 置 Done + 证据注释（**顺带补发三次 `-32603` 失败的那条中期通报**：`LookupError`→`PARSE_FAILED` 的分支、`_INT_RE` 在 core/services 两处重复需守住、R22 归属）。
+3. 评审通过后：`gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge` → `INH-1886` 置 Done + 证据注释（**顺带补发三次 `-32603` 失败的那条中期通报**：`LookupError`→`PARSE_FAILED` 的分支、R22 归属，以及评审的三条 Important 已修复）。类型规则一节按修复后的事实写：`INT_RE`/`TYPE_HINTS`/`value_type_hint` 已收进 `core`，`services/review.py::_required_type` 改为转发（真去重，非加一致性测试）；**剩下的第三份拷贝在前端 `mock-api.js:793-800`**，与 core 无同步保证，已 deferred。
 4. 派发卡 2（INH-1887）：brief = `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-2-brief.md`，JIT 计划 = 同目录 `task-2-plan.md`（4 个子任务、带真实测试代码与变异验证），并带上 §10 的 R1/R2/R3/R6/R7/R8/R19。
 
 **待办（不要在实现代理运行中做分支手术）**：`a165106` 与 `830731b` 两个文档提交目前混在卡 1 分支上，卡 1 合并前应拆成独立 `chore/m3-m4-plan-doc` PR，让卡 1 的 PR 只含本卡改动。
