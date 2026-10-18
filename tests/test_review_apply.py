@@ -1,11 +1,12 @@
 """审阅写回：只在原文上改选中节点（规范 §6.7 第 5–6 步；T-16 / M3-01、INH-1886）。
 
-`reviewing.apply_edits(src, fmt, edits) -> bytes` 是 `core` 层的纯函数：输入原文字节与
-`(loc, new_value, kind)` 列表，输出新原文字节；任何不安全情况都以 `AppError` 抛出且
-**不返回任何字节**（幂等与 legacy 建议两条属 M3-02，不在本文件）。
+`reviewing.apply_edits(src, fmt, edits) -> bytes` 是 `core` 层、不读写业务文件的函数：
+输入原文字节与 `(loc, new_value, kind)` 列表，输出新原文字节；任何不安全情况都以
+`AppError` 抛出且**不返回任何字节**（幂等与 legacy 建议两条属 M3-02，不在本文件）。
 
 按卡面已知限制，断言只针对**业务值与节点集合**（compact 的 `loc`/`t`/`v`），不断言引号
-风格、空元素写法、实体写法——标准库必然会统一它们（§6.7 已知限制）。
+风格、空元素写法、实体写法——标准库必然会统一它们（§6.7 已知限制）。除此之外不授权删除
+内容：根元素之外、元素之内夹的注释与处理指令都必须原位保住。
 """
 
 from __future__ import annotations
@@ -150,6 +151,7 @@ class TestApplyXml:
         src = b'<?xml-stylesheet type="text/xsl" href="s.xsl"?>\n<R><a>1</a></R>'
         out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
         assert not out.startswith(b"<?xml version")
+        assert b'<?xml-stylesheet type="text/xsl" href="s.xsl"?>' in out, "根前 PI 不能被删掉"
         assert values(out) == {"/R[1]/a[1]": "2"}
 
     def test_unknown_encoding_declaration_is_parse_failed(self):
@@ -201,6 +203,225 @@ class TestApplyXml:
         assert values(out, "ns.xml") == expected_of(
             NS_DOC, "ns.xml", {attr_loc: "2", text_loc: "T"}
         )
+
+
+class TestOutOfRootContent:
+    """Important 1 / BLOCKERS B3：根元素**之外**的内容必须原位搬运，不能静默删除。
+
+    卡面已知限制只授权引号统一、空元素写法、实体写法三类差异，不含节点删除；而第 6 步
+    只比较有值节点，看不见根外内容的丢失——同一函数对 DTD 是明确拒绝的（理由正是「第 6 步
+    看不见」），所以搬运做在校验之前，不加「位置化拒绝」。
+    评审复现的三种输入（根前注释、根前 PI、根后注释）逐个钉住。
+    """
+
+    def test_comment_before_the_root_survives(self):
+        src = b'<?xml version="1.0"?><!-- header --><R><a>1</a></R>'
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert out.startswith(b'<?xml version="1.0"?><!-- header -->'), "根前注释必须原样留在原位"
+        assert out.count(b"<?xml ") == 1, "原声明与重建声明不能同时出现"
+        assert values(out) == {"/R[1]/a[1]": "2"}
+
+    def test_pi_before_the_root_survives(self):
+        src = b'<?xml version="1.0"?><?xml-stylesheet href="a.xsl"?><R><a>1</a></R>'
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert b'<?xml-stylesheet href="a.xsl"?>' in out, "根前 PI 必须原样留着"
+        assert out.count(b"<?xml ") == 1
+        assert values(out) == {"/R[1]/a[1]": "2"}
+
+    def test_comment_after_the_root_survives(self):
+        src = b"<R><a>1</a></R><!-- trailer -->"
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert out.endswith(b"<!-- trailer -->"), "根后注释必须原样留在原位"
+        assert values(out) == {"/R[1]/a[1]": "2"}
+
+    def test_declaration_text_is_carried_verbatim_including_standalone(self):
+        """`standalone="yes"` 也是原文声明的一部分：重建会丢，所以声明整体搬运。"""
+        src = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><R><a>1</a></R>'
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert out.startswith(b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+        assert out.count(b"<?xml ") == 1
+        assert values(out) == {"/R[1]/a[1]": "2"}
+
+    def test_prolog_and_epilog_are_not_duplicated_with_the_bom(self):
+        src = (
+            codecs.BOM_UTF8
+            + b'<?xml version="1.0"?><!-- header --><R><a>1</a></R><!-- trailer -->\n'
+        )
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert out.startswith(codecs.BOM_UTF8)
+        assert out.count(codecs.BOM_UTF8) == 1, "BOM 只准出现在搬运后的 prolog 里"
+        assert out.count(b"<!-- header -->") == 1
+        assert out.endswith(b"<!-- trailer -->\n")
+        assert values(out) == {"/R[1]/a[1]": "2"}
+
+    def test_whitespace_outside_the_root_is_kept(self):
+        src = b"\n<!-- c -->\n<R>\n  <a>1</a>\n</R>\n"
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert out.startswith(b"\n<!-- c -->\n<R>")
+        assert out.endswith(b"</R>\n")
+
+    def test_doctype_in_a_utf16_prolog_is_still_refused(self):
+        """prolog 收窄之后仍然要认得出 DTD：UTF-16 下 `<!DOCTYPE` 不是 ASCII 那串字节。"""
+        src = '<!DOCTYPE r SYSTEM "m.dtd"><R><a>1</a></R>'.encode("utf-16")
+        with pytest.raises(AppError) as excinfo:
+            apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert excinfo.value.code == REVIEW_UNSAFE
+        assert "DTD" in excinfo.value.message
+
+    def test_utf16_document_is_rewritten_in_its_own_encoding(self):
+        """搬运按字节做，正文必须与 prolog 同一套编码：混着用会产出声明与字节对不上的文件。"""
+        src = (
+            '<?xml version="1.0" encoding="UTF-16"?><!-- 头 --><R><a>1</a></R><!-- 尾 -->'
+        ).encode("utf-16")
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert out.count(codecs.BOM_UTF16_LE) == 1, "BOM 只准有开头那一个"
+        text = out.decode("utf-16")
+        assert text.startswith('<?xml version="1.0" encoding="UTF-16"?><!-- 头 -->')
+        assert text.endswith("<!-- 尾 -->")
+        assert values(out) == {"/R[1]/a[1]": "2"}
+
+    def test_self_closing_root_keeps_its_prolog_and_epilog(self):
+        """自闭合根的结束位置与 `</名称>` 那种不同：两条分支都要有样本。
+
+        判据是「偏移处是不是 `</`」，不能用「往后找一个 `>`」——自闭合根的偏移已经在 `/>`
+        之后，再往后找会一头扎进 epilog 里。
+        """
+        src = b'<?xml version="1.0"?><!-- head --><R a="1"/><!-- tail -->'
+        out = apply_edits(src, "xml", [("/R[1]/@a", "2", "attribute")])
+        assert out == b'<?xml version="1.0"?><!-- head --><R a="2" /><!-- tail -->'
+
+    def test_nested_self_closing_does_not_end_the_root_early(self):
+        """`…><b/></R>`：根的结束标签前紧跟着一个 `/>`，结束位置不能被它带偏。"""
+        src = b"<R><a>1</a><b/></R><!-- tail -->"
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "2", "element")])
+        assert values(out) == {"/R[1]/a[1]": "2"}
+        assert out.endswith(b"<!-- tail -->")
+        assert b"<b />" in out, "空元素写法可以统一，但根后注释不能连着一并被切掉"
+
+    def test_doctype_literal_inside_the_document_is_not_a_false_refusal(self):
+        """整文件子串扫描会把 CDATA/注释里的 `<!DOCTYPE` 字面量误判成 DTD。
+
+        真 DTD 只能在 prolog（根元素之前），扫描范围就按那个区间来；根外内容现在可由
+        `_xml_root_span` 量出，所以这个收窄不需要额外解析。
+        """
+        src = b'<R><a><![CDATA[<!DOCTYPE r SYSTEM "m.dtd">]]></a><b>1</b></R>'
+        out = apply_edits(src, "xml", [("/R[1]/b[1]", "2", "element")])
+        after = values(out)
+        assert after["/R[1]/b[1]"] == "2"
+        assert after["/R[1]/a[1]"] == '<!DOCTYPE r SYSTEM "m.dtd">'
+
+
+class TestInnerMarkupInValueSpan:
+    """Important 2 / BLOCKERS B7：元素内含注释/PI 时，显示**有值**的节点必须写得回去。
+
+    显示链路丢掉注释/PI（§6.1 第 1 步 `insert_comments=False`），标准库把它们前后的文本
+    拼进 `.text`；写入侧留着这些节点，同一段文本被切成 `.text` + 各兄弟的 `.tail`。
+    两侧必须按同一个「有效文本」口径定位与写值，否则 `services/review.py` 放行（值不是
+    None）、写回永久 `REVIEW_CONFLICT`，用户只会看到「无法唯一定位 + 刷新」。
+    """
+
+    def test_value_after_a_leading_comment(self):
+        src = b"<R><a><!-- c -->5</a></R>"
+        assert values(src) == {"/R[1]/a[1]": "5"}, "前提：显示侧确实有值（提交阶段不会被 400 拦住）"
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "9", "element")])
+        assert values(out) == {"/R[1]/a[1]": "9"}
+        assert b"<!-- c -->" in out, "注释节点不能被当成写入的代价删掉"
+
+    def test_value_after_a_leading_pi(self):
+        src = b"<R><a><?pi?>5</a></R>"
+        assert values(src) == {"/R[1]/a[1]": "5"}
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "9", "element")])
+        assert values(out) == {"/R[1]/a[1]": "9"}
+        assert b"<?pi?>" in out
+
+    def test_value_split_around_a_comment_is_replaced_wholesale(self):
+        src = b"<R><a>5<!-- c -->6</a></R>"
+        assert values(src) == {"/R[1]/a[1]": "56"}, "显示的是整段（56），不是只有 text 那半（5）"
+        out = apply_edits(src, "xml", [("/R[1]/a[1]", "9", "element")])
+        assert values(out) == {"/R[1]/a[1]": "9"}, "整段跨度都要被替换，不能只写前半留下 6"
+        assert b"<!-- c -->" in out
+
+    def test_text_row_with_a_leading_comment(self):
+        src = b"<R><a><!-- c -->5<b>7</b></a></R>"
+        assert values(src) == {"/R[1]/a[1]/#text": "5", "/R[1]/a[1]/b[1]": "7"}
+        out = apply_edits(src, "xml", [("/R[1]/a[1]/#text", "9", "text")])
+        assert values(out) == {"/R[1]/a[1]/#text": "9", "/R[1]/a[1]/b[1]": "7"}
+        assert b"<!-- c -->" in out
+
+    def test_tail_after_a_child_element_is_not_part_of_the_value(self):
+        """`<a><b>7</b>x</a>` 里的 `x` 是 tail：显示没有 `#text` 行，也就不是写回目标。
+
+        有效文本必须在**首个子元素**处收口，否则 tail 会被算进值，这条 loc 就能「定位」上，
+        写回去等于凭空长出一行——第 6 步只能事后按结构变化拒绝，错误码也从 409 变成 422。
+        """
+        src = b"<R><a><b>7</b>x</a></R>"
+        assert values(src) == {"/R[1]/a[1]/b[1]": "7"}
+        with pytest.raises(AppError) as excinfo:
+            apply_edits(src, "xml", [("/R[1]/a[1]/#text", "9", "text")])
+        assert excinfo.value.code == REVIEW_CONFLICT
+
+    def test_whitespace_only_span_is_still_not_a_writable_target(self):
+        """有效文本 strip 后为空 = 显示无值：与 `<empty/>` 同口径按定位不到拒绝（B2 兜底）。"""
+        src = b"<R><a><!-- c -->   </a></R>"
+        assert values(src) == {}
+        with pytest.raises(AppError) as excinfo:
+            apply_edits(src, "xml", [("/R[1]/a[1]", "9", "element")])
+        assert excinfo.value.code == REVIEW_CONFLICT
+
+    def test_attribute_value_keeps_its_surrounding_whitespace(self):
+        """`kind` 取 compact 的真实词表（`element`/`attribute`/`text`）。
+
+        属性行的 `v` 不 strip、元素与 `#text` 行的 `v` 是 strip 后的文本（§6.2），所以
+        带首尾空白的属性值必须按 `attribute` 口径比对期望值，否则第 6 步会误报 unsafe。
+        """
+        src = b'<R a=" x "><b>1</b></R>'
+        out = apply_edits(src, "xml", [("/R[1]/@a", " y ", "attribute")])
+        assert values(out)["/R[1]/@a"] == " y "
+
+
+class TestTypeRulesHaveOneDefinition:
+    """Important 3：int/float/bool 的口径**只准有一处定义**（在 `core.reviewing`）。
+
+    服务层与写回各写一份时，口径一旦飘了就会出现「`POST /remarks` 接受、`POST /review/submit`
+    在机器写锁内把它拒掉」的永远无法应用的建议。`services/review.py` 本来就 import `core`，
+    所以去重方向是 services → core，不违反 §3.3 分层红线。
+    """
+
+    def test_services_keeps_no_private_copy_of_the_rules(self):
+        from app.core import reviewing
+        from app.services import review
+
+        assert not hasattr(review, "_INT_RE"), "正则只准有一份，定义在 core"
+        assert not hasattr(review, "_TYPE_HINTS"), "类型提示只准有一份，定义在 core"
+        assert hasattr(reviewing, "INT_RE") and hasattr(reviewing, "value_type_hint")
+
+    @pytest.mark.parametrize(
+        "kind,proposed,hint",
+        [
+            ("int", "1_0", "整数"),
+            ("int", " 7 ", "整数"),
+            ("int", "1", ""),
+            ("float", "1e400", "数字"),
+            ("float", "1.5", ""),
+            ("bool", "TRUE", "true 或 false"),
+            ("bool", "false", ""),
+            ("NoneType", "null", ""),
+            ("str", "x", ""),
+        ],
+    )
+    def test_service_and_core_share_the_verdict_object(self, kind, proposed, hint):
+        """服务层的 `_required_type` 只是 `fmt` 的门，判定本身来自 core。"""
+        from app.core import reviewing
+        from app.services import review
+
+        assert reviewing.value_type_hint(kind, proposed) == hint
+        assert review._required_type("json", kind, proposed) == hint
+
+    def test_xml_is_not_type_checked_at_the_service_layer(self):
+        """§6.7 第 4 步：XML 不做类型检查，这条门留在服务层，不进 core 的判定函数。"""
+        from app.services import review
+
+        assert review._required_type("xml", "int", "abc") == ""
 
 
 class TestApplyJson:
