@@ -1,12 +1,22 @@
 """文档内存缓存的条目上限按机型文件数放大（M4-05 / INH-1907；§6.5、§12；决策 17 / D3）。
 
-这几条只钉本卡改动的东西：条目上限不再钉死 24、下限仍可单独钉住（基准用它复现旧
-配置）、字节上限仍是硬护栏、放大不越权（不建目录、不影响别的机型、跨机型共用 LRU 时
-仍按字节逐出）。搜索耗时本身由 `scripts/bench_api.py` 测量，不在这里做计时断言——
-计时断言在 CI 机器上必然是恒真或恒炸，两种都无意义。
+钉住的是本卡改动的四件事：条目上限不再钉死 24、下限仍可单独钉住（基准用它复现旧
+配置）、字节上限仍是硬护栏、放大不越权（读路径不建目录、容量按**参数机型**算而不是
+按当前上下文机型算、机型共用同一把进程内 LRU）。搜索耗时本身由 `scripts/bench_api.py`
+测量，不在这里做计时断言——计时断言在 CI 机器上必然是恒真或恒炸，两种都无意义。
 
-缓存是**进程内全局单例**，`test_api_documents.py` 等用例会往里塞东西，所以每个用例
-都自己 `reset_cache()`；凡是用「缓存内字节数」当算术输入的地方都先断言条目数是 1。
+缓存是**进程内全局单例**，`test_api_documents.py` 等用例会往里塞东西，所以
+`TestEntryLimitScales` 每个用例先 `reset_cache()`（`TestLimitComputation` 里除新增那条
+外都只做容量算术，不读缓存计数，无需清）；凡是用「缓存内字节数」当算术输入的地方都先
+断言条目数是 1。
+
+**为什么需要目录集合快照**（M4-05 假绿审计）：`tests/conftest.py::isolated_data_root`
+在建夹具时已经调过 `storage._ensure_dirs()`，default 的骨架目录在用例开始前就存在，所以
+「调完之后那个目录还是不存在」这种断言只在**没人建过它的机型**上才有意义；而且现网
+`GET /p/{pid}/files` → `storage.list_config_files()` 开头就会 `_ensure_dirs()`（M4-05 实测：
+真实数据根里因此长出 `archive/`、`records/`、`cache/parse_tree/`，见 `docs/know-how.md`），
+光数「参数机型的 configs」一个目录抓不到它。下面的用例一律把**整个数据根的目录集合**
+拍下来比对，并把当前上下文机型换成一个从没写过的机型，两个坏实现才都会变红。
 """
 
 from __future__ import annotations
@@ -31,6 +41,19 @@ def seed_configs(pid: str, count: int, prefix: str = "cfg") -> List[str]:
 def loaded_body_bytes() -> int:
     """当前内存缓存里的响应体总字节；调用前必须自己确认缓存是空的。"""
     return documents.cache_info()["bytes"]
+
+
+def all_directories() -> List[str]:
+    """数据根之下的全部目录（排序后的绝对路径）。
+
+    「读路径不建目录」只能用集合快照来断言：单个目录可以恰好被夹具或写路径提前建好，
+    那时「它不存在」是空断言（详见本文件开头）。
+    """
+    collected: List[str] = []
+    for base, dirs, _names in os.walk(storage.DATA_DIR):
+        for name in dirs:
+            collected.append(os.path.join(base, name))
+    return sorted(collected)
 
 
 class TestEntryLimitScales:
@@ -120,10 +143,52 @@ class TestLimitComputation:
         assert len(names) == 5
 
     def test_unknown_profile_falls_back_to_floor_without_creating_dirs(self, monkeypatch) -> None:
-        """机型目录不存在 → 文件数按 0 算、落到下限，并且**读路径不创建目录**。"""
+        """机型目录不存在 → 文件数按 0 算、落到下限，并且**读路径不创建目录**。
+
+        目录断言取整个数据根的快照而不是只看 `ghost_model/configs`：现网那个会顺手补建
+        骨架的写法是 `storage._ensure_dirs()`，它建的是**当前上下文机型**的目录，只看
+        参数机型那一个目录抓不到（M4-05 假绿审计里那个坏实现就是这么活下来的）。
+        """
         monkeypatch.setattr(documents, "MEMORY_CACHE_MAX_ENTRIES", 7)
         monkeypatch.setattr(documents, "MEMORY_CACHE_FILES_MULTIPLIER", 2)
+        before = all_directories()
         assert documents.memory_cache_limit("ghost_model") == 7
-        assert not os.path.isdir(
-            os.path.join(storage.get_profile_data_dir("ghost_model"), "configs")
-        )
+        assert all_directories() == before
+
+    def test_limit_counts_the_argument_profile_not_the_active_one(self, monkeypatch) -> None:
+        """容量数的是**参数那个机型**的 `configs/`，且当前上下文机型一个目录都不长。
+
+        本卡的规则是「按机型内配置文件数」放大，所以「传进来的 pid 真的被用了」是规则的
+        一半；另一半是读路径不建目录。两个坏实现分别对应两个曾在 M4-05 审计里活下来的变异：
+        ① `memory_cache_limit` 改用 `storage.get_active_profile()`；
+        ② 计数前先 `storage._ensure_dirs()`（补建上下文机型的 `configs/archive/records/
+        cache/parse_tree`——`GET /p/{pid}/files` 走的就是这条路）。
+        这里把上下文机型设成**从没写过的** `model_b`：夹具已经替 default 把骨架建好了，
+        换成 default 时 ② 照样绿。
+        """
+        monkeypatch.setattr(documents, "MEMORY_CACHE_MAX_ENTRIES", 3)
+        monkeypatch.setattr(documents, "MEMORY_CACHE_FILES_MULTIPLIER", 1)
+        seed_configs("model_a", 5)  # 写路径：save_config_file 会建 model_a 的骨架
+
+        storage.set_active_profile("model_b")  # model_b 只有机型 id，目录还不存在
+        before = all_directories()
+        assert documents.memory_cache_limit("model_a") == 5  # ① 会变成 max(3, 0)=3
+        assert documents.memory_cache_limit("model_b") == 3  # 空机型落到下限
+        assert all_directories() == before  # ② 在这里变红
+
+    def test_profiles_share_one_lru(self) -> None:
+        """不同机型的文档进的是**同一把**进程内 LRU（驻留数与字节都是全局账）。"""
+        pid_a = "model_a"
+        pid_b = "model_b"
+        names_a = seed_configs(pid_a, 2)
+        names_b = seed_configs(pid_b, 2)
+        documents.reset_cache()
+
+        documents.document_bytes(pid_a, names_a[0], "current")
+        documents.document_bytes(pid_a, names_a[1], "current")
+        assert documents.cache_info()["entries"] == 2
+        documents.document_bytes(pid_b, names_b[0], "current")
+
+        info = documents.cache_info()
+        assert info["entries"] == 3  # 两个机型共用一把缓存，不是每机型一把
+        assert info["bytes"] > 0

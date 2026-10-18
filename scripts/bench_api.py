@@ -22,9 +22,13 @@
 
 **语料与 H3**：默认语料是在 `tempfile.mkdtemp()` 里按 `--seed` 确定性生成的合成配置
 文件，退出时整目录删除，**绝不指向仓库 `data/`**。脚本开工前后各对仓库 `data/` 拍一次
-逐文件 sha256 快照，任何差异以退出码 2 失败（自带 tripwire，不靠口头声明；`data/`
-不存在时这一条自己说破是空信号）。`--profile-dir` 是给手上有真实数据的人的逃生口，
-风险见 `--help`。
+逐文件 sha256 快照，任何**文件层面**的差异以退出码 2 失败（自带 tripwire，不靠口头声明；
+`data/` 不存在时这一条自己说破是空信号）。快照按文件算，**空目录不计入**（与
+`tests/data_guard.py` 同口径），而 `GET /p/{pid}/files` 这类读路径经
+`storage.list_config_files()` → `_ensure_dirs()` 恰恰只长目录——tripwire 看不见它，
+所以那条行为单独写进 `--help`，别把「tripwire 绿」读成「数据根一个字节都没动过」。
+`--profile-dir` 是给手上有真实数据的人的逃生口，风险与「真实语料下 §12 判定行只报实测、
+不给 PASS」的理由见 `--help`。
 
 退出码：0 全部达标；1 有用例超预算或断言不成立；2 仓库 `data/` 前后不一致（H3）；
 3 环境/语料问题（服务起不来、请求非 200 等——失败绝不折算成通过）。
@@ -191,7 +195,7 @@ def adopt_data_root(data_dir: str) -> Dict[str, Any]:
         "search_pid": pid,
         "files_pid": pid,
         "search_files": names,
-        "search_nodes": 0,  # 真实数据：节点数只有解析后才知道，主表按实测写
+        "search_nodes": 0,  # 真实数据：节点数只有解析后才知道；规模类判定行因此降级为仅报告
         "big_name": names[0],
         "big_nodes": 0,
         "mid_names": names[1:3],
@@ -405,7 +409,7 @@ class Case:
         mode: str,
         budget_ms: Optional[float],
         budget_src: str,
-        fn: Callable[[], Tuple[str, str]],
+        fn: Callable[[], Tuple[List[float], str, str]],
         runs: int = 5,
         cold: bool = False,
         pct: float = 0.95,
@@ -591,6 +595,7 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
     search_pid = corpus["search_pid"]
     files_pid = corpus["files_pid"]
     search_files = corpus["search_files"]
+    synthetic = bool(corpus.get("synthetic"))
     query = "param_00007"
     big_url = document_url(files_pid, corpus["big_name"])
     mid_url = document_url(files_pid, corpus["mid_names"][0])
@@ -598,18 +603,63 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
         {"base": {"file": corpus["mid_names"][0]}, "target": {"file": corpus["mid_names"][1]}}
     ).encode("utf-8")
 
+    def size_budget(budget_ms: float, budget_src: str) -> Tuple[Optional[float], str]:
+        """§12 的规模类预算行只在合成语料上才是判据。
+
+        「30 文件 × 3 万节点 ≤ 500 ms」「5 万节点命中 ≤ 300 ms」这类行的预算写死了样本
+        规模。`--profile-dir` 用的是客户机里现成的文件，规模既不是 5 万也不是 30×3 万，
+        在这种文件上打出一个 0.4 ms 的 PASS 说的不是「你的真实数据满足 §12」，而是「这台
+        机器请求一次很快」——那是假绿，M4-05 拿真实形态的数据根跑过才知道有多容易误读。
+        判定退成「仅报告」，实测毫秒数照打；只有与规模无关的 §7.3 轮询行仍然判。
+        """
+        if synthetic:
+            return budget_ms, budget_src
+        return None, "真实语料规模不等于 §12 那一行的场景（原线 %s）⇒ 仅报告" % budget_src
+
+    def size_label(name: str, nodes: int) -> str:
+        """样本列：合成语料能写准节点数，真实语料不能拿 0 冒充已知规模。"""
+        if nodes:
+            return "%s：%d 节点" % (name, nodes)
+        return "%s：节点数未知（见实测说明）" % name
+
+    def history_sample(shape: str) -> str:
+        """归档/记录行的样本列：版本数只有合成语料才知道得准。"""
+        if synthetic:
+            return "%s × %d 个%s" % (corpus["history_name"], HISTORY_VERSIONS, shape)
+        return "%s：真实语料，版本数与节点数见实测说明" % corpus["history_name"]
+
     def warm_document(url: str, accept_encoding: str = "identity") -> Tuple[List[float], str, str]:
+        """命中行：先证明「这次计时真的是缓存命中」，再报毫秒数。
+
+        §12 那一行给的是**命中路径**的预算。只预热一次就计时，等于把「预热真的生效」
+        当成不会失败的前提——缓存键一改、容量一缩，这条照样能打 2 ms 报 PASS。所以这里
+        同时钉两句：被计的那次请求不许再读原文（`_read_bytes` 0 次），并且全局命中计数
+        必须 +1、驻留条目数不许因为它再涨。
+        """
         api.expect("GET", url, accept_encoding=accept_encoding)  # 预热一次，不计时
-        elapsed, payload = api.expect("GET", url, accept_encoding=accept_encoding)
+        before = documents.cache_info()
+        with RefetchCounter(documents) as counter:
+            elapsed, payload = api.expect("GET", url, accept_encoding=accept_encoding)
+        after = documents.cache_info()
+        failure = ""
+        if counter.count or after["hits"] <= before["hits"] or after["entries"] > before["entries"]:
+            failure = (
+                "被计的这次请求不是 §12 说的「服务端缓存命中」（本次 `documents._read_bytes` %d 次、"
+                "全局命中计数 %+d、驻留条目 %+d）：拿未命中的请求去比 300 ms 那条线只会把退化读成通过。"
+                % (counter.count, after["hits"] - before["hits"], after["entries"] - before["entries"])
+            )
         info = documents.cache_info()
         if accept_encoding == "gzip":
-            return [elapsed], "传输体 %s（gzip；§6.5 不缓存压缩体，每次响应重压；计时不含客户端 inflate）" % mb(
-                len(payload)
-            ), ""
+            return [elapsed], "传输体 %s（gzip；§6.5 不缓存压缩体，每次响应现压；计时不含客户端" \
+                " inflate；本脚本不解压所以节点数不在这行，见 doc_hit_mid；命中已%s）" % (
+                mb(len(payload)), "钉住" if not failure else "未成立"
+            ), failure
         return (
             [elapsed],
-            "响应体 %s；本次驻留 %d 项 %s" % (mb(len(payload)), info["entries"], mb(info["bytes"])),
-            "",
+            "响应体 %s；节点 %s；本次驻留 %d 项 %s；命中已钉住（_read_bytes 0 次）" % (
+                mb(len(payload)), node_count(payload), info["entries"], mb(info["bytes"])
+            ),
+            failure,
         )
 
     def cold_document() -> Tuple[List[float], str, str]:
@@ -668,8 +718,21 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
         ), ""
 
     def revision_poll() -> Tuple[List[float], str, str]:
-        """50 次真实轮询逐次计时：§7.3 的预算是 P99，必须一个请求一个样本。"""
+        """50 次真实轮询逐次计时：§7.3 的预算是 P99，必须一个请求一个样本。
+
+        「不读磁盘」这一半要先问前提在不在：`fsutil.read_json` 遇不到文件时**连 open 都
+        不做**（M4-05 实测），所以数据根里缺 `device_models.json` / 该机型的
+        `ip_mapping.json` / `admin_users.json` 时，「open 0 次」是必然结果、不构成证据。
+        那种情况下本条判**不可判**（红），不给 PASS——默认合成语料会建齐这三个文件，
+        逃生口指向缺身份文件的数据根时才会走到这条分支。
+        """
         url = "/api/v1/p/%s/revision" % files_pid
+        premise = (
+            "device_models.json",
+            os.path.join("profiles", files_pid, "ip_mapping.json"),
+            os.path.join("profiles", files_pid, "admin_users.json"),
+        )
+        missing = [rel for rel in premise if not os.path.isfile(os.path.join(opens.root, rel))]
         api.expect("GET", url)  # 先走一遍，连接与身份解析路径热起来
         timings: List[float] = []
         with opens:
@@ -678,6 +741,7 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
                 timings.append(elapsed)
             caught = len(opens.paths)
         failure = ""
+        ending = ""
         if caught:
             failure = (
                 "§7.3 写明该接口「不读磁盘」，实测 %d 次轮询打开数据根内文件 %d 次（每次 %s 个，%s）。"
@@ -689,15 +753,18 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
                 "P99 那一半是过的（见 p50/最差列）。"
                 % (REVISION_POLLS, caught, "%.1f" % (caught / float(REVISION_POLLS)), opens.rel())
             )
-        vacuous = ""
-        if caught == 0:
-            vacuous = (
-                "；注意这是**空信号**：数据根里没有 `device_models.json` / "
-                "`ip_mapping.json` / `admin_users.json` 时 `fsutil.read_json` 连 open 都不做，"
-                "本条必然过（合成语料会建这三个文件，所以主表那条才有意义）"
+        elif missing:
+            failure = (
+                "本条**不可判**（按红报，不给 PASS）：数据根里缺 %s，`fsutil.read_json` 遇不到文件时"
+                "连 open 都不做，所以「open 0 次」量到的是前提缺失，不是「不读磁盘」成立。"
+                "（默认合成语料会建齐这三个文件，那条才是真信号；走到这里说明 --profile-dir "
+                "指向的数据根不是真实部署形态。）"
+                % "、".join(missing)
             )
+        else:
+            ending = "；前提齐备（三个身份/机型文件都在）且 open 0 次 ⇒「不读磁盘」这一半真的过了"
         return timings, "%d 次逐次计时；数据根内 open %d 次（%s）%s" % (
-            REVISION_POLLS, caught, opens.rel(), vacuous
+            REVISION_POLLS, caught, opens.rel(), ending
         ), failure
 
     def revision_memory() -> Tuple[List[float], str, str]:
@@ -723,40 +790,59 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
             len(search_files), elapsed, info["entries"], mb(info["bytes"]), mb(limit)
         ), ("" if info["bytes"] <= limit else "驻留字节越过 §12 的「+LRU ≤ 256 MB」")
 
+    cold_budget, cold_src = size_budget(3000.0, "§12「30 万节点冷 ≤ 3 s」")
+    hit_budget, hit_src = size_budget(300.0, "§12「5 万节点缓存命中 ≤ 300 ms」")
+    search_budget, search_src = size_budget(
+        SEARCH_BUDGET_MS, "§12 表格（D3：取 500 ms，不取 §7.6 的 300 ms）"
+    )
+    filter_budget, filter_src = size_budget(
+        80.0, "§12「文件内筛选 5 万节点 ≤ 80 ms」（该行原指前端）"
+    )
+    compare_budget, compare_src = size_budget(800.0, "§12「对比 2×5 万节点结构化 ≤ 800 ms」")
+    search_sample = (
+        "%d 文件 × %d 节点 = %d 节点" % (
+            len(search_files), corpus["search_nodes"], len(search_files) * corpus["search_nodes"]
+        )
+        if synthetic
+        else "%d 个真实文件（节点数未测列，非 §12 的 30×3 万场景）" % len(search_files)
+    )
+
     return [
         Case("doc_cold_big", "打开大文件（冷）", "GET /files/{name}/document",
-             "%s：%d 节点" % (corpus["big_name"], corpus["big_nodes"]),
-             "冷", 3000.0, "§12「30 万节点冷 ≤ 3 s」", cold_document, runs=3),
+             size_label(corpus["big_name"], corpus["big_nodes"]),
+             "冷", cold_budget, cold_src, cold_document, runs=3),
         Case("doc_hit_mid", "打开 5 万节点文件（服务端缓存命中）", "GET /files/{name}/document",
-             "%s：%d 节点" % (corpus["mid_names"][0], corpus["mid_nodes"]),
-             "热", 300.0, "§12「5 万节点缓存命中 ≤ 300 ms」", lambda: warm_document(mid_url)),
+             size_label(corpus["mid_names"][0], corpus["mid_nodes"]),
+             "热", hit_budget, hit_src, lambda: warm_document(mid_url)),
         Case("doc_hit_mid_gzip", "同上但客户端接受 gzip（内存缓存不存压缩体）", "GET /files/{name}/document",
-             "%s：%d 节点" % (corpus["mid_names"][0], corpus["mid_nodes"]),
-             "热", 300.0, "§12「5 万节点缓存命中 ≤ 300 ms」", lambda: warm_document(mid_url, "gzip")),
+             size_label(corpus["mid_names"][0], corpus["mid_nodes"]),
+             "热", hit_budget, hit_src, lambda: warm_document(mid_url, "gzip")),
         Case("search_warm", "全局搜索（内存缓存已预热；§12 预算的前提）", "GET /search?q=…",
-             "%d 文件 × %d 节点 = %d 节点" % (
-                 len(search_files), corpus["search_nodes"], len(search_files) * corpus["search_nodes"]),
-             "热", SEARCH_BUDGET_MS, "§12 表格（D3：取 500 ms，不取 §7.6 的 300 ms）", search_warm),
+             search_sample,
+             "热", search_budget, search_src, search_warm),
         Case("search_cold", "全局搜索（冷：含首次解析与写缓存）", "GET /search?q=…",
              "%d 文件 × %d 节点" % (len(search_files), corpus["search_nodes"]),
              "冷", None, "§12 未给冷启动全局搜索定预算", search_cold, runs=1),
         Case("filter_in_file", "文件内筛选（服务端扫描单文件，对应 §12 前端的行）", "GET /search?file=…",
-             "%s：%d 节点" % (corpus["mid_names"][0], corpus["mid_nodes"]),
-             "热", 80.0, "§12「文件内筛选 5 万节点 ≤ 80 ms」（该行原指前端）", filter_in_file),
+             size_label(corpus["mid_names"][0], corpus["mid_nodes"]),
+             "热", filter_budget, filter_src, filter_in_file),
         Case("compare_2x50k", "结构化对比（两个不同文件）", "POST /compare",
-             "%s × %s：各 %d 节点" % (corpus["mid_names"][0], corpus["mid_names"][1], corpus["mid_nodes"]),
-             "热", 800.0, "§12「对比 2×5 万节点结构化 ≤ 800 ms」", compare_warm),
+             "%s × %s：各 %s" % (
+                 corpus["mid_names"][0], corpus["mid_names"][1],
+                 "%d 节点" % corpus["mid_nodes"] if synthetic else "节点数未知（真实语料）",
+             ),
+             "热", compare_budget, compare_src, compare_warm),
         Case("files_list", "文件列表（结构树顶层）", "GET /files",
              "%d 个文件" % len(search_files), "热", None, "§12 未定预算", files_list),
         Case("archives_cold", "历史版本列表（冷：首次计算相邻版本结构摘要）", "GET /files/{name}/archives",
-             "%s × %d 个归档版本（各 %d 节点）" % (corpus["history_name"], HISTORY_VERSIONS, corpus["history_nodes"]),
+             history_sample("归档版本（各 %d 节点）" % corpus["history_nodes"]),
              "冷", None, "§12 未定预算",
              lambda: history_list("archives", "归档"), runs=1),
         Case("archives_warm", "历史版本列表（热：摘要走 cache/diff_v2）", "GET /files/{name}/archives",
-             "%s × %d 个归档版本" % (corpus["history_name"], HISTORY_VERSIONS),
+             history_sample("归档版本"),
              "热", None, "§12 未定预算", lambda: history_list("archives", "归档")),
         Case("records_warm", "修改记录列表（含相邻版本结构摘要）", "GET /files/{name}/records",
-             "%s × %d 个记录版本（各 %d 节点）" % (corpus["history_name"], HISTORY_VERSIONS, corpus["history_nodes"]),
+             history_sample("记录版本（各 %d 节点）" % corpus["history_nodes"]),
              "热", None, "§12 未定预算", lambda: history_list("records", "记录")),
         Case("revision_poll", "修订号轮询（真实 HTTP，逐次计时）", "GET /revision",
              "%d 次轮询" % REVISION_POLLS,
@@ -853,18 +939,28 @@ def main(argv: Optional[List[str]] = None) -> int:
             "语料与风险\n"
             "  默认语料：tempfile.mkdtemp() 里按 --seed 确定性生成的合成配置文件"
             "（默认 30 文件 × 3 万节点 = 决策 17 的场景），退出时整目录删除，不读也不写仓库"
-            " data/。脚本开工前后各对仓库 data/ 拍一次逐文件 sha256 快照，任何差异以退出码 2"
-            " 失败。本机没有 data/ 时这一条自己说破是空信号。\n"
+            " data/。脚本开工前后各对仓库 data/ 拍一次逐文件 sha256 快照，任何文件层面的差异以"
+            " 退出码 2 失败。本机没有 data/ 时这一条自己说破是空信号。\n"
             "  --profile-dir 的风险（后果自负）：把真实数据根指给基准之后，基准会**读**其中"
-            "每个配置文件（搜索/筛选/对比/列表都会全量扫描），并往数据根里**写**派生缓存"
-            "（profiles/<pid>/cache/doc_v2、cache/diff_v2）；此外 `GET /files` 经 "
-            "`storage.list_config_files()` → `_ensure_dirs()` 会补建机型目录骨架"
-            "（archive/、records/、cache/ 等空目录）——那是既有读路径的行为，不是本脚本新造的写，"
-            "但在真实数据上跑之前你要知道数据根会长出这些。读接口不会改动 configs/archive/records "
-            "里的权威文件；磁盘占用、读放大与耗时都是真的：本脚本实测 100 文件 × 3 万节点的机型会把"
-            "内存驻留顶到 256 MB 上限（71 项 / 254 MB），真实语料更大时进程内存就是这个量级。"
-            "请先备份、先确认剩余空间与可接受的运行时长，并且只指向仓库之外的目录——指向仓库内部"
-            "（含 data/）一律拒绝（H3）。合成语料已足够复现决策 17 的场景。\n"
+            "每个配置文件（搜索/筛选/对比/列表都会全量扫描），并往数据根里写东西。实测（M4-05：一份"
+            " 4 文件的模拟真实根，跑之前/之后逐条比对目录与文件哈希）长出了这几样："
+            "profiles/<pid>/cache/doc_v2/*.json.gz（文档磁盘缓存，派生数据，本次 4 个）；"
+            "profiles/<pid>/archive/、records/、cache/、cache/parse_tree/ 四个空目录（实测跑前跑后 "
+            "`find -type d` 的差集就是这四条）——它们不是"
+            "本脚本新造的写，是既有读路径自带的：GET /p/{pid}/files → "
+            "storage.list_config_files() → storage._ensure_dirs()（core/storage.py:916、:200）。"
+            "空目录不在上面的 sha256 快照里（与 tests/data_guard.py 同口径），所以 tripwire 绿"
+            "**不等于**「数据根一个字节、一个目录都没多」。\n"
+            "  configs/archive/records 里的权威文件确实一个都没被改（实测哈希逐条一致）；磁盘占用、"
+            "读放大与耗时都是真的：本脚本实测 100 文件 × 3 万节点的机型会把内存驻留顶到 256 MB 上限"
+            "（71 项 / 254 MB），真实语料更大时进程内存就是这个量级。请先备份、先确认剩余空间与可"
+            "接受的运行时长，并且只指向仓库之外的目录——指向仓库内部（含 data/）一律拒绝（H3）。\n"
+            "  真实语料下的判定口径：§12 的规模类预算行（5 万命中 / 30 万冷 / 30×3 万搜索 / 5 万筛选 /"
+            " 2×5 万对比）写死了样本规模，客户机里现成的文件不是那个规模，打 PASS 说的是「这台机器"
+            "请求一次很快」而不是「真实数据满足 §12」⇒ 这些行只报实测毫秒（判定列「仅报告」），"
+            "容量对比表同理只作观察；只有与规模无关的 §7.3 轮询行仍按预算判，且它在数据根缺"
+            " device_models.json / ip_mapping.json / admin_users.json 时报「不可判」而不是 PASS。"
+            "要复现决策 17 的场景请直接用合成语料。\n"
             "预算线：§12 表格 + §7.3；没有预算线的用例判定列写「仅报告」，不参与退出码。"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -992,6 +1088,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         ))
         print("      「重取/次」= 一次搜索里 `documents._read_bytes` 的调用数（逐出后重新读原文 + 反序列化），")
         print("      它是决策 17 那条 731 ms 的机制本体；`open/次` 另含磁盘缓存 `doc_v2/*.json.gz` 的打开。")
+        if not corpus["synthetic"]:
+            print("      真实语料下的口径：主表里 §12 的规模类预算行（30 万冷 / 5 万命中 / 30×3 万搜索 /"
+                  " 5 万筛选 / 2×5 万对比）已按「仅报告」输出——那些行的预算写死了样本规模，"
+                  "在客户机现成的文件上打 PASS 证明不了真实数据满足 §12；本表的毫秒与「重取/次」"
+                  "只是观察值（机型里文件数与 §12 的 30 文件场景无关时，24/auto 两档本来就测不出差别）。")
 
         failed = [row for row in rows if row.failed]
         after = snapshot_repo_data()
@@ -1031,6 +1132,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             else:
                 shutil.rmtree(work, ignore_errors=True)
                 print("临时语料目录已删除：%s" % work)
+        if code in (0, 1) and not snapshot_repo_data():
+            print(
+                "H3 说明：仓库 data/ 不存在，本次运行从代码路径上就碰不到它（数据根 = %s，%s）。\n"
+                "这一句是根据运行形态得出的，不是前面那条 tripwire 给的证据——没有可比对的树，"
+                "tripwire 自己已经自称空信号。" % (
+                    data_dir,
+                    "临时目录" + ("（--keep-temp 已保留）" if args.keep_temp else "，退出即删")
+                    if work is not None else "--profile-dir 指定的目录，脚本不删"),
+                file=sys.stderr,
+            )
     return code
 
 
