@@ -12,6 +12,9 @@
   var S = MC.mockFixtures.build();
   var temps = {};
   var tasks = {};
+  /* 任务去重键（`(pid,type,target)`）只留在 mock 内部：`task` 的 JSON 形状必须严格
+   * 是 §7.10 的 11 个字段，与 `services/tasks.py::Task.to_payload` 一致（M3-07）。 */
+  var taskKeys = {};
   var idempotency = {};
   /* 与后端 `services/review.py::IDEMPOTENCY_WINDOW_SECONDS` 同口径（§6.7 第 1 步）。 */
   var IDEMPOTENCY_WINDOW_SECONDS = 600;
@@ -362,17 +365,36 @@
   }
 
   /* ---------------- tasks ---------------- */
+  /* 契约与 `app/services/tasks.py` + `app/server/api_tasks.py` 对齐（M3-07 / R19）：
+   * `task` 的 JSON 形状严格是 §7.10 的 11 个字段，去重键只留在内部 `taskKeys`；
+   * 状态由条目结果推出（全成 succeeded / 全败 failed / 部分 partial）；
+   * 结束时 `tasks` 必递增，`files` 只在真的写入过内容时递增，`settings` 只随 update_all。 */
+  var TASK_FAILED_STATUSES = ["download_failed", "rejected", "too_large", "error"];
+
+  function busyTaskByKey(key) {
+    return Object.keys(tasks).map(function (k) { return tasks[k]; }).filter(function (t) {
+      return taskKeys[t.id] === key && (t.state === "queued" || t.state === "running");
+    })[0];
+  }
+
+  function activeTaskOfType(pid, type) {
+    return Object.keys(tasks).map(function (k) { return tasks[k]; }).filter(function (t) {
+      return t.profile === pid && t.type === type && (t.state === "queued" || t.state === "running");
+    })[0];
+  }
+
   function runTask(pid, type, name, actor) {
     var P = profile(pid);
     var key = pid + ":" + type + ":" + (name || "*");
-    var running = Object.keys(tasks).map(function (k) { return tasks[k]; }).filter(function (t) {
-      return t.key === key && (t.state === "queued" || t.state === "running");
-    })[0];
+    // update_all 与同机型任意 update_source 互斥（§10.1），反向同理。
+    var running =
+      busyTaskByKey(key) ||
+      (type === "update_all" && activeTaskOfType(pid, "update_source")) ||
+      (type === "update_source" && activeTaskOfType(pid, "update_all"));
     if (running) return fail(409, "BUSY", "该任务正在执行（由 " + running.actor + " 发起）", { task_id: running.id });
     var targets = type === "update_all" ? P.mapping.map(function (m) { return m.name; }) : [name];
     var t = {
       id: util.uid("task"),
-      key: key,
       profile: pid,
       type: type,
       target: name || null,
@@ -385,6 +407,7 @@
       finished_at: null,
     };
     tasks[t.id] = t;
+    taskKeys[t.id] = key;
     bump(pid, "tasks");
     var step = 0;
     (function next() {
@@ -396,7 +419,9 @@
         t.progress.done = step;
         bump(pid, "tasks");
         if (step < targets.length) return next();
-        var failed = t.result.items.filter(function (x) { return x.status === "download_failed" || x.status === "error" || x.status === "rejected"; }).length;
+        var failed = t.result.items.filter(function (x) {
+          return TASK_FAILED_STATUSES.indexOf(x.status) >= 0;
+        }).length;
         t.state = failed === 0 ? "succeeded" : failed === targets.length ? "failed" : "partial";
         t.finished_at = util.nowString();
         if (type === "update_all") {
@@ -409,8 +434,9 @@
           };
         }
         bump(pid, "tasks");
-        bump(pid, "files");
-        bump(pid, "settings");
+        // 与后端同口径：unchanged 不通知 files（R5），settings 只随 update_all（§10.1）。
+        if (t.result.items.some(function (x) { return x.status === "success"; })) bump(pid, "files");
+        if (type === "update_all") bump(pid, "settings");
       }, 900);
     })();
     return ok({ task: t }, 202);

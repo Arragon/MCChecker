@@ -213,6 +213,40 @@
     ok(/M\d-\d\d/.test(MC.unwired.review), "review 的未接入说明要保留并点名卡号：" + MC.unwired.review);
   });
 
+  test("M3-07 / D4：任务接口独立放行，tools 键不再代表任务可用性", function () {
+    var prod = MC.capsFor(false);
+    ok(MC.capKeys.indexOf("tasks") >= 0, "tasks 已登记在 CAP_KEYS");
+    ok(MC.wiredCaps.indexOf("tasks") >= 0, "tasks 已接入真实后端（M3-07）");
+    ok(prod.tasks, "生产模式下 tasks 为真：「立即拉取」与两个更新按钮可用");
+    ok(!prod.tools, "tools 仍只代表外部工具，M3-15 才放行");
+    eq(MC.capKeys.length, 16, "能力键共 16 项");
+    ok(/M\d-\d\d/.test(MC.unwired.tasks), "tasks 的未接入说明要点名卡号：" + MC.unwired.tasks);
+  });
+
+  test("M3-07 / D4：tasks 未接入时 pollTasks 与 startTask 一个请求都不发", function () {
+    var calls = [];
+    var origGet = MC.api.get;
+    var origPost = MC.api.post;
+    var origCap = MC.caps.tasks;
+    var poll = MC.App.prototype.pollTasks;
+    var start = MC.App.prototype.startTask;
+    var stubApp = { p: function (s) { return "/p/p1" + s; }, activeTasks: [], taskSlot: null, renderTasks: function () {}, pollTasks: poll };
+    try {
+      MC.api.get = function (path, query) { calls.push("GET " + path); return Promise.resolve({ items: [] }); };
+      MC.api.post = function (path, body) { calls.push("POST " + path); return Promise.resolve({ task: {} }); };
+      MC.caps.tasks = false;
+      poll.call(stubApp);
+      /* startTask 走 reject 而不是「假装任务已开始」；catch 挂上以免留下未处理的拒绝。 */
+      start.call(stubApp, { type: "update_all" }).then(null, function () {});
+      eq(calls, [], "未接入时不得打 /tasks（决策 14：禁用 + 说明 + 不发请求）");
+    } finally {
+      /* 同步恢复：异步 finally 会让其余用例在整个同步批次里都用假 API（卡 3 的已知坑）。 */
+      MC.api.get = origGet;
+      MC.api.post = origPost;
+      MC.caps.tasks = origCap;
+    }
+  });
+
   test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
     var calls = [];
     var origDel = MC.api.del;

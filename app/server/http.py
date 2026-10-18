@@ -29,7 +29,7 @@ from ..core.errors import (
     TOO_LARGE,
     AppError,
 )
-from ..services import auth
+from ..services import auth, tasks
 from ..services.context import RequestContext
 from .router import Response, Router
 
@@ -417,12 +417,30 @@ def _content_type(path: str) -> str:
 
 
 class MCServer(ThreadingHTTPServer):
-    """收敛并发与连接行为（§3.5）。"""
+    """收敛并发与连接行为（§3.5）。
+
+    `runner`（卡 6 的后台任务队列）一旦注入，`shutdown()` 就**先排空在途任务再关
+    HTTP**（R9）：`ThreadPoolExecutor` 的工作线程不是 daemon，顺序反过来会让
+    `serve_forever` 先退出、主线程走完而任务还在跑。这个次序放在服务器自己身上，
+    是为了让「任何调用方关掉这个 server」都自动满足它；`run.ordered_stop` 里还显式
+    排了同一次序（`runner.shutdown()` 幂等，两次调用不会重复 join，见 R10）。
+
+    `daemon_threads = True` 只覆盖 HTTP 处理线程，与本卡的非 daemon 工作线程无关。
+    """
 
     daemon_threads = True
     request_queue_size = 128
 
-    def __init__(self, settings: Settings, router: Router) -> None:
+    def __init__(
+        self, settings: Settings, router: Router, runner: Optional[tasks.TaskRunner] = None
+    ) -> None:
         self.settings = settings
         self.router = router
+        self.runner = runner
         super().__init__((settings.host, settings.port), MCRequestHandler)
+
+    def shutdown(self) -> None:
+        """有序停止：先等后台任务收尾（至多 30 秒），再让 `serve_forever` 退出。"""
+        if self.runner is not None:
+            self.runner.shutdown(tasks.DEFAULT_SHUTDOWN_TIMEOUT)
+        super().shutdown()

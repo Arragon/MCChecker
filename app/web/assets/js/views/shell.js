@@ -810,6 +810,8 @@
   App.prototype.pollTasks = function () {
     var self = this;
     clearTimeout(this._taskTimer);
+    // D4（M3-07）：任务接口未接入时**一个请求都不发**（避免 404 噪声，决策 14）。
+    if (!MC.caps.tasks) return Promise.resolve();
     return api.get(this.p("/tasks"), { active: "1" }).then(function (res) {
       var before = self.activeTasks.map(function (t) { return t.id; });
       self.activeTasks = res.items;
@@ -829,6 +831,9 @@
 
   App.prototype.startTask = function (body) {
     var self = this;
+    // D4：未接入时不发请求，也不假装任务已开始——调用方本来就已按同一个键禁用按钮，
+    // 这里 reject 是给「按钮之外」的入口（命令面板、将来的快捷键）留的兜底。
+    if (!MC.caps.tasks) return Promise.reject(new MC.ApiError(0, "UNWIRED", MC.unwired.tasks));
     return api.post(this.p("/tasks"), body).then(function (res) {
       self.activeTasks = self.activeTasks.concat([res.task]);
       self.renderTasks();

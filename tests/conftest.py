@@ -91,3 +91,18 @@ def isolated_nicegui_storage(tmp_path_factory):
     finally:
         Storage.path = original_path
         nicegui_app.storage = original_storage
+
+
+@pytest.fixture(autouse=True)
+def isolated_task_runner(isolated_data_root):
+    """后台任务队列是**进程内单例**，工作线程会泄漏到别的用例（卡 6 / M3-07）。
+
+    这里显式依赖 `isolated_data_root`：夹具的拆序是装序的反面，所以本夹具一定在
+    monkeypatch 被撤销**之前**拆完——`ThreadPoolExecutor` 的工作线程是非 daemon 的
+    （R9），万一还有任务在跑，它至少是在临时数据根里跑，不会把字节写进仓库真实的
+    `data/`（H3）。超时给 5 秒：忘了放行的假任务只会让这一条用例慢，不会卡死整轮。
+    """
+    yield
+    from app.services import tasks
+
+    tasks.reset_runner(timeout=5.0)

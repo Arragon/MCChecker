@@ -160,12 +160,12 @@
    */
   var CAP_KEYS = [
     "favorites", "remarks", "schedule", "search", "review", "dl", "settings", "import",
-    "delete", "history", "compare", "records", "tools", "revision", "temp",
+    "delete", "history", "compare", "records", "tools", "revision", "temp", "tasks",
   ];
 
   /* 已经接入真实后端的接口。后端卡在自己的 PR 里实现接口，紧随的前端卡在这里加一项，
    * 视图代码本身不用改。必须始终是 CAP_KEYS 的子集（前端测试页有断言会红）。 */
-  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"];
+  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review", "tasks"];
 
   MC.capsFor = function (mock) {
     var caps = {};
@@ -196,6 +196,10 @@
     tools: "外部工具将在 M3-15 接入",
     revision: "多用户更新提示将在 M2-01 接入",
     temp: "临时文件将在 M2-10 / M2-11 接入",
+    /* D4（M3-07）：任务接口是独立能力键。此前「立即拉取」借用 `tools` 代表任务可用性，
+     * 而 `tools` 要到 M3-15 才放行 ⇒ M3-07/M3-09 做完后按钮仍是禁用态。`tools` 从此
+     * 只代表「外部工具」。 */
+    tasks: "后台任务（更新、拉取记录）将在 M3-07 接入",
   };
 
   /* ===================== Router (hash) ===================== */
