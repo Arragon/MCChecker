@@ -20,6 +20,9 @@
 - 审阅写回要在原文上保住根元素之外的内容（M3-01 / B3）：`ET` 的事件里没有位置信息，位置只能自己用 `xml.parsers.expat` 量（`CurrentByteIndex`）。三个坑：① `ParserCreate()` 必须**关掉命名空间处理**，expat 文档写明开启后该偏移不保证对应原始字节；② 根元素有两种收尾，`</名称>` 的偏移落在 `<` 上、自闭合 `<a/>` 的偏移已在 `/>` 之后，判据用「偏移处是不是 `</`」，不能「往后找第一个 `>`」（`<R><a/></R>` 会在根结束之前就撞上 `/>`）；③ 区间两端要按字节核对，而 UTF-16 下 `<`/`>` 各占两字节，marker 得跟着编码换。
 - `ET.register_namespace` 改的是**进程级**的 `xml.etree.ElementTree._namespace_map`，注册只增不减，没有公开 API 能读回原值。不要在请求路径上「序列化前后快照/恢复」它：FastAPI 的同步端点跑在线程池里，两个并发写回会互相踩——A 的 `tostring` 可能读到 B 刚恢复进去的映射。每次写回都先把**当前文档自己的**前缀登记进去，所以同一份原文在同一进程内产出一致；别的文档留下的条目只会多不会少（str→str，量级可忽略），并发下最坏情况是前缀拼写换一种写法，`loc`/值/节点数都不变，第 6 步校验与 `to_compact` 的显示标签都不受影响。因此 `apply_edits` 的 docstring 明确写着它不是纯函数。
 - 同一份 XML 用两种口径解析会得到不同的 `.text`（M3-01 / B7）：显示链路 `insert_comments=False` 时，标准库把被丢弃的注释/PI 前后的字符数据**拼进** `elem.text`；写入侧 `insert_comments=True` 时同一段文本被切成 `elem.text` + 各注释/PI 兄弟的 `.tail`。所以「元素的有效文本」必须自己算（`elem.text` 加上首个子元素之前那些注释/PI 的 tail），写入也要跨这一整段跨度写，否则会出现「界面显示有值、提交建议被接受、写回永久 `REVIEW_CONFLICT 无法唯一定位`」这种用户刷不出去的死循环。
+- 审阅分组只认 `group_key = locator or node_path or node_key`，不要用 `storage.list_review_items`（M3-02）：它按 `(source_file, node_key or node_path)` 分组，而 v2 建议按 §5.2 写 `node_key=""`，于是会退化成按旧节点 ID 并组——同名兄弟共享旧 ID，「item 第 1 个」和「item 第 2 个」的建议被并成一组，批准其中一条会把另一条连带驳回，写回还可能指错节点（正是 v1 的根因）。分组只能在 service 层自己算，原始条目仍可以复用 `storage.load_edit_remarks()`。
+- 审阅的「能不能通过」必须列表与提交共用一份定位算法（M3-02）：`views/review.js` 只用 `n.stale || !n.resolvable` 两个布尔决定按钮是否可点，服务端另算一套就会出现「按钮能点、点下去 400/409」的死路。legacy（无 `locator`）建议按旧 ID 试匹配，**恰好 1 个**匹配才 `resolvable=true`；`legacy` 只用于打徽标。另外当前文件解析不了或被删时仍要给出真实 `current_sha`（拿不到就 `null`），否则前端只能带空 `source_sha` 提交，连「驳回」这条唯一出路都会被 409 挡死。
+- 审阅写回的落盘顺序（M3-02）：`apply_edits`（内含 §6.7 第 6 步的再解析比对）必须在生成文件与状态更新**之前**跑完，这样「校验失败 422 不写任何文件、不改任何建议状态」是靠顺序保证的，不需要回滚；幂等表落在独立的 `profiles/<pid>/review_idempotency.json`（10 分钟窗口、**不**进 `COPY_PROFILE_FILES`），塞进 `edit_remarks.json` 顶层会破坏 §5.2「现有字段不变」。
 
 ## 3. Development Notes
 - NiceGUI 的 `app.storage.user` 基于浏览器会话

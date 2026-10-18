@@ -13,6 +13,8 @@
   var temps = {};
   var tasks = {};
   var idempotency = {};
+  /* 与后端 `services/review.py::IDEMPOTENCY_WINDOW_SECONDS` 同口径（§6.7 第 1 步）。 */
+  var IDEMPOTENCY_WINDOW_SECONDS = 600;
   var rev = {};
   var docCache = {};
 
@@ -871,7 +873,9 @@
     var deny = needAdmin(id);
     if (deny) return deny;
     var b = req.body;
-    if (b.request_id && idempotency[b.request_id]) return ok(idempotency[b.request_id]);
+    // §6.7 第 1 步：命中最近 10 分钟的幂等表就原样返回上次结果，不生成第二份文件。
+    var hit = b.request_id && idempotency[b.request_id];
+    if (hit && Date.now() / 1000 - hit.at <= IDEMPOTENCY_WINDOW_SECONDS) return ok(hit.result);
     var ix = currentIndex(P, b.file);
     if (!ix) return fail(404, "NOT_FOUND", "源文件不存在");
     if (ix.sha !== b.source_sha) return fail(409, "REVIEW_CONFLICT", "源文件在你审阅期间已被更新，请刷新后重新核对");
@@ -879,21 +883,30 @@
     var rejected = [];
     var edits = [];
     var pending = P.remarks.filter(function (r) { return r.status === "pending" && r.source_file === b.file; });
-    (b.decisions || []).forEach(function (d) {
+    var decisions = b.decisions || [];
+    for (var di = 0; di < decisions.length; di++) {
+      var d = decisions[di];
       var group = pending.filter(function (r) { return (r.locator || r.node_path || r.node_key) === d.group_key; });
-      if (!group.length) return;
+      // 允许部分提交（C07）：请求里的组可能已被别人决定过，只能忽略，不是客户端错误。
+      if (!group.length) continue;
       if (d.choice === "reject") {
         group.forEach(function (r) { rejected.push(r); });
-        return;
+        continue;
       }
       var chosen = group.filter(function (r) { return r.id === d.choice; })[0];
-      if (!chosen) return;
+      if (!chosen) return fail(400, "INVALID_INPUT", "choice 只能是该组的建议 ID 或 reject", { field: d.group_key, group_key: d.group_key });
       var loc = locateRemark(ix, chosen);
-      if (loc.i < 0 || ix.N.v[loc.i] !== chosen.original_value) throw { conflict: chosen.node_label };
+      // §6.7 第 7 步：stale（含定位不到）的节点只能驳回。前端已禁用按钮，这是服务端那一半——
+      // 报 400 指出是哪个组，不静默驳回，也不伪装成 409。stale 按组的第一条原值算（§7.8）。
+      if (loc.i < 0 || ix.N.v[loc.i] !== group[0].original_value) {
+        return fail(400, "INVALID_INPUT", "该节点的当前值已变化或无法唯一定位，只能驳回", { field: d.group_key, group_key: d.group_key, reason: loc.i < 0 ? "unresolvable" : "stale" });
+      }
+      // 第 4 步：同组各条建议的「提交时原值」可能彼此不同（间隔里文件被动过）→ 409。
+      if (ix.N.v[loc.i] !== chosen.original_value) throw { conflict: chosen.node_label };
       edits.push({ loc: ix.N.loc[loc.i], value: chosen.proposed_value, label: chosen.node_label });
       approved.push(chosen);
       group.forEach(function (r) { if (r !== chosen) rejected.push(r); });
-    });
+    }
     var generated = null;
     if (edits.length) {
       var out;
@@ -906,9 +919,9 @@
     approved.forEach(function (r) { Object.assign(r, { status: "approved", reviewed_by: id.name, reviewer_ip: id.ip, reviewed_at: now, generated_file: generated }); });
     rejected.forEach(function (r) { Object.assign(r, { status: "rejected", reviewed_by: id.name, reviewer_ip: id.ip, reviewed_at: now, generated_file: "" }); });
     var result = { generated_file: generated, approved: approved.length, rejected: rejected.length };
-    if (b.request_id) idempotency[b.request_id] = result;
-    bump(a.pid, "remarks");
-    bump(a.pid, "files");
+    if (b.request_id) idempotency[b.request_id] = { at: Date.now() / 1000, result: result };
+    // 审阅写回属于建议域：原文件字节不变、只新增一份生成文件，所以只递增 remarks（§7.3）。
+    if (approved.length || rejected.length) bump(a.pid, "remarks");
     return ok(result);
   });
 
