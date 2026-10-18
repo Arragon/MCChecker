@@ -397,8 +397,24 @@ def _latest_record_bytes(name: str) -> Optional[bytes]:
     `None` 是「没有可比对象」而不是「内容相同」，所以第一次拉取一定走 `success`——
     这点与 §10.2 第 4 步的根指纹同口径（拿不到基准时不做拒绝、也不做去重）。
 
-    顺序只有一个出处：`storage.list_record_versions` 按时间倒序，第 0 项就是「最新一条」
-    （`services/history.py` 列记录用的也是它，两处不会读出不同的「最新」）。
+    **顺序有两个出处，它们不是一回事，这里只跟第一个**（旧 docstring 说「history.py 也用
+    `list_record_versions`，两处读不出不同的最新」——那是错的，`services/history.py:84`
+    走的是自己的 `_list_versions`）：
+
+    * `storage.list_record_versions`（本函数）：排序键是 mtime **截断到秒**的字符串，
+      同秒之内由文件名的**逆字典序**定先后。
+    * `services/history.py::_list_versions`（`GET /files/{name}/records` 的列表，也就是
+      用户看到的「最新一条」顶行）：排序键是 **float mtime**，不看文件名，另跳过
+      `.diff.json`。
+
+    所以同一秒落盘的两条（改过一次 `record_url` 的扩展名就是这个形状）会让两边各挑一个
+    「最新」：基准挑了写得早的那份时，内容其实等于顶行的拉取会被判成「变了」——多写一份
+    记录并 `files` +1；反向则是该新建的没新建。损伤面只有通知口径与一条多余记录，
+    权威数据不受影响。本卡（M3-09 修复轮）只把这个分叉钉住、不对齐：要对齐就得改
+    `storage.list_record_versions` 的排序键，而它同时被旧 NiceGUI 页面
+    `app/pages/records.py` 用（H2：M3 期间不动那页），改在 `updates.py` 里则会出现第三个
+    排序出处。哨兵在 `tests/test_api_records.py::test_same_second_records_are_ordered_two_different_ways`，
+    将来统一两侧排序时**跟着那条一起改**，别把它改成恒真。
     """
     clean = _optional_validated_name(name)
     if clean is None:

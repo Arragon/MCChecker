@@ -105,8 +105,10 @@ FAILED_ITEM_STATUSES = frozenset({"download_failed", "rejected", "too_large", "e
 #: 没变），`files` 放进去就会在「一条记录都没新增」时把全部客户端的横幅点起来（R5 判过的
 #: 虚假通知）。真实的那一次递增在 service 层：`updates.refresh_records` 只在确实多写了
 #: 一份 `records/<name>/record_*` 文件时 `bump(pid, "files")` 一次。`tests/test_api_records.py`
-#: 同时钉住「这张表里没有 refresh_records 的 files」与「unchanged 拉取不递增、success 拉取
-#: 恰好递增一次」，两张一起才封住「顺手把它加进表里」的改法。
+#: 里钉「表里没有 refresh_records 的 files」的那条只是**值比较**（改表的人会连着改它的期望），
+#: 真正走得到 `_finish` 的行为判据是 `TestRevisionAccounting::
+#: test_runner_finish_bumps_no_business_part_on_an_identical_pull`——别把它当重复用例删，
+#: 也别与值比较那条合并（M3-09 修复轮：往表里塞 `("files",)` 时全量 1098 条只红那一条值比较）。
 FINISH_PARTS: Dict[str, Tuple[str, ...]] = {
     "update_source": (),
     "update_all": ("settings",),
