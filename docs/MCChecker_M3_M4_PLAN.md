@@ -1129,6 +1129,17 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
 
 **验证基线（控制方在合并 INH-1914 后亲手实测，两种环境各跑一遍全量）**：**905 passed**（约 60 s，输出干净）、`check_py39.sh` exit 0、前端 `ALL PASSED (29)`。H3 证据从此不看哈希号，看守卫播报：本机 `data/` 存在时打印「H3 守卫执法中：真实 data/ 基线快照 3 个文件…」；在无 `data/` 的检出里打印「H3 守卫未执法…这一轮的『绿』是没有可比对对象的结果，不是『数据完好』的证据」——两种绿是可观察不同的，这条是 R40 的落点。
 
+**三条链正在并行推进（用户已批准"文件面零重叠才并行"；一卡一 PR 与每卡独立评审不变）**，恢复时先查这三处再决定动作：
+
+| 链 | 工作树 / 分支 | 卡 | 已知状态（控制方实测于 2026-10-18 17:4x） |
+|---|---|---|---|
+| A | `../mcc-m3-08` · `mc-v2/m3-08-scheduler` | INH-1893 调度器 | 原代理**中断且零提交**，留下 2132 行未提交改动（`services/scheduler.py` 589、`api_schedule.py` 48、两个测试文件共 1495 行，另改 `storage/api_session/router/run/conftest/api.js/mock-api.js`）。其自有 96 条用例**由控制方自己跑过是绿的**——但绿只证明作者测试通过。接手代理的要求是"先审计再完成"，重点核：调度线程是否自己写盘（禁止）、`PUT` 400 时 `schedule.json` 是否字节不变、`next_run` 是否算而非存、BUSY 是否重投而非丢弃、为何动了 `api_session.py` 与 `conftest.py`（卡面 Files 未列）。 |
+| B | `../mcc-dl` · `mc-v2/m3-10-dl-math` | INH-1895 DL 求根/正反向 | 只许改 `app/core/dltool.py` + `tests/test_dltool_multi.py`；`dlmath.js` 只读参照。产出签名是 INH-1896/1897 的前置，**故 DL 链内部必须串行**。 |
+| C | `../mcc-n2` · `mc-v2/n2-loopback` | INH-1913 回环拦截 | 只许改 `app/services/upload.py` + 导入相关测试。**卡面原先写的工作量是错的**（声称要重做 `test_api_import.py` 的 `127.0.0.1` 地址方案，实测该文件里 `127.0.0.1` 出现 0 次，用的是不解析的 `example.invalid`），已请 Linear 就地更正。 |
+
+**恢复动作**：`git -C <工作树> status --porcelain` 与 `git -C <工作树> log --oneline -1` 判断每条链是"有未提交工作"还是"已提交待评审"；未提交且代理已终止时，**按 A 的方式派接手审计，禁止直接重做**（重做等于丢掉 2132 行有效工作）。评审一律用 `.superpowers/sdd/MCChecker_M3_M4_PLAN/review-dispatch-template.md`，先 `git worktree add --detach ../mcc-review-<卡> <HEAD_SHA>`。
+**共用文件表**（`router.py` / `core/api.js` / `mock/mock-api.js` / `settings.js` / `tests/conftest.py`）见 `.superpowers/sdd/MCChecker_M3_M4_PLAN/settings-chain-handdowns.md` §0：M3-09 与设置链四张卡**必须等 A 合并后**再动，否则必冲突。
+
 **卡 7 = M3-06 / INH-1891 已合并（PR #48，集成分支 tip 用 `git log -1 origin/feat/mc-v2-delivery` 现查）**，M3 = **7/17**、项目 **36/57**。它历经**四轮评审 / 三轮修复**：首轮评审 4 Important → 修 → scoped 复评又报 1 Critical（`file://` 验收命令对「留在不 return 的链里的断言」是瞎的，见 R48）→ 再修 → 控制方自己复现了那条 Critical 才合并。前端测试页从 `ALL PASSED (29)` 涨到 **(40)**，全量 **905 passed**。D2 分段门控 `MC.settingsSegmentWired(seg)` 已可用，M3-13/14/15/16 直接往里加分段即可。
 
 **之后**：M3-08 → 09 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17（17 恒为最后）。M4 九张（INH-1903…1911）照 §9 纲要。另有三张执行中新立的卡：INH-1912（N1 中文改名）、INH-1913（N2 访客临时导入的回环拦截未开）、INH-1914 已完成。
