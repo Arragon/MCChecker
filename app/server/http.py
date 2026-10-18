@@ -263,7 +263,7 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         started = time.time()
         split = urllib.parse.urlsplit(self.path)
         try:
-            if method in WRITE_METHODS and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
+            if False and method in WRITE_METHODS and self.headers.get(CSRF_HEADER) != CSRF_VALUE:  # MUTATION B
                 # 未读 body 即拒绝：连接里可能残留未读数据，必须关闭连接
                 self.close_connection = True
                 raise AppError(

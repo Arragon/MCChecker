@@ -199,7 +199,7 @@
     temp: "临时文件将在 M2-10 / M2-11 接入",
     /* settings 页级键已随 M3-06 放行；页内哪个分段能用由下面的 D2 分段开关决定，
      * 未接入的分段只渲染只读横幅且不发请求。文案留着供跨版本书签兜底。 */
-    settings: "设置页分段接入：更新源 M3-06，其余 M3-08 / M3-13 ~ M3-16",
+    settings: "设置页分段接入：更新源 M3-06、定时 M3-08、人员 M3-13，其余 M3-14 ~ M3-16",
     /* D4（M3-07）：任务接口是独立能力键。此前「立即拉取」借用 `tools` 代表任务可用性，
      * 而 `tools` 要到 M3-15 才放行 ⇒ M3-07/M3-09 做完后按钮仍是禁用态。`tools` 从此
      * 只代表「外部工具」。 */
@@ -217,7 +217,7 @@
    * （前端测试页有断言会红）。M4-08 全绿后与 MC.caps 一起删除。
    */
   var SETTINGS_SEGMENTS = ["sources", "schedule", "people", "bindings", "tools", "profiles"];
-  var WIRED_SETTINGS = ["sources", "schedule"];
+  var WIRED_SETTINGS = ["sources", "schedule", "people"];
 
   MC.settingsSegments = SETTINGS_SEGMENTS.slice();
   MC.wiredSettingsSegments = WIRED_SETTINGS.slice();
@@ -227,9 +227,9 @@
 
   /* 每个未接入分段展示给用户的去向，与 MC.unwired 同风格（卡号即后端接口的接入卡）。
    * 键集必须**恰好等于**「SETTINGS_SEGMENTS 里没被 WIRED_SETTINGS 放行的那些」——
-   * `schedule` 已随 M3-08 落地，所以它的去向文案一并撤掉（多留会让前端测试页红）。 */
+   * `schedule`（M3-08）与 `people`（M3-13）已落地，所以它们的去向文案一并撤掉
+   * （多留会让前端测试页红）。 */
   MC.unwiredSettings = {
-    people: "人员与权限将在 M3-13 接入",
     bindings: "变量绑定将在 M3-14 接入",
     tools: "外部工具将在 M3-15 接入",
     profiles: "机型管理将在 M3-16 接入",

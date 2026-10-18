@@ -98,10 +98,15 @@ WRITE_ROUTE_ACTIONS = {
     ("PATCH", "/api/v1/p/{pid}/sources/{name}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/sources/{name}"): "settings_write",
     ("PUT", "/api/v1/p/{pid}/schedule"): "settings_write",
+    # M3-13（INH-1898）：人员两张表的写接口全部只有部署者（§7.9）。
+    ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
+    ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
+    ("POST", "/api/v1/p/{pid}/admins"): "settings_write",
+    ("DELETE", "/api/v1/p/{pid}/admins/{name}"): "settings_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
 }
 
-ROUTE_VALUES = {"pid": "p1", "name": FILE_A, "token": "tk", "id": "t1"}
+ROUTE_VALUES = {"pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7"}
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。
 TRAVERSALS = [
@@ -192,6 +197,26 @@ def schedule_state(pid: str):
     with open(path, "rb") as fh:
         raw = fh.read()
     return hashlib.sha256(raw).hexdigest(), os.stat(path).st_mtime_ns
+
+
+def people_state(pid: str):
+    """`ip_mapping.json` + `admin_users.json` 的 (内容 sha256, mtime_ns) 两份（M3-13 / §16.8 第 4 条）。
+
+    口径与 `schedule_state` 一致：单看内容 hash 挡不住「同长度原地改写」，所以 mtime 一起取；
+    文件不存在返回 None。**这两份文件决定谁能写**，所以「CSRF 403 不落盘」值得单独钉。
+    """
+    out = {}
+    for label, path in (
+        ("ip_mapping", storage.get_ip_mapping_file(pid)),
+        ("admin_users", storage.get_admin_users_file(pid)),
+    ):
+        if not os.path.isfile(path):
+            out[label] = None
+            continue
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        out[label] = (hashlib.sha256(raw).hexdigest(), os.stat(path).st_mtime_ns)
+    return out
 
 
 # ======================================================================
@@ -873,6 +898,12 @@ WRITE_FAMILIES = [
     ("DELETE", "/api/v1/p/{pid}/sources/{name}", "deployer", None, False),
     ("POST", "/api/v1/p/{pid}/tasks", "deployer", {"type": "update", "target": FILE_A}, True),
     ("PUT", "/api/v1/p/{pid}/schedule", "deployer", {"enabled": True, "interval_hours": 24}, False),
+    # M3-13（INH-1898）：两张人员表的写接口。有权的角色是部署者，所以「删掉 CSRF 守卫必红」
+    # 在这一族上成立（不是靠别人的权限 403 蒙过去）。
+    ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}", "deployer", {"ip": "10.7.7.7", "name": "跨站改的人"}, False),
+    ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}", "deployer", None, False),
+    ("POST", "/api/v1/p/{pid}/admins", "deployer", {"name": "跨站加的人"}, False),
+    ("DELETE", "/api/v1/p/{pid}/admins/{name}", "deployer", None, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
 ]
@@ -1017,6 +1048,51 @@ class TestCsrfOnEveryWriteFamily:
                 "带头的请求没真写出定时设置，上面的「没改」断言就是恒真"
             )
             assert after[1] != before[1], after
+
+    def test_people_files_are_untouched_by_a_csrf_403(self):
+        """M3-13 合入的 `/ip-mapping`、`/admins`（§7.9）：CSRF 403 必须一字节不落盘。
+
+        这两份文件是**权限面**（登记表等于改谁能写、名单决定谁能审阅），所以除了上面的
+        「不带头 403」，这里还要证明「403 之后文件纹丝不动」，并且照 `test_schedule_file_…`
+        的形状补上**带头的正向对照**——没有正向对照，「没改」可能只是恒真。
+        """
+        pid = seed_roles("sec4")
+        ip_url = url_of("/api/v1/p/{pid}/ip-mapping/{ip}", pid=pid)
+        admin_url = url_of("/api/v1/p/{pid}/admins", pid=pid)
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            # 基线：带头各写一次，两份文件这才存在。
+            assert caller.json("PUT", ip_url, body={"ip": "10.7.7.7", "name": "基线甲"})[0] == 200
+            assert caller.json("POST", admin_url, body={"name": "基线管理员"})[0] == 201
+            before = people_state(pid)
+            assert before["ip_mapping"] is not None and before["admin_users"] is not None, (
+                "基线没落下来，下面的「没改」是恒真"
+            )
+
+            for method, url, body in (
+                ("PUT", ip_url, {"ip": "10.7.7.7", "name": "跨站改掉的名字"}),
+                ("DELETE", url_of("/api/v1/p/{pid}/ip-mapping/{ip}", pid=pid), None),
+                ("POST", admin_url, {"name": "跨站加的人"}),
+                ("DELETE", url_of("/api/v1/p/{pid}/admins/{name}", pid=pid), None),
+            ):
+                status, _h, raw = caller.request(method, url, body=body, with_csrf=False)
+                assert status == 403, (method, url, status, raw)
+                assert csrf_error(raw), (method, url, raw)
+            assert people_state(pid) == before, "CSRF 403 之后人员文件被改写了"
+
+            # 正向对照：带头的同类请求必须真的改得动。
+            assert caller.json("PUT", ip_url, body={"ip": "10.7.7.7", "name": "带头改的名字"})[0] == 200
+            after = people_state(pid)
+            assert after["ip_mapping"][0] != before["ip_mapping"][0], (
+                "带头的 PUT 没真写出 IP 对应表，上面的「没改」断言就是恒真"
+            )
+            assert after["ip_mapping"][1] != before["ip_mapping"][1], after
+
+            before_admin = people_state(pid)["admin_users"]
+            assert caller.json("POST", admin_url, body={"name": "带头加的人"})[0] == 201
+            assert people_state(pid)["admin_users"][0] != before_admin[0], (
+                "带头的 POST 没真写出管理员名单，上面的「没改」断言就是恒真"
+            )
 
     @pytest.mark.parametrize("path", [
         "/api/v1/session",
