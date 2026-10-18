@@ -6,7 +6,16 @@
 
 ---
 
-## B1 · Linear 连接器不可用，进度无法同步（阻塞「同步」半边，不阻塞开发）
+## B1 · Linear 连接器 —— **App 层已修复（ready），但本会话用不了，需开新会话**
+
+**2026-10-17 处置结果**：`query_mcp list_servers` 查到 `plugin:product-management:linear`（serverId `c634f9ea-03f7-474c-8c0b-1de0db0738a9`）状态是 `failed` / `failureCategory=connectivity` / `MCP_REMOTE_CONNECTION_CLOSED`，而 `enabled=true`、`sourcePresent=true` —— 也就是**插件没被卸载也没被禁用，是连接断了**。对它执行 `manage_mcp retry` 后，`get_server` 显示 **`status=ready`、`failureCategory=null`**。
+
+**但本会话仍然调不到它的工具**：`mcp_list keyword=linear` 返回空，直接 `mcp_call` 报 `No connected MCP server offers a tool named mcp__plugin_product-management_linear__get_issue`。这与本项目已记录的行为一致：**会话中途恢复/重新授权的 MCP，工具不会重新挂进当前会话**。
+
+**没有再往下做的原因**：`authorizationAction` 字段仍写着 `reauthorize`，但服务器已不报授权失败，触发一次 OAuth 只会打断刚恢复好的连接，解决不了会话注册表的问题。**唯一有效动作是开新会话。**
+
+**恢复后的动作**（新会话里 Linear 工具应当直接可用；下面的注释正文都已在下方第 1–5 条写好，照发即可）：
+
 
 **事实**：`plugin:product-management:linear` 于 2026-10-17 卡 1 实现完成后从可用 MCP 列表移除。本会话已连接的服务器里没有它。`mcp_list` 也查不到。会话中途重新授权的 MCP 工具在本会话调不到（本项目已知行为），必须**重新接入连接器并开新会话**。
 
@@ -14,7 +23,6 @@
 
 **此前尝试**：`save_comment` 到 `INH-1886` 共 6 次，全部 `MCP error -32603`；缩短正文无效（同日对 `INH-1887` 的同类调用成功过，判定为该连接器按目标不稳，非正文问题）。
 
-**恢复后的动作（按序）**：
 1. 在 `INH-1886` 补一条「未完成」说明：代码在 `cc90ffb`、未合并、评审中；里程碑仍 28/54，本轮合入集成分支 0 卡。
 2. 补 D1 通报：`fileview.js` 原本**没有** NoneType 分支，D1 第 2 步「若已如此」前提不成立，实际是新增门控；该门控无 DOM 级用例（`fileview.js` 不在前端测试页加载列表、`renderSuggest` 是私有闭包），故 `ALL PASSED (26)` 的 n 未变。
 3. 卡 1 合并后按交付手册第 4 节模板写 Done 证据注释：PR 链接与 tip、已完成项、验收证据（全量 576 passed / 基线 506、`check_py39.sh` exit 0、`data/` 哈希 `478d9c26ea8dbb8f…` 不变、前端 `ALL PASSED (26)`）、两轮变异验证、以及 B2/B3 两条口径的最终裁定。
