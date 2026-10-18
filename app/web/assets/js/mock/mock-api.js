@@ -943,10 +943,14 @@
     if (deny) return deny;
     var name = String(req.body.name || "").trim();
     var url = String(req.body.url || "").trim();
+    var rec = String(req.body.record_url || "").trim();
     if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不能为空且不能包含 \\ / : * ? \" < > |", { field: "name" });
+    if (!url) return fail(400, "INVALID_INPUT", "下载链接不能为空", { field: "url" });
     if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "下载链接需以 http:// 或 https:// 开头", { field: "url" });
-    if (P.mapping.some(function (m) { return m.name === name; })) return fail(409, "INVALID_INPUT", "已存在同名更新源", { field: "name" });
-    P.mapping.push({ name: name, url: url, record_url: String(req.body.record_url || "").trim() });
+    if (rec && !/^https?:\/\//i.test(rec)) return fail(400, "INVALID_INPUT", "修改记录链接需以 http:// 或 https:// 开头", { field: "record_url" });
+    // 同名已存在：与后端同用 409 FILE_EXISTS（§7.1 把 INVALID_INPUT 定为 400）。
+    if (P.mapping.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名更新源", { field: "name" });
+    P.mapping.push({ name: name, url: url, record_url: rec });
     bump(a.pid, "settings");
     return ok({ item: P.mapping[P.mapping.length - 1] }, 201);
   });
@@ -960,19 +964,27 @@
     var url = String(req.body.url || "").trim();
     var rec = String(req.body.record_url || "").trim();
     if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不合法", { field: "name" });
+    if (!url) return fail(400, "INVALID_INPUT", "下载链接不能为空", { field: "url" });
     if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "下载链接需以 http:// 或 https:// 开头", { field: "url" });
     if (rec && !/^https?:\/\//i.test(rec)) return fail(400, "INVALID_INPUT", "修改记录链接需以 http:// 或 https:// 开头", { field: "record_url" });
-    if (name !== a.name && P.mapping.some(function (x) { return x.name === name; })) return fail(409, "INVALID_INPUT", "目标文件名已存在", { field: "name" });
-    if (name !== a.name && req.body.migrate_files && P.files[a.name]) {
+    if (name !== a.name && P.mapping.some(function (x) { return x.name === name; })) return fail(409, "FILE_EXISTS", "目标文件名已存在", { field: "name" });
+    // migrate_files 缺省按 true（与 services/updates.py 与 storage.update_config_mapping 同默认）。
+    var migrate = name !== a.name && req.body.migrate_files !== false;
+    if (migrate && P.files[a.name]) {
       P.files[name] = P.files[a.name];
       delete P.files[a.name];
       P.favorites.forEach(function (f) { if (f.source_file === a.name) f.source_file = name; });
       P.remarks.forEach(function (r) { if (r.source_file === a.name) r.source_file = name; });
-      bump(a.pid, "files");
+      P.bindings.forEach(function (b) { b.variables.forEach(function (v) { if (v.file === a.name) v.file = name; }); });
+      ["pp_energy", "rp_energy", "rp_width"].forEach(function (k) {
+        var it = P.dl && P.dl.items && P.dl.items[k];
+        if (it && it.binding && it.binding.source_file === a.name) it.binding.source_file = name;
+      });
     }
     m.name = name;
     m.url = url;
     m.record_url = rec;
+    // 改名不产生新的文件内容，只改设置：与后端一致，只递增 settings（R5）。
     bump(a.pid, "settings");
     return ok({ item: m });
   });
@@ -980,9 +992,11 @@
   route("DELETE", "/p/{pid}/sources/{name}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
+    var before = P.mapping.length;
     P.mapping = P.mapping.filter(function (m) { return m.name !== a.name; });
-    bump(a.pid, "settings");
-    return ok({ deleted: true });
+    var removed = P.mapping.length !== before;
+    if (removed) bump(a.pid, "settings"); // 删了 0 条不递增（决策 16）
+    return ok({ removed: removed });
   });
 
   route("POST", "/p/{pid}/tasks", function (a, req, P, id) {
