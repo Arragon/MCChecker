@@ -1145,6 +1145,14 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
 
 **Linear 已同步到**（明细与注释 ID 在 `.superpowers/linear-sync-log.md`）：INH-1913 Done（`completedAt 18:13:07Z`）、INH-1895 两条进展、INH-1912 三条进展（含根因与控方复测数字）、INH-1893 一条进展（明写未置 Done）、INH-1907 开工、INH-1908/1904 进行中。**仍欠**：M3-08/N1/M3-10 合并后的 Done + 证据；三张在飞卡的完成状态。
 
+## 11.3 安全卡（M4-02 / INH-1904）代理再次跑到轮次上限中断 · 2026-10-18 18:40 UTC（**控制方已代打保全提交**）
+
+实现代理跑到自身 150 轮上限中断（169 次工具调用、4526 万 token 累计），中断时的最后一句是「8 条前端验收 6 绿，另 2 条是已记录的 title 抖动＝重跑即可；接着做自查范围的 diff 复核」。**它一个提交都没打过，工作全是未提交状态**——这正是本项目曾经冲掉过一次在飞工作的形状。
+
+控制方处置：在 `mcc-sec`（分支 `mc-v2/m4-02-security`）按文件名 `git add` 了那四个文件（`app/server/http.py`、`app/web/tests/tests.js`、`tests/test_api_import.py`、新增 `tests/test_api_security.py`），代打一条**明确标注「WIP(未验收，禁止当完成)」的保全提交 `998dcea` 并推到远端**，工作区现已干净。提交正文写死了接手四条：不得据此认为本卡完成或已验证、所有数字必须当场重测、先 `git diff HEAD~1 --stat` 逐文件审是否越界再补剩余 2 条验收、以及全量＋守门＋前端 ALL PASSED(n)（HTTP 形态）＋**独立评审**之后才允许 PR；Linear 上 INH-1904 仍 In Progress，不得置 Done。
+
+**这条保全提交不是验收**，它存在的唯一理由是防丢失。另外两件事别忘：① 本卡的 commit 消息与派发词把编号写成 INH-1906，真实是 **INH-1904**（映射 M4-01→1903、02→1904、03→1905、04→1906、05→1907、06→1908），不改写历史，PR 正文更正；② 它改了 `app/web/tests/tests.js`，与已提交的调度器卡（`05c8dd0`）撞同一个文件，合并顺序按 §11 的纪律走（先到的先合，后到的在自己工作树手工合并并重跑全量，禁止 `-X ours/theirs`）。
+
 ## 11.2 计算卡（M3-10 / INH-1895）修复轮 scoped 复评结论 · 2026-10-18 18:38 UTC
 
 **结论：Approved for merge，0 Critical / 0 Important / 3 Minor。** 评审者在同源检出 `mcc-review-m3-10 @ 5f513ed`（回显过完整 SHA，前后工作树干净，实验全在 `/tmp/dlx` 副本里做）自跑：全量 **954 passed**、两条新文件 **39 passed** 且**无 SKIPPED 行**（本机 node v24.21.0 存在，所以等价性用例是真跑）、`check_py39.sh` exit 0、`py_compile` 过、harness 单独跑通。
