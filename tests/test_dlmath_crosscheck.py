@@ -11,12 +11,22 @@
 默认 samples 从 4000 改成 400、round 改成 round(x, 10) 这类改动，源码字面串可以几乎不变，
 而这里的用例必然点名不一致。
 
-三处**卡面裁定的**语义差异在下面 _normalize 里显式归一，其余必须逐位相等：
+三处**卡面裁定的**语义差异在下面显式归一，其余必须逐位相等：
 1. 常数函数且 target != b：dlmath.js 返回 status "none"，卡面把 Python 拆成 "constant"。
 2. validate 合法值：dlmath.js 用 null，§7.11 契约改成 ""。
 3. dlmath.js 的 findRoots 默认 samples=4000、Python find_roots 默认 200：
    本用例一律显式传 samples，因此这个默认值差不参与比对
    （reverse/multi_check 内部各自用 JS 同值的 4000 / 2000，走真实路径）。
+
+**第四条是「不可比」而不是「已归一」**：`trans_coeff = 0` 让换算系数 `s = 0`，而
+`reverse`/`multi_check` 要 `÷ s`——JS 算出 Infinity/NaN 继续跑（实测 `y_base` 序列化成
+null、status "none"；multiCheck 返回 `{"has_multi": false, "cases": []}`），Python 按
+`_scale_of` 的既有裁定直接抛 `ZeroDivisionError`（实测两边输出见上，两侧确实不同）。
+那是卡面裁定过、归属 M3-11 的「谁响亮失败」差异（`docs/know-how.md` 第 1 节 +
+`tests/test_dltool_multi.py::TestTransCoeffZeroDividesByS`），**不进** cross-check：一侧抛
+一侧返回，比对永远绿不了，硬塞等于替 M3-11 当场改语义。能进的是两侧真正一致的
+`validate`（都放行）与 `forward`（乘 s，两边都全 0）——而 `validate` 正是延迟裁定最可能
+被单方面改动的那一处，所以它必须有 trans_coeff=0 的用例。
 """
 
 from __future__ import annotations
@@ -24,6 +34,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -34,8 +45,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = REPO_ROOT / "tests" / "utils" / "dlmath_crosscheck.js"
 DLMATH_JS = REPO_ROOT / "app" / "web" / "assets" / "js" / "mock" / "dlmath.js"
 
-# 用例只许增不许减：低于这个数量就不再是在证明等价性了。
-MIN_PAIRS = 40
+# 用例只许增不许减，而且要**按函数分别**钉死（M3-10 修复轮 Minor）：原先只有一个
+# 总数下限 40，而实际产出 64 组——把 validate 的 9 条或 multiCheck 的 5 条整删也照样绿，
+# 「总数够」根本不代表「覆盖面够」。下面每个数字就是当前真实条数，等于「一条都不许少」：
+# 加用例不用改这里，删掉某个函数的任何一条会当场红，并点名是哪个函数少了到几条。
+MIN_PAIRS_BY_FN = {
+    "poly": 20,
+    "findRoots": 14,
+    "forward": 9,
+    "reverse": 8,
+    "multiCheck": 5,
+    "validate": 14,
+}
+MIN_PAIRS = sum(MIN_PAIRS_BY_FN.values())
 
 
 def _coeffs(**over):
@@ -121,6 +143,11 @@ def _forward_cases():
         (_item(_coeffs(k1=1.0), x_min=-10.0, x_max=10.0, y_min=0.0), "rp_width", [-1.0, 0.0]),
         (_item(SQUAT), "rp_width", [3.0, 1.0, 5.0]),
         (_item(WIGGLE, trans_coeff=-1.5, power_conv_coeff=0.75), "pp_energy", [-2.0, 0.5]),
+        # s = 0.0 的 forward：forward 是**乘** s 而不是除，两侧都老实算出全 0、status 依旧 ok
+        # （JS 0*1、Python 1.0*0.0，没有除零），所以这条是 trans_coeff=0 唯一可比对的下游路径。
+        # 有人单方面给 forward 加「s==0 就拒绝」时，这里当场红。
+        (_item(_coeffs(k1=2.0, b=1.0), trans_coeff=0.0, power_conv_coeff=1.0),
+         "pp_energy", [1.0, -3.0, 0.0]),
     ]
     # 1e-10 尺度上的半值：round 的破平方向（JS floor(t+0.5) 朝 +∞）在 y_base 上可观测。
     # 写成 round(x, 10) 的话 3.5e-10→3e-10、-2.5e-10→-3e-10，这里立刻报差异。
@@ -194,6 +221,21 @@ def _validate_cases():
         (inf_item, "rp_width"),
         (_item(_coeffs(k1=1.0), trans_coeff=1.0, power_conv_coeff=0.0), "pp_energy"),
         (_item(_coeffs(k1=1.0), trans_coeff=1.0, power_conv_coeff=0.0), "rp_energy"),
+        # ---- trans_coeff = 0.0：本卡头号隐患，原先 9 条 validate 里一条都没有 ----
+        # 现状（实测，两侧一致，所以这里是绿的）：JS 与 Python 都**放行** trans_coeff=0，
+        # 只有 power_conv_coeff==0 才被拒。延迟裁定把它归 M3-11，而裁定最可能落成的形态
+        # 就是「某一侧的 validate 开始拒绝 s=0」。下面五条把这个点从三个方向钉住：
+        # 任何一方单独改判（改返回文案、改检查顺序、改成对非 pp kind 也查 trans_coeff），
+        # cross-check 当场红——不再只靠 unit 哨兵那一侧的绿。
+        (_item(_coeffs(k1=1.0), trans_coeff=0.0, power_conv_coeff=1.0), "pp_energy"),
+        # s=0 与 power_conv_coeff=0 同时在场：钉死「谁先被拒」的文案优先级。
+        (_item(_coeffs(k1=1.0), trans_coeff=0.0, power_conv_coeff=0.0), "pp_energy"),
+        # s=0 与 x 范围非法同时在场：同上，防止改判时把顺序换掉。
+        (_item(_coeffs(k1=1.0), trans_coeff=0.0, x_min=5.0, x_max=3.0), "pp_energy"),
+        # 非 pp kind 的 s 恒为 1、trans_coeff 根本不参与：这里必须**继续放行**，
+        # 否则就是有人把 trans_coeff 的检查误提到了 kind 判断之外。
+        (_item(_coeffs(k1=1.0), trans_coeff=0.0), "rp_energy"),
+        (_item(_coeffs(k1=1.0), trans_coeff=0.0), "rp_width"),
     ]
     out = []
     for item, kind in combos:
@@ -272,6 +314,17 @@ def test_dltool_matches_dlmath_js():
 
     parsed = json.loads(proc.stdout)
     assert parsed["pairs"] == len(cases), "oracle 少跑了用例：%s != %s" % (parsed["pairs"], len(cases))
+    counts = Counter(case["fn"] for case, _ in cases)
+    short = ["%s：只剩 %d 条，下限 %d 条" % (fn, counts.get(fn, 0), floor)
+             for fn, floor in sorted(MIN_PAIRS_BY_FN.items()) if counts.get(fn, 0) < floor]
+    # 没登记下限的函数名同样判红：新加一类比对时必须顺手补上它的条数下限，
+    # 否则覆盖面会靠「反正总数够」悄悄漂走。
+    unregistered = sorted(set(counts) - set(MIN_PAIRS_BY_FN))
+    # 逐函数检查排在总数检查**前面**：下限之和就是总数下限，所以先点名「哪个函数少到几条」
+    # 比只报「总数不够」更有用。
+    assert not short and not unregistered, (
+        "等价性覆盖不足（每个函数的条数下限就是它当前真实的条数，一条都不许少）：%s%s"
+        % ("；".join(short), "" if not unregistered else "；未登记下限的函数：%s" % unregistered))
     assert len(cases) >= MIN_PAIRS, "用例从 %d 缩到 %d 条，等价性覆盖不足" % (MIN_PAIRS, len(cases))
 
     diffs = []
