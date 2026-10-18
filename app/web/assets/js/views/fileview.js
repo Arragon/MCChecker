@@ -26,6 +26,10 @@
     return v;
   }
 
+  /* D1（§6.7 提交建议第 1/4 步）：null 节点的当前值恒为 "null"，提交任何建议都会被
+   * 判为「与当前值相同」，把别的节点改成 null 也过不了类型检查 —— null 是只读值。 */
+  var NULL_VALUE_HINT = "null 值为只读，不支持提交修改建议";
+
   function factory(app, route) {
     var isTemp = route.kind === "t";
     var S = {
@@ -598,6 +602,11 @@
         S.draftInput = input;
         var fld = MC.field({ label: "提交修改建议", control: input, help: "提交人：" + util.identityName(app.identity) + "。建议由管理员审阅，通过后生成新文件，不会直接覆盖原文件。" });
         var submit = h("button.btn.btn-primary", { type: "button" }, icon("message"), "提交建议");
+        if (idx.t[i] === "NoneType") {
+          input.disabled = true;
+          submit.disabled = true;
+          input.title = submit.title = NULL_VALUE_HINT;
+        }
         input.addEventListener("input", function () { app.renderTabbar(); fld.setError(""); });
         input.addEventListener("keydown", function (e) { if (e.key === "Enter") submit.click(); });
         submit.addEventListener("click", function () {

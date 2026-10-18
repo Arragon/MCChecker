@@ -430,6 +430,16 @@ def _pointer_escape(key: str) -> str:
     return key.replace("~", "~0").replace("/", "~1")
 
 
+def pointer_unescape(token: str) -> str:
+    """JSON Pointer 反转义（RFC 6901）：`~1`→`/`、`~0`→`~`。
+
+    与 `_pointer_escape` 严格互逆；**顺序不能颠倒**：必须先 `~1`→`/`、再 `~0`→`~`，
+    否则 `~01`（真键名是 `~1`）会被还原成 `/`。`core.reviewing.apply_edits` 靠它把
+    `loc` 还原成真实键名，所以只能由本模块提供，避免第二套转义规则。
+    """
+    return token.replace("~1", "/").replace("~0", "~")
+
+
 def _compact_json(content: bytes, filename: str) -> _Nodes:
     try:
         data = json.loads(content.decode("utf-8-sig"))
@@ -507,6 +517,16 @@ def _collect_ns_prefixes(data: bytes) -> Dict[str, str]:
         if uri and uri not in mapping:
             mapping[uri] = prefix
     return mapping
+
+
+def collect_ns_prefixes(content: bytes) -> Dict[str, str]:
+    """`uri → prefix`（首次出现者），§6.1 第 3 步的公开入口。
+
+    `_collect_ns_prefixes` 的薄封装：`core.reviewing.apply_edits` 要用它把原文的
+    前缀注册回去（§6.7 第 5 步），必须与显示标签**同源**，所以这里不复制实现、
+    也不让别的 core 模块跨文件调私有函数。
+    """
+    return _collect_ns_prefixes(content)
 
 
 def _display_label(tag: str, ns_prefix: Dict[str, str]) -> str:

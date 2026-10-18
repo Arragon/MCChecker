@@ -9,20 +9,14 @@
 
 from __future__ import annotations
 
-import math
-import re
 from typing import Any, Dict, List, Optional
 
-from ..core import storage
+from ..core import reviewing, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, SOURCE_CHANGED, AppError
 from ..services.auth import Actor
 from . import documents, revision
 
 PART = "remarks"
-
-_INT_RE = re.compile(r"^-?\d+$")
-#: §6.7 第 4 步：JSON 节点按原类型校验建议值；XML 不做类型检查。
-_TYPE_HINTS = {"int": "整数", "float": "数字", "bool": "true 或 false", "NoneType": "null"}
 
 
 def list_items(
@@ -42,22 +36,16 @@ def list_items(
 
 
 def _required_type(fmt: str, node_type: str, proposed: str) -> str:
-    """建议值与原类型不符时返回需要的类型名，一致则返回空串。"""
+    """建议值与原类型不符时返回需要的类型名，一致则返回空串。
+
+    类型口径**不在本文件再写一份**（评审 Important 3）：判定来自 `core.reviewing.value_type_hint`，
+    与 `apply_edits` 的写入侧共用同一个函数——两份拷贝一旦飘了，就会出现「`/remarks` 接受一条
+    建议、`/review/submit` 在机器写锁内把它拒掉」的永远无法应用的建议。方向是 services → core，
+    不违反 §3.3 分层红线。留在本层的只有「XML 不做类型检查」这条格式门（§6.7 第 4 步）。
+    """
     if fmt != "json":
         return ""
-    if node_type == "int":
-        return "" if _INT_RE.match(proposed) else _TYPE_HINTS["int"]
-    if node_type == "float":
-        try:
-            value = float(proposed)
-        except ValueError:
-            return _TYPE_HINTS["float"]
-        return "" if math.isfinite(value) else _TYPE_HINTS["float"]
-    if node_type == "bool":
-        return "" if proposed in ("true", "false") else _TYPE_HINTS["bool"]
-    if node_type == "NoneType":
-        return "" if proposed == "null" else _TYPE_HINTS["NoneType"]
-    return ""
+    return reviewing.value_type_hint(node_type, proposed)
 
 
 def submit(
