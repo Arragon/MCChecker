@@ -365,11 +365,20 @@
   }
 
   /* ---------------- tasks ---------------- */
-  /* 契约与 `app/services/tasks.py` + `app/server/api_tasks.py` 对齐（M3-07 / R19）：
+  /* 契约与 `app/services/tasks.py` + `app/server/api_tasks.py` 对齐（M3-07 建、M3-06 同步，R19）：
    * `task` 的 JSON 形状严格是 §7.10 的 11 个字段，去重键只留在内部 `taskKeys`；
    * 状态由条目结果推出（全成 succeeded / 全败 failed / 部分 partial）；
    * 结束时 `tasks` 必递增，`files` 只在真的写入过内容时递增，`settings` 只随 update_all。 */
   var TASK_FAILED_STATUSES = ["download_failed", "rejected", "too_large", "error"];
+  /* 互斥面与后端 `_CONFLICTING_TYPES` 同源（卡 6 复审 F2，卡 7 把规则显示给用户）：
+   * 同一机型内三类任务两两互斥；只要有一方是 refresh_records，就按机型整块挡、不看 target
+   * （update_all 会对每个有 record_url 的映射项跑 refresh_records）。
+   * 「全部更新」正在跑时点「立即拉取/单条更新」**必然** 409 BUSY。 */
+  var TASK_CONFLICTS = {
+    update_source: ["update_all", "refresh_records"],
+    update_all: ["update_source", "refresh_records"],
+    refresh_records: ["update_source", "update_all"],
+  };
 
   function busyTaskByKey(key) {
     return Object.keys(tasks).map(function (k) { return tasks[k]; }).filter(function (t) {
@@ -377,21 +386,23 @@
     })[0];
   }
 
-  function activeTaskOfType(pid, type) {
+  function activeTasksOfTypes(pid, types) {
     return Object.keys(tasks).map(function (k) { return tasks[k]; }).filter(function (t) {
-      return t.profile === pid && t.type === type && (t.state === "queued" || t.state === "running");
+      return t.profile === pid && (t.state === "queued" || t.state === "running") && types.indexOf(t.type) >= 0;
     })[0];
   }
 
+  /* progress 契约（卡 6 移交、卡 7 对齐，R19）：与后端同一出处——
+   * 建任务时是 0/0；update_all 在**开始执行**时发布 total（`updates.update_all`
+   * 首步 `_publish(task, 0, total, None)`）；单条任务（update_source/refresh_records）
+   * 要等下载调用**返回之后**才一起回填 done/total（`_publish_single`），整个下载
+   * 期间就是 0/0 ⇒ shell.js 渲染「准备中」。旧 mock 在建任务时就把 total 写进
+   * payload，掩盖了这个窗口，本卡改齐。 */
   function runTask(pid, type, name, actor) {
     var P = profile(pid);
     var key = pid + ":" + type + ":" + (name || "*");
-    // update_all 与同机型任意 update_source 互斥（§10.1），反向同理。
-    var running =
-      busyTaskByKey(key) ||
-      (type === "update_all" && activeTaskOfType(pid, "update_source")) ||
-      (type === "update_source" && activeTaskOfType(pid, "update_all"));
-    if (running) return fail(409, "BUSY", "该任务正在执行（由 " + running.actor + " 发起）", { task_id: running.id });
+    var running = busyTaskByKey(key) || activeTasksOfTypes(pid, TASK_CONFLICTS[type] || []);
+    if (running) return fail(409, "BUSY", "同类任务正在执行（由 " + running.actor + " 发起）", { task_id: running.id });
     var targets = type === "update_all" ? P.mapping.map(function (m) { return m.name; }) : [name];
     var t = {
       id: util.uid("task"),
@@ -399,7 +410,7 @@
       type: type,
       target: name || null,
       state: "running",
-      progress: { done: 0, total: targets.length },
+      progress: { done: 0, total: 0 },
       result: { items: [] },
       error: null,
       actor: actor,
@@ -413,10 +424,12 @@
     (function next() {
       setTimeout(function () {
         var tgt = targets[step];
+        if (type === "update_all") t.progress.total = targets.length;
         var res = type === "refresh_records" ? doRefreshRecords(P, tgt) : doUpdate(P, pid, tgt);
         t.result.items.push(res);
         step++;
         t.progress.done = step;
+        if (type !== "update_all") t.progress.total = targets.length;
         bump(pid, "tasks");
         if (step < targets.length) return next();
         var failed = t.result.items.filter(function (x) {
@@ -985,7 +998,8 @@
     var deny = needDeployer(id);
     if (deny) return deny;
     var m = P.mapping.filter(function (x) { return x.name === a.name; })[0];
-    if (!m) return fail(404, "NOT_FOUND", "更新源不存在");
+    // 与 `services/updates.rename_source` 一致：旧名不在映射 ⇒ 404 + detail.name。
+    if (!m) return fail(404, "NOT_FOUND", "更新源不存在", { name: a.name });
     var name = String(req.body.name || "").trim();
     var url = String(req.body.url || "").trim();
     var rec = String(req.body.record_url || "").trim();
@@ -1025,13 +1039,23 @@
     return ok({ removed: removed });
   });
 
+  /* 与后端 `api_tasks.create_task` 同一道校验顺序（卡 6 裁定，R19 同步）：
+   * 未知 type → 400（field=type）；名字非法 → 400（field=name，_validated_target）；
+   * 名字不在映射表 → **404 NOT_FOUND**，不是 202 ——否则会排出一条「什么都没做却
+   * 显示已完成」的绿任务。404 附带 detail.name 供前端按业务结果显示。 */
+  var TASK_TYPE_LIST = ["update_source", "update_all", "refresh_records"];
   route("POST", "/p/{pid}/tasks", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
     var type = req.body.type;
-    if (["update_source", "update_all", "refresh_records"].indexOf(type) < 0) return fail(400, "INVALID_INPUT", "未知任务类型");
-    if (type !== "update_all" && !P.mapping.some(function (m) { return m.name === req.body.name; })) return fail(404, "NOT_FOUND", "该文件没有配置更新源");
-    return runTask(a.pid, type, req.body.name, id.name);
+    if (TASK_TYPE_LIST.indexOf(type) < 0) return fail(400, "INVALID_INPUT", "任务类型只能是 " + TASK_TYPE_LIST.join("/"), { field: "type", wanted: type });
+    var name = null;
+    if (type !== "update_all") {
+      name = String(req.body.name || "").trim();
+      if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不能为空且不能包含 \\ / : * ? \" < > |", { field: "name", wanted: name });
+      if (!P.mapping.some(function (m) { return m.name === name; })) return fail(404, "NOT_FOUND", "该文件没有配置更新源", { name: name });
+    }
+    return runTask(a.pid, type, name, id.name);
   });
 
   route("GET", "/p/{pid}/tasks", function (a, req) {
@@ -1043,7 +1067,8 @@
 
   route("GET", "/tasks/{id}", function (a) {
     var t = tasks[a.id];
-    return t ? ok({ task: clone(t) }) : fail(404, "NOT_FOUND", "任务不存在");
+    /* 消息与后端 `api_tasks.get_task` 一致：404 = 不存在**或已结束太久**（1 小时/200 条窗口）。 */
+    return t ? ok({ task: clone(t) }) : fail(404, "NOT_FOUND", "任务不存在或已结束太久", { id: a.id });
   });
 
   route("GET", "/p/{pid}/schedule", function (a, req, P) {

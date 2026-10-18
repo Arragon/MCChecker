@@ -2,37 +2,107 @@
 (function () {
   "use strict";
   var MC = window.MC;
+  /* F2（卡 7 复审）+ 第三轮 C1：全局错误兜底与「这个兜底在什么条件下才成立」。
+   * 此前这里没有任何 error/unhandledrejection 监听——「用例返回已 resolve 的 Promise
+   * 之后才抛出的断言/异常」会被静默吞掉，页面照样报 ALL PASSED，正是本卡要消灭的
+   * 「静默绿」再往下一层。两类失败都记成**合成失败 slot** 并立刻重画汇总——report
+   * 幂等可重入，队尾那次与迟到错误谁最后跑谁定标题。
+   *
+   * 【钉死的验收命令 = HTTP，不是 file://】起一个临时静态服务器服务 app/web/
+   *  —— `./.venv39/bin/python -m http.server 0 --bind 127.0.0.1 --directory <app/web 或其 /tmp 副本>`
+   *  （随机端口；绝不拿仓库 data/ 当服务根；用完关掉），同一个预算跑：
+   *    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+   *      --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom \
+   *      "http://127.0.0.1:<port>/tests/index.html"   → 期望 <title>ALL PASSED (40)</title>
+   *  【HTTP 下两种抖动，重跑而不是改代码】`--virtual-time-budget` 与真实网络延迟竞速，
+   *  预算到点时 Chrome 会取消在途脚本，于是：① dump 早于 report() ⇒ 标题停在初始值
+   *  （既非绿也非红）；② 某个外部 .js 没跑完 ⇒ 一批用例同时报 `X is not a function`
+   *  （看着像回归，其实交付是好的：逐字节核过服务端 80/80 与磁盘一致）。**只认
+   *  `ALL PASSED (n)` / `n FAILED / m` 两种标题**；①②一律重跑。实测抖动率按服务器
+   *  形态排：HTTP/1.1 keep-alive 的多线程服务器 22 次 0 抖；stdlib `python -m http.server`
+   *  （HTTP/1.0，每请求一条连接）24 次抖 5 次；单线程 socketserver 9 次抖 2 次
+   *  ——**验收优先用 keep-alive 那种**。profile 共用与否不是变量，抬预算也不保证。
+   *  完整数据与判据见 docs/know-how.md 第 4 节。
+   *
+   * 【为什么 file:// 不算验收】实测边界（Chrome 155，同一份页面两种来源各跑一遍，
+   * 结论如实记录）：变量是**产生拒绝的那个脚本的来源**，与「串行队列在不在进行中」
+   * 无关——
+   *   ① **外部脚本**（本文件的全部用例、所有视图模块都是外部脚本）里产生的
+   *      unhandledrejection，file:// 下**从不派发**：队列进行中产生的不派发；改到
+   *      report 跑完、队列早已 settle 之后再产生，照样不派发；预算 8000→30000 也一样。
+   *   ② **inline** 页面脚本产生的 rejection 在 file:// 下**会**派发 ⇒ 盲区精确到
+   *      「外部脚本来源」，不是「这个页面里的所有拒绝」。
+   *   ③ error 通道不受此限，file:// 下照样派发，只是外部脚本的 message/filename 被
+   *      浏览器掩成 "Script error."（只有 inline 的带 filename:line，去 DevTools 找肇事行）。
+   *   ④ HTTP 下两个监听都完整命中、含真实 filename:line 与消息。
+   * 后果：「用例不返回那条 Promise 链、断言写在链里」这种形状在 file:// 下确定性地绿——
+   * 用例注册了也启动了（用例数钉死满足）、没有同步抛（error 通道静默），能抓它的只有
+   * rejection 通道，而那条通道在 file:// 下对①是瞎的。所以三层兜底（这两个监听 +
+   * EXPECTED_CASES 钉死 + 队尾宏任务 flush）只有在 HTTP 命令下才是闭合的。 */
+  /* F2（卡 7 复审）：钉死用例总数——某条用例「注册了却没跑到」或干脆没注册时，
+   * 呈现的是更小的绿色数字而不是红。新加用例必须同步改这里（对不上当场判失败）。
+   * 第三轮 nit：这条声明必须排在下面注册的两个监听**之前**——监听在脚本求值期就可能调
+   * report()，那时若常量还没赋值，红会写成「预期 undefined，实际注册 0」（仍然红，
+   * 但不说人话）。 */
+  var EXPECTED_CASES = 40;
+  var traps = [];
+  function recordTrap(name, detail) {
+    traps.push({ name: name, ok: false, err: detail });
+    report();
+  }
+  window.addEventListener("error", function (e) {
+    var where = e && e.filename ? e.filename.split("/").pop() + ":" + e.lineno : "file:// 下来源被掩为 Script error.，看浏览器控制台";
+    var msg = (e && e.error && e.error.message) || (e && e.message) || "未知";
+    recordTrap("全局脚本错误（用例流之外，位于 " + where + "）：" + msg, msg);
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e && e.reason;
+    var msg = (reason && (reason.message || reason.code)) || String(reason);
+    recordTrap("未处理的 Promise 拒绝（用例流之外）：" + msg, msg);
+  });
+  /* M3-06（修卡 3 遗留）：记下真 API。异步用例把 MC.api.* 换成 stub 后，
+   * 后续用例开始时**必须**已经换回真身——下面这条「隔离证明」按注册序排在
+   * 唯一一条异步 stub 用例（文件详情）之后，用它证明恢复是真的排到了序上。
+   * F9：stubs 现在覆盖全部 9 个请求面（含 request/download/fetchBlob/upload），
+   * 隔离证明跟着逐个核对。 */
+  var REAL_API = { get: MC.api.get, post: MC.api.post, put: MC.api.put, patch: MC.api.patch, del: MC.api.del, request: MC.api.request, download: MC.api.download, fetchBlob: MC.api.fetchBlob, upload: MC.api.upload };
   var results = [];
-  var pending = [];
   /*
    * 用例可以是同步的，也可以返回一个 Promise（视图渲染要走 api.get 的 Promise 链，
-   * 断言只能在 DOM 真正画出来之后做）。异步用例先占位为失败，settled 后改写结果，
-   * 因此顺序不变、也不会因为没等到就误判成通过；最后一条汇总要等全部异步用例结束。
+   * 断言只能在 DOM 真正画出来之后做）。
+   *
+   * M3-06 起用例**串行执行**：每条要等上一条（含其异步部分）settle 之后才开始。
+   * 这是机制修复，不是碰时机——卡 3 的旧机制里同步批次先全部跑完、异步用例的
+   * `finally` 恢复 `MC.api.*` 恢复得太晚，整个同步批次期间 API 都是假的（今天恰好
+   * 没人依赖真 API 所以无害，卡 7 起有依赖了）。串行之后，stub 用例结束时恢复，
+   * 后续用例必然看到真 API；顺序断言见「测试隔离」用例。
+   * 异步用例在其 slot 里先占位为失败、settle 成功后才改写，汇总永远是队列的最后一步。
    */
+  var queue = Promise.resolve();
   function test(name, fn) {
-    var slot = { name: name, ok: true, err: null };
-    results.push(slot);
-    try {
-      var r = fn();
-      if (r && typeof r.then === "function") {
-        slot.ok = false;
-        pending.push(
-          r.then(
+    queue = queue.then(function () {
+      var slot = { name: name, ok: true, err: null };
+      results.push(slot);
+      try {
+        var r = fn();
+        if (r && typeof r.then === "function") {
+          slot.ok = false;
+          return r.then(
             function () {
               slot.ok = true;
               slot.err = null;
             },
             function (e) {
-              slot.ok = false;
               slot.err = e && e.message ? e.message : String(e);
             }
-          )
-        );
+          );
+        }
+      } catch (e) {
+        slot.ok = false;
+        slot.err = e && e.message ? e.message : String(e);
       }
-    } catch (e) {
-      slot.ok = false;
-      slot.err = e && e.message ? e.message : String(e);
-    }
+      return undefined;
+    });
   }
   function eq(a, b, msg) {
     var sa = JSON.stringify(a);
@@ -206,11 +276,15 @@
     ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["schedule", "dl", "settings", "tools"].forEach(function (k) {
+    ["schedule", "dl", "tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
+    /* M3-06：settings 页级键已放行——页面内部的分段由 D2 分段开关控制（见下面专门用例），
+     * 未接入分段渲染只读横幅且不发请求，所以页级放行不再打空接口。 */
+    ok(prod.settings, "settings 页级键在 M3-06 放行");
     /* 放行只改 WIRED：未接入文案必须留着，M4-08 删本机制前 view 仍靠它给禁用提示。 */
     ok(/M\d-\d\d/.test(MC.unwired.review), "review 的未接入说明要保留并点名卡号：" + MC.unwired.review);
+    ok(/M\d-\d\d/.test(MC.unwired.settings), "settings 的未接入说明要保留并点名卡号：" + MC.unwired.settings);
   });
 
   test("M3-07 / D4：任务接口独立放行，tools 键不再代表任务可用性", function () {
@@ -236,15 +310,566 @@
       MC.api.post = function (path, body) { calls.push("POST " + path); return Promise.resolve({ task: {} }); };
       MC.caps.tasks = false;
       poll.call(stubApp);
-      /* startTask 走 reject 而不是「假装任务已开始」；catch 挂上以免留下未处理的拒绝。 */
+      /* startTask 走 reject 而不是「假装任务已开始」；catch 挂上以免留下未处理的拒绝。
+       * 这句 catch **不许摘**：它是本文件唯一一处「不把链交给 test() 的浮空 Promise」，
+       * 正是文件头 C1 描述的那个形状——摘掉以后 HTTP 验收命令当场红，file:// 反而看不见。 */
       start.call(stubApp, { type: "update_all" }).then(null, function () {});
       eq(calls, [], "未接入时不得打 /tasks（决策 14：禁用 + 说明 + 不发请求）");
     } finally {
-      /* 同步恢复：异步 finally 会让其余用例在整个同步批次里都用假 API（卡 3 的已知坑）。 */
+      /* 同步恢复：异步 finally 会让其余用例在整个同步批次里都用假 API（卡 3 的已知坑，
+       * 本卡已把执行序改成串行，这里保持同步恢复不变——更快且不依赖队列）。 */
       MC.api.get = origGet;
       MC.api.post = origPost;
       MC.caps.tasks = origCap;
     }
+  });
+
+  test("M3-06 / D2：设置页分段白名单——只放行 sources，其余五项各有点名卡号的去向", function () {
+    /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS、
+     * 起点只有 sources、unwiredSettings 恰好覆盖未接入的五项且文案点名接入卡号。
+     * 后续 M3-08/13/14/15/16 各自把一项加进 WIRED_SETTINGS，本用例是它们的公共回归。 */
+    eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
+    ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
+    ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
+    var unwired = MC.settingsSegments.filter(function (s) { return MC.wiredSettingsSegments.indexOf(s) < 0; });
+    eq(Object.keys(MC.unwiredSettings).sort(), unwired.slice().sort(), "未接入分段都要有去向文案，且不多给已接入分段");
+    ok(unwired.every(function (s) { return /M\d-\d\d/.test(MC.unwiredSettings[s]); }), "去向文案要点名接入卡号");
+    /* 模板模式全开（预览不受门控）；生产模式只有 sources。 */
+    var wasMock = MC.config.mock;
+    var origWired = MC.wiredSettingsSegments.slice();
+    try {
+      MC.config.mock = true;
+      ok(MC.settingsSegmentWired("people") && MC.settingsSegmentWired("sources"), "模板模式下分段全部可用");
+      MC.config.mock = false;
+      ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（本卡）");
+      ok(!MC.settingsSegmentWired("schedule") && !MC.settingsSegmentWired("people") && !MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余五项未接入");
+      /* F8（卡 7 复审）：F 断言的是效果而不是切片自比——真的动手改暴露出的切片，
+       * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。 */
+      MC.wiredSettingsSegments.push("people");
+      ok(!MC.settingsSegmentWired("people"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
+      /* 第二变异：先裁回原长再验一次（这一句是**变异步骤**，不是恢复——恢复在 finally）。 */
+      MC.wiredSettingsSegments.splice(origWired.length);
+      ok(MC.settingsSegmentWired("sources") && !MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向打开/关闭门控");
+    } finally {
+      /* 第三轮 nit：变异必须自清理，跟本文件其它 fixture 一样。原先只有成功路径上那句
+       * splice 会把 push 进去的 "people" 摘掉，所以上面任一 ok 抛错时「people」就留在
+       * 对外切片里带到跑完，后续读到它的用例会拿到脏值。finally 这一句在成功路径上是
+       * 幂等 no-op（已经裁到 origWired.length），只在失败路径上才真正复原。 */
+      MC.wiredSettingsSegments.splice(origWired.length);
+      MC.config.mock = wasMock;
+    }
+    eq(MC.wiredSettingsSegments, origWired, "MC.wiredSettingsSegments 是快照切片，外部改不动白名单本体（上面的动手变异才是正证）");
+  });
+
+  /* ---------- M3-06：设置页渲染用例（真 API 路径 + D2 分段门控的行为观测） ----------
+   * 这批用例把 MC.config.mock 暂时置为 false 走「生产」分支，并用 spy 替换 MC.api.*
+   * （视图只经由 MC.api 的方法名调用，替换属性即可拦住真实 fetch）。执行序已串行，
+   * 每例在自己的 settle 里恢复，后续用例拿到真身——由上面的「测试隔离」用例兜底。
+   */
+  function tick() {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, 0);
+    });
+  }
+  function settingsApp(canDeployer) {
+    return {
+      pid: "default",
+      identity: { ip: "10.12.3.21", name: canDeployer ? "部署者甲" : "李娜", registered: true, is_deployer: !!canDeployer, is_admin: !!canDeployer, role_label: canDeployer ? "部署者" : "成员" },
+      can: function (kind) { return kind === "deployer" && !!canDeployer; },
+      session: { profiles: [{ id: "default", name: "默认机型" }] },
+      files: [],
+      activeTasks: [],
+      taskSlot: MC.util.h("div"),
+      p: function (rest) { return "/p/default" + rest; },
+      go: function () {},
+      openFile: function () {},
+      switchProfile: function () {},
+      reloadSession: function () { return Promise.resolve(); },
+      syncRevision: function () { return Promise.resolve(); },
+      refreshFiles: function () { return Promise.resolve(); },
+      refreshTools: function () { return Promise.resolve(); },
+      renderTasks: MC.App.prototype.renderTasks,
+      pollTasks: function () { return Promise.resolve(); },
+      showTask: function (id) { return MC.App.prototype.showTask.call(this, id); },
+      startTask: function (body) { return MC.App.prototype.startTask.call(this, body); },
+    };
+  }
+  function stubApi(handlers) {
+    /* F9（卡 7 复审）：桩覆盖面 = MC.api 的全部请求面，不止五个动词包装。
+     * 「未接入分段一个请求都不发」的断言宽度取决于这里拦了多少门——
+     * request/download/fetchBlob/upload 过去无人拦，结论只对已拦的成立。
+     * （两个可选方案里选了「加宽桩」而不是「静态断言视图只用五个动词」，
+     * 因为前者对未来的视图改动仍然有效。） */
+    var orig = { get: MC.api.get, post: MC.api.post, put: MC.api.put, patch: MC.api.patch, del: MC.api.del, request: MC.api.request, download: MC.api.download, fetchBlob: MC.api.fetchBlob, upload: MC.api.upload };
+    var calls = [];
+    function mk(method) {
+      return function (path, arg) {
+        calls.push(method + " " + path + (arg !== undefined ? " " + JSON.stringify(arg) : ""));
+        var h = handlers[method];
+        var r = h ? h(path, arg) : Promise.resolve({ items: [] });
+        return r;
+      };
+    }
+    MC.api.get = mk("GET");
+    MC.api.post = mk("POST");
+    MC.api.put = mk("PUT");
+    MC.api.patch = mk("PATCH");
+    MC.api.del = mk("DELETE");
+    MC.api.request = function (method, path, opts) {
+      calls.push(method + " " + path + (opts && opts.body !== undefined ? " " + JSON.stringify(opts.body) : ""));
+      return handlers.request ? handlers.request(method, path, opts) : Promise.resolve({ items: [] });
+    };
+    MC.api.download = function (path) { calls.push("DOWNLOAD " + path); return Promise.resolve({ blob: null, filename: "" }); };
+    MC.api.fetchBlob = function (path) { calls.push("FETCHBLOB " + path); return Promise.resolve({ blob: null, filename: "" }); };
+    MC.api.upload = function (path) { calls.push("UPLOAD " + path); return Promise.resolve({}); };
+    return { calls: calls, restore: function () { Object.keys(orig).forEach(function (k) { MC.api[k] = orig[k]; }); } };
+  }
+  function cleanOverlays() {
+    MC.closePopover();
+    document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+    /* 只清空 toast 内容、不删 .toast-stack 容器：components.js 复用同一个容器变量，
+     * 删掉容器会让后续用例的 toast 落到游离节点上。 */
+    document.querySelectorAll(".toast").forEach(function (t) { t.remove(); });
+  }
+  var SOURCE_LIST = {
+    items: [
+      { name: "a.xml", url: "http://up/a.xml", record_url: "", local_updated_at: "2026-10-18 10:00:00", last_result: { status: "success", label: "已更新", reason: "已归档旧版本 a_20261017.xml", at: "2026-10-18 10:00:00", archived: "a_20261017.xml" } },
+      { name: "b.xml", url: "http://up/b.xml", record_url: "http://up/b_rec.xml", local_updated_at: null, last_result: { status: "rejected", label: "已拒绝", reason: "根节点由 R 变为 html，可能下载到了错误页面，已拒绝替换", at: "2026-10-17 09:00:00", archived: null } },
+      { name: "c.xml", url: "http://up/c.xml", record_url: "", local_updated_at: "2026-10-18 08:00:00", last_result: { status: "download_failed", label: "下载失败", reason: "连接超时（30 秒），已重试 3 次", at: "2026-10-18 08:00:00", archived: null } },
+      { name: "d.xml", url: "http://up/d.xml", record_url: "", local_updated_at: "2026-10-16 08:00:00", last_result: { status: "unchanged", label: "无变化", reason: "内容与当前版本一致，未归档", at: "2026-10-16 08:00:00", archived: null } },
+    ],
+  };
+  function sourceHandlers(patchImpl) {
+    return {
+      GET: function (path) {
+        if (/\/sources$/.test(path)) return Promise.resolve(JSON.parse(JSON.stringify(SOURCE_LIST)));
+        return Promise.resolve({ items: [] });
+      },
+      POST: function () { return Promise.resolve({ task: { id: "tk1", type: "update_source", target: "a.xml", state: "running", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "部署者甲" } }); },
+      PATCH: patchImpl,
+    };
+  }
+  /* 统一的生产模式挂载器：mock 位、视图实例、API 桩、caps 覆盖、浮层 DOM 无论用例
+   * 成败都在 settle 阶段恢复——执行序已串行，这就是「后续用例拿到真 API」的机制保证。 */
+  function productionRun() {
+    var wasMock = MC.config.mock;
+    var stage = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0;width:900px;height:600px" });
+    document.body.append(stage);
+    MC.config.mock = false;
+    var insts = [];
+    var restoreFns = [];
+    var capsPatch = [];
+    var activeRestore = null;
+    var r = {
+      stage: stage,
+      mount: function (app, seg) {
+        var inst = MC.views.settings(app, { kind: "settings", arg: seg, query: {} });
+        stage.append(inst.el);
+        insts.push(inst);
+        return inst;
+      },
+      /* 登记「非设置页」的视图实例（F1 用例挂 fileview 用）：stage/destroy 语义与 mount 一致。 */
+      mountView: function (inst) {
+        stage.append(inst.el);
+        insts.push(inst);
+        return inst;
+      },
+      useApi: function (handlers) {
+        /* 同一时刻只允许一层桩：先摘掉上一层，新桩才会捕获到「真 API」作为恢复目标，
+         * 恢复顺序也就天然正确。 */
+        if (activeRestore) activeRestore();
+        var s = stubApi(handlers);
+        activeRestore = s.restore;
+        restoreFns.push(s.restore);
+        return s;
+      },
+      capOff: function (key) {
+        capsPatch.push({ key: key, was: MC.caps[key] });
+        MC.caps[key] = false;
+      },
+    };
+    function finish() {
+      MC.config.mock = wasMock;
+      insts.forEach(function (i) { i.destroy(); });
+      stage.remove();
+      cleanOverlays();
+      restoreFns.forEach(function (f) { f(); });
+      capsPatch.forEach(function (p) { MC.caps[p.key] = p.was; });
+    }
+    r.run = function (body) {
+      var p;
+      try {
+        p = Promise.resolve(body(r));
+      } catch (e) {
+        p = Promise.reject(e);
+      }
+      return p
+        .catch(function (e) {
+          finish();
+          throw e;
+        })
+        .then(finish);
+    };
+    return r;
+  }
+
+  test("M3-06 / D2：未接入的五个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi({});
+      /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。 */
+      ["schedule", "people", "bindings", "tools", "profiles"].forEach(function (seg) {
+        var inst = r.mount(settingsApp(true), seg);
+        var main = inst.el.querySelector(".settings-main");
+        ok(main.textContent.indexOf(MC.unwiredSettings[seg]) >= 0, seg + "：只读横幅必须给出接入去向「" + MC.unwiredSettings[seg] + "」");
+        var controls = main.querySelectorAll("button, input, select, textarea");
+        ok(controls.length > 0, seg + "：分段要有编辑控件（禁用占位）");
+        controls.forEach(function (c) {
+          ok(c.disabled, seg + " 的编辑控件必须真的 disabled");
+          ok(/M3-\d\d/.test(c.getAttribute("title") || ""), seg + " 控件的 title 要点名接入卡号，实际：" + c.getAttribute("title"));
+        });
+      });
+      return tick().then(function () {
+        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /schedule、/admins、/bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
+      });
+    });
+  });
+
+  test("M3-06：sources 分段在生产模式打 /sources 与 POST /tasks，状态列显示条目状态与原因", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(sourceHandlers());
+      var app = settingsApp(true);
+      var inst = r.mount(app, "sources");
+      var main;
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          eq(spy.calls, ["GET /p/default/sources"], "进入已接入的 sources 只发这一个请求");
+          ["已更新", "已拒绝", "下载失败", "无变化"].forEach(function (label) {
+            ok(main.textContent.indexOf(label) >= 0, "状态列要显示条目状态「" + label + "」（来自 last_result，不是任务 state）");
+          });
+          ok(main.textContent.indexOf("根节点由 R 变为 html") >= 0, "rejected 行要显示原因");
+          ok(main.textContent.indexOf("连接超时（30 秒），已重试 3 次") >= 0, "download_failed 行要显示原因");
+          ok(main.textContent.indexOf("尚未下载") >= 0, "没有本地文件要如实显示");
+          ok(main.textContent.indexOf("修改记录：http://up/b_rec.xml") >= 0, "record_url 要显示");
+          var upds = [].slice.call(main.querySelectorAll("tbody button")).filter(function (b) { return b.textContent.indexOf("更新") >= 0; });
+          eq(upds.length, 4, "每行一个更新按钮");
+          upds.forEach(function (b) { ok(!b.disabled, "分段已接入且 caps.tasks 为真时更新按钮可用"); });
+          upds[0].click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('POST /p/default/tasks {"type":"update_source","name":"a.xml"}') >= 0, "更新按钮只走 POST /tasks，不做第二套同步按钮：" + spy.calls.join(" | "));
+          ok(app.taskSlot.textContent.indexOf("准备中") >= 0, "入队瞬间 total 还没发布 ⇒ 顶栏显示「准备中」而不是 0/0");
+          var all = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("全部立即更新") >= 0; })[0];
+          ok(all && !all.disabled, "有条目且 tasks 已接入时「全部立即更新」可用");
+          all.click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('POST /p/default/tasks {"type":"update_all"}') >= 0, "全部更新同样只走 POST /tasks");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "两次点击各发一个任务请求，没有重试或重复");
+          /* caps.tasks 关掉（模拟未接入）：更新类按钮禁用 + title 给去向，点击不发任务请求。 */
+          r.capOff("tasks");
+          var inst2 = r.mount(settingsApp(true), "sources");
+          return tick().then(function () {
+            var main2 = inst2.el.querySelector(".settings-main");
+            /* 「新增更新源」是 CRUD 按钮（sources 分段自带），不归 tasks 门控管，排除掉。 */
+            var btns = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return /更新/.test(b.textContent) && b.textContent.indexOf("新增") < 0; });
+            ok(btns.length >= 5, "四个行更新按钮 + 全部立即更新都要在，实际 " + btns.length);
+            btns.forEach(function (b) {
+              ok(b.disabled, "tasks 未接入 ⇒ 更新类按钮 disabled");
+              ok(/M3-\d\d/.test(b.getAttribute("title") || ""), "禁用要点名接入卡号，实际：" + b.getAttribute("title"));
+            });
+            btns.forEach(function (b) { b.click(); });
+            return tick();
+          }).then(function () {
+            eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "未接入时点击不发任务请求");
+          });
+        });
+    });
+  });
+
+  test("M3-06：409 BUSY 不是服务器故障——解释互斥、不重试、给跳到 detail.task_id 的入口；404 按业务错误显示", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var runningAll = { id: "t9", profile: "default", type: "update_all", target: null, state: "running", progress: { done: 1, total: 3 }, result: { items: [] }, error: null, actor: "李娜", created_at: "2026-10-18 10:00:00", finished_at: null };
+      var postErr = new MC.ApiError(409, "BUSY", "同类任务正在执行（由 李娜 发起）", { task_id: "t9" });
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/sources$/.test(path)) return Promise.resolve(JSON.parse(JSON.stringify(SOURCE_LIST)));
+          if (path === "/tasks/t9") return Promise.resolve({ task: JSON.parse(JSON.stringify(runningAll)) });
+          return Promise.resolve({ items: [] });
+        },
+        POST: function () { return Promise.reject(postErr); },
+      });
+      var app = settingsApp(true);
+      var inst = r.mount(app, "sources");
+      var main;
+      var rowUpd = function (i) {
+        return [].slice.call(main.querySelectorAll("tbody button")).filter(function (b) { return b.textContent.indexOf("更新") >= 0; })[i];
+      };
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          rowUpd(0).click();
+          return tick();
+        })
+        .then(function () {
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          var warn = toasts.filter(function (x) { return x.className.indexOf("toast-warning") >= 0; })[0];
+          ok(warn, "409 必须是解释性警示而不是错误 toast（BUSY 是预期结果，不是服务器故障）");
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "不得按「无法开始更新/服务器故障」处理");
+          ok(warn.textContent.indexOf("已有任务在运行") >= 0, "文案要说清互斥：" + warn.textContent);
+          ok(warn.textContent.indexOf("李娜") >= 0, "要带上后端 detail 里的发起者");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 1, "409 不自动重试");
+          var action = warn.querySelector("button.btn");
+          ok(action && action.textContent.indexOf("查看该任务") >= 0, "要给出跳转 detail.task_id 的入口");
+          action.click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf("GET /tasks/t9") >= 0, "入口按 detail.task_id 拉那条任务（GET /tasks/{id}）");
+          var modal = [].slice.call(document.querySelectorAll(".modal-backdrop .modal")).pop();
+          ok(modal, "弹出那条任务的详情");
+          ok(modal.textContent.indexOf("全量更新") >= 0 && modal.textContent.indexOf("进行中") >= 0 && modal.textContent.indexOf("1/3") >= 0, "弹窗显示任务类型/状态/进度：" + modal.textContent);
+          /* 换 404（卡 6 裁定：名字不在映射表 ⇒ 404 是业务结果，不是服务器故障）：
+           * 显示后端消息、刷新本列表、不重试。 */
+          document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+          document.querySelectorAll(".toast").forEach(function (x) { x.remove(); });
+          postErr = new MC.ApiError(404, "NOT_FOUND", "该文件没有配置更新源", { name: "a.xml" });
+          rowUpd(1).click();
+          return tick();
+        })
+        .then(function () {
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "404 不走「服务器故障」式错误 toast");
+          var warn = toasts.filter(function (x) { return x.className.indexOf("toast-warning") >= 0 && x.textContent.indexOf("该文件没有配置更新源") >= 0; })[0];
+          ok(warn, "404 显示后端业务消息：" + toasts.map(function (x) { return x.className + "|" + x.textContent; }).join(" ; "));
+          var gets = spy.calls.filter(function (c) { return c === "GET /p/default/sources"; }).length;
+          ok(gets >= 2, "404 说明列表已过期 ⇒ 刷新本列表（GET /sources 第二次），实际 " + gets + " 次");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "两次点击各一次 POST：409 与 404 都不自动重试");
+        });
+    });
+  });
+
+  test("M3-06 / F1：文件页「立即拉取」409 BUSY 与设置页同一共享口径——warning 点名在跑任务并跳 detail.task_id", function () {
+    /* 卡 7 复审 F1：「全部更新」在跑时点「立即拉取」必然 409（三类两两互斥）。
+     * 过去 fileview 直接 MC.toastError("无法开始拉取")——红色故障 toast、不解释互斥、
+     * 不给那条任务的入口。现在走共享的 MC.taskStartError（shell.js），本用例镜像
+     * 上面设置页那条 409 断言，钉住「warning / 点名在跑任务 / 跳转落 detail.task_id」。 */
+    var t = productionRun();
+    return t.run(function (r) {
+      var runningAll = { id: "t9", profile: "default", type: "update_all", target: null, state: "running", progress: { done: 1, total: 3 }, result: { items: [] }, error: null, actor: "李娜", created_at: "2026-10-18 10:00:00", finished_at: null };
+      var postErr = new MC.ApiError(409, "BUSY", "同类任务正在执行（由 李娜 发起）", { task_id: "t9" });
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/records$/.test(path)) return Promise.resolve({ record_url: "http://up/cfg_rec.xml", items: [] });
+          if (path === "/tasks/t9") return Promise.resolve({ task: JSON.parse(JSON.stringify(runningAll)) });
+          return Promise.resolve({ items: [] });
+        },
+        POST: function () { return Promise.reject(postErr); },
+      });
+      var app = settingsApp(true);
+      app.files = [{ name: "cfg.xml", record_count: 2, archive_count: 1 }];
+      var inst = r.mountView(MC.views.f(app, { kind: "f", arg: "cfg.xml", query: { view: "records" } }));
+      var fetchBtn;
+      return tick()
+        .then(function () {
+          var btns = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("立即拉取") >= 0; });
+          eq(btns.length, 1, "修改记录视图要有「立即拉取」按钮");
+          fetchBtn = btns[0];
+          ok(!fetchBtn.disabled, "部署者 + 已配置 record_url + tasks 已接入 ⇒ 按钮可用");
+          fetchBtn.click();
+          return tick();
+        })
+        .then(function () {
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          var warn = toasts.filter(function (x) { return x.className.indexOf("toast-warning") >= 0; })[0];
+          ok(warn, "409 在文件页同样是解释性 warning，不是红色故障 toast");
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "不得按「无法开始拉取/服务器故障」处理（F1 修的正是这个）");
+          ok(warn.textContent.indexOf("已有任务在运行") >= 0, "文案与设置页同源（MC.taskStartError）：" + warn.textContent);
+          ok(warn.textContent.indexOf("李娜") >= 0, "要点名那条在跑任务的发起者");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 1, "409 不自动重试");
+          var action = warn.querySelector("button.btn");
+          ok(action && action.textContent.indexOf("查看该任务") >= 0, "要给出跳转 detail.task_id 的入口");
+          action.click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf("GET /tasks/t9") >= 0, "入口按 detail.task_id 拉那条任务");
+          var modal = [].slice.call(document.querySelectorAll(".modal-backdrop .modal")).pop();
+          ok(modal, "弹出那条任务的详情");
+          ok(modal.textContent.indexOf("全量更新") >= 0 && modal.textContent.indexOf("进行中") >= 0, "弹窗用共享词汇说出在跑的是全量更新：" + modal.textContent.slice(0, 160));
+        });
+    });
+  });
+
+  test("M3-06：改名对话框带 migrate_files 勾选；字段级错误保留输入；保存成功只刷新列表", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(
+        sourceHandlers(function () {
+          return Promise.reject(new MC.ApiError(409, "FILE_EXISTS", "已存在同名更新源", { field: "name", name: "改名.xml" }));
+        })
+      );
+      var app = settingsApp(true);
+      var inst = r.mount(app, "sources");
+      var modal, nameField, migrate;
+      return tick()
+        .then(function () {
+          var main = inst.el.querySelector(".settings-main");
+          main.querySelector('tbody button[aria-label="更多操作"]').click();
+          var edit = [].slice.call(document.querySelectorAll(".popover .menu-item")).filter(function (m) { return m.textContent.indexOf("编辑") >= 0; })[0];
+          ok(edit, "行菜单里有「编辑」");
+          edit.click();
+          modal = [].slice.call(document.querySelectorAll(".modal-backdrop .modal")).pop();
+          nameField = modal.querySelectorAll(".field input.input-mono")[0];
+          migrate = modal.querySelector('input[type="checkbox"]');
+          ok(migrate, "改名对话框必须有「是否迁移本地文件」勾选");
+          ok(migrate.checked, "缺省勾选迁移（与后端 migrate_files 缺省 True 同口径）");
+          ok(modal.textContent.indexOf("迁移") >= 0, "勾选旁要说明迁移范围（本地文件、历史、收藏、建议）");
+          migrate.checked = false;
+          nameField.value = "改名.xml";
+          nameField.dispatchEvent(new Event("input"));
+          var save = [].slice.call(modal.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save.click();
+          return tick();
+        })
+        .then(function () {
+          var patchCalls = spy.calls.filter(function (c) { return c.indexOf("PATCH") === 0; });
+          eq(patchCalls.length, 1, "一次点击一次 PATCH");
+          ok(patchCalls[0].indexOf("PATCH /p/default/sources/a.xml ") === 0, "PATCH 打到旧名字（改名前的键）：" + patchCalls[0]);
+          ok(patchCalls[0].indexOf('"migrate_files":false') >= 0, "取消勾选要如实提交 migrate_files=false：" + patchCalls[0]);
+          var fieldWrap = nameField.closest ? nameField.closest(".field") : nameField.parentNode;
+          var errEl = fieldWrap.querySelector(".field-error");
+          ok(errEl && !errEl.classList.contains("hidden") && errEl.textContent.length > 0, "detail.field=name 的错误显示在「文件名」输入框下方");
+          eq(nameField.value, "改名.xml", "字段错误必须保留用户输入");
+          ok(nameField.classList.contains("is-invalid"), "输入框标红");
+          /* 接口恢复正常后再保存一次：成功 ⇒ 对话框关闭、只重新拉本列表（不整页 reload）。 */
+          migrate.checked = false;
+          var spy2 = r.useApi(
+            sourceHandlers(function () {
+              return Promise.resolve({ item: { name: "改名.xml", url: "http://up/a.xml", record_url: "" } });
+            })
+          );
+          var save2 = [].slice.call(modal.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save2.click();
+          return tick().then(function () {
+            ok(!document.body.contains(modal), "保存成功后对话框关闭");
+            var gets = spy2.calls.filter(function (c) { return c === "GET /p/default/sources"; }).length;
+            ok(gets >= 1, "保存成功后重新拉本列表刷新（而不是整页 reload）");
+            var patch2 = spy2.calls.filter(function (c) { return c.indexOf("PATCH") === 0; });
+            eq(patch2.length, 1, "第二次点击只发一次 PATCH");
+          });
+        });
+    });
+  });
+
+  test("M3-06：非部署者进 sources 可查看，但页级只读横幅说明原因、写控件全部禁用", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(sourceHandlers());
+      var inst = r.mount(settingsApp(false), "sources");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        ok(spy.calls.indexOf("GET /p/default/sources") >= 0, "读取仍允许（读接口全部角色可用）");
+        ok(main.textContent.indexOf("只读") >= 0 && main.textContent.indexOf("部署者") >= 0, "页级横幅要说清身份与原因：" + main.textContent.slice(0, 160));
+        var writeBtns = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return /新增|更新/.test(b.textContent); });
+        ok(writeBtns.length >= 3, "覆盖面：新增、每行更新、全部立即更新都要在");
+        writeBtns.forEach(function (b) {
+          ok(b.disabled, "非部署者的写按钮必须禁用");
+          ok((b.getAttribute("title") || "").indexOf("部署者") >= 0, "禁用要说明原因");
+        });
+      });
+    });
+  });
+
+  test("M3-06：顶栏任务进度在 total 未发布时渲染「准备中」，不显示 0/0", function () {
+    /* 后端契约（卡 6 移交）：update_source 的 progress.total 在下载结束后才回填，
+     * 下载期间就是 0/0 ⇒ UI 必须渲染成「准备中」。 */
+    function slotFor(tasks) {
+      var slot = MC.util.h("div");
+      MC.App.prototype.renderTasks.call({ taskSlot: slot, activeTasks: tasks });
+      return slot;
+    }
+    var early = slotFor([{ id: "t1", type: "update_source", target: "x.xml", state: "running", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "张三" }]);
+    ok(early.textContent.indexOf("准备中") >= 0, "total=0 ⇒ 「准备中」，实际：" + early.textContent);
+    ok(early.textContent.indexOf("0/0") < 0, "不能再出现 0/0");
+    var later = slotFor([{ id: "t2", type: "update_all", target: null, state: "running", progress: { done: 2, total: 5 }, result: { items: [] }, actor: "张三" }]);
+    ok(later.textContent.indexOf("2/5") >= 0 && later.textContent.indexOf("准备中") < 0, "total 已发布 ⇒ 正常 n/m");
+  });
+
+  test("M3-06：任务浮层里 total 未发布时**整条进度条都不画**（注释与 markup 不得各说各话）", function () {
+    /* 第三轮 nit 的回归位：F7 的注释一直声称「不在 total 未发布时画 0% 空条」，可 markup
+     * 原先**无条件**画 `.progress`——灰色槽照样出现，只是里面是空的。现在按 hasProgress
+     * 条件渲染，这条用例点开真浮层钉住两侧：未发布⇒0 条，已发布⇒1 条且宽度按 done/total。
+     * 上面那条「准备中」用例只查顶栏按钮文字，看不见浮层，所以两者都要在。 */
+    var slot = MC.util.h("div");
+    document.body.appendChild(slot);
+    function open(tasks) {
+      MC.util.clear(slot);
+      MC.App.prototype.renderTasks.call({ taskSlot: slot, activeTasks: tasks });
+      slot.querySelector("button.task-indicator").click();
+      var bars = document.querySelectorAll(".popover .progress");
+      var width = bars.length ? bars[0].firstElementChild.style.width : null;
+      cleanOverlays();
+      return { bars: bars.length, width: width };
+    }
+    var early = open([{ id: "t1", type: "update_source", target: "x.xml", state: "running", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "张三" }]);
+    eq(early.bars, 0, "total 未发布 ⇒ 一条都不画（旧 markup 会留一条 0% 灰槽，正是注释与 markup 矛盾的地方）");
+    var later = open([{ id: "t2", type: "update_all", target: null, state: "running", progress: { done: 2, total: 5 }, result: { items: [] }, actor: "张三" }]);
+    eq([later.bars, later.width], [1, "40%"], "total 已发布 ⇒ 照旧画一条，宽度 2/5 = 40%");
+    slot.remove();
+  });
+
+  test("M3-06 / R19：mock 与后端 /tasks 契约同步——单条任务 0/0 起步、三类两两互斥 409+task_id、未知名 404", function () {
+    /* 模板模式的绿不算后端接对的证据（R19），但 mock 必须与后端同口径——这条用例
+     * 直接打 MC.mock.handle，钉住卡 6 移交的三处契约：
+     * ① 单条任务入队不预发 total（下载期间 0/0 ⇒ UI「准备中」）；
+     * ② 互斥面 = 后端 _CONFLICTING_TYPES：三类两两互斥、撞车 409 BUSY + detail.task_id；
+     * ③ 名字不在映射表 ⇒ 404 NOT_FOUND（不是那条「什么都没做却已完成」的绿任务）。 */
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    var first = null;
+    return call("POST", "/p/default/tasks", { type: "update_source", name: "scenario_a.xml" })
+      .then(function (r) {
+        eq(r.status, 202, "单条更新走 POST /tasks");
+        first = r.body.task;
+        eq([first.progress.done, first.progress.total], [0, 0], "契约 ①：入队时不预发 total，下载期间就是 0/0");
+        eq(first.result.items.length, 0, "入队响应里没有结果条目");
+        /* 互斥断言与在跑任务**并发**下发：mock 的模拟下载约 900ms 后完成，串行等待会
+         * 撞上完成时刻变成随机红。并发 ⇒ 每条都在同一个 dispatch 窗口（≤260ms）里被
+         * BUSY 挡住，与后端行为一致且不受延迟抖动影响。 */
+        return Promise.all([
+          call("POST", "/p/default/tasks", { type: "update_all" }),
+          call("POST", "/p/default/tasks", { type: "update_source", name: "scenario_a.xml" }),
+          call("POST", "/p/default/tasks", { type: "refresh_records", name: "scenario_a.xml" }),
+          call("POST", "/p/default/tasks", { type: "bogus" }),
+          call("POST", "/p/default/tasks", { type: "update_source", name: "bad/name" }),
+          call("POST", "/p/default/tasks", { type: "update_source", name: "没配置.xml" }),
+          call("GET", "/tasks/nope-not-here"),
+        ]);
+      })
+      .then(function (rs) {
+        var all = rs[0], same = rs[1], rec = rs[2], bogus = rs[3], badname = rs[4], ghost = rs[5], gone = rs[6];
+        eq(all.status, 409, "契约 ②：update_source 在跑 ⇒ update_all 必 409（与后端加宽后的互斥面一致）");
+        eq(all.body.error.code, "BUSY", "409 是 BUSY 业务结果，不是服务器故障");
+        ok(all.body.error.detail && all.body.error.detail.task_id === first.id, "detail.task_id 指回正在跑的那条，前端据此给跳转入口");
+        eq(same.status, 409, "同 (机型,类型,目标) 重复提交也 409，不排队不重试");
+        eq(rec.status, 409, "契约 ②：三类两两互斥 ⇒ refresh_records 撞进行中的 update_source（卡 6 复审 F2）");
+        eq(bogus.status, 400, "未知 type ⇒ 400 且落 field=type（校验在入队之前）");
+        eq(bogus.body.error.detail.field, "type");
+        eq(badname.status, 400, "非法文件名 ⇒ 400 且落 field=name（后端 _validated_target 同款）");
+        eq(badname.body.error.detail.field, "name");
+        eq(ghost.status, 404, "契约 ③：名字不在映射表 ⇒ 404，不给「什么都没做却显示已完成」的绿任务");
+        eq(ghost.body.error.code, "NOT_FOUND");
+        eq(ghost.body.error.detail.name, "没配置.xml", "detail.name 供前端按业务结果显示");
+        eq(gone.status, 404, "未知任务 id 404，消息与后端同口径（不存在或已结束太久）");
+        ok(gone.body.error.message.indexOf("已结束太久") >= 0, "消息口径：" + gone.body.error.message);
+      });
   });
 
   test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
@@ -406,14 +1031,32 @@
     });
   });
 
+  /* 隔离证明（M3-06）：上一条是**异步**用例，它把 MC.api.get 换成 stub、只在自己 settle
+   * 时恢复。旧机制下所有同步用例先于它跑完，这条按注册序紧随其后的用例就会看到假 API ⇒ 红。
+   * 修好执行序（用例串行 settle）后它必须绿：证明恢复排在序上，不是碰运气。 */
+  test("测试隔离：异步桩用例 settle 后，后续用例必须拿到真 MC.api", function () {
+    /* F2.3（卡 7 复审）：stubApi 换的是全部 9 个请求面，只查 5 个就漏掉另外 4 个
+     * 可能泄漏的门（put/patch 早已在桩里、过去没人核对；request/download/fetchBlob/upload 是 F9 新拦的）。 */
+    ok(MC.api.get === REAL_API.get, "MC.api.get 不是真身：异步用例的 stub 泄漏到了后续用例（卡 3 的桩污染）");
+    ok(MC.api.post === REAL_API.post, "MC.api.post 不是真身：桩泄漏");
+    ok(MC.api.put === REAL_API.put, "MC.api.put 不是真身：桩泄漏");
+    ok(MC.api.patch === REAL_API.patch, "MC.api.patch 不是真身：桩泄漏");
+    ok(MC.api.del === REAL_API.del, "MC.api.del 不是真身：桩泄漏");
+    ok(MC.api.request === REAL_API.request, "MC.api.request 不是真身：桩泄漏");
+    ok(MC.api.download === REAL_API.download, "MC.api.download 不是真身：桩泄漏");
+    ok(MC.api.fetchBlob === REAL_API.fetchBlob, "MC.api.fetchBlob 不是真身：桩泄漏");
+    ok(MC.api.upload === REAL_API.upload, "MC.api.upload 不是真身：桩泄漏");
+  });
+
 
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
     var capOfKind = MC.App.prototype.capOfKind;
     MC.caps = MC.capsFor(false);
     ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t") && capOfKind("review"), "速览、文件、搜索、临时标签与审阅页已接入真实后端");
-    ok(!capOfKind("settings"), "未接入的 kind 不可用");
+    ok(capOfKind("settings"), "设置页级键已随 M3-06 接入（页内分段另由 D2 开关控制）");
+    ok(!capOfKind("dl"), "未接入的 kind 不可用");
     MC.caps = MC.capsFor(true);
-    ok(capOfKind("settings") && capOfKind("t"), "接入后可用");
+    ok(capOfKind("settings") && capOfKind("t") && capOfKind("dl"), "接入后可用");
   });
 
   test("搜索高亮：用文本节点拆分关键词，关键字不进入 HTML（§9.8.8 / UC-25）", function () {
@@ -510,22 +1153,43 @@
     tree.destroy();
   });
 
+  /* EXPECTED_CASES（钉死用例总数）已提到文件顶部两个监听之前（第三轮 nit）。 */
   function report() {
     var out = document.getElementById("out");
     var failed = 0;
-    results.forEach(function (r) {
+    /* 幂等可重入：全局兜底可能在队尾 report 之后才触发，重画前先清空。 */
+    while (out.firstChild) out.removeChild(out.firstChild);
+    results.concat(traps).forEach(function (r) {
       var li = document.createElement("li");
       li.className = r.ok ? "pass" : "fail";
       li.textContent = (r.ok ? "✓ " : "✗ ") + r.name + (r.ok ? "" : " — " + r.err);
       if (!r.ok) failed++;
       out.appendChild(li);
     });
+    var total = results.length + traps.length;
+    if (results.length !== EXPECTED_CASES) {
+      var drift = document.createElement("li");
+      drift.className = "fail";
+      drift.textContent = "✗ 用例注册数不符：预期 " + EXPECTED_CASES + "，实际注册 " + results.length + "（有用例丢失或没注册上）";
+      out.appendChild(drift);
+      failed++;
+      total++;
+    }
     var sum = document.getElementById("summary");
-    sum.textContent = failed ? failed + " FAILED / " + results.length : "ALL PASSED (" + results.length + ")";
+    sum.textContent = failed ? failed + " FAILED / " + total : "ALL PASSED (" + total + ")";
     sum.className = failed ? "fail" : "pass";
     document.title = sum.textContent;
   }
 
-  if (pending.length) Promise.all(pending).then(report);
-  else report();
+  /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链
+   * 清空之后——串行队列本身是一条长微任务链，不 flush 的话最后几条用例的迟到拒绝
+   * 会排在 report 之后（headless --dump-dom 拿到的还是旧标题）。兜底 handler 自己
+   * 也会重画 report，这里是把「汇总之前该到的错误一定先到」变成顺序保证。 */
+  queue
+    .then(function () {
+      return new Promise(function (resolve) {
+        setTimeout(resolve, 50);
+      });
+    })
+    .then(report);
 })();

@@ -948,7 +948,7 @@
       var refresh = h("button.btn.btn-sm", { type: "button", disabled: !mayFetch, title: fetchTitle }, icon("refresh"), "立即拉取");
       refresh.addEventListener("click", function () {
         MC.withBusy(refresh, function () {
-          return app.startTask({ type: "refresh_records", name: S.name }).then(function () { MC.toast.info("已开始拉取修改记录", "完成后列表会自动刷新"); }, function (err) { MC.toastError("无法开始拉取", err); });
+          return app.startTask({ type: "refresh_records", name: S.name }).then(function () { MC.toast.info("已开始拉取修改记录", "完成后列表会自动刷新"); }, function (err) { MC.taskStartError(app, err, { notFoundTitle: "无法开始拉取", faultTitle: "无法开始拉取" }); });
         });
       });
       var rows = res.items.map(function (r, k) {

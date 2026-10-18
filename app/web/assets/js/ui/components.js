@@ -56,7 +56,7 @@
     REVISION_CONFLICT: "数据已被他人修改，请刷新后再保存",
     FILE_EXISTS: "已存在同名文件",
     TOO_LARGE: "文件超过大小限制",
-    BUSY: "已有相同任务正在执行",
+    BUSY: "该机型已有互斥任务在运行（单条更新/全量更新/拉取修改记录三者互斥）",
     DOWNLOAD_FAILED: "从链接下载失败",
     PARSE_FAILED: "文件无法解析为 XML/JSON",
     FAVORITE_COVERED: "该节点已被父级收藏包含，请先取消父级",

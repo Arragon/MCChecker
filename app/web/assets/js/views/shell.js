@@ -22,6 +22,23 @@
 
   var POLL_MS = 10000;
 
+  /** 任务类型/状态的展示词汇。§7.10：task.state 只说「跑没跑完」，
+   * 业务结果在条目 status 里（列表页各自显示，两者不混用）。 */
+  var TASK_STATE_LABELS = { queued: "排队中", running: "进行中", succeeded: "已完成", partial: "部分失败", failed: "失败" };
+  function taskLabel(t) {
+    if (t.type === "update_source") return "更新 " + (t.target || "");
+    return { update_all: "全量更新", refresh_records: "拉取修改记录" }[t.type] || t.type;
+  }
+  /**
+   * 进度文案（卡 6 移交的契约）：后端 `services/tasks.py::_publish_single` 在
+   * `updates.update_source` **返回之后**才写 done/total，单条任务在整个下载期间
+   * 都是 0/0 ——那是「还没开始报数」，不是「0 步里完成了 0 步」。渲染成「准备中」，
+   * 与 mock-api.js 同口径（本卡已把 mock 改成建任务时不预发 total）。
+   */
+  function taskProgressText(t) {
+    return t.progress && t.progress.total ? t.progress.done + "/" + t.progress.total : "准备中";
+  }
+
   /** MC.caps 为 false 时对外展示的接入去向，与 CAP_KEYS 一一对应（见 core/api.js）。 */
   var UNWIRED = MC.unwired;
 
@@ -819,10 +836,26 @@
       var still = res.items.map(function (t) { return t.id; });
       before.forEach(function (id) {
         if (still.indexOf(id) < 0) {
-          api.get("/tasks/" + api.seg(id)).then(function (r) {
-            MC.bus.emit("task:done", r.task);
-            self.refreshFiles();
-          });
+          api.get("/tasks/" + api.seg(id)).then(
+            function (r) {
+              MC.bus.emit("task:done", r.task);
+              self.refreshFiles();
+            },
+            /* 卡 7 第三轮 C2：这条链原先只有成功分支 ⇒ refetch 一失败就留下无人接手的
+             * 拒绝。file:// 验收命令看不见它，钉死成 HTTP 以后它就是随机红。竞态本身正常：
+             * 任务在这次 poll 与 refetch 之间被惰性清理摘掉 ⇒ 404 NOT_FOUND（与 showTask
+             * 的「任务已结束出窗口」同一口径）。诚实的最小动作：
+             * ① **不**伪造 task:done——两个消费方按 t.type / t.target 过滤（fileview
+             *    的 records 刷新、settings 的 sources 重画），伪造会让别的界面拿假数据刷新；
+             * ② 记一条 console.error 留诊断（同 [boot] / [bus] 的既有做法）；
+             * ③ 404 静默接受，其余错误给部署者看得见的 toast。
+             * 「这条已不在进行中」是真状态且已经画出来了（上面刚替换 activeTasks 并
+             * renderTasks），业务结果面另有修订号轮询兜底，所以这里不补刷新。 */
+            function (err) {
+              console.error("[task-refetch]", id, err);
+              if (!(err && err.status === 404)) MC.toastError("任务结果读取失败", err);
+            }
+          );
         }
       });
       if (res.items.length) self._taskTimer = setTimeout(function () { self.pollTasks(); }, 1200);
@@ -842,19 +875,88 @@
     });
   };
 
+  /**
+   * 409 BUSY 的跳转落点（卡 6 口径：`detail.task_id` 指向那条正在跑的任务）。
+   * 弹窗只讲「任务本身」：类型 / state / 进度 / 发起人；条目业务结果仍看
+   * 更新源列表的「最近结果」列（§7.10 的两套词汇不混用）。
+   * 任务可能在这一步已结束（GET /tasks/{id} 404）：给业务文案，不谎报服务器故障。
+   */
+  App.prototype.showTask = function (taskId) {
+    return api.get("/tasks/" + api.seg(taskId)).then(
+      function (r) {
+        var t = r.task;
+        MC.modal({
+          title: "任务详情",
+          subtitle: "409 撞车时指回正在运行的那条任务（detail.task_id）",
+          body: h(
+            "div.col",
+            { style: "gap:10px" },
+            h(
+              "dl.kv",
+              h("dt", "任务"),
+              h("dd", taskLabel(t)),
+              h("dt", "状态"),
+              h("dd", (TASK_STATE_LABELS[t.state] || t.state) + "（进度 " + taskProgressText(t) + "）"),
+              h("dt", "发起人"),
+              h("dd", t.actor || "—"),
+              h("dt", "提交时间"),
+              h("dd", util.formatTime(t.created_at))
+            ),
+            h("div.xsmall.muted", "每一项更新的业务结果在「设置 › 更新源」的最近结果列显示；这条任务结束后列表会自动刷新。")
+          ),
+          footer: function (close) {
+            return [h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭")];
+          },
+        });
+      },
+      function (err) {
+        /* 点「查看该任务」时那条任务可能已结束出窗口（GET 404）：业务文案，不是故障。 */
+        MC.toastError("看不到这条任务", err);
+      }
+    );
+  };
+
+  /**
+   * 更新类任务启动失败的共享口径（卡 7 复审 F1：从 settings 闭包提到与 showTask 同层）。
+   * 设置页「立即更新/全部更新」与文件页「立即拉取」撞的是同一条互斥规则（三类任务
+   * 同机型两两互斥），文案必须同源，否则两个界面对同一种 409 各说各话。
+   * - 409 BUSY 是正常业务结果不是服务器故障：warning + 解释互斥 + 按 detail.task_id
+   *   跳去那条正在跑的任务；**不重试**（重试只会再撞一次 409）。
+   * - 404＝名字已不在映射表（多半刚被他人删除）：warning 显示后端业务消息，
+   *   opts.onNotFound 给调用方刷新自己列表的钩子。
+   * opts.notFoundTitle / opts.faultTitle 供各界面用准确动词（「更新」/「拉取」）。
+   */
+  MC.taskStartError = function (app, err, opts) {
+    opts = opts || {};
+    if (err && err.status === 409 && err.code === "BUSY") {
+      var taskId = err.detail && err.detail.task_id;
+      MC.toast.warning(
+        "已有任务在运行",
+        MC.errorText(err) + "。同一机型内「单条更新 / 全量更新 / 拉取修改记录」互斥，" + (taskId ? "点这里查看那条正在运行的任务。" : "请等它结束后再试。"),
+        taskId ? { action: { label: "查看该任务", onClick: function () { app.showTask(taskId); } } } : null
+      );
+      return;
+    }
+    if (err && err.status === 404) {
+      MC.toast.warning(opts.notFoundTitle || "无法开始更新", MC.errorText(err));
+      if (opts.onNotFound) opts.onNotFound();
+      return;
+    }
+    MC.toastError(opts.faultTitle || "无法开始更新", err);
+  };
+
   App.prototype.renderTasks = function () {
     if (!this.taskSlot) return;
     util.clear(this.taskSlot);
     var running = this.activeTasks.filter(function (t) { return t.state === "running" || t.state === "queued"; });
     if (!running.length) return;
     var t = running[0];
-    var label = { update_all: "全量更新", update_source: "更新 " + (t.target || ""), refresh_records: "拉取修改记录" }[t.type] || t.type;
     var self = this;
     var btn = h(
       "button.task-indicator",
       { type: "button", "aria-live": "polite" },
       h("span.spinner"),
-      label + " " + t.progress.done + "/" + t.progress.total,
+      taskLabel(t) + " " + taskProgressText(t),
       running.length > 1 ? " 等 " + running.length + " 项" : null
     );
     btn.addEventListener("click", function () {
@@ -865,8 +967,16 @@
           { style: "padding:8px;width:280px" },
           h("div.section-title", "进行中的任务"),
           running.map(function (x) {
-            var pct = x.progress.total ? Math.round((x.progress.done / x.progress.total) * 100) : 0;
-            return h("div.col", { style: "gap:4px;margin-bottom:10px" }, h("div.row.small", h("span.grow.truncate", x.type + (x.target ? " · " + x.target : "")), h("span.muted.xsmall", x.actor)), h("div.progress", h("span", { style: { width: pct + "%" } })));
+            /* 第三轮 nit（注释与 markup 矛盾，选「markup 追上注释」而不是删注释）：
+             * F7 那句原本声称「total 未发布时不画 0% 空条」，可 `.progress` 是无条件画的，
+             * pct=0 时照样留一条灰色空槽。现在 total 未发布⇒整条不画（util.h 跳过 null
+             * 子节点），与 taskProgressText 在同一条件下改说「准备中」保持一致。
+             * hasProgress 就是原来那句条件判断，只是提出来复用一次。 */
+            var hasProgress = !!x.progress.total;
+            var pct = hasProgress ? Math.round((x.progress.done / x.progress.total) * 100) : 0;
+            /* F7（卡 7 复审）：弹窗与浮层同一套词汇——taskLabel/TASK_STATE_LABELS/
+             * taskProgressText，不再裸打 type token，也不在 total 未发布时画 0% 空条。 */
+            return h("div.col", { style: "gap:4px;margin-bottom:10px" }, h("div.row.small", h("span.grow.truncate", taskLabel(x)), h("span.muted.xsmall", x.actor)), h("div.row.xsmall", h("span.grow.muted", (TASK_STATE_LABELS[x.state] || x.state) + " · " + taskProgressText(x))), hasProgress ? h("div.progress", h("span", { style: { width: pct + "%" } })) : null);
           }),
           h("button.btn.btn-sm", { type: "button", onclick: function () { MC.closePopover(); self.go({ kind: "settings", arg: "sources" }); } }, "查看更新源状态")
         ),

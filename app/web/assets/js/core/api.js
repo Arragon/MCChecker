@@ -165,7 +165,7 @@
 
   /* 已经接入真实后端的接口。后端卡在自己的 PR 里实现接口，紧随的前端卡在这里加一项，
    * 视图代码本身不用改。必须始终是 CAP_KEYS 的子集（前端测试页有断言会红）。 */
-  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review", "tasks"];
+  var WIRED = ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review", "tasks", "settings"];
 
   MC.capsFor = function (mock) {
     var caps = {};
@@ -187,7 +187,6 @@
     search: "全局搜索将在 M2-05 / M2-06 接入",
     review: "审阅页将在 M3-02 / M3-03 接入",
     dl: "DL 计算将在 M3-10 ~ M3-12 接入",
-    settings: "设置页将在 M3-06 / M3-13 ~ M3-16 接入",
     import: "导入本地文件或链接将在 M2-10 / M2-11 接入",
     delete: "删除文件（移入恢复区）将在 M2-12 接入",
     history: "历史版本将在 M2-07 / M2-09 接入",
@@ -196,10 +195,41 @@
     tools: "外部工具将在 M3-15 接入",
     revision: "多用户更新提示将在 M2-01 接入",
     temp: "临时文件将在 M2-10 / M2-11 接入",
+    /* settings 页级键已随 M3-06 放行；页内哪个分段能用由下面的 D2 分段开关决定，
+     * 未接入的分段只渲染只读横幅且不发请求。文案留着供跨版本书签兜底。 */
+    settings: "设置页分段接入：更新源 M3-06，其余 M3-08 / M3-13 ~ M3-16",
     /* D4（M3-07）：任务接口是独立能力键。此前「立即拉取」借用 `tools` 代表任务可用性，
      * 而 `tools` 要到 M3-15 才放行 ⇒ M3-07/M3-09 做完后按钮仍是禁用态。`tools` 从此
      * 只代表「外部工具」。 */
     tasks: "后台任务（更新、拉取记录）将在 M3-07 接入",
+  };
+
+  /* ===================== 设置页分段开关（D2 / 决策 14，M3-06 建） ===================== */
+  /*
+   * settings 是页级键，但设置页有六个各自依赖不同后端接口的分段。整键放行会点亮四个
+   * 还没接口的分段（M3-13/14/15/16 才有 /admins、/bindings、/tools、/profiles），
+   * 违反「未接入不发请求」。所以分段级白名单在这里：views/settings.js 的 renderSection
+   * 是**唯一**插入点（R14）——未接入的分段在调用发请求的 fn **之前**就渲染只读横幅并返回。
+   * 每张后续设置卡只把自己那一项加进 WIRED_SETTINGS（M3-08 schedule、M3-13 people、
+   * M3-14 bindings、M3-15 tools、M3-16 profiles）。必须是 SETTINGS_SEGMENTS 的子集
+   * （前端测试页有断言会红）。M4-08 全绿后与 MC.caps 一起删除。
+   */
+  var SETTINGS_SEGMENTS = ["sources", "schedule", "people", "bindings", "tools", "profiles"];
+  var WIRED_SETTINGS = ["sources"];
+
+  MC.settingsSegments = SETTINGS_SEGMENTS.slice();
+  MC.wiredSettingsSegments = WIRED_SETTINGS.slice();
+  MC.settingsSegmentWired = function (seg) {
+    return !!(MC.config && MC.config.mock) || WIRED_SETTINGS.indexOf(seg) >= 0;
+  };
+
+  /* 每个未接入分段展示给用户的去向，与 MC.unwired 同风格（卡号即后端接口的接入卡）。 */
+  MC.unwiredSettings = {
+    schedule: "定时更新将在 M3-08 接入",
+    people: "人员与权限将在 M3-13 接入",
+    bindings: "变量绑定将在 M3-14 接入",
+    tools: "外部工具将在 M3-15 接入",
+    profiles: "机型管理将在 M3-16 接入",
   };
 
   /* ===================== Router (hash) ===================== */
