@@ -1505,6 +1505,59 @@ def apply_review_results(
     return {"approved": approved_count, "rejected": rejected_count}
 
 
+# ============ 审阅提交：幂等表与生成文件（§6.7 第 1/7 步；M3-02） ============
+
+
+def load_review_idempotency() -> Dict[str, Any]:
+    """`request_id → {"at": 服务器 epoch 秒, "result": {…}}`（§6.7 第 1 步）。
+
+    落在机型目录下的**独立文件** `review_idempotency.json`：卡面要求「进程重启后重复
+    `request_id` 仍不得生成第二份文件」，所以必须落盘；而把它塞进 `edit_remarks.json`
+    顶层会破坏 §5.2「现有字段不变」。路径在**调用期**由 `_get_profile_json_file` 求值，
+    不留模块级常量（交付手册决策 1 的 import 期派生路径坑）。文件被手改成非对象时按空表
+    处理——它是运行期数据，重写一次即可，不该让审阅永久报错；真正的损坏（JSON 读不出来）
+    仍由 `_load_json` 抛 `CorruptDataError`（§5.4）。
+    """
+    profile = get_active_profile()
+    data = _load_json(_get_profile_json_file("review_idempotency.json", profile), {})
+    return data if isinstance(data, dict) else {}
+
+
+def save_review_idempotency(table: Dict[str, Any]) -> None:
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(_get_profile_json_file("review_idempotency.json", profile), table)
+
+
+def _review_generated_candidates(name: str, now: datetime) -> Iterator[str]:
+    """审阅生成名的候选序列（§5.3「审阅生成」行）。
+
+    `<stem>_<YYYYMMDD>_<HHMMSS><.ext>`；已被占用则依次追加 `_2`、`_3`…（与归档同一条
+    独占创建的路子，同一秒第二次提交不会覆盖第一份）。
+    """
+    precise = now.strftime("%Y%m%d_%H%M%S")
+    yield _add_date_suffix(name, precise)
+    for index in range(2, 1000):
+        yield _add_date_suffix(name, "%s_%d" % (precise, index))
+
+
+def save_review_generated_file(name: str, content: bytes) -> str:
+    """把审阅写回的结果作为**新**文件存进 `configs/`（§6.7 第 7 步），原文件一字节不动。
+
+    与 `save_config_file_detailed` 的分工：那个函数维护「当前文件 + 归档」的关系，写之前
+    会把磁盘上的旧内容归档；这里的产物本来就是新文件，按 §5.3 先用独占创建拿到唯一名再
+    原子写入。返回生成后的文件名。
+    """
+    fsutil.validate_filename(name)
+    _ensure_dirs()
+    with _profile_write():
+        with _reserve_file(
+            get_configs_dir(), _review_generated_candidates(name, datetime.now())
+        ) as filepath:
+            fsutil.atomic_write_bytes(filepath, content)
+            return os.path.basename(filepath)
+
+
 # ===================== 变量绑定关系 =====================
 
 BINDINGS_FILE = os.path.join(DATA_DIR, "bindings.json")
@@ -1666,8 +1719,9 @@ def save_schedule(schedule: Dict[str, Any]):
 
 
 #: 复制机型时带上的目录（规范 §7.2、C27）。
-#: `cache/` 可重建；`records/`、`edit_remarks.json`、`ip_mapping.json`、
-#: `admin_users.json`、`update_status.json` 属于运行期数据，不随机型复制。
+#: `cache/` 可重建；`records/`、`edit_remarks.json`、`review_idempotency.json`、
+#: `ip_mapping.json`、`admin_users.json`、`update_status.json` 属于运行期数据，
+#: 不随机型复制。
 COPY_PROFILE_DIRS = ("configs", "archive")
 
 #: 复制机型时带上的 JSON（规范 §7.2）。
