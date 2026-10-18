@@ -97,6 +97,7 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/p/{pid}/sources"): "settings_write",
     ("PATCH", "/api/v1/p/{pid}/sources/{name}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/sources/{name}"): "settings_write",
+    ("PUT", "/api/v1/p/{pid}/schedule"): "settings_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
 }
 
@@ -179,6 +180,18 @@ def config_sha(pid: str, name: str):
             return None
         with open(path, "rb") as fh:
             return hashlib.sha256(fh.read()).hexdigest()
+
+
+def schedule_state(pid: str):
+    """`schedule.json` 的 (内容 sha256, mtime_ns)——CSRF 用例要钉「一个字节都没动」，
+    单看内容 hash 挡不住「同长度原地改写」，所以把 mtime 一起取。文件不存在返回 None。
+    """
+    path = storage.get_schedule_file(pid)
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    return hashlib.sha256(raw).hexdigest(), os.stat(path).st_mtime_ns
 
 
 # ======================================================================
@@ -859,6 +872,7 @@ WRITE_FAMILIES = [
     ("PATCH", "/api/v1/p/{pid}/sources/{name}", "deployer", {"url": "http://x/y"}, False),
     ("DELETE", "/api/v1/p/{pid}/sources/{name}", "deployer", None, False),
     ("POST", "/api/v1/p/{pid}/tasks", "deployer", {"type": "update", "target": FILE_A}, True),
+    ("PUT", "/api/v1/p/{pid}/schedule", "deployer", {"enabled": True, "interval_hours": 24}, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
 ]
@@ -965,6 +979,44 @@ class TestCsrfOnEveryWriteFamily:
             assert status == 201, payload
             _s, _h, grown = caller.json("GET", fav_url)
             assert grown["groups"], "带头的请求没真写出收藏，上面的「没写」断言就是恒真"
+
+    def test_schedule_file_is_untouched_by_a_csrf_403(self):
+        """M3-08 合入的 `PUT /schedule`（§7.9）：CSRF 403 必须一字节不落盘。
+
+        形状照上面的 PUT files 与 sources 两例——先落一份基线，再证明不带头的
+        请求让 `schedule.json` 的内容 hash 与 mtime 都纹丝不动，最后用**带头的
+        同类请求**做正向对照；没有正向对照，「没改」可能只是恒真。
+        """
+        pid = seed_roles("sec4")
+        url = url_of("/api/v1/p/{pid}/schedule", pid=pid)
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+
+            # 基线：带头写一份，文件这才存在。
+            status, _h, payload = caller.json(
+                "PUT", url, body={"enabled": True, "interval_hours": 24}
+            )
+            assert status == 200, payload
+            assert payload["interval_hours"] == 24, payload
+            before = schedule_state(pid)
+            assert before is not None, "基线 schedule.json 没落下来，下面的「没改」是恒真"
+
+            # 不带头再发一次：权限够（部署者），只缺 CSRF 头；载荷的两个字段都与基线相反/
+            # 不同，所以它要是真写下去了，字节必变。
+            replacement = {"enabled": False, "interval_hours": 48}
+            status, _h, raw = caller.request("PUT", url, body=replacement, with_csrf=False)
+            assert status == 403, raw
+            assert csrf_error(raw), raw
+            assert schedule_state(pid) == before, "CSRF 403 之后定时设置被改写了"
+
+            # 正向对照：同一个请求补上头，必须真的把 schedule.json 改掉。
+            status, _h, payload = caller.json("PUT", url, body=replacement)
+            assert status == 200, payload
+            after = schedule_state(pid)
+            assert after is not None and after[0] != before[0], (
+                "带头的请求没真写出定时设置，上面的「没改」断言就是恒真"
+            )
+            assert after[1] != before[1], after
 
     @pytest.mark.parametrize("path", [
         "/api/v1/session",
