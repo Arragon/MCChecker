@@ -49,8 +49,10 @@ def ordered_stop(
     就已经往下走了**——包括把单实例锁删掉，见 `stop_and_release`（C1）。
     调度线程自己不吃这份等待：它不是池线程，`_python_exit` 也 join 不到它，但它在
     `stop()` 之后不再投任何东西，而它**不往 `data/` 写任何一个字节**（权威内容的下载与落盘
-    全在 `mctask` 工作线程里；这条线程唯一的文件系统动作是到期时**删除**临时区与派生缓存，
-    见 `app/services/scheduler.py` 模块 docstring），所以被解释器直接抛下也不损伤权威数据。
+    全在 `mctask` 工作线程里）。这条线程唯一的文件系统动作是到期时**删除**临时区与派生缓存，
+    而两项各有各的判定：派生缓存按 mtime 年龄（只删 7 天前的），临时区按 meta 里的
+    `expires_at`，并且跳过「还没写出 `meta.json`」的半成品目录（那正是某次上传正在写的那一半）。
+    所以它被解释器直接抛下也不损伤权威数据，详见 `app/services/scheduler.py` 模块 docstring。
 
     `runner.shutdown()` 幂等（R10），所以 `_handle_signal` 与正常退出路径两处都调它、
     信号连按两次都不会重复 join。`scheduler.stop()` 同样幂等，且调度器还没建

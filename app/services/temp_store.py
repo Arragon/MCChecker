@@ -4,9 +4,15 @@
 且同一个客户端 IP（两个要素都不满足即 404，不承认 token 存在）。区域是 `data/temporary/<token>/`，`meta.json` 记所有者、机型、
 原名、大小与到期时间；它不属于权威数据，因此不参与机型目录布局、也不进备份。
 
-**惰性清理**（决策 4）：M2 阶段不引入定时器或后台线程——过期目录在每次创建/访问/
-列举时机会式删除。过期 token 一律 404「临时文件已过期，请重新上传」，并且
+**惰性清理**（决策 4）：过期目录在每次创建/访问/列举时机会式删除；M3-08 起
+`services/scheduler.py` 每小时再兜一次（`purge_expired(skip_incomplete=True)`），
+把「之后再没人碰过」的过期目录也收掉。过期 token 一律 404「临时文件已过期，请重新上传」，并且
 **绝不回退去读同名服务器文件**（这是 F01 的老缺陷）。
+
+**「没有 `meta.json`」不等于「可以删」**：`create()` 的落盘顺序是 `makedirs` → 原文 →
+`meta.json` 最后，所以一个还没有 meta 的目录可能就是某次上传正在写的那一半。后台清理走
+`skip_incomplete=True`（见 `purge_expired`）；上传路径自己那次保持原样，它在自己
+`makedirs` 之前跑，看不到自己的半成品。
 """
 
 from __future__ import annotations
@@ -140,8 +146,15 @@ def raw(profile_id: str, token: str, cid: Optional[str], ip: str) -> Tuple[bytes
     return data, meta["name"]
 
 
-def purge_expired(now: Optional[datetime] = None) -> int:
-    """删掉已过期的临时目录，返回删除数（惰性清理的唯一入口）。"""
+def purge_expired(now: Optional[datetime] = None, skip_incomplete: bool = False) -> int:
+    """删掉已过期的临时目录，返回删除数（惰性清理的唯一入口）。
+
+    `skip_incomplete=True` 是**后台定时清理那一档**：连 `meta.json` 都还没写出来的目录本轮不碰。
+    `create()` 的顺序是 `makedirs` → 原文 → meta 最后，所以「读不到 meta」恰恰是「某次上传正在
+    写这一半」的形状，把它删掉就是删别人正在写的东西（M3-08 修复轮 / Important 3）。默认 `False`
+    保住上传路径自己的既有语义（那里在 `makedirs` 之前跑，看不到自己的半成品，孤儿目录照收）。
+    meta 文件**存在但读不懂**的目录两档都照删——那是真损坏，不是半成品。
+    """
     root = storage.get_temporary_dir()
     if not os.path.isdir(root):
         return 0
@@ -151,7 +164,10 @@ def purge_expired(now: Optional[datetime] = None) -> int:
         directory = os.path.join(root, entry)
         if not os.path.isdir(directory):
             continue
-        meta = _read_meta_file(os.path.join(directory, META_FILE))
+        meta_path = os.path.join(directory, META_FILE)
+        if skip_incomplete and not os.path.isfile(meta_path):
+            continue
+        meta = _read_meta_file(meta_path)
         if meta is None or _expired(meta, moment):
             _remove_tree(directory)
             removed += 1

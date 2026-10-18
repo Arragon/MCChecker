@@ -5,7 +5,9 @@
 1. **调度线程自己不下载、不写、不删权威数据**（卡 8 手递手 §1）。它醒来只做一件事——
    往 `TaskRunner` 投一个 `update_all`，于是互斥、进度、修订口径、排空、按线程名判存活
    全部继承 runner 的。`TestSchedulerWritesNothingAuthoritative` 用「记录每一次文件系统
-   删除并核对发起线程」把这条钉死，而不是靠人读代码相信它。
+   删除并核对发起线程」把这条钉死，而不是靠人读代码相信它；允许目录那一份名单是**硬编码**的
+   （`("doc_v2", "diff_v2")`），不从被测的 `DERIVED_CACHE_DIRNAMES` 推导——否则往那个元组里
+   多加一项就会连带放宽它本该防的东西，而那正是这条用例存在的理由。
 2. **时钟可注入**：全部用例都在假钟上跑，没有一条为「等一小时」真睡。
 3. **BUSY 不丢这次定时**：手工 `update_all` 正在跑时投出 BUSY，调度器改 1 分钟后重试，
    而不是「跳过、等下一个整周期」。这是与「跳过」真实不同的产品行为，单独一条用例钉住。
@@ -454,6 +456,48 @@ class TestPeriodicCleanup:
         clock.advance(scheduler_module.TEMP_SWEEP_SECONDS)
         sched.tick()
 
+    def test_both_sweeps_answer_to_the_injected_clock_not_two_clocks(self, clock, monkeypatch):
+        """`_sweep_if_due` 只听一只钟（修复轮 Minor 4）：两项清理都收到 `tick()` 那个时刻。
+
+        旧形状是「临时区用注入的 `moment`、派生缓存自己读 `time.time()`」——一只函数两只钟，
+        假钟下的用例既决定「到没到期」又决定不了「哪些条目算旧」。现在 `now` 一路传到底，
+        这里直接看传下去的是不是同一个时刻（`None` 就意味着回落真实钟）。
+        """
+        seen: List[Tuple[str, Any]] = []
+        monkeypatch.setattr(
+            scheduler_module, "sweep_temp_area", lambda now=None: seen.append(("temp", now)) or 0
+        )
+        monkeypatch.setattr(
+            scheduler_module,
+            "sweep_derived_caches",
+            lambda max_age_seconds=None, now=None: seen.append(("cache", now)) or 0,
+        )
+        sched = _make(clock)
+        clock.advance(scheduler_module.CACHE_SWEEP_SECONDS)  # 两项都到期
+        sched.tick()
+        assert [name for name, _ in seen] == ["temp", "cache"]
+        assert [moment for _, moment in seen] == [clock.now(), clock.now()], (
+            "两项清理拿到的必须是同一个注入时刻：%s" % (seen,)
+        )
+
+    def test_derived_cache_sweep_honours_the_injected_moment(self, pid, clock):
+        """同一件事在被测函数那一侧：给了 `now` 就按 `now` 算年龄，不读真实墙上时间。
+
+        判据是「按假钟算很旧、按真实钟算很新」的那一份文件——只有注入的钟生效时它才被删。
+        真实钟那一档由本文件其余用例覆盖（它们不传 `now`，走 `datetime.now()` 回落）。
+        """
+        from app.core import storage
+
+        doc = os.path.join(storage.get_cache_root_dir(pid), "doc_v2")
+        os.makedirs(doc, exist_ok=True)
+        path = os.path.join(doc, "a" * 64 + ".json.gz")
+        with open(path, "wb") as fh:
+            fh.write(b"x")
+        # 磁盘上是「刚刚」，但假钟被拨到两年之后 ⇒ 按注入的钟它已经老过 TTL。
+        far_future = clock.now() + timedelta(days=365 * 2)
+        assert scheduler_module.sweep_derived_caches(now=far_future) == 1
+        assert not os.path.exists(path), "`now` 没生效：年龄仍然按真实墙上时间算"
+
     def test_expired_temp_directories_are_removed(self, pid, clock):
         from app.core import storage
 
@@ -469,6 +513,63 @@ class TestPeriodicCleanup:
         _write_meta(keep, clock.now() + timedelta(hours=1))
         assert scheduler_module.sweep_temp_area(now=clock.now()) == 1
         assert not os.path.exists(gone) and os.path.isdir(keep)
+
+    def test_a_temp_directory_without_meta_json_is_not_swept(self, pid, clock):
+        """还没有 `meta.json` 的临时目录**不许**被后台清理删掉——那正是某次上传正在写的那一半。
+
+        `temp_store.create()` 的落盘顺序是 `makedirs` → 原文 → `meta.json` 最后，所以旧语义
+        「读不到 meta 就删」= 「删正在写的」。本卡把这条清理从「机会式」升级成了独立的小时级
+        daemon 线程定时器，窗口也从「同一毫秒内的另一次上传」变成「任何时候」，所以这一档必须收
+        （M3-08 修复轮 Important 3）。
+        """
+        from app.core import storage
+        from app.services import temp_store
+
+        root = storage.get_temporary_dir()
+        os.makedirs(root, exist_ok=True)
+        mid_upload = os.path.join(root, "uploadingtoken")
+        os.makedirs(mid_upload, exist_ok=True)
+        half = os.path.join(mid_upload, temp_store.CONTENT_FILE)
+        with open(half, "wb") as fh:
+            fh.write(b"<a>1</a>")
+
+        assert scheduler_module.sweep_temp_area(now=clock.now()) == 0
+        assert os.path.isdir(mid_upload), "半成品被抹掉 ⇒ 上传中的用户拿到一次 FileNotFoundError"
+        assert os.path.isfile(half), "原文也不许跟着没"
+
+    def test_a_temp_directory_with_unreadable_meta_is_still_swept(self, pid, clock):
+        """闸只挡「meta 文件还不存在」。meta **在但读不懂**说明这次上传已经死了，照旧回收
+        ——否则坏目录永远留在 `data/temporary/`，§7.4 的配额会被孤儿一点点吃光。"""
+        from app.core import storage
+        from app.services import temp_store
+
+        root = storage.get_temporary_dir()
+        os.makedirs(root, exist_ok=True)
+        broken = os.path.join(root, "brokentoken")
+        os.makedirs(broken, exist_ok=True)
+        with open(os.path.join(broken, temp_store.META_FILE), "w", encoding="utf-8") as fh:
+            fh.write("{不是 json")
+
+        assert scheduler_module.sweep_temp_area(now=clock.now()) == 1
+        assert not os.path.exists(broken)
+
+    def test_the_upload_path_keeps_reclaiming_metaless_directories(self, pid, clock):
+        """边界声明：`purge_expired` 的**默认**语义没被顺手改掉。
+
+        不带 `skip_incomplete` 时照旧回收没有 meta 的目录——那是 `temp_store.create()` 自己在
+        `makedirs` **之前**跑的那一次（它看不到自己的半成品），也是孤儿目录唯一的回收入口。
+        新增的那一档只属于后台调度器；共享服务的既有行为不是本卡的改动面。
+        """
+        from app.core import storage
+        from app.services import temp_store
+
+        root = storage.get_temporary_dir()
+        os.makedirs(root, exist_ok=True)
+        orphan = os.path.join(root, "orphantoken")
+        os.makedirs(orphan, exist_ok=True)
+
+        assert temp_store.purge_expired(now=clock.now()) == 1
+        assert not os.path.exists(orphan)
 
     def test_stale_derived_cache_files_are_removed_and_fresh_kept(self, pid, clock):
         from app.core import storage
@@ -585,6 +686,11 @@ class TestSchedulerWritesNothingAuthoritative:
         authoritative = os.path.join(cfg_dir, "keep.xml")
         with open(authoritative, "wb") as fh:
             fh.write(b"<config><a>1</a></config>")
+        # **把它老化**（修复轮 Important 2，对照同文件 `test_stale_derived_cache_files_are_removed_and_fresh_kept`）：
+        # 一份「刚刚才写」的权威文件会被 mtime 过滤器顺手保住，于是「把 configs/ 列进清理候选」这种
+        # 越界根本撞不到这条用例——上一版就是这样。老到超过 TTL 之后，只有代码本身不把它列进候选
+        # 才保得住它。
+        os.utime(authoritative, (old, old))
         _write_schedule(pid, {"enabled": True, "interval_hours": 1})
 
         # 真线程：睡的是真 Event（reload/stop 都能立刻叫醒），所以不会空转。
@@ -606,10 +712,15 @@ class TestSchedulerWritesNothingAuthoritative:
         assert mine, "本用例没能在调度线程上观测到任何删除，等于没测到"
         assert not os.path.exists(expired) and not os.path.exists(stale), "清理要真的做掉事"
         temp_real = os.path.realpath(temp_root)
+        # 允许目录**硬编码**，绝不从 `scheduler_module.DERIVED_CACHE_DIRNAMES` 推导（修复轮 Important 2）：
+        # 那个元组是「被测代码自己宣布它能删哪些目录」，从它推导白名单就会跟着它一起放宽——
+        # 往里面加一项 `"../configs"` 时上一版仍然全绿，正是这条用例本该抓的那个回归。
+        # 机型清单仍然取自注册表：那是环境（有哪些 profile），不是被断言的权限面。
+        allowed_cache_dirnames = ("doc_v2", "diff_v2")
         derived = [
             os.path.realpath(os.path.join(storage.get_cache_root_dir(one), name))
             for one in [str(model.get("id")) for model in device_models.load_models()]
-            for name in scheduler_module.DERIVED_CACHE_DIRNAMES
+            for name in allowed_cache_dirnames
         ]
         for path in mine:
             real = os.path.realpath(path)
@@ -645,7 +756,11 @@ class TestSchedulerWritesNothingAuthoritative:
             _wait_finished(task)
 
         assert commits, "一条落盘都没观测到 = 桩没生效，本用例等于没跑"
-        assert [path for name, path in commits if name == scheduler_module.THREAD_NAME] == []
+        # 这一句就是本用例的全部判据（修复轮 Minor 1）：`tick()` 由**主线程**直接驱动，这里根本
+        # 没有 `mcsched` 线程存在，所以旧版旁边那句「把提交按 `THREAD_NAME` 筛出来应当为空」
+        # 恒真、看着像卡面头条保证而实际一条都不执法。真线程上的观测归
+        # `test_the_mcsched_thread_deletes_only_temp_and_derived_paths`；而主线程要是自己写了盘，
+        # 线程名会是 `MainThread`，下面这句照样红。
         assert all(
             name.startswith("mctask") for name, _ in commits
         ), "权威写入只许出现在 runner 的工作线程上：%s" % commits
@@ -864,7 +979,11 @@ class TestStopOrder:
 
         clock.advance(86400 * 7)  # 往前跑一周
         assert sched.tick() == [], "停止位之后 tick() 必须是空操作"
-        time.sleep(0.2)  # 给任何还活着的循环一轮机会
+        # 上一行才是本用例真正执法的那一句（修复轮 Minor 3）。旧版这里还跟了一句
+        # `time.sleep(0.2)`，注释写「给任何还活着的循环一轮机会」——那是把话说大了：线程在上面
+        # 已经 join 散（`run.ordered_stop` + `sched.join(5)`），而真循环一轮最长睡
+        # `MAX_SLEEP_SECONDS` = 60 秒，0.2 秒连一次醒来都观察不到，它既抓不到 stray 提交、
+        # 也不会让这条用例更慢或更稳。所以直接删掉那句睡，判据留在行为上。
         assert len(runner.list(pid, False)) == before, "停完之后一条都不许再投"
 
     def test_lock_release_still_waits_for_mctask_writers(self, pid, clock, gates):
@@ -891,7 +1010,13 @@ class TestStopOrder:
 
         assert lock.released == 1
         assert lock.writers_at_release == [], "release 时还有人在写 data/（C1 的老 bug）"
-        assert not sched.is_alive() or sched.stopping, "stop_and_release 也要先把调度器叫停"
+        # 修复轮 Minor 2：旧写法是 `assert not sched.is_alive() or sched.stopping`，而后一支是
+        # `stop()` 自己置的位、必然为真 ⇒ 前一支要抓的「线程没退」被自己吞了，整条恒绿。
+        # `ordered_stop` 按 R11 故意不等 join，所以**由用例自己等**再断言行为（手递手 §5：
+        # 断「线程真的没了」，不断调用序列）。等 5 秒还不散就是真回归。
+        sched.join(5)
+        assert not sched.is_alive(), "stop_and_release 之后调度线程必须已经退出"
+        assert _sched_threads() == [], "停止路径上不许留下调度线程"
 
     def test_ordered_stop_without_a_scheduler_is_unchanged(self, clock):
         """早退路径（`MCServer` 构造失败、或没走 `run.py`）：单例是 None 也不能抛。"""

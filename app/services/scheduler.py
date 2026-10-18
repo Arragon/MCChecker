@@ -25,14 +25,22 @@
 `scheduler.stop()` → `runner.shutdown(30)` → `server.shutdown()`，删单实例锁仍排在
 `wait_for_workers()` 之后（C1）。
 
-周期清理（§10.4 要点 3）是循环里唯一碰文件系统的动作，且只碰**派生/临时**数据：
-`data/temporary/`（过期上传的临时文件）与 `profiles/<pid>/cache/doc_v2|diff_v2/`
-（解析与差异缓存，`services/documents.py`、`services/history.py` 都写着「损坏即丢弃重建」）。
-删除按 mtime 年龄判定，写盘用 `fsutil.atomic_write_bytes`（同目录临时文件 + `os.replace`），
-所以只可能删到「至少 7 天前的条目」，永远删不到正在写的那一份。中断的代价至多是「某个缓存
-还留着、下次再清」，重跑幂等；权威配置 `configs/`、归档 `archive/`、记录 `records/` 一个
-都不在候选路径里，`tests/test_scheduler.py::TestSchedulerWritesNothingAuthoritative`
-用「记录每一次删除及其发起线程」把这条钉死。
+周期清理（§10.4 要点 3）是循环里唯一碰文件系统的动作，且只碰**派生/临时**数据。
+**两项各有各的判定，不许并成一句话**：
+
+* `profiles/<pid>/cache/doc_v2|diff_v2/`（解析与差异缓存，`services/documents.py`、
+  `services/history.py` 都写着「损坏即丢弃重建」）按 **mtime 年龄**筛，只删 7 天前的。写盘走
+  `fsutil.atomic_write_bytes`（同目录临时文件 + `os.replace`），那份临时文件的年龄永远是
+  「刚刚」，所以这一条删不到正在写的那一份。
+* `data/temporary/`（上传的临时文件）**不按年龄**，它按 meta 里的 `expires_at` 判定，因此
+  「半成品」要靠另一条闸：`temp_store.create()` 的落盘顺序是 makedirs → 原文 → `meta.json`
+  最后，所以 `sweep_temp_area()` 传 `skip_incomplete=True`——meta 还没写出来的目录本轮不碰。
+  这一条之前是「读不到 meta 就删」，等于每小时去抹别人正在上传的那一半（M3-08 修复轮 Important 3）。
+
+中断的代价至多是「某个条目还留着、下次再清」，重跑幂等；权威配置 `configs/`、归档 `archive/`、
+记录 `records/` 一个都不在候选路径里，`tests/test_scheduler.py::TestSchedulerWritesNothingAuthoritative`
+用「记录每一次删除及其发起线程」把这条钉死——那里的允许目录是**硬编码**的，不从下面那个
+`DERIVED_CACHE_DIRNAMES` 推导，否则往元组里多加一项就会连带放宽它本该防的东西。
 
 时钟（`now_fn`）与等待（`sleep_fn`）都可注入：测试全在假钟上跑，没有一条为「等一小时」真睡。
 """
@@ -43,7 +51,6 @@ import logging
 import os
 import shutil
 import threading
-import time
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -69,6 +76,8 @@ CACHE_SWEEP_SECONDS = 86400.0
 #: 派生缓存保留上限：超过这个年龄的文件才会被删（7 天，与 v1 的解析缓存口径一致）。
 CACHE_TTL_SECONDS = 7 * 86400.0
 #: 只出现在这些子目录下的文件是清理候选（§6.5 / §6.6 的派生数据）。
+#: **加一项就是加删除面**：安全用例里的允许目录是硬编码的 `("doc_v2", "diff_v2")`，
+#: 不跟着这个元组走（`tests/test_scheduler.py::TestSchedulerWritesNothingAuthoritative`）。
 DERIVED_CACHE_DIRNAMES = ("doc_v2", "diff_v2")
 #: `interval_hours` 的合法区间（§7.9：1 小时 ~ 90 天）。
 MIN_INTERVAL_HOURS = 1
@@ -159,8 +168,15 @@ def system_context(pid: str) -> RequestContext:
 
 
 def sweep_temp_area(now: Optional[datetime] = None) -> int:
-    """删掉过期临时目录（每小时一次；实现就是 `temp_store` 的惰性清理入口）。"""
-    removed = temp_store.purge_expired(now=now)
+    """删掉过期临时目录（每小时一次；实现就是 `temp_store` 的惰性清理入口）。
+
+    判定是「meta 里的 `expires_at` 到了」，**不是**年龄，所以半成品要靠 `skip_incomplete`：
+    `create()` 最后才写 `meta.json`，一个还没有 meta 的目录可能就是某次上传正在写的那一半。
+    这里只兜「还没写出来」的那一种；上传路径自己那次（`temp_store.create()` 开头）不带这一档，
+    语义没动。跳过的半成品不是泄漏——它写完了就在下一轮被按过期收掉，写一半崩掉的则留给
+    上传路径自己那次回收（§7.4：临时区不是权威数据）。
+    """
+    removed = temp_store.purge_expired(now=now, skip_incomplete=True)
     if removed:
         logger.info("定时清理：临时区删除 %d 个过期目录", removed)
     return removed
@@ -195,18 +211,24 @@ def _read_schedule_cfg(pid: str) -> Dict[str, Any]:
     return cfg if isinstance(cfg, dict) else {}
 
 
-def sweep_derived_caches(max_age_seconds: float = CACHE_TTL_SECONDS) -> int:
+def sweep_derived_caches(
+    max_age_seconds: float = CACHE_TTL_SECONDS, now: Optional[datetime] = None
+) -> int:
     """删掉各机型 `cache/doc_v2`、`cache/diff_v2` 下年龄超过 `max_age_seconds` 的文件。
 
-    三条安全前提（都在 `tests/test_scheduler.py` 里钉着）：
+    四条安全前提（都在 `tests/test_scheduler.py` 里钉着）：
 
     * **只有派生数据**：`documents._disk_load` 与 `history._cache_read` 读到损坏就丢弃重建，
       删了最坏是「下一次打开重新算」，不影响任何权威内容；
     * **按年龄筛**：只删 `max_age_seconds` 之前的，`fsutil.atomic_write_bytes` 那个同目录
       临时文件的年龄永远是「刚刚」，所以删不到正在写的那一份，也不可能删到半成品；
-    * **不跟符号链接**：缓存目录里若被塞进一个指向别处的链接，跟着删就是越界。
+    * **不跟符号链接**：缓存目录里若被塞进一个指向别处的链接，跟着删就是越界；
+    * **一只钟**：`now` 由调用方注入（`_sweep_if_due` 用与「该不该清」同一时刻的那个钟），
+      没注入才回落 `datetime.now()`——和 `Scheduler.__init__` 里 `now_fn` 的默认同一个出处。
+      `st_mtime` 是 epoch 秒，所以换算就是 `moment.timestamp()`。
     """
-    cutoff = time.time() - max(0.0, float(max_age_seconds))
+    moment = now if now is not None else datetime.now()
+    cutoff = moment.timestamp() - max(0.0, float(max_age_seconds))
     ids = _profile_ids()
     if ids is None:
         return 0
@@ -455,7 +477,12 @@ class Scheduler(threading.Thread):
             plan.next_run = moment
 
     def _sweep_if_due(self, moment: datetime) -> None:
-        """到期才清；两项各自记账，互不影响（§10.4 要点 3）。"""
+        """到期才清；两项各自记账，互不影响（§10.4 要点 3）。
+
+        这一整段只认 `moment` 这一只钟（`tick()` 从 `now_fn` 取的注入时刻）：两项清理都把它
+        传下去，所以假钟下的用例既决定「到没到期」，也决定「哪些条目算旧」，不会一半按注入
+        时刻、一半按真实墙上时间。
+        """
         if moment >= self._next_temp_sweep:
             self._next_temp_sweep = moment + timedelta(seconds=TEMP_SWEEP_SECONDS)
             try:
@@ -465,7 +492,7 @@ class Scheduler(threading.Thread):
         if moment >= self._next_cache_sweep:
             self._next_cache_sweep = moment + timedelta(seconds=CACHE_SWEEP_SECONDS)
             try:
-                sweep_derived_caches()
+                sweep_derived_caches(now=moment)
             except Exception:
                 logger.exception("派生缓存定时清理失败（24 小时后再试）")
 
@@ -516,6 +543,9 @@ def save_schedule(pid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
       锁之间跑完的 `update_all` 会把这次的新 `enabled`/`interval_hours` 整份覆盖掉。
       `storage.save_schedule` 内部再取一次同一把 per-pid `RLock`，可重入、无死锁。
     * **成功才递增**（全局约束）；读与失败写都不递增。
+    * **载荷是整份替换，不是补丁**：`enabled` 用 `payload.get("enabled", False)`，所以一个
+      只带 `interval_hours` 的 PUT 会**把定时关掉**（mock 的 `!!req.body.enabled` 同口径）。
+      这属契约既有形状，M3-09 与设置页每次都要把当前 `enabled` 一起发（已记 `docs/know-how.md`）。
     * 这里的 `revision.bump` 属**service 层的写路径**（handler 不碰计数）。调度**线程自己**
       一次都不调 `revision.bump`：它提交的 `update_all` 结束时按 `tasks.FINISH_PARTS`
       补 `settings`，那份记账在 runner 里（手递手 §3 / R39）。

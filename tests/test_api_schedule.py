@@ -9,6 +9,8 @@
 3. **修订号**（R39 / 全局约束）：成功写补一次 `settings`；读永远不补；失败写不补。
 4. **读-改-写整段扣在同一把机型锁里**（§5.4 / 卡 5 复审 I1）：`TestNoLostUpdate` 用
    「竞争方必须是另一个线程」的既定写法证明——同线程重入同一把 `RLock` 是抓不到丢失更新的。
+5. **PUT 是整份替换**：载荷里缺 `enabled` 就是写 `False`（把定时关掉），不是「保留原值」。
+   本卡不改这条契约，只钉住它并记进 `docs/know-how.md`，免得 M3-09 的设置页踩上去。
 
 `next_run_at` 由调度器算、绝不持久化，所以「有没有在跑的调度器」会直接改变响应：
 没有就是 `None`（那个进程里没人会去执行它，凭空报一个时间是撒谎）。
@@ -228,6 +230,28 @@ class TestPutSchedule:
             )
         assert body == {"enabled": False, "interval_hours": 12, "last_run": None, "next_run_at": None}
 
+    def test_a_put_that_omits_enabled_disables_it_replace_not_patch(self, target_pid, running_scheduler, clock):
+        """PUT 是**整份替换**，不是补丁：载荷里缺 `enabled` ⇒ 写入 `False`，定时被关掉。
+
+        本条只是**钉住现有契约**（`save_schedule` 的 `payload.get("enabled", False)`，mock 的
+        `!!req.body.enabled` 同口径），不是新的产品决定。M3-09 与设置页每次 PUT 都必须把当前
+        `enabled` 一起带上，否则「只改间隔」会把定时悄悄关掉——所以这里连磁盘、回显和排期三处
+        一起断，任何一处变成「保留原值」都会红（并已记进 `docs/know-how.md`）。
+        """
+        _seed(target_pid, {"enabled": True, "interval_hours": 12, "last_run": None})
+        running_scheduler.reload()
+        assert running_scheduler.next_run_at(target_pid) == clock.at(hours=12), "先证明停之前是开着的"
+        with make_server() as server:
+            status, _, body = as_role(server, "deployer").json(
+                "PUT", "/api/v1/p/%s/schedule" % target_pid, body={"interval_hours": 48}
+            )
+        assert status == 200, "缺 enabled 不叫非法载荷，服务端不报错、只是按缺省写 False"
+        assert body["enabled"] is False, "省略 enabled ⇒ False（整份替换语义）"
+        assert body["interval_hours"] == 48, "另一个字段照常按载荷写入"
+        saved = json.loads(_raw(target_pid).decode("utf-8"))
+        assert saved["enabled"] is False and saved["interval_hours"] == 48
+        assert running_scheduler.next_run_at(target_pid) is None, "关掉之后不再有排期"
+
     def test_success_bumps_settings_once_and_only_settings(self, target_pid, running_scheduler, clock):
         _seed(target_pid, {"enabled": True, "interval_hours": 1, "last_run": None})
         running_scheduler.reload()
@@ -446,28 +470,19 @@ class TestWiring:
             handler, _ = router.match(method, "/api/v1/p/default/schedule")
             assert handler is not None, "%s /schedule 没挂进 build_router" % method
 
-    def test_handler_source_stays_thin(self):
-        """分层红线（§3.3）：handler 不 import storage、不碰 revision.bump。"""
-        source = _js("app", "server", "api_schedule.py")
-        assert "storage" not in source.split("import")[-1], "handler 不该直接读写业务文件"
-        for token in ("from ..core import storage", "revision.bump", "storage.save_schedule"):
-            assert token not in source, "%s 出现在 handler 里 = 越过分层" % token
 
-    def test_mock_api_mirrors_the_same_interval_bounds_and_shape(self):
-        """R19 / 全局约束：改接口语义必须同 PR 同步 mock。这里钉住两处最容易漂移的字面量。"""
-        mock = _js("app", "web", "assets", "js", "mock", "mock-api.js")
-        assert "24 * 90" in mock, "mock 的间隔上限要和后端 MAX_INTERVAL_HOURS=2160 同口径"
-        for key in ("enabled", "interval_hours", "last_run", "next_run_at"):
-            assert key in mock, "mock 的 /schedule 载荷要含 %s" % key
-
-    def test_field_name_matches_the_frontend(self):
-        """错误落点字段名是前后端契约：`views/settings.js` 找的是 `interval`。"""
-        view = _js("app", "web", "assets", "js", "views", "settings.js")
-        assert scheduler_module.INTERVAL_FIELD == "interval"
-        assert "fieldError({ interval: amountField }" in view
-
-
-def _js(*parts: str) -> str:
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, *parts), "r", encoding="utf-8") as fh:
-        return fh.read()
+# ---------------------------------------------------------------------------
+# 为什么这里没有「grep 源码文本」的用例（M3-08 修复轮 / Important 1，R45）
+#
+# 上一版有三条按字面串读源码的断言：`api_schedule.py` 的 import 里不许出现 `storage`、
+# `mock-api.js` 里要能找到 `24 * 90` 与四个键名、`views/settings.js` 里要有一句特定的
+# `fieldError({…})` 标记。它们都是穿了测试衣服的 lint：契约真漂移时照样绿（把变量改个名、
+# 上限写成 `48 * 45`、把错误写进另一个节点，三条都看不见），而任何一次格式化排版都会把它们
+# 弄红。要保护的行为由两条**语义**用例执法：
+#   * 本文件 `TestPutSchedule::test_invalid_interval_is_400_with_unchanged_bytes`——服务端
+#     错误落在 `detail.field == "interval"` 上（前后端字段名的真实契约）。
+#   * `app/web/tests/tests.js` 的 M3-08 UC-33 用例——跑真实视图代码：字段错误可见、控件标红、
+#     不退化成全局 toast、未接入时一个请求都不发。
+# 分层红线（handler 不碰 `storage`、不碰计数）在这里的可观察形式是「GET 一字节都不写、读不
+# 递增、失败写不递增、成功只补一次 settings」，那四条用例已经各自钉住；grep 反而挡不住别名
+# 导入。卡面只要求 mock **同步更新**，从没要求它被 grep。
