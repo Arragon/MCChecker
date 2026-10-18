@@ -360,6 +360,23 @@ class TestInnerMarkupInValueSpan:
             apply_edits(src, "xml", [("/R[1]/a[1]/#text", "9", "text")])
         assert excinfo.value.code == REVIEW_CONFLICT
 
+    def test_writing_the_value_span_stops_at_the_first_child_element(self):
+        """卡 1 遗留的覆盖率洞（M3-02 补）：清空 span 的循环必须在首个**子元素**处停下。
+
+        `_write_effective_text` 把值写进 `elem.text`，再清掉段内注释/PI 兄弟的 `tail`；那些
+        兄弟只可能出现在首个子元素之前（`<R><a><!-- pre -->5<b>7</b><!-- c -->tail</a></R>`
+        里 `tail` 是注释 `c` 的 tail，已经在值跨度之外）。移除「遇到首个子元素即 break」这句
+        后循环会继续清空后续兄弟的 tail，而 tail 不是有值节点，§6.7 第 6 步看不见它被删掉
+        ——文件会静默少一截内容。`values()` 判不出来，只能按字节钉住。
+        """
+        src = b"<R><a><!-- pre -->5<b>7</b><!-- c -->tail</a></R>"
+        assert values(src) == {"/R[1]/a[1]/#text": "5", "/R[1]/a[1]/b[1]": "7"}, "前提：显示侧的值跨度只到 5"
+        out = apply_edits(src, "xml", [("/R[1]/a[1]/#text", "9", "text")])
+        assert values(out) == {"/R[1]/a[1]/#text": "9", "/R[1]/a[1]/b[1]": "7"}
+        assert b"<!-- pre -->" in out and b"<!-- c -->" in out
+        assert b"tail" in out, "子元素之后的 tail 不属于值跨度，不能被写成空"
+        assert b"9" in out and b">5<" not in out, "新值落在段首，旧值整段被替换"
+
     def test_whitespace_only_span_is_still_not_a_writable_target(self):
         """有效文本 strip 后为空 = 显示无值：与 `<empty/>` 同口径按定位不到拒绝（B2 兜底）。"""
         src = b"<R><a><!-- c -->   </a></R>"
