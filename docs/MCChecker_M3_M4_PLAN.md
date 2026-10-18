@@ -1123,6 +1123,28 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
   HTTP 形态另有两种抖动（dump 抢在 `report()` 前 ⇒ 标题停在初始值；dump 抢在某个外部 `.js` 执行完 ⇒ 一批 `X is not a function`，**长得像真回归但不是**）：**判据只认 `ALL PASSED (n)` / `n FAILED / m`，其它一律重跑，不许为此改代码，也不许为了「稳」退回 `file://`**——`file://` 确实稳，而它的稳正是瞎。
 
 
+## 11.0 恢复快照 · 2026-10-18 18:32 UTC（轮次即将耗尽，这一段是接手者的唯一起点）
+
+**本轮已合并**：N2 / INH-1913（PR #53，合并 commit `5ca9611`）与四条文档 chore（#54…#57）。集成分支 tip 现查 `git log --oneline -1 origin/feat/mc-v2-delivery`（本段写下时是 `8cc8806`）。计数：57+ 卡中 **37 Done / 21 未完成**。
+
+**三张卡的提交已全部 `git push` 到 origin，不再是本地孤本**（这条本轮专门做过一次，防中断丢失）：`mc-v2/m3-10-dl-math` = `5f513ed`（DL 实现 `1b55e7f` + 修复轮）、`mc-v2/n1-rename-charset` = `2ef7c7e`（中文改名）、`mc-v2/m3-08-scheduler` = `05c8dd0`（调度器，抢救件已落成提交）。三张都**没有 PR、没有合并**，因为评审都还没过；谁也不许自称完成（R23）。
+
+**评审在跑（三份，都用与被评审 SHA 同源的独立工作树，禁止读主工作区）**：
+- `mcc-review-m3-08` @ `05c8dd0`（第 2 轮；第 1 轮通篇 FastAPI/Jinja2 且 `tool_uses=0`，已作废，判据见本节末）。
+- `mcc-review-n1` @ `2ef7c7e`（第 1 轮）。控制方已在同一棵树上亲手重跑并背书：全量 **926 passed**、聚焦 `tests/test_api_sources.py` **78 passed**、`check_py39.sh` **exit 0**、测试文件 `py_compile` 过。两条旧用例 400→200 的翻转**已被仓库里既有的待命注释预先授权**（旧文件第 1326 行原句「N1 把白名单收敛到 `fsutil.validate_filename` 时，这条的期望值要改成 200」）。
+- `mcc-review-m3-10` @ `5f513ed`（scoped 复评，只核 2 Important + 3 Minor 是否真闭合，并要求当场证明新的前后端对照用例**能让它变红**）。
+
+**实现代理仍在飞的三张（工作区干净=还没提交，勿动它们的文件）**：`mcc-sec`（M4-02 / INH-1904，安全头 + 跨站写保护；已改 `app/server/http.py`、`app/web/tests/tests.js`、新增 `tests/test_api_security.py`）、`mc-rel`（M4-06 / INH-1908，已写 `scripts/make_release.py` + `start.sh`/`start.bat` + `tests/test_release.py`）、`mcc-bench`（M4-05 / INH-1907，刚开工）。
+
+**接手后的动作顺序（严格按此，别新开卡）**：
+1. 收 M3-08 评审 → 通过则 `git -C mcc-m3-08 merge origin/feat/mc-v2-delivery`（它与 N1、与 mcc-sec 都动了 `docs/know-how.md`，N1 还动了同一个 `storage.py` 的另一处函数；**禁止 `-X ours/theirs`**，手工合并后在 m3-08 树上重跑全量再开 PR 合并）。它是 M3-09 与设置链四张的闸门。
+2. 收 N1 评审 → 在 `mcc-n1` 树上 merge 远端集成分支（此时应已含 M3-08）→ 重跑全量（基线必须当场重测，别引用 926）→ PR 合并 → Linear 置 Done + 证据。
+3. 收 DL 复评 → 在 `mcc-dl` 树上 merge 远端 → 重跑 → PR 合并。注意该分支基线早于 M3-06/N2，`docs/know-how.md` 必冲突。
+4. 收 M4-02 / M4-06 / M4-05 的提交，各自独立评审（R34）后才允许 PR。M4-02 的 commit 消息编号写错成 INH-1906，真实是 **INH-1904**，不改历史，PR 正文更正。
+5. 剩余卡序：M3-09 → 11 → 12 → 13…16（设置链，四张共用 `router.py`/`api.js`/`mock-api.js`，串行）→ M3-17 恒为最后（31 个写接口的修订号审计）；M4-01/03/04/07/08/09（M4-08 在 M4-07 之后、M4-09 在 M4-08 之后）；另有 INH-1915 假绿哨兵卡的预写简报 `inh-1915-truth-brief.md`（等 M3-08 合并后开工）。
+
+**Linear 已同步到**（明细与注释 ID 在 `.superpowers/linear-sync-log.md`）：INH-1913 Done（`completedAt 18:13:07Z`）、INH-1895 两条进展、INH-1912 三条进展（含根因与控方复测数字）、INH-1893 一条进展（明写未置 Done）、INH-1907 开工、INH-1908/1904 进行中。**仍欠**：M3-08/N1/M3-10 合并后的 Done + 证据；三张在飞卡的完成状态。
+
 ## 11. 执行状态快照（2026-10-18 18:11 UTC 更新，恢复时从这里接）
 
 **本轮增量（覆盖下方 07:10 那份快照里的计数，旧段落只作过程记录）**：**N2 / INH-1913 已合并**（PR #53，合并 commit `5ca9611`，评审 0 Critical / 0 Important / 4 Minor，全量 **924 passed**、基线 **917** 为分支自测）。**M3 = 7/17，项目 36 Done / 21 未完成**，集成分支 tip 现查。
