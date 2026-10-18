@@ -870,7 +870,8 @@
       function (r) {
         var t = r.task;
         MC.modal({
-          title: "正在运行的任务",
+          title: "任务详情",
+          subtitle: "409 撞车时指回正在运行的那条任务（detail.task_id）",
           body: h(
             "div.col",
             { style: "gap:10px" },
