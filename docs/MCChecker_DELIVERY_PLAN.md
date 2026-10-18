@@ -74,7 +74,10 @@ M4 收尾：feat/mc-v2-delivery → v1.0.1 一条汇总 PR
    ```
    **为什么不再手敲 `find data | shasum`**（INH-1914 之前这里是事故源）：① 一旦开始报数字，人就倾向于抄文档里的旧数字而不是当场跑 —— 已有五个合并 PR 这么报过一个**从未实测、也复现不出来**的哈希；② 原先抄在文档里的这条命令**没有** `-not -name '.mcchecker.lock'`，服务在跑时必然给出假的「❌ data 被改动」；③ 它按整行排序，与 `tests/data_guard.py`（按路径排序）给出的聚合值本来就**不相等**，两处「权威数字」互相打脸。守卫的红/绿取代它。若确实必须给出数字，只能贴**当场跑的命令 + 原始输出**，且必须写「本机值，不代表基线」。
    **守卫绿只证明首末快照一致**，不证明期间无人写入（两个盲区见 `docs/know-how.md`）。
-   涉及前端时补：`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "file://$PWD/app/web/tests/index.html"` → `<title>ALL PASSED (n)</title>`。
+   涉及前端时补（**命令必须是 HTTP 形态，`file://` 已作废**，M3-06 第三轮实测）：从 `/tmp` 起一个只服务 `app/web/` 的临时静态服务器（随机端口，绝不用仓库 `data/` 当服务根），同一个预算跑
+   `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:<port>/tests/index.html"` → `<title>ALL PASSED (n)</title>`。
+   **`file://` 为什么不能用**：该协议下「外部脚本里产生的 Promise 拒绝」永不派发 `unhandledrejection`（控制方与评审方各自独立实测：同一份页面 `file://` → 不派发、HTTP → 命中；变量是脚本来源，与队列状态无关，预算 8000→30000 也一样）。于是「把断言留在一条自己不 return 的链里」这种形状在 `file://` 下**确定性地报绿**——用例注册了、启动了（用例数钉死满足），没有同步抛（error 通道静默）。
+   **HTTP 形态有两种抖动必须重跑而不是改代码**：dump 早于 `report()` ⇒ 标题停在初始值；dump 早于某个外部 `.js` 执行完 ⇒ 一批 `X is not a function`（看着像真回归但不是）。**判据只认 `ALL PASSED (n)` / `n FAILED / m`，其它一律重跑。**
    涉及 HTTP 时补：真实 `run.py --port <随机> --data-dir "$(mktemp -d)"` + `curl` 走一遍本卡的验收条目 —— **必须用临时 `--data-dir`**，否则真实服务写字节会被守卫判为改动而红。
 6. **提交**：`feat(<域>): <一句话>（<卡号> / <INH-xxxx>）`；同分支多次提交可，但**一个卡一个 PR**。
 7. **PR + 合并**：写清「范围／改动／验证（命令+结果）／已知取舍」；`gh pr create --base feat/mc-v2-delivery` → `gh pr merge <n> --merge` → 本地 `feat/mc-v2-delivery` 拉平。
@@ -125,7 +128,7 @@ PR: <url> · 提交 `<sha>`
 
 ## 6. 卡序与依赖（原 54 卡全表）
 
-> 执行中新立的三张不在下表里：**INH-1912**（更新源改名字符集与创建不一致，中文源名能创建但永远改不了）、**INH-1913**（访客临时导入未打开回环拦截，SSRF 面未闭合）、**INH-1914**（H3 会话级 `data/` 完整性守卫，已完成）。以 Linear 为准。
+> 执行中新立的三张不在下表里：**INH-1912**（更新源改名字符集与创建不一致，中文源名能创建但永远改不了，**进行中**，工树 `mcc-n1`）、**INH-1913**（访客临时导入未打开回环拦截，SSRF 面未闭合，**已完成**：PR #53，合并 commit `5ca9611`，评审 0 Critical / 0 Important）、**INH-1914**（H3 会话级 `data/` 完整性守卫，已完成）。以 Linear 为准。
 
 > 状态快照于 2026-10-17。**In Progress = 前端界面已在模板中完成、后端/接口未做**（历史上 18 张卡如此标记，注释里写了「已完成/还没做/接着做」）。后端完成后才能置 Done。
 
@@ -172,7 +175,7 @@ PR: <url> · 提交 `<sha>`
 | M2-11 | INH-1884 | Done | 导入对话框与临时文件标签（`WIRED` 放行 `import`/`temp`） |
 | M2-12 | INH-1885 | Done | 删除文件进入恢复区（`services/recovery.py` + `DELETE /files/{name}`，`WIRED` 放行 `delete`） |
 
-### M3 审阅、更新、DL 与设置（6/17，截至 2026-10-18）
+### M3 审阅、更新、DL 与设置（7/17，截至 2026-10-18 18:16 UTC）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -181,11 +184,11 @@ PR: <url> · 提交 `<sha>`
 | M3-03 | INH-1888 | Done | 审阅页与本地草稿 |
 | M3-04 | INH-1889 | Done | 安全下载器 |
 | M3-05 | INH-1890 | Done | 更新源校验提交与映射接口（含 PR #41 的锁范围补修） |
-| M3-06 | INH-1891 | Todo | 更新源设置页（**下一张**；含 D2 分段门控基础设施，并接手卡 6 改派来的 `progress.total` 与 409 文案） |
+| M3-06 | INH-1891 | Done | 更新源设置页 + D2 分段门控（PR #48；四轮评审/三轮修复，前端测试页 29 → 40，`MC.settingsSegmentWired(seg)` 可供 M3-13…16 直接加分段） |
 | M3-07 | INH-1892 | Done | 后台任务队列与任务接口（PR #43；历经 4 轮评审，第 1 轮作废、合并前修掉一条会损坏用户数据的缺陷） |
-| M3-08 | INH-1893 | Todo | 标准库调度器与定时设置 |
+| M3-08 | INH-1893 | In Progress | 标准库调度器与定时设置（`05c8dd0` 已提交：全量 1015 passed、`check_py39.sh` exit 0、该工树无 `data/` 故无 H3 证据；独立评审在跑。它动了 `router.py`/`storage.py`/`api.js`/`conftest.py`，**M3-09 与 M3-13…16 必须等它合并**） |
 | M3-09 | INH-1894 | Todo | 修改记录拉取与文件内查看 |
-| M3-10 | INH-1895 | Todo | DL 求根与正向反向计算 |
+| M3-10 | INH-1895 | In Progress | DL 求根与正向反向计算（`1b55e7f` 评审 Approved for merge / 0 Critical / 2 Important / 3 Minor；修复轮在跑：1e-10 取整的 JS 语义缺边界用例、`trans_coeff=0` 会让 `reverse`/`multi_check` 裸崩而 `validate` 放行、前后端等价性证明只在 `/tmp` 里） |
 | M3-11 | INH-1896 | Todo | DL 试算、提取预览与条件保存 |
 | M3-12 | INH-1897 | Todo | DL 计算页 |
 | M3-13 | INH-1898 | Todo | IP 对应表与管理员名单 |
@@ -201,11 +204,11 @@ PR: <url> · 提交 `<sha>`
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
 | M4-01 | INH-1903 | Todo | 旧下载与记录链接兼容 |
-| M4-02 | INH-1904 | Todo | 安全响应头与跨站写保护 |
+| M4-02 | INH-1904 | In Progress | 安全响应头与跨站写保护（工树 `mcc-sec`。**已知瑕疵**：派发词与 commit 消息里写成 `INH-1906`，真实编号是 `INH-1904`；不改写历史，PR 正文更正） |
 | M4-03 | INH-1905 | Todo | 访问日志与业务日志 |
 | M4-04 | INH-1906 | Todo | 旧布局复制校验迁移 |
 | M4-05 | INH-1907 | Todo | 性能基准脚本 |
-| M4-06 | INH-1908 | Todo | 离线发布包 |
+| M4-06 | INH-1908 | In Progress | 离线发布包（工树 `mc-rel`：`scripts/make_release.py` + `start.sh`/`start.bat`。验收边界：§16.7 的「断网浏览器实测」**不得**由本卡报绿，只能报「产物里不存在外部主机引用」，且要带负向对照——种一条 `https://cdn…` 必须让构建失败） |
 | M4-07 | INH-1909 | Todo | 移除 NiceGUI 并同步文档（含 `.nicegui/` 取消跟踪、`docs/know-how.md` 更新） |
 | M4-08 | INH-1910 | Todo | §16 全量验收门禁 |
 | M4-09 | INH-1911 | Todo | 恢复区干跑说明（可选，不做界面） |
