@@ -1071,25 +1071,47 @@
     return t ? ok({ task: clone(t) }) : fail(404, "NOT_FOUND", "任务不存在或已结束太久", { id: a.id });
   });
 
-  route("GET", "/p/{pid}/schedule", function (a, req, P) {
+  /* ---------- 定时更新：与后端 `app/services/scheduler.py` 同口径（M3-08 / R19） ----------
+   * SPEC 是准，mock 只是把同一条契约在模板模式下演一遍：
+   * - `next_run_at` **不持久化**、只在 `enabled` 时给出，否则 `null`（不是缺字段）；
+   * - 播种：`last_run.at + interval`；算出来已过期 ⇒ 现在 + 2 分钟（避免启动风暴）；
+   *   没有 `last_run` ⇒ 现在 + interval；
+   * - `interval_hours` 必须是 1–2160（=24×90 天）的**整数**：小数、字符串、布尔、越界
+   *   一律 400，`detail.field = "interval"`（后端 `scheduler.INTERVAL_FIELD` 同值）。 */
+  function fmtLocal(d) {
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2) + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) + ":00";
+  }
+  function nextRunAt(s, from) {
+    var span = s.interval_hours * 3600 * 1000;
+    var base = s.last_run && s.last_run.at ? util.parseTime(s.last_run.at) : null;
+    var next = base ? new Date(base.getTime() + span) : new Date(from.getTime() + span);
+    if (next.getTime() <= from.getTime()) next = new Date(from.getTime() + 120000);
+    return fmtLocal(next);
+  }
+  function scheduleView(P, from) {
     var s = clone(P.schedule);
-    if (s.enabled) {
-      var base = s.last_run ? util.parseTime(s.last_run.at) : new Date();
-      var next = new Date(base.getTime() + s.interval_hours * 3600 * 1000);
-      s.next_run_at = next.getFullYear() + "-" + ("0" + (next.getMonth() + 1)).slice(-2) + "-" + ("0" + next.getDate()).slice(-2) + " " + ("0" + next.getHours()).slice(-2) + ":" + ("0" + next.getMinutes()).slice(-2) + ":00";
-    }
-    return ok(s);
+    s.next_run_at = s.enabled ? nextRunAt(s, from) : null;
+    return s;
+  }
+
+  route("GET", "/p/{pid}/schedule", function (a, req, P) {
+    return ok(scheduleView(P, new Date()));
   });
 
   route("PUT", "/p/{pid}/schedule", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    var hrs = Number(req.body.interval_hours);
-    if (!isFinite(hrs) || hrs < 1 || hrs > 24 * 90) return fail(400, "INVALID_INPUT", "间隔需在 1 小时到 90 天之间", { field: "interval" });
+    var raw = req.body.interval_hours;
+    var hrs = typeof raw === "number" ? raw : NaN;
+    if (!isFinite(hrs) || hrs !== Math.floor(hrs) || hrs < 1 || hrs > 24 * 90) {
+      return fail(400, "INVALID_INPUT", "间隔必须是 1-2160 之间的整数小时", { field: "interval" });
+    }
     P.schedule.enabled = !!req.body.enabled;
     P.schedule.interval_hours = hrs;
     bump(a.pid, "settings");
-    return ok(clone(P.schedule));
+    /* 成功才 bump；403/400 都直接返回，一个字节都不动（与后端「失败写不递增」一致）。
+     * 返回的是**整份视图**（含 next_run_at），和 GET 同一个形状——保存后界面按新间隔重计划。 */
+    return ok(scheduleView(P, new Date()));
   });
 
   route("GET", "/p/{pid}/ip-mapping", function (a, req, P) {

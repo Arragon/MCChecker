@@ -1701,13 +1701,19 @@ def get_schedule_file(profile_id: Optional[str] = None) -> str:
     return _get_profile_json_file("schedule.json", pid)
 
 
+#: `schedule.json` 缺文件时的默认值（规范 §5 的 schema）。`last_run` 是 v2 新增的**可选**
+#: 字段，读不出来就是「从没跑过」（`None`），界面上显示「尚未执行」。写它的人是
+#: `services/updates.py::update_all`（在机型锁内读-改-写）。
+_SCHEDULE_DEFAULT = {"enabled": False, "interval_hours": 24, "last_run": None}
+
+
 def load_schedule() -> Dict[str, Any]:
-    """加载调度配置"""
+    """加载调度配置（缺文件/缺 `last_run` 都按默认值，见 `_SCHEDULE_DEFAULT`）。"""
     profile = get_active_profile()
     path = _get_profile_json_file("schedule.json", profile)
     if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_SCHEDULE_FILE):
-        return _load_json(LEGACY_SCHEDULE_FILE, {"enabled": False, "interval_hours": 24})
-    return _load_json(path, {"enabled": False, "interval_hours": 24})
+        return _load_json(LEGACY_SCHEDULE_FILE, dict(_SCHEDULE_DEFAULT))
+    return _load_json(path, dict(_SCHEDULE_DEFAULT))
 
 
 def save_schedule(schedule: Dict[str, Any]):

@@ -108,6 +108,7 @@ def build_router(settings: Settings) -> Router:
         api_remarks,
         api_review,
         api_revision,
+        api_schedule,
         api_search,
         api_session,
         api_sources,
@@ -132,5 +133,6 @@ def build_router(settings: Settings) -> Router:
     api_delete.register(router)
     api_sources.register(router)
     api_tasks.register(router)
+    api_schedule.register(router)
     router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
     return router
