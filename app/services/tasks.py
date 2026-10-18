@@ -65,7 +65,7 @@ RETAIN_MAX = 200
 TASK_PART = "tasks"
 #: `shutdown()` 的默认等待上限（§10.1 签名，也是停止序列要求的 30 秒）。
 DEFAULT_SHUTDOWN_TIMEOUT = 30.0
-#: 工作线程名前缀：测试用它筛「有没有残留线程」。
+#: 工作线程名前缀：`worker_threads()` 用它判「还有没有人在写 data/」，测试也用它筛残留线程。
 THREAD_NAME_PREFIX = "mctask"
 
 #: `shutdown()` 自己那条等待线程的名字：同样带前缀，但它只跑 `pool.shutdown`，一个字节都不写。
@@ -171,7 +171,7 @@ def worker_threads() -> List[threading.Thread]:
     return [
         thread
         for thread in threading.enumerate()
-        if thread.name.startswith(THREAD_NAME_PREFIX) and thread.name != SHUTDOWN_WAITER_NAME and thread.name != SHUTDOWN_WAITER_NAME
+        if thread.name.startswith(THREAD_NAME_PREFIX) and thread.name != SHUTDOWN_WAITER_NAME
     ]
 
 
