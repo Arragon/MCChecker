@@ -216,11 +216,15 @@
     ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["schedule", "dl", "settings", "tools"].forEach(function (k) {
+    ["schedule", "dl", "tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
+    /* M3-06：settings 页级键已放行——页面内部的分段由 D2 分段开关控制（见下面专门用例），
+     * 未接入分段渲染只读横幅且不发请求，所以页级放行不再打空接口。 */
+    ok(prod.settings, "settings 页级键在 M3-06 放行");
     /* 放行只改 WIRED：未接入文案必须留着，M4-08 删本机制前 view 仍靠它给禁用提示。 */
     ok(/M\d-\d\d/.test(MC.unwired.review), "review 的未接入说明要保留并点名卡号：" + MC.unwired.review);
+    ok(/M\d-\d\d/.test(MC.unwired.settings), "settings 的未接入说明要保留并点名卡号：" + MC.unwired.settings);
   });
 
   test("M3-07 / D4：任务接口独立放行，tools 键不再代表任务可用性", function () {
@@ -250,11 +254,37 @@
       start.call(stubApp, { type: "update_all" }).then(null, function () {});
       eq(calls, [], "未接入时不得打 /tasks（决策 14：禁用 + 说明 + 不发请求）");
     } finally {
-      /* 同步恢复：异步 finally 会让其余用例在整个同步批次里都用假 API（卡 3 的已知坑）。 */
+      /* 同步恢复：异步 finally 会让其余用例在整个同步批次里都用假 API（卡 3 的已知坑，
+       * 本卡已把执行序改成串行，这里保持同步恢复不变——更快且不依赖队列）。 */
       MC.api.get = origGet;
       MC.api.post = origPost;
       MC.caps.tasks = origCap;
     }
+  });
+
+  test("M3-06 / D2：设置页分段白名单——只放行 sources，其余五项各有点名卡号的去向", function () {
+    /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS、
+     * 起点只有 sources、unwiredSettings 恰好覆盖未接入的五项且文案点名接入卡号。
+     * 后续 M3-08/13/14/15/16 各自把一项加进 WIRED_SETTINGS，本用例是它们的公共回归。 */
+    eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
+    ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
+    ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
+    var unwired = MC.settingsSegments.filter(function (s) { return MC.wiredSettingsSegments.indexOf(s) < 0; });
+    eq(Object.keys(MC.unwiredSettings).sort(), unwired.slice().sort(), "未接入分段都要有去向文案，且不多给已接入分段");
+    ok(unwired.every(function (s) { return /M\d-\d\d/.test(MC.unwiredSettings[s]); }), "去向文案要点名接入卡号");
+    /* 模板模式全开（预览不受门控）；生产模式只有 sources。 */
+    var wasMock = MC.config.mock;
+    var origWired = MC.wiredSettingsSegments.slice();
+    try {
+      MC.config.mock = true;
+      ok(MC.settingsSegmentWired("people") && MC.settingsSegmentWired("sources"), "模板模式下分段全部可用");
+      MC.config.mock = false;
+      ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（本卡）");
+      ok(!MC.settingsSegmentWired("schedule") && !MC.settingsSegmentWired("people") && !MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余五项未接入");
+    } finally {
+      MC.config.mock = wasMock;
+    }
+    eq(MC.wiredSettingsSegments, origWired, "MC.wiredSettingsSegments 是快照切片，外部改不动白名单本体");
   });
 
   test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
@@ -430,9 +460,10 @@
     var capOfKind = MC.App.prototype.capOfKind;
     MC.caps = MC.capsFor(false);
     ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t") && capOfKind("review"), "速览、文件、搜索、临时标签与审阅页已接入真实后端");
-    ok(!capOfKind("settings"), "未接入的 kind 不可用");
+    ok(capOfKind("settings"), "设置页级键已随 M3-06 接入（页内分段另由 D2 开关控制）");
+    ok(!capOfKind("dl"), "未接入的 kind 不可用");
     MC.caps = MC.capsFor(true);
-    ok(capOfKind("settings") && capOfKind("t"), "接入后可用");
+    ok(capOfKind("settings") && capOfKind("t") && capOfKind("dl"), "接入后可用");
   });
 
   test("搜索高亮：用文本节点拆分关键词，关键字不进入 HTML（§9.8.8 / UC-25）", function () {
