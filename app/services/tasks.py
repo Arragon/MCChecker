@@ -79,6 +79,26 @@ FINISH_PARTS: Dict[str, Tuple[str, ...]] = {
     "refresh_records": (),
 }
 
+#: 互斥面（§10.1 + 卡 6 复审 F2）：`ttype` -> 同一机型内要挡掉的在途类型。
+#:
+#: 三类任务都算「更新类」，规则不是全对成机型级串行，只有 `refresh_records` 例外地
+#: **不看 target**。理由：`updates.update_all` 自己对每个有 `record_url` 的映射项跑一次
+#: `refresh_records`（`updates.py:164`），而 `refresh_records` 是对 `records/<name>` 的
+#: 读-改-写。单独 `POST {"type":"refresh_records","name":X}` 与 `update_all`（或任何
+#: `update_source`）并发，就是把同一个 RMW 在同一机型、同一 target 上跑两遍——机型锁只
+#: 保证单次读写不被撕裂，不会让两次互相覆盖丢失，所以这一条必须按**机型**整块挡掉；
+#: `update_all` 会碰全部映射项，因此按 target 判也挡不住。
+#:
+#: `update_source ↔ update_source` 仍按 target 细分（不细分就是机型级串行，卡 5 的多源
+#: 并行更新会退化成排队）：不同源写不同的 `configs/<name>`，而共享文件
+#: （`update_status.json`、`schedule.json`）的读-改-写已经整段扣在机型锁里
+#: （`updates._finish` / `update_all`），并行不会丢东西。
+_CONFLICTING_TYPES: Dict[str, Tuple[str, ...]] = {
+    "update_source": ("update_all", "refresh_records"),
+    "update_all": ("update_source", "refresh_records"),
+    "refresh_records": ("update_source", "update_all"),
+}
+
 #: §7.1 的本地时间字符串格式（与 `updates._now()` 同一口径）。
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -255,10 +275,26 @@ class TaskRunner:
     ) -> Task:
         """入队并立即返回；`fn` 在工作线程里跑（§10.1）。
 
+        `ttype` 必须在 `TASK_TYPES` 里，否则 `INVALID_INPUT`——见 `_run` 上方与
+        `_CONFLICTING_TYPES` 的说明（卡 6 复审 F4）。
+
         互斥规则：key = `(pid, ttype, target or '*')`，同 key 已有 queued/running →
-        `AppError(BUSY, task_id=第一次的 id)`；`update_all` 与同机型**任意**
-        `update_source` 互斥（同一机型同时只允许一个「更新类」任务改同一批文件）。
+        `AppError(BUSY, task_id=第一次的 id)`；同机型内 `update_all` 与**任意**
+        `update_source` 互斥（同一机型同时只允许一个「更新类」任务改同一批文件），
+        而只要有一方是 `refresh_records`，就按**机型**互斥、不看 target——判据全在
+        `_CONFLICTING_TYPES` 那张表里（卡 6 复审 F2）。
         """
+        if ttype not in TASK_TYPES:
+            # 类型清单是 key 语义的一部分：`_CONFLICTING_TYPES` 与 `FINISH_PARTS` 都按它取值。
+            # HTTP handler 那层（`api_tasks.py`）确实已经挡过一次，但那道门只有前端会走——
+            # 卡 8 / 卡 9 直接调 `submit`，拼错的类型进队列后既不参与互斥、结束时的修订分量
+            # 口径也不存在，只会留下一条永远撞不上的任务。
+            raise AppError(
+                INVALID_INPUT,
+                "未知任务类型：%s（可选 %s）" % (ttype, "/".join(TASK_TYPES)),
+                field="type",
+                wanted=ttype,
+            )
         pid = _profile_of(ctx)
         clean_target = target or None
         key = _key(pid, ttype, clean_target)
@@ -344,37 +380,47 @@ class TaskRunner:
     ) -> Optional[Task]:
         same = self._active.get(key)
         if same is not None:
-            return same
-        if ttype == "update_all":
-            blocked = ("update_source",)  # 同 key 的 update_all 已经被上面挡住了
-        elif ttype == "update_source":
-            blocked = ("update_all",)
-        else:  # refresh_records 不在 §10.1 的互斥面里（动的是 records/）
-            return None
+            return same  # 同 (机型, 类型, target) 的快路径；`update_all` 之间也是靠它挡住
+        blocked = _CONFLICTING_TYPES.get(ttype, ())
         for (other_pid, other_type, _), task in self._active.items():
             if other_pid == pid and other_type in blocked:
                 return task
         return None
 
     def _run(self, task: Task, fn: Callable[[Task], None]) -> None:
-        task.mark_running()
-        revision.bump(task.profile, TASK_PART)
+        # 「收口」要覆盖 `_run` 的**每一**行。原先 `mark_running()` 与第一次 `revision.bump()`
+        # 落在 `try` 之外、成功路径的 `_finish()` 落在 `try` 之后：那三处任意一处抛异常，异常
+        # 都只进那只没人 inspect 的 `Future`，而 `_active[key]` 永远被占住——这个
+        # `(机型, 类型, target)` 从此只回 409 BUSY，任务还停在「进行中」，惰性清理又永远
+        # 跳过 active 任务，于是连内存里那条记录也不会消失（卡 6 复审 F4）。
         try:
-            fn(task)
-        except AppError as exc:
-            logger.exception(
-                "后台任务失败（%s）：%s %s（id=%s）", exc.code, task.type, task.target or "-", task.id
-            )
-            self._finish(task, FAILED, error=exc.message)
-            return
-        except Exception as exc:
-            # 原始异常文本可能含路径、URL、令牌——那些只进日志，不进 `task.error`（§11.5）。
-            logger.exception(
-                "后台任务未预期异常：%s %s（id=%s）", task.type, task.target or "-", task.id
-            )
-            self._finish(task, FAILED, error="任务执行失败（%s）" % type(exc).__name__)
-            return
-        self._finish(task, _state_from_items(list(task.result["items"])))
+            task.mark_running()
+            revision.bump(task.profile, TASK_PART)
+            try:
+                fn(task)
+            except AppError as exc:
+                logger.exception(
+                    "后台任务失败（%s）：%s %s（id=%s）", exc.code, task.type, task.target or "-", task.id
+                )
+                self._finish(task, FAILED, error=exc.message)
+                return
+            except Exception as exc:
+                # 原始异常文本可能含路径、URL、令牌——那些只进日志，不进 `task.error`（§11.5）。
+                logger.exception(
+                    "后台任务未预期异常：%s %s（id=%s）", task.type, task.target or "-", task.id
+                )
+                self._finish(task, FAILED, error="任务执行失败（%s）" % type(exc).__name__)
+                return
+            self._finish(task, _state_from_items(list(task.result["items"])))
+        finally:
+            if task.state in ACTIVE_STATES:
+                # 只有「`_finish` 一次都没跑到」才会落到这里。`_finish` 做的第一件事就是归还
+                # 互斥键，所以键与状态在这里一起收口；`error` 不为 None ⇒ 一个业务分量都不补
+                # （§10.1「失败写不递增」），但 `tasks` 照补，别人的界面才不会永远「进行中」。
+                logger.exception(
+                    "后台任务在任务体之外崩了：%s %s（id=%s）", task.type, task.target or "-", task.id
+                )
+                self._finish(task, FAILED, error="任务执行失败（队列内部错误）")
 
     def _finish(self, task: Task, state: str, error: Optional[str] = None) -> None:
         """收口状态 + `finished_at`，递增 `tasks`，并按类型补 `files`/`settings`。

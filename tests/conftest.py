@@ -101,8 +101,23 @@ def isolated_task_runner(isolated_data_root):
     monkeypatch 被撤销**之前**拆完——`ThreadPoolExecutor` 的工作线程是非 daemon 的
     （R9），万一还有任务在跑，它至少是在临时数据根里跑，不会把字节写进仓库真实的
     `data/`（H3）。超时给 5 秒：忘了放行的假任务只会让这一条用例慢，不会卡死整轮。
+
+    超时**不是**放过：`shutdown()` 的公开契约是「记一条 WARNING 就返回」（§10.1），
+    `reset_runner` 也照样把单例丢掉，于是那条孤儿线程会在 `monkeypatch` 把
+    `storage.DATA_DIR` 恢复成仓库 `data/` **之后**继续经 `updates`/`storage` 落盘
+    ——正是本夹具要防的那次污染，而在加本守卫之前它是静悄悄发生的。所以 reset 之后
+    再点名一次残留线程并直接把用例判失败：约束由夹具守，不去改生产 API 的签名。
     """
     yield
+    import threading
+
     from app.services import tasks
 
     tasks.reset_runner(timeout=5.0)
+    survivors = [t.name for t in threading.enumerate() if t.name.startswith(tasks.THREAD_NAME_PREFIX)]
+    if survivors:
+        pytest.fail(
+            "任务队列已经拆完，但仍有工作线程活着：%s。它会在这次 monkeypatch 撤销之后"
+            "继续往真实的 data/ 里写（H3）。放行这条任务自己的 Event/gate，或让它早点"
+            "结束——不要放宽本夹具的等待，也不要改线程名绕过检查。" % ", ".join(sorted(survivors))
+        )

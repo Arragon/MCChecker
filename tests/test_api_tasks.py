@@ -406,7 +406,8 @@ class TestTaskContract:
 
 
 # ---------------------------------------------------------------------------
-# 2. BUSY 与互斥（§10.1：同 key 进行中；update_all 与同机型任意 update_source 互斥）
+# 2. BUSY 与互斥（§10.1：同 key 进行中；update_all 与同机型任意 update_source 互斥；
+#    卡 6 复审 F2 把 refresh_records 也拉进同一机型的互斥面，见下面两条用例）
 # ---------------------------------------------------------------------------
 
 
@@ -465,10 +466,17 @@ class TestBusyAndMutex:
         release.set()
         _wait_state(pid, first.id)
 
-    def test_other_target_profile_or_type_is_allowed(self, pid):
+    def test_other_target_or_profile_is_allowed(self, pid):
+        """互斥面**之内**仍然并行的只有「同一类型的不同 target」与「别的机型」。
+
+        卡 6 复审 F2 之后，「同机型的别的类型」这一轴已经不在这里成立了：三类更新任务
+        只要沾上 `refresh_records` 就要互相挡（见下面两条）。所以本用例的第四提交换到
+        第三个机型上——它证明的是原本要证明的那件事（机型是互斥轴），不是放宽。
+        """
         from app.core import device_models
 
         other = device_models.add_model("tasks-other")
+        another = device_models.add_model("tasks-another")
         release = threading.Event()
         entered = threading.Event()
         first = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
@@ -476,25 +484,54 @@ class TestBusyAndMutex:
 
         second = _runner().submit(_ctx(pid), "update_source", "other.xml", _noop)
         third = _runner().submit(_ctx(other), "update_source", NAME, _noop)
-        fourth = _runner().submit(_ctx(pid), "refresh_records", NAME, _noop)
+        fourth = _runner().submit(_ctx(another), "refresh_records", NAME, _noop)
         assert len({first.id, second.id, third.id, fourth.id}) == 4
 
         release.set()
         for task in (first, second, third, fourth):
             _wait_state(task.profile, task.id)
 
-    def test_refresh_records_does_not_block_update_source(self, pid):
-        """§10.1 只规定 `update_all` 与 `update_source` 互斥；拉记录动的是 records/，不在互斥面里。"""
+    def test_refresh_records_and_update_all_are_mutually_exclusive(self, pid):
+        """卡 6 复审 F2：`update_all` 自己就逐项跑 `refresh_records`（`updates.py:164`）。
+
+        单独 POST 一条 `refresh_records` 与 `update_all` 并发，就是在同一机型、同一
+        target 上把 `records/<name>` 的读-改-写同时跑两遍——正是丢更新。两个方向都要挡，
+        而且**不看 target**（`update_all` 会碰所有映射项，`refresh_records` 的 target 换
+        一个也照样撞进同一批文件）。
+        """
         release = threading.Event()
         entered = threading.Event()
         records = _runner().submit(_ctx(pid), "refresh_records", NAME, _blocking(release, entered))
         entered.wait(5)
-
-        source = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
-        assert source.id != records.id
-
+        assert self._busy(pid, "update_all", None).detail["task_id"] == records.id
         release.set()
         _wait_state(pid, records.id)
+
+        release2 = threading.Event()
+        entered2 = threading.Event()
+        bulk = _runner().submit(_ctx(pid), "update_all", None, _blocking(release2, entered2))
+        entered2.wait(5)
+        # 反方向同样互斥；target 不同也一样挡
+        assert self._busy(pid, "refresh_records", "别的.xml").detail["task_id"] == bulk.id
+        release2.set()
+        _wait_state(pid, bulk.id)
+
+    def test_refresh_records_and_update_source_are_mutually_exclusive(self, pid):
+        """同一条记录面也会被 `update_source` 撞上：两个方向都要挡，同样不看 target。"""
+        release = threading.Event()
+        entered = threading.Event()
+        records = _runner().submit(_ctx(pid), "refresh_records", NAME, _blocking(release, entered))
+        entered.wait(5)
+        assert self._busy(pid, "update_source", NAME).detail["task_id"] == records.id
+        release.set()
+        _wait_state(pid, records.id)
+
+        release2 = threading.Event()
+        entered2 = threading.Event()
+        source = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release2, entered2))
+        entered2.wait(5)
+        assert self._busy(pid, "refresh_records", "别的.xml").detail["task_id"] == source.id
+        release2.set()
         _wait_state(pid, source.id)
 
     def test_finished_task_frees_the_key(self, pid):
@@ -504,6 +541,64 @@ class TestBusyAndMutex:
         second = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
         assert second.id != first.id
         _wait_state(pid, second.id)
+
+    def test_failure_before_the_task_body_still_frees_the_key(self, pid, monkeypatch):
+        """卡 6 复审 F4：`mark_running` 与第一次 `revision.bump` 抛异常时，键必须照样归还。
+
+        这两行原先落在 `try` 之外：异常只会进那只没人 inspect 的 `Future`，而
+        `_active[key]` 永远被占住——那个 `(机型, 类型, target)` 从此只回 409 BUSY，
+        任务还停在「进行中」被惰性清理永远跳过。打桩点选工作线程里的第一次 `bump`
+        本身，不动生产代码的形状。
+        """
+        from app.services import revision, tasks
+
+        real_bump = revision.bump
+        fired = threading.Event()
+
+        def blow_up_in_the_worker(target_pid: str, part: str) -> None:
+            # 只炸工作线程里的第一次调用：`submit` 自己那次发生在主线程，必须照常。
+            if not fired.is_set() and threading.current_thread().name.startswith(
+                tasks.THREAD_NAME_PREFIX
+            ):
+                fired.set()
+                raise RuntimeError("修订号服务在任务体开始前就崩了")
+            real_bump(target_pid, part)
+
+        monkeypatch.setattr(revision, "bump", blow_up_in_the_worker)
+        broken = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
+        payload = _wait_task(broken, FINISHED_STATES, timeout=5.0)
+
+        assert payload["state"] == "failed"
+        assert payload["error"], "收口了的失败任务必须留下一条能看的错误"
+
+        # 键确实归还了：同一个 `(机型, 类型, target)` 现在还能再排一条并正常跑完。
+        second = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
+        assert _wait_task(second, FINISHED_STATES, timeout=5.0)["state"] == "succeeded"
+
+    def test_submit_rejects_an_unknown_task_type(self, pid):
+        """卡 6 复审 F4：类型清单是 key 语义的一部分，校验要落在 `submit` 上。
+
+        拼错的类型绕过 HTTP handler（`api_tasks.py` 那层只有前端会走）直接进队列后，
+        既不参与互斥（`_CONFLICTING_TYPES` 查不到）、也没有 `FINISH_PARTS` 口径，
+        只会留下一条永远撞不上的任务。卡 8 / 卡 9 是直接调 `submit` 的。
+        """
+        from app.core.errors import AppError, INVALID_INPUT
+
+        before = _parts(pid)
+        with pytest.raises(AppError) as info:
+            _runner().submit(_ctx(pid), "update_sourse", NAME, _noop)
+        error = info.value
+
+        assert error.code == INVALID_INPUT
+        assert error.http_status == 400
+        assert error.detail["field"] == "type"
+        assert "update_source/update_all/refresh_records" in error.message  # 给出可选清单
+        assert _runner().list(pid, False) == []  # 队列里什么都没留下
+        assert _parts(pid) == before  # 连 `tasks` 分量都不该递增
+
+        # 未知类型也不能占用互斥键：同机型的正常提交照样进得去。
+        task = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
+        assert _wait_task(task, FINISHED_STATES, timeout=5.0)["state"] == "succeeded"
 
 
 # ---------------------------------------------------------------------------
