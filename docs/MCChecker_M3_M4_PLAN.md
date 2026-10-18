@@ -1134,6 +1134,8 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
 4. **M4-06 / INH-1908**（`mc-rel`，分支 `mc-v2/m4-06-release` @ `bd961c8`）：离线发布包在跑。验收边界已交代：§16.7 的「断网浏览器实测」**不得**由本卡报绿，只能报「构建产物里不存在外部主机引用」，并要求负向对照（种一条 `https://cdn…` 必须让构建失败）。
 5. **N1 / INH-1912**（`mcc-n1`，分支 `mc-v2/n1-rename-charset` @ `5ca9611`）：刚开工，要求**先复现再修**。控制方已排除两层：创建与改名共用同一校验（`updates.py:229`/`:263-264` → `fsutil.py:130`，允许中文），HTTP 路由也正常（`http.py:232`/`:241` 已 unquote、`router.py:77` 用 `[^/]+`）。剩余嫌疑：`api.seg` 前端编码、映射键归一化（NFC/NFD）、`update_config_mapping` 搬文件、`update_status.json` 搬键。
 
+**合并顺序冲突预警（控制方在 fff0e5f 逐卡列文件得出，先看清再动手）**：`app/web/tests/tests.js` 同时被两张在跑的卡改着——M3-08（`05c8dd0`，已提交）与 M4-02（`mcc-sec`，工作区未提交）；另外 `docs/know-how.md` 是 M3-08、N1、M4-02、M4-06、M4-05 五张卡都要追加的文件；`app/core/storage.py` 被 M3-08（另一处函数）与 N1（`_sanitize_config_filename`）同时改。处置口径：**先到的先合并**（按当前证据是 M3-08），后到的一方必须在**它自己的工作树**里 `git merge origin/feat/mc-v2-delivery` 手工解冲突并重跑全量，绝不允许用 `-X ours/theirs` 之类策略"赢"过去——know-how 与 tests.js 都是追加型文件，策略性合并会静默吃掉别人的条目或别人的用例，而这两处被吃掉都不会让任何测试变红。`app/web/tests/tests.js` 若被两边各自加了用例，钉死计数 `EXPECTED_CASES` 必须按合并后的真数重算。
+
 **评审工作树**：`mcc-review-m3-10`（detached @ `1b55e7f`，M3-10 复评前先 `git -C … checkout --detach <新 SHA>` 并让评审者回显 `git log --oneline -1`，见 R42）；`mcc-review-m3-08`（detached @ `05c8dd0`）。`mcc-review-n2` 已随 N2 合并清掉。
 
 **M3-08 评审第一轮作废（R37 同型事故，别再当成有效结论）**：那份输出通篇是 FastAPI / uvicorn / Jinja2 / pandas / psutil / 股票指标图 / `tests/requirements.txt`，这些在本仓库**一个都不存在**，且 usage 显示 tool_uses=0（它一行代码也没读）。作废判据不是“语气不对”而是**内容与仓库事实不符**：控制方复核方式是看它有没有引用任何本项目真实存在的符号、以及工具调用计数。第二轮派发词已点名作废理由，并要求逐字引用 file:line、断言缺失前先说明搜了什么。**教训补一条**：评审派发的usage 里 `tool_uses` 为 0 就直接作废，不必读正文。
