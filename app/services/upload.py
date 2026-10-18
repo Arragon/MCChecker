@@ -7,14 +7,20 @@
 链接导入的 `persist=false` 落到临时区（M2-10 的另一半），`persist=true` 走与上传完全
 相同的落盘路径，因此权限也一致（`upload_persist` = 部署者）。
 
-**SSRF 白名单不在本卡**：§14 把 `settings.download_allow` 的放行判断排在 M3-04，本卡只做
-`http/https` 前缀校验，并在 PR 里点名这一处遗留。
+**地址策略按授权分支挑选（N2 / INH-1913）**：`persist=false` 的字节进的是访客可见的临时区，
+所以这一条必须额外 `block_loopback=True`；`persist=true` 是部署者写权威配置的通道，内网更新
+源照旧可用，沿用 `default_policy` 的 `False`（卡 4 的裁定：默认值不动，opt-in 放在调用方的
+授权边界上）。见 `_download`。`settings.download_allow` 的白名单判断在 `core.downloader`
+（M3-04），本层只剩入口那句给出 `field="url"` 的 http/https 前缀校验，为的是把错误显示在
+对应输入框下方（§7.1）。
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import urllib.parse
+from dataclasses import replace
 from typing import Any, Dict, NamedTuple, Optional
 
 from ..core import downloader, fsutil, parser, storage
@@ -26,6 +32,8 @@ from ..core.errors import (
     AppError,
 )
 from . import revision, temp_store
+
+logger = logging.getLogger(__name__)
 
 PART = "files"
 DEFAULT_IMPORT_NAME = "downloaded.xml"
@@ -76,10 +84,7 @@ def import_url(
     if not target.lower().startswith(("http://", "https://")):
         raise AppError(INVALID_INPUT, "仅支持 http/https 链接", field="url")
 
-    data = downloader.download_file(target)
-    if data is None:
-        raise AppError(DOWNLOAD_FAILED, "下载失败：连接超时或目标不可达，已重试")
-
+    data = _download(target, persist, settings)
     clean_name = fsutil.validate_filename(str(name or "").strip() or _name_from_url(target))
     _check_size(data, settings.upload_max_bytes)
 
@@ -118,6 +123,32 @@ def create_temp(
         "size": meta["size"],
         "expires_at": meta["expires_at"],
     }
+
+
+def _download(target: str, persist: bool, settings) -> bytes:
+    """链接导入唯一的下载入口：**用哪个地址策略由 `persist` 在这里一次性决定**。
+
+    `persist=false` 的字节进访客可见的临时区，所以额外打开 `block_loopback`，关掉「访客把
+    导入指到服务器本机回环上的服务、再从临时文件查看器把正文读走」这条 SSRF（N2 / INH-1913）。
+    `persist=true` 走部署者的权威落盘，内网更新源照旧可用，沿用 `default_policy` 的 `False`。
+
+    协议/地址段/白名单的判断一律留在 `core.downloader`，超时与重试一律来自 `Settings`
+    （经 `default_policy`），本函数不重复实现其中任何一件。
+    """
+    policy = downloader.default_policy(settings)
+    if not persist:
+        policy = replace(policy, block_loopback=True)
+    try:
+        return downloader.fetch(target, policy)
+    except AppError as exc:
+        if exc.code != DOWNLOAD_FAILED:
+            # `TOO_LARGE` 及其余一律原样上抛：超限在服务边界是 413，不许塌成 502。
+            raise
+        # 下载类失败一律收成同一句话（`download_file` 的旧口径），逐字节相同，访客据此分不出
+        # 「端口开着还是关着」——那正是 SSRF 探测要读的差别。具体原因只进日志，且下载器已经把
+        # URL 脱敏成 `scheme://host/path`（§11.5）。
+        logger.error("链接导入下载失败: %s", exc.message)
+        raise AppError(DOWNLOAD_FAILED, "下载失败：连接超时或目标不可达，已重试") from exc
 
 
 def _name_from_url(url: str) -> str:

@@ -84,6 +84,8 @@
 ## 7. Do Not Do
 - 不要在 pytest 之外直接跑临时脚本调用 `app.core.storage` / `app.services.*`：数据根重绑定只发生在 `tests/conftest.py` 的夹具里，`storage.DATA_DIR = tmp` 这类手工赋值改不到由它派生的其它常量，脚本会把样本和 `cache/doc_v2` 写进仓库真实的 `data/`。要么写成 pytest 用例（自动隔离），要么显式用 `run.py --data-dir $(mktemp -d)`。
 - 不要只 `realpath` 一侧就算相对路径（`os.path.relpath(源, storage.DATA_DIR)`）：`fsutil.resolve_within()` 返回 realpath，而 `get_archive_root_dir()` / `get_records_root_dir()` 拼出来的是未解析的路径；macOS 上 `/var` 又是指向 `/private/var` 的符号链接，于是恢复区 manifest 的 `from` 会变成 `../../../../../../private/var/…` 这种没法照着放回去的废值（M2-12 真实后端跑出来才发现，pytest 的 tmp 两侧恰好一致所以没抓到）。要两侧都 `os.path.realpath()` 再 `relpath`。
+- 不要把「某个调用方必须翻的安全开关」放进原语的默认值里，也不要指望它自动生效：`DownloadPolicy.block_loopback` 的默认是 `False`（卡 4 裁定，部署者要从内网更新源取配置），但 `persist=false` 的链接导入把字节放进**访客可见的临时区**，这一条必须 `True`——否则访客就能把导入指到服务器本机 `127.0.0.1` 的服务上、再从临时文件查看器把正文读走（N2 / INH-1913 补的就是这个 opt-in）。落点选在调用方自己的授权边界（`app/services/upload.py::_download`，`persist` 在那里一次性决定策略），原语继续保持默认 `False`；判据是「谁能看到落地的字节」，不是「哪个函数比较方便」。反过来在 `default_policy()` 里改成 `True` 会一起断掉部署者与调度器的内网更新源。
+- 不要让下载失败的细节透出到访客能读到的响应体：`Connection refused`（端口关着）与 `HTTP 404`（端口开着、路径没有）只要文案不同，就是一只 SSRF 端口探测器。`services/upload.py` 沿用 `download_file` 的旧口径——一律收成同一句 `下载失败：连接超时或目标不可达，已重试`、`detail` 留空，原因只进日志（下载器已把 URL 脱敏成 `scheme://host/path`）。`TOO_LARGE` 是唯一例外，它必须原样上抛才有 413。证据在 `tests/test_api_import.py::TestImportUrlErrorHygiene`。
 - 不要使用小众第三方库
 - 不要在日志中输出敏感信息
 - 不要修改用户上传的原始文件
