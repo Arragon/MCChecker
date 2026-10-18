@@ -117,10 +117,10 @@
         var running = app.activeTasks.some(function (t) { return t.type === "update_all" && t.state === "running"; });
         /* 按钮可用性 = 分段已接入（D2）且 tasks 已接入（D4，卡 6 已放行，这里只核对）。
          * 未接入 ⇒ disabled + title，不发请求（决策 14）。 */
-        var offTitle = !MC.settingsSegmentWired("sources") ? "更新源分段尚未接入" : !MC.caps.tasks ? MC.unwired.tasks : null;
+        var tasksOff = !MC.settingsSegmentWired("sources") ? "更新源分段尚未接入" : !MC.caps.tasks ? MC.unwired.tasks : null;
         var all = h(
           "button.btn.btn-primary",
-          { type: "button", disabled: running || !!offTitle || !res.items.length, title: offTitle },
+          { type: "button", disabled: running || !!tasksOff || !res.items.length, title: tasksOff },
           icon("download"),
           running ? "全量更新进行中…" : "全部立即更新"
         );
@@ -137,8 +137,8 @@
             "button.btn.btn-sm",
             {
               type: "button",
-              disabled: ro() || !!offTitle,
-              title: ro() ? "只有部署者（在服务器本机访问）可以修改" : offTitle,
+              disabled: ro() || !!tasksOff,
+              title: ro() ? "只有部署者（在服务器本机访问）可以修改" : tasksOff,
             },
             icon("refresh"),
             "更新"

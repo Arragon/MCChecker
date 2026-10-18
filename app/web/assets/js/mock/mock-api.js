@@ -392,6 +392,12 @@
     })[0];
   }
 
+  /* progress 契约（卡 6 移交、卡 7 对齐，R19）：与后端同一出处——
+   * 建任务时是 0/0；update_all 在**开始执行**时发布 total（`updates.update_all`
+   * 首步 `_publish(task, 0, total, None)`）；单条任务（update_source/refresh_records）
+   * 要等下载调用**返回之后**才一起回填 done/total（`_publish_single`），整个下载
+   * 期间就是 0/0 ⇒ shell.js 渲染「准备中」。旧 mock 在建任务时就把 total 写进
+   * payload，掩盖了这个窗口，本卡改齐。 */
   function runTask(pid, type, name, actor) {
     var P = profile(pid);
     var key = pid + ":" + type + ":" + (name || "*");
@@ -404,12 +410,6 @@
       type: type,
       target: name || null,
       state: "running",
-      /* progress 契约（卡 6 移交、卡 7 对齐）：与后端同一出处——
-       * 建任务时是 0/0（`_publish` 之前什么都没人写）；update_all 在**开始执行**时
-       * 发布 total（`updates.update_all` 首步 `_publish(task, 0, total, None)`）；
-       * 单条任务（update_source/refresh_records）要等下载调用**返回之后**才一起回填
-       * done/total（`_publish_single`），整个下载期间就是 0/0 ⇒ shell.js 渲染「准备中」。
-       * 旧 mock 在建任务时就给 total，掩盖了这个窗口，本卡改齐。 */
       progress: { done: 0, total: 0 },
       result: { items: [] },
       error: null,
