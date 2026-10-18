@@ -1718,6 +1718,41 @@ def save_schedule(schedule: Dict[str, Any]):
         _save_json(_get_profile_json_file("schedule.json", profile), schedule)
 
 
+# ===================== 更新源最近结果 =====================
+#
+# `profiles/<pid>/update_status.json`（规范 §10.2 第 7 步、§7.9 的 `last_result`）：
+# `{文件名: {"status","label","reason","at","archived"}}`。
+#
+# 三条约束（这张卡新增的持久化文件，容易踩的地方都写在这）：
+# * **路径只在调用期由 `_get_profile_json_file` 求值**，不落地成模块级常量——测试夹具靠
+#   重绑定 `DATA_DIR` 隔离数据根，常量会绕开它写到真实目录（见 `configure_data_dir` 与
+#   `docs/know-how.md` 第 7 节），所以文件名字面量只出现在 `get_update_status_file` 里；
+# * 属**运行期数据**，因此**不进** `COPY_PROFILE_FILES`（§7.2：不随机型复制）；
+# * v1 没有这个文件，所以没有 `LEGACY_*` 回退：不存在就是「从没检查过」。
+
+
+def get_update_status_file(profile_id: Optional[str] = None) -> str:
+    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
+    return _get_profile_json_file("update_status.json", pid)
+
+
+def load_update_status() -> Dict[str, Any]:
+    """加载更新源最近结果；文件不存在时返回 `{}`（缺省视为全 null）。"""
+    path = get_update_status_file()
+    status = _load_json(path, {})
+    if not isinstance(status, dict):
+        # 形状不对（例如被改成数组）等同损坏：返回空表会让下一次保存丢掉全部结果。
+        raise CorruptDataError(path)
+    return status
+
+
+def save_update_status(status: Dict[str, Any]) -> None:
+    """整体保存更新源最近结果（原子写，机型锁内）。"""
+    profile = get_active_profile()
+    with _profile_write(profile):
+        _save_json(get_update_status_file(profile), status)
+
+
 #: 复制机型时带上的目录（规范 §7.2、C27）。
 #: `cache/` 可重建；`records/`、`edit_remarks.json`、`review_idempotency.json`、
 #: `ip_mapping.json`、`admin_users.json`、`update_status.json` 属于运行期数据，
