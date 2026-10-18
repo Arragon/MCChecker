@@ -194,7 +194,11 @@ def _is_constant(coeffs: Dict[str, Any]) -> bool:
 def _round(x: float) -> float:
     """dlmath.js round：Math.round(x*1e10)/1e10。JS Math.round 定义为
     floor(t+0.5)（半值向 +∞），与 Python round() 的银行家舍入不同，
-    必须按 JS 语义实现。"""
+    必须按 JS 语义实现。
+    改成 round(x, 10) 会让 1e-10 尺度上的半值往「偶数」方向靠而不是往 +∞，
+    既有 31 条用例照样绿而结果与 dlmath.js 漂移；钉死用例是
+    tests/test_dltool_multi.py::TestRoundTieDirection 与
+    tests/test_dlmath_crosscheck.py（后者直接跑 dlmath.js 对比）。"""
     return math.floor(x * 1e10 + 0.5) / 1e10
 
 
@@ -274,6 +278,9 @@ def find_roots(target: float, coeffs: Dict[str, Any], lo: Optional[float], hi: O
     none=非常数函数且范围内无根；lo/hi 任一为 None → no_range 且 roots=[]
     （空范围是 null，不是 0；“不限 x”的反解请走 reverse，它按 JS 回退 ±100）。
     """
+    # 顺序即语义（M3-10 修复轮）：no_range 判在 constant/identity **之前**，
+    # 所以「常数系数 + lo/hi 任一缺失」返回 no_range 而不是 identity/constant；
+    # 哨兵用例 tests/test_dltool_multi.py::TestFindRoots::test_no_range_precedes_constant_and_identity。
     if lo is None or hi is None:
         return {"status": "no_range", "roots": []}
     target = float(target)
@@ -364,6 +371,14 @@ def reverse(item: Dict[str, Any], kind: str, ys: Sequence[float]) -> Tuple[List[
             row["status"] = "out_of_y_range"
             rows.append(row)
             continue
+        # HAZARD（M3-10 修复轮）：s 可以是 **0.0** 而这份配置仍然 validate-legal——
+        # validate 只在 power_conv_coeff == 0.0 时拒绝，从不检查 trans_coeff == 0.0，
+        # 而 _scale_of 对 pp_energy 返回 trans_coeff / power_conv_coeff。
+        # s == 0.0 时下面这句对**任意** y（含 0.0，Python 的浮点除零不产出 inf/nan）
+        # 抛 ZeroDivisionError，整个 reverse 调用失败。本卡不改 validate、不在此兜底：
+        # 把它翻成 400（或按 spec 改判让 validate 拒绝 trans_coeff=0）归
+        # M3-11（app/services/dl.py）。哨兵用例见 tests/test_dltool_multi.py::
+        # TestTransCoeffZeroDividesByS（钉住「validate 放行 + 此处抛错」这一现状）。
         row["y_base"] = _round(float(y) / s)
         res = find_roots(row["y_base"], coeffs, lo, hi, samples=_REVERSE_SAMPLES)
         if res["status"] == "identity":
@@ -400,6 +415,12 @@ def multi_check(item: Dict[str, Any], kind: str) -> Dict[str, Any]:
         return {"has_multi": False, "cases": []}
     y_min = item.get("y_min")
     y_max = item.get("y_max")
+    # HAZARD（M3-10 修复轮）：与 reverse 里同一条——trans_coeff == 0.0 时 s == 0.0，
+    # 而 validate 仍然放行（它只拒绝 power_conv_coeff == 0.0）。只要 y_min/y_max
+    # 有**任一**非 None，下面两句 ÷ s 就抛 ZeroDivisionError（两者都为 None 时走
+    # min/max(observed)，本卡不崩）。翻成 400 或改判 validate 归 M3-11
+    # （app/services/dl.py）；哨兵用例 tests/test_dltool_multi.py::
+    # TestTransCoeffZeroDividesByS。
     base_min = (float(y_min) / s) if y_min is not None else min(observed)
     base_max = (float(y_max) / s) if y_max is not None else max(observed)
     cases: List[Dict[str, Any]] = []

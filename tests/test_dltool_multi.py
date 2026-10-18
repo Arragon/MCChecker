@@ -127,6 +127,23 @@ class TestFindRoots:
         assert dltool.find_roots(4.0, coeffs, 0.0, None) == {"status": "no_range", "roots": []}
         assert dltool.find_roots(4.0, coeffs, None, None) == {"status": "no_range", "roots": []}
 
+    def test_no_range_precedes_constant_and_identity(self):
+        """分支顺序即语义（M3-10 修复轮 / Minor 2）：no_range 判在 constant/identity **之前**，
+        所以「常数系数 + 范围缺失」返回 no_range，而不是 identity / constant。
+        把 find_roots 里两个 if 换个个儿，本用例就红（实测）。
+        注意上面那条用的是非常数多项式，钉不住这条顺序。"""
+        const = _empty_coeffs()
+        const["b"] = 2.0
+        # target == b：范围齐备时才是 identity，缺范围时是 no_range
+        assert dltool.find_roots(2.0, const, None, None) == {"status": "no_range", "roots": []}
+        assert dltool.find_roots(2.0, const, None, 5.0) == {"status": "no_range", "roots": []}
+        assert dltool.find_roots(2.0, const, -5.0, None) == {"status": "no_range", "roots": []}
+        # target != b：同理，no_range 优先于 constant
+        assert dltool.find_roots(3.0, const, None, None) == {"status": "no_range", "roots": []}
+        # 对照：范围齐备时才是 constant / identity
+        assert dltool.find_roots(3.0, const, -5.0, 5.0)["status"] == "constant"
+        assert dltool.find_roots(2.0, const, -5.0, 5.0)["status"] == "identity"
+
     def test_zero_bound_is_real_not_null(self):
         """lo=0.0 是真实下界：f(x)=x 的根 -5 被排除（若 0 被当成 None 就会搜到 [-100,100]）。"""
         coeffs = _empty_coeffs()
@@ -144,6 +161,39 @@ class TestFindRoots:
         assert res["status"] == "ok"
         assert len(res["roots"]) == 1
         assert res["roots"][0]["residual"] < 1e-9
+
+
+class TestRoundTieDirection:
+    """_round 的半值方向必须是 JS 的 Math.round（= floor(t+0.5)，往 +∞ 破平），
+    不是 Python round() 的银行家舍入（往偶数破平）。M3-10 修复轮 / Important 1。
+
+    期望值按 JS 语义手算并经 node 实测复核（Math.round(x*1e10)/1e10）：
+      0.00000000035 → t=3.5  → floor(4.0)=4 → 0.0000000004
+      -0.00000000025 → t=-2.5 → floor(-2.0)=-2 → -0.0000000002（朝 +∞，不是 -0.0000000003）
+      0.00000000025 → t=2.5  → floor(3.0)=3 → 0.0000000003
+    回归成 round(x, 10) 会怎么红：-0.00000000025 变成 -0.0000000003、
+    0.00000000035 变成 0.0000000003（两条断言当场失败；实测见修复报告）。
+    反过来说 0.00000000025 **不是**判据——距它最近的双精度落在平局点上方，
+    round(·, 10) 看到的不是平局，两种写法都给 0.0000000003。这条留在这里只是把
+    卡面写明的正半值期望钉住，真正执法的是上面两条同号反号各一的判据。
+    """
+
+    def test_round_breaks_ties_toward_positive_infinity(self):
+        assert dltool._round(0.00000000035) == 0.0000000004
+        assert dltool._round(-0.00000000025) == -0.0000000002
+        assert dltool._round(0.00000000025) == 0.0000000003
+        # 更多 JS 实测同值的半值刻度（floor(t+0.5) 与银行家舍入在这些点上分道）
+        assert dltool._round(0.00000000015) == 0.0000000002
+        assert dltool._round(0.00000000045) == 0.0000000005
+        assert dltool._round(-0.00000000035) == -0.0000000003
+        assert dltool._round(-0.00000000015) == -0.0000000001
+
+    def test_round_is_identity_like_on_non_ties(self):
+        """非平局值仍然是「四舍五入到 10 位」，两条语义只在 .5 上分岔。"""
+        assert dltool._round(0.123456789012345) == 0.123456789
+        assert dltool._round(1.00000000004) == 1.0
+        assert dltool._round(-2.0000000006) == -2.0000000006
+        assert dltool._round(0.0) == 0.0
 
 
 class TestForward:
@@ -281,6 +331,55 @@ class TestMultiCheck:
         # (x-3)²=0.25 → x = 3±0.5
         assert res["cases"][0]["y"] == 1.0
         assert res["cases"][0]["x_values"] == pytest.approx([2.5, 3.5], abs=1e-9)
+
+
+class TestTransCoeffZeroDividesByS:
+    """trans_coeff == 0.0 是 validate **放行**的配置，而 reverse/multi_check 会 ÷ s 崩
+    （s = trans_coeff / power_conv_coeff = 0.0）。M3-10 修复轮 / Important 2 + Minor 3。
+
+    本卡只钉现状，不改判：把 ZeroDivisionError 翻成 400（或出 spec 让 validate 拒绝
+    trans_coeff=0）归 M3-11（app/services/dl.py）。M3-11 改了行为，这三条就该同步改，
+    届时它们是提示「有一处契约变化需要跟着落测」的哨兵，而不是回归失败。
+    JS 侧对照：dlmath.js 同样不拒绝 trans_coeff=0，但它算出 Infinity/NaN 继续跑，
+    Python 侧按 _scale_of 的既有裁定选择响亮失败。
+    """
+
+    def _zero_trans_item(self, **over):
+        coeffs = _empty_coeffs()
+        coeffs["k1"] = -6.0
+        coeffs["k2"] = 1.0
+        coeffs["b"] = 9.0
+        item = {"coeffs": coeffs, "x_min": -10.0, "x_max": 10.0,
+                "y_min": 0.0, "y_max": 100.0, "trans_coeff": 0.0, "power_conv_coeff": 1.0}
+        item.update(over)
+        return item
+
+    def test_validate_accepts_zero_trans_coeff(self):
+        """validate 只拒绝 power_conv_coeff == 0.0，从不看 trans_coeff。"""
+        assert dltool.validate(self._zero_trans_item(), "pp_energy") == ""
+
+    def test_reverse_raises_zero_division(self):
+        item = self._zero_trans_item()
+        with pytest.raises(ZeroDivisionError):
+            dltool.reverse(item, "pp_energy", [4.0])
+        # y=0.0 也一样崩：Python 的浮点除零不产出 inf/nan，而是直接抛
+        with pytest.raises(ZeroDivisionError):
+            dltool.reverse(item, "pp_energy", [0.0])
+
+    def test_multi_check_raises_zero_division_when_y_range_is_set(self):
+        """y_min/y_max 任一非 None 就走到 ÷ s；两者都为 None 时用观测域，不崩。"""
+        with pytest.raises(ZeroDivisionError):
+            dltool.multi_check(self._zero_trans_item(), "pp_energy")
+        with pytest.raises(ZeroDivisionError):
+            dltool.multi_check(self._zero_trans_item(y_min=None), "pp_energy")
+        assert dltool.multi_check(self._zero_trans_item(y_min=None, y_max=None),
+                                 "pp_energy")["has_multi"] is True
+
+    def test_forward_survives_zero_trans_coeff(self):
+        """forward 是乘 s，不是除 s —— 同一份合法配置下它只有 0 输出，不抛。"""
+        rows = dltool.forward(self._zero_trans_item(), "pp_energy", [1.0])
+        assert rows[0]["y_base"] == 4.0
+        assert rows[0]["y"] == 0.0
 
 
 class TestValidate:
