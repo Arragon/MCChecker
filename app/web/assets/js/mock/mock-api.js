@@ -398,6 +398,25 @@
    * 要等下载调用**返回之后**才一起回填 done/total（`_publish_single`），整个下载
    * 期间就是 0/0 ⇒ shell.js 渲染「准备中」。旧 mock 在建任务时就把 total 写进
    * payload，掩盖了这个窗口，本卡改齐。 */
+  /* §10.2 末段 / §10.3：`update_all` 对每个**带 record_url** 的映射项在配置更新之后再跑
+   * 一次记录拉取，所以「条目数」可以比「目标数」多——后端 `updates.update_all` 就是这个
+   * 形状（`progress.total` 仍是映射项数，`result.items` 一个映射项可能出两条）。旧 mock 只
+   * 跑配置那半，于是 §9.8.6 空状态里那句「定时更新时会自动拉取」在 mock 里演示不出来。
+   * 条目顺序与后端一致：先配置、后记录。
+   * （本函数刻意放在 `runTask` 之前：`tests/test_api_tasks.py` 那条 mock 契约用例是按
+   * 「从 runTask 的定义起 2600 个字符」的窗口读源码的，把注释堆进 runTask 会把窗口尾的
+   * 那句 202 响应挤出窗口——那是断言的容量问题，不是它测错了，所以这里收窄 runTask，
+   * 而不是去放宽那条断言。也别在这里逐字写出那两个被 grep 的串，窗口是按它们定位的。） */
+  function taskItemsFor(P, pid, type, name) {
+    var first = type === "refresh_records" ? doRefreshRecords(P, name) : doUpdate(P, pid, name);
+    var items = [first];
+    if (type === "update_all") {
+      var mapped = P.mapping.filter(function (x) { return x.name === name; })[0];
+      if (mapped && mapped.record_url) items.push(doRefreshRecords(P, name));
+    }
+    return items;
+  }
+
   function runTask(pid, type, name, actor) {
     var P = profile(pid);
     var key = pid + ":" + type + ":" + (name || "*");
@@ -425,8 +444,7 @@
       setTimeout(function () {
         var tgt = targets[step];
         if (type === "update_all") t.progress.total = targets.length;
-        var res = type === "refresh_records" ? doRefreshRecords(P, tgt) : doUpdate(P, pid, tgt);
-        t.result.items.push(res);
+        taskItemsFor(P, pid, type, tgt).forEach(function (item) { t.result.items.push(item); });
         step++;
         t.progress.done = step;
         if (type !== "update_all") t.progress.total = targets.length;
@@ -435,7 +453,10 @@
         var failed = t.result.items.filter(function (x) {
           return TASK_FAILED_STATUSES.indexOf(x.status) >= 0;
         }).length;
-        t.state = failed === 0 ? "succeeded" : failed === targets.length ? "failed" : "partial";
+        /* 与后端 `_state_from_items` 同判据：**全部条目**失败才 `failed`。旧写法拿
+         * `targets.length` 比，条目数一旦多于目标数（上面那条记录拉取就会）会把
+         * 「部分失败」误报成「失败」。 */
+        t.state = failed === 0 ? "succeeded" : failed === t.result.items.length ? "failed" : "partial";
         t.finished_at = util.nowString();
         if (type === "update_all") {
           P.schedule.last_run = {
@@ -473,14 +494,41 @@
     return res;
   }
 
+  /* §10.3 / C13 契约（卡 9 / M3-09 与后端对齐，SPEC 权威、mock 跟随）：
+   * 拉到的内容与**最新一条**记录逐字节相同 ⇒ `unchanged`，**不新建记录文件**；不同才按
+   * §5.3 命名保存。旧 mock 每次点击都无条件 `records.unshift(...)`，于是「再拉相同内容
+   * 条数不变」这一半在 mock 里根本测不出来，本卡改齐。
+   * mock 没有真的远端可下载：可下载的那份内容就按最新一条记录对待，所以已有记录的源每次
+   * 拉取都是 `unchanged`（与「远端没换内容」时的后端一字不差），一条记录都没有时落第一份。
+   * 状态词汇与 `services/updates.py::LABELS` 同口径（`success`→已更新、`unchanged`→无变化），
+   * 旧文案「已拉取 / 新增 1 条修改记录」是 mock 自己造的。 */
   function doRefreshRecords(P, name) {
     var m = P.mapping.filter(function (x) { return x.name === name; })[0];
     if (!m || !m.record_url) return { name: name, status: "skipped", label: "已跳过", reason: "未配置修改记录链接" };
     var f = P.files[name];
-    var last = f.records[0];
+    // mock 把记录挂在文件对象上，没有文件对象时无处存放（后端会照常落 records/<name>/）。
+    if (!f) return { name: name, status: "skipped", label: "已跳过", reason: "mock：本地还没有该文件的记录目录" };
+    if (f.records[0]) {
+      // 「远端内容」与最新一条逐字节相同 ⇒ unchanged，**不新建记录文件**（C13）。
+      return { name: name, status: "unchanged", label: "无变化", reason: "内容与最新一条修改记录一致，未新建记录文件", archived: null };
+    }
     var s = stamp();
-    f.records.unshift({ filename: "record_" + s.day + "_" + s.sec + ".xml", text: last ? last.text : "<changes/>", mtime: util.nowString() });
-    return { name: name, status: "success", label: "已拉取", reason: "新增 1 条修改记录" };
+    var filename = "record_" + s.day + "_" + s.sec + recordExt(m.record_url);
+    f.records.unshift({ filename: filename, text: "<changes/>", mtime: util.nowString() });
+    return { name: name, status: "success", label: "已更新", reason: "已保存新的修改记录 " + filename, archived: null };
+  }
+
+  /* §5.3：扩展名取自 record_url 的路径（含点在内 ≤10 个字符且只允许字母数字与点），
+   * 取不到则 `.txt`。判据与 `storage.save_record_file` 逐条对齐，别在 mock 里写死 `.xml`。
+   * （Python 的 `str.isalnum()` 认中文等非 ASCII 字母，这里只认 A-Za-z0-9：更严，
+   * 差别只在「怪扩展名落到 .txt」，演示无影响。） */
+  function recordExt(url) {
+    var path = String(url || "").split("?")[0].split("#")[0];
+    var leaf = path.slice(path.lastIndexOf("/") + 1);
+    var dot = leaf.lastIndexOf(".");
+    var ext = dot > 0 ? leaf.slice(dot) : "";
+    if (!ext || ext.length > 10 || /[^A-Za-z0-9.]/.test(ext)) return ".txt";
+    return ext;
   }
 
   function saveVersion(P, name, text) {

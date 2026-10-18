@@ -674,9 +674,13 @@ class TestUpdateAll:
 
         assert [item["name"] for item in summary["items"]] == ["a.xml", "a.xml"]
         assert summary["items"][0]["status"] == "success"
-        assert summary["items"][1]["status"] == "skipped"
-        # 本卡不下载修改记录：服务器只记到配置那一条
-        assert srv.requests == ["/a.xml"]
+        # 卡 9（M3-09）把 `refresh_records` 的骨架换成了真拉取：本卡这条用例的
+        # 「第二项 = skipped（未实现）」与「服务器只记到配置那一条」两句期望随之改变，
+        # 现在记录那一项是 `success`，而服务器必须记下**两次**下载。
+        # 「只有带 record_url 才跑记录拉取」这一半仍然由下面的 requests 证明：
+        # 没有第二个映射项，就没有第三条请求。
+        assert summary["items"][1]["status"] == "success"
+        assert srv.requests == ["/a.xml", "/records.xml"]
 
     def test_task_progress_and_items_are_filled(self, pid, servers):
         from app.services import updates
@@ -786,7 +790,16 @@ class TestReadModifyWriteLocks:
         assert set(_status_file(pid)) == {"a.xml", "b.xml"}
 
 
-class TestRefreshRecordsSkeleton:
+class TestRefreshRecordsGuards:
+    """§10.3 的两道**前置守卫**与「不写 update_status」这条数据边界（拉取本体见 `tests/test_api_records.py`）。
+
+    类名原为 `TestRefreshRecordsSkeleton`（卡 5 只搭了签名与判定，不下载、不落盘）。
+    卡 9（M3-09 / INH-1894）把主体填上了：那条
+    `test_with_record_url_is_skipped_and_downloads_nothing`（断言「一条字节都不下载」）
+    断的正是**已被本卡替换掉的行为**，它的正面版本（真下载、真落盘、相同内容不新建）在
+    `tests/test_api_records.py`，这里只留「守卫不过就不碰网络」的两条。
+    """
+
     def test_missing_mapping_is_not_found(self, pid):
         from app.services import updates
 
@@ -805,8 +818,15 @@ class TestRefreshRecordsSkeleton:
         assert result["status"] == "skipped"
         assert result["reason"] == "未配置修改记录链接"
 
-    def test_with_record_url_is_skipped_and_downloads_nothing(self, pid, servers):
-        """主体属卡 9：签名与骨架先就位，但一条字节都不下载。"""
+    def test_does_not_write_update_status(self, pid, servers):
+        """`update_status.json` 装的是「更新源最近结果」，记录拉取不往里写。
+
+        卡 5 时这条用例走的是「什么都没做」的骨架，所以它当时是空的成立；卡 9 落地后
+        必须让它**真的拉成功一份记录**再来断言——`update_all` 会按同一个映射名先跑配置
+        更新再跑记录拉取，记录要是也往这个键写，配置那半的「最近结果」每次都会被覆盖
+        （UC-31 的状态列当场失真）。
+        """
+        from app.core import storage
         from app.services import updates
 
         srv = servers({"/records.xml": {"body": RECORD_BODY}})
@@ -814,18 +834,10 @@ class TestRefreshRecordsSkeleton:
 
         result = updates.refresh_records(pid, NAME, "deployer")
 
-        assert result["status"] == "skipped"
-        assert "M3-09" in result["reason"]
-        assert srv.requests == []
-
-    def test_does_not_write_update_status(self, pid):
-        """`update_status.json` 装的是「更新源最近结果」，记录拉取不往里写。"""
-        from app.services import updates
-
-        _seed(pid, url="", record_url="http://127.0.0.1:1/records.xml")
-
-        updates.refresh_records(pid, NAME, "deployer")
-
+        assert result["status"] == "success"  # 真的写了一份记录，不是空跑
+        assert srv.requests == ["/records.xml"]
+        with storage.use_profile(pid):
+            assert storage.load_update_status() == {}
         assert _status_of(pid) is None
 
 

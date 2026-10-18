@@ -44,7 +44,7 @@
    * 第三轮 nit：这条声明必须排在下面注册的两个监听**之前**——监听在脚本求值期就可能调
    * report()，那时若常量还没赋值，红会写成「预期 undefined，实际注册 0」（仍然红，
    * 但不说人话）。 */
-  var EXPECTED_CASES = 42;
+  var EXPECTED_CASES = 43;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1268,6 +1268,89 @@
     var domRows = tree.el.querySelectorAll(".tr").length;
     ok(domRows > 0 && domRows <= 80, "可视区 DOM 行数与总节点数无关，实测 " + domRows);
     tree.destroy();
+  });
+
+  /* 卡 9 / M3-09（INH-1894）追加：mock 的修改记录契约必须与后端同口径。
+   * 旧 mock 每次「立即拉取」都无条件 `records.unshift(...)` 并回 `success/已拉取`，
+   * 于是 §10.3 与 C13 那条「内容与最新一条相同就不新建记录文件」在 mock 里根本演示不出来，
+   * 而 UC-30 的「再拉相同内容条数不变」正是这张卡的主验收。用例打在 `MC.mock.handle` 上，
+   * 断的是**可观察结果**（列表条数与文件名、任务条目状态、files 修订号），不是源码文字。 */
+  test("mock §10.3 / C13：相同内容的记录拉取不新建文件、不递增 files", function () {
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    /* mock 的模拟步骤是 setTimeout(900) 逐条推进：这里必须**轮询到任务结束**再断言，
+     * 但轮询本身有上限，超时是失败而不是跳过（浮空链一律 return，见文件头那条 C1）。 */
+    function waitFinished(id, tries) {
+      return call("GET", "/tasks/" + id).then(function (r) {
+        var t = r.body && r.body.task;
+        if (t && (t.state === "succeeded" || t.state === "partial" || t.state === "failed")) return t;
+        if (tries <= 0) throw new Error("mock 任务没有在轮询上限内结束：" + id);
+        return new Promise(function (resolve) {
+          setTimeout(resolve, 40);
+        }).then(function () {
+          return waitFinished(id, tries - 1);
+        });
+      });
+    }
+    function names(r) {
+      return r.body.items.map(function (x) { return x.filename; });
+    }
+    function later(fn) {
+      return new Promise(function (resolve) {
+        setTimeout(resolve, 40);
+      }).then(fn);
+    }
+    /* 前面的契约用例「并发下发」后Leave了一条在跑的 mock 任务（`setTimeout(900)` 逐条推进）。
+     * 按 §10.1 / 卡 6 复审 F2，`refresh_records` 与 `update_source`/`update_all` 在**同一机型内
+     * 两两互斥**，直接 POST 会撞 409——那是契约正确，不是本用例要测的东西，所以先等队列空。 */
+    function waitIdle(tries) {
+      return call("GET", "/p/default/tasks").then(function (r) {
+        var busy = (r.body.items || []).filter(function (t) {
+          return t.state === "queued" || t.state === "running";
+        });
+        if (!busy.length) return null;
+        if (tries <= 0) {
+          throw new Error("default 机型里始终有在跑的更新类任务，无法开始拉取：" + busy.map(function (t) { return t.type; }).join(","));
+        }
+        return later(function () {
+          return waitIdle(tries - 1);
+        });
+      });
+    }
+    var name = "scenario_a.xml"; // 默认映射里唯一带 record_url 的项，种子里已有两条记录
+    var beforeFiles = null;
+    var beforeNames = null;
+    return waitIdle(120)
+      .then(function () {
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (r) {
+        beforeFiles = r.body.parts.files;
+        return call("GET", "/p/default/files/" + encodeURIComponent(name) + "/records");
+      })
+      .then(function (r) {
+        beforeNames = names(r);
+        eq(beforeNames.length, 2, "种子里有两条修改记录");
+        return call("POST", "/p/default/tasks", { type: "refresh_records", name: name });
+      })
+      .then(function (r) {
+        eq(r.status, 202, "「立即拉取」只走 POST /tasks（页面不再自己定时拉）");
+        return waitFinished(r.body.task.id, 80);
+      })
+      .then(function (task) {
+        var item = task.result.items[0];
+        eq(item.status, "unchanged", "mock 的「远端内容」就是最新那一条 ⇒ C13 判重必须生效：" + item.status);
+        eq(item.label, "无变化", "文案与 `updates.LABELS` 同口径，不再是 mock 自造的「已拉取」");
+        return call("GET", "/p/default/files/" + encodeURIComponent(name) + "/records");
+      })
+      .then(function (r) {
+        eq(names(r), beforeNames, "相同内容不得新增记录文件：条数与名字都不许变");
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (r) {
+        eq(r.body.parts.files, beforeFiles, "unchanged 拉取不递增 files（R5：不叫醒别人）");
+      });
   });
 
   /* EXPECTED_CASES（钉死用例总数）已提到文件顶部两个监听之前（第三轮 nit）。 */

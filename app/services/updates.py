@@ -19,9 +19,17 @@
 结构）；只有存储失败才向上抛。失败与跳过同样会写 `update_status.json`——「最近结果」这一列
 要的正是失败原因。例外是 `not_found`：映射里根本没有这个名字，不该往状态文件里塞野键。
 
+例外二：`refresh_records`（§10.3）**不写** `update_status.json`。那个文件的键是映射名、
+存的是「这个源的**配置**最近一次更新结果」（§5.2、UC-31 的状态列）；`update_all` 会按
+同一个映射名先跑 `update_source` 再跑 `refresh_records`，记录拉取要是也往里写，就会
+**每次都用记录的结果把配置的最近结果覆盖掉**。所以记录的结果只进任务条目
+（§7.10 的 `result.items`），不进状态文件。
+
 下载策略全部来自启动配置（`downloader.default_policy()`）。`block_loopback` 保持默认
 `False`：§10.2 只对**访客临时导入**额外禁止回环，那一条路径在 `services/upload.py`
-（不在本卡范围，认领结论见卡报告 R31）。
+（不在本卡范围，认领结论见卡报告 R31）。修改记录走**同一个** `downloader.fetch` 与同一份
+策略：白名单 `MCHECKER_DOWNLOAD_ALLOW`、逐跳重定向复核、超时与重试都在这条路上生效，
+本模块不写第二个取数原语。
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,7 +53,8 @@ from . import revision
 
 logger = logging.getLogger(__name__)
 
-#: `update_source` 成功后递增的修订分量（§7.3）。
+#: 写入了**新的权威原文字节**之后递增的修订分量（§7.3）。配置更新（§10.2 第 7 步）与
+#: 修改记录（§10.3）共用它，也共用同一条判据：字节真的变了才通知别人（R5）。
 PART = "files"
 #: 映射 CRUD 与调度配置属于「设置」分量（本模块是 `settings` 的第一个调用点，M3-17 会审）。
 SETTINGS_PART = "settings"
@@ -67,7 +77,9 @@ UNCHANGED_REASON = "内容与当前版本一致，未归档"
 RACE_REASON = "当前版本在本次更新期间被其他操作修改，已放弃替换"
 NO_MAPPING_REASON = "映射中不存在该更新源"
 NO_RECORD_URL_REASON = "未配置修改记录链接"
-RECORDS_PENDING_REASON = "修改记录拉取将在 M3-09 接入"
+#: §10.3 / C13：内容与最新一条记录逐字节相同 → `unchanged`，**不新建记录文件**。
+RECORD_UNCHANGED_REASON = "内容与最新一条修改记录一致，未新建记录文件"
+RECORD_SAVED_REASON = "已保存新的修改记录 %s"
 
 _URL_LABELS = {"url": "下载链接", "record_url": "修改记录链接"}
 
@@ -177,20 +189,65 @@ def update_all(pid: str, actor: str, task: Optional[Any] = None) -> Dict[str, An
 
 
 def refresh_records(pid: str, name: str, actor: str) -> Dict[str, Any]:
-    """§10.3 的**骨架**：只判定映射与 `record_url`，不下载、不落盘。
+    """§10.3 拉取修改记录：下载 → 与**最新一条**比 sha256 → 相同就不新建文件（C13）。
 
-    主体（下载、与最新一条记录比 sha 去重、按 §5.3 命名保存）属卡 9（INH-1894）。
-    签名与返回结构与卡 9 一致，届时只替换第 3 个分支的实现。
+    与 §10.2 的四点区别，都要保住：
+
+    1. **不校验可解析性、不校验根节点**：§10.3 明写「记录内容不要求可解析」，解析不了的
+       在查看时走原文下载（`documents` 对 `version=record:` 已经给出 422 + `raw_available`）。
+       因此记录的结果里**没有** `rejected` 这个取值。
+    2. **不写 `update_status.json`**（见模块 docstring 的「例外二」）：那个键属于配置更新，
+       `update_all` 按同一个映射名连着跑两者，写进来就会互相覆盖。
+    3. **「变没变」的基准是 `records/<name>/` 里最新一条**，不是当前配置文件。判据是
+       逐字节 sha256，与 R5 同口径；`unchanged` 不新建文件、不递增 `files`。
+    4. **命名与落盘交给 `storage.save_record_file`**（§5.3：`record_<YYYYMMDD>_<HHMMSS><ext>`，
+       ext 取自 `record_url` 路径且 ≤10 个字母数字，否则 `.txt`；同秒冲突追加 `_2`…），
+       这里不另起一套。
+
+    「读最新一条 → 比 sha → 写新文件」是一次读-改-写，整段扣在同一把机型锁里（§5.4）：
+    分两次加锁的话，并发两次拉同一份新内容会各自读到「没有记录」，然后各写一个文件——
+    机型锁只保证单次写不被撕裂，不会让两次互相覆盖丢失。网络 I/O 仍然在锁外（§3.5），
+    所以两次并发下载照旧发生，只是第二次进锁后看到的是第一次写好的那份记录 ⇒ `unchanged`。
     """
     with storage.use_profile(pid):
         entry = _mapping_entry(name)
         if entry is None:
             return _result(name, "not_found", NO_MAPPING_REASON)
         target = str(entry.get("name") or "")
-        if not str(entry.get("record_url") or "").strip():
+        record_url = str(entry.get("record_url") or "").strip()
+        if not record_url:
             return _result(target, "skipped", NO_RECORD_URL_REASON)
-        logger.info("修改记录拉取未实现（M3-09）：%s（actor=%s）", target, actor)
-        return _result(target, "skipped", RECORDS_PENDING_REASON)
+
+        try:
+            content = downloader.fetch(record_url, _policy())
+        except AppError as exc:
+            status = "too_large" if exc.code == TOO_LARGE else "download_failed"
+            result = _result(target, status, exc.message)
+            logger.info(
+                "修改记录拉取 %s: %s（actor=%s）%s", target, status, actor, result["reason"]
+            )
+            return result
+
+        with storage.profile_write(pid):
+            latest = _latest_record_bytes(target)
+            if latest is not None and _sha(latest) == _sha(content):
+                result = _result(target, "unchanged", RECORD_UNCHANGED_REASON)
+            else:
+                saved = storage.save_record_file(target, content, source_url=record_url)
+                result = _result(target, "success", RECORD_SAVED_REASON % os.path.basename(saved))
+
+        logger.info(
+            "修改记录拉取 %s: %s（actor=%s）%s",
+            target,
+            result["status"],
+            actor,
+            result["reason"],
+        )
+        if result["status"] == "success":
+            # 只有真的多了一份记录文件才通知别人（R5）：`unchanged` 与失败都不递增，
+            # 否则「一条记录都没新增」会把全部客户端的横幅点起来。
+            revision.bump(pid, PART)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +389,27 @@ def _policy() -> downloader.DownloadPolicy:
 def _current_bytes(name: str) -> Optional[bytes]:
     """当前版本字节。§10.2 第 4/5 步在锁外读一次、第 6 步在锁内再读一次，共两次。"""
     return storage.load_config_file(name)
+
+
+def _latest_record_bytes(name: str) -> Optional[bytes]:
+    """`records/<name>/` 里**最新一条**记录的字节；没有任何记录时返回 `None`。
+
+    `None` 是「没有可比对象」而不是「内容相同」，所以第一次拉取一定走 `success`——
+    这点与 §10.2 第 4 步的根指纹同口径（拿不到基准时不做拒绝、也不做去重）。
+
+    顺序只有一个出处：`storage.list_record_versions` 按时间倒序，第 0 项就是「最新一条」
+    （`services/history.py` 列记录用的也是它，两处不会读出不同的「最新」）。
+    """
+    clean = _optional_validated_name(name)
+    if clean is None:
+        return None
+    versions = storage.list_record_versions(clean)
+    if not versions:
+        return None
+    filename = str(versions[0].get("filename") or "")
+    if not filename:  # pragma: no cover - 目录里列出来的名字必然非空
+        return None
+    return storage.load_record_file(clean, filename)
 
 
 def _mapping_entry(name: str) -> Optional[Dict[str, Any]]:
