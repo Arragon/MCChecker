@@ -74,7 +74,10 @@ M4 收尾：feat/mc-v2-delivery → v1.0.1 一条汇总 PR
    ```
    **为什么不再手敲 `find data | shasum`**（INH-1914 之前这里是事故源）：① 一旦开始报数字，人就倾向于抄文档里的旧数字而不是当场跑 —— 已有五个合并 PR 这么报过一个**从未实测、也复现不出来**的哈希；② 原先抄在文档里的这条命令**没有** `-not -name '.mcchecker.lock'`，服务在跑时必然给出假的「❌ data 被改动」；③ 它按整行排序，与 `tests/data_guard.py`（按路径排序）给出的聚合值本来就**不相等**，两处「权威数字」互相打脸。守卫的红/绿取代它。若确实必须给出数字，只能贴**当场跑的命令 + 原始输出**，且必须写「本机值，不代表基线」。
    **守卫绿只证明首末快照一致**，不证明期间无人写入（两个盲区见 `docs/know-how.md`）。
-   涉及前端时补：`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "file://$PWD/app/web/tests/index.html"` → `<title>ALL PASSED (n)</title>`。
+   涉及前端时补（**命令必须是 HTTP 形态，`file://` 已作废**，M3-06 第三轮实测）：从 `/tmp` 起一个只服务 `app/web/` 的临时静态服务器（随机端口，绝不用仓库 `data/` 当服务根），同一个预算跑
+   `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:<port>/tests/index.html"` → `<title>ALL PASSED (n)</title>`。
+   **`file://` 为什么不能用**：该协议下「外部脚本里产生的 Promise 拒绝」永不派发 `unhandledrejection`（控制方与评审方各自独立实测：同一份页面 `file://` → 不派发、HTTP → 命中；变量是脚本来源，与队列状态无关，预算 8000→30000 也一样）。于是「把断言留在一条自己不 return 的链里」这种形状在 `file://` 下**确定性地报绿**——用例注册了、启动了（用例数钉死满足），没有同步抛（error 通道静默）。
+   **HTTP 形态有两种抖动必须重跑而不是改代码**：dump 早于 `report()` ⇒ 标题停在初始值；dump 早于某个外部 `.js` 执行完 ⇒ 一批 `X is not a function`（看着像真回归但不是）。**判据只认 `ALL PASSED (n)` / `n FAILED / m`，其它一律重跑。**
    涉及 HTTP 时补：真实 `run.py --port <随机> --data-dir "$(mktemp -d)"` + `curl` 走一遍本卡的验收条目 —— **必须用临时 `--data-dir`**，否则真实服务写字节会被守卫判为改动而红。
 6. **提交**：`feat(<域>): <一句话>（<卡号> / <INH-xxxx>）`；同分支多次提交可，但**一个卡一个 PR**。
 7. **PR + 合并**：写清「范围／改动／验证（命令+结果）／已知取舍」；`gh pr create --base feat/mc-v2-delivery` → `gh pr merge <n> --merge` → 本地 `feat/mc-v2-delivery` 拉平。
