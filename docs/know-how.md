@@ -31,6 +31,7 @@
 - 使用 `ui.run(host='0.0.0.0')` 允许内网访问
 - 文件上传使用 `ui.upload` 组件，通过 `e.content.read()` 获取内容
 - Windows 下 Python 输出需 `sys.stdout.reconfigure(encoding='utf-8')` 避免编码错误
+- 子类只覆盖 `HTTPRedirectHandler.http_error_302` 是**不够的**：基类里 `http_error_301 = http_error_303 = http_error_307 = http_error_302` 是在类体求值时绑定的别名，指向基类函数本身，301/303/307 仍会绕过子类的实现（M3-04 自定义重定向策略时发现；308 基类压根不处理）。要么在本类里重新赋一遍别名，要么像本卡这样自己接管 3xx（校验的 URL 与请求的 URL 必须是同一个）。
 - PowerShell 写入文件内容过长时可能触发文件名过长错误，需拆分文件
 
 ## 4. Testing Notes
@@ -40,7 +41,7 @@
 - `tests.js` 的 `test()` 支持**返回 Promise 的异步用例**（M3-03 加）：视图的 DOM 断言必须走这条路，因为 `fileview.js`/`review.js` 的渲染在 `api.get(...)` 的 Promise 链末端才落到 DOM，同步断言只能看到空壳。做法是 stub `MC.api.get` 后让出一个宏任务（`setTimeout(resolve, 0)`）再查 DOM；汇总会等全部异步用例 settle 后才写 `<title>`，所以 headless 的 `--virtual-time-budget` 照常能抓到结果。新增异步用例别忘了它**默认记为失败**，只有 settle 后才改写——断言必须真的跑到。
 - 视图脚本要进测试页就直接加进 `app/web/tests/index.html` 的加载列表（`importer.js` M2-11、`fileview.js` M3-03 都是这么做的既有做法），**不要**为了好测把工厂闭包内的私有函数（如 `renderSuggest`）导出成公共 API。
 - 存储层测试使用 monkeypatch 替换 DATA_DIR 为临时目录
-- 下载器测试使用 unittest.mock.patch 模拟 urllib
+- 下载器测试**不要**再打桩 `urllib.request.urlopen`（M3-04 改）：`app/core/downloader.py` 现在用自己的 `OpenerDirector`，桩打不进去；更要命的是打桩会把「逐跳重定向校验、分块限流、日志脱敏」三类行为一起屏蔽。做法是起本地 `http.server`（127.0.0.1 随机端口），用「服务端记到的请求条数」证明被策略拒绝的连接根本没发出去。两个环境坑：macOS 上 urllib 会读系统代理（`getproxies` 必须打桩成 `{}`，否则请求被代理接走返回 502）；需要「非回环首跳」时不要用 UDP-connect 探到的地址（开发机上那是 Clash/TUN 的 198.18.0.0/15，bind 得到但 connect 被黑洞吞掉），要逐个做 bind+connect 探针。
 - 对比引擎测试需注意文件名不同导致路径不匹配的问题
 
 ## 5. UI/UX Notes
