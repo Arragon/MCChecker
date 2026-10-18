@@ -1,8 +1,9 @@
 """文档服务：文件列表、compact 文档与原文字节（§6.3–§6.5、§7.4；T-06）。
 
 **缓存**（§6.5）
-* 内存 LRU：键 `(realpath, size, mtime_ns)`，上限 24 项且总量 ≤ 256 MB。命中直接
-  返回**已序列化**的响应体，不再读盘、不再解析、不再序列化。
+* 内存 LRU：键 `(realpath, size, mtime_ns)`，条目上限 = `max(24, 2 × 该机型配置文件数)`
+  （M4-05 实测定档，见 `memory_cache_limit`），且总量 ≤ 256 MB。命中直接返回
+  **已序列化**的响应体，不再读盘、不再解析、不再序列化。
 * 磁盘缓存：`cache/doc_v2/<sha256>.json.gz`，按内容 sha 命名，属**派生数据**——
   损坏即丢弃重建，永远不以它为准判断权威内容。
 * 旧 `cache/parse_tree` 保持只读兼容，本卡不动它。
@@ -13,8 +14,10 @@
 `profile_id`。
 
 **已知取舍**：内存缓存只存未压缩响应体，gzip 由 server 层按需进行（§6.5 提到
-「已 gzip 的响应体」）；是否把压缩结果也纳入缓存，留到性能卡（M4-05/M4-08）用
-基准脚本决定。
+「已 gzip 的响应体」）。M4-05 用 `scripts/bench_api.py` 量过要不要把压缩结果也进缓存：
+5 万节点文件命中缓存后 identity p50 2.3–3.3 ms、gzip 18.6–19.7 ms（八次运行），差额
+≈16 ms，最紧的 §12「5 万节点 ≤ 300 ms」那一行仍有 280 ms 余量，而缓存压缩体要为每个
+文档多驻留约 1/6 的字节、直接挤占 256 MB 预算 ⇒ **结论是不缓存 gzip**，本卡不改。
 """
 
 from __future__ import annotations
@@ -40,6 +43,9 @@ CACHE_SCHEMA = 1
 
 MEMORY_CACHE_MAX_ENTRIES = 24
 MEMORY_CACHE_MAX_BYTES = 256 * 1024 * 1024
+#: 条目上限按「该机型 `configs/` 里的文件数」放大多少倍（M4-05 / INH-1907，见 `memory_cache_limit`）。
+#: 置 0 即关掉按文件数放大、把容量钉死在 `MEMORY_CACHE_MAX_ENTRIES`，供基准与测试做对照。
+MEMORY_CACHE_FILES_MULTIPLIER = 2
 
 DISK_CACHE_DIRNAME = "doc_v2"
 
@@ -113,6 +119,41 @@ def reset_cache() -> None:
 def etag_for_sha(sha256: str) -> str:
     """`"<sha256>-v2"`（§6.3）。"""
     return '"%s-v%d"' % (sha256, parser.PARSER_VERSION)
+
+
+def _count_profile_config_files(profile_id: str) -> int:
+    """该机型 `configs/` 下的普通文件数；**读路径不创建目录**（与 `_count_files` 同规矩）。"""
+    directory = storage.get_configs_dir(profile_id)
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return 0
+    return sum(1 for entry in entries if os.path.isfile(os.path.join(directory, entry)))
+
+
+def memory_cache_limit(profile_id: str) -> int:
+    """条目上限 = `max(MEMORY_CACHE_MAX_ENTRIES, MEMORY_CACHE_FILES_MULTIPLIER × 机型文件数)`。
+
+    **为什么改（M4-05 / INH-1907，D3 交给本卡的实测）**：一次全局搜索要触碰机型里
+    每个当前文件，而 `search._may_hit` 与 `load_document` 各触碰一遍。钉死 24 时，
+    30 文件 × 3 万节点的机型里每个文件每次搜索都要重新
+    读原文 → gunzip → `json.loads` → `json.dumps`：本机八次运行实测 p50 725–753 ms（
+    p95 最高 761.2），超 §12 表格的 500 ms；按文件数放大后同一批语料 p50 282–296 ms
+    （钉死 30 项、钉死 64 项与按文件数放大三档，八次运行差异在噪声内；
+    `scripts/bench_api.py` 的容量对比表）。
+
+    **为什么安全、以及它救不了什么**：内存的硬护栏一直是 `MEMORY_CACHE_MAX_BYTES`
+    （§12「+LRU ≤ 256 MB」），放大条目数不会让驻留字节越过它。同脚本实测 100 文件 ×
+    3 万节点的机型里，条目上限算出来是 200，但字节上限先在 **71 项 / 254 MB** 处开始
+    逐出，每轮搜索仍要重读全部 100 个文件 → p50 2363–2431 ms（三次规模运行），照样超 500 ms。也就是
+    说本规则把「超过 24 个文件就退化」推后到「超过 ~71 个同规模文件」，再大的机型要
+    满足 §12 得动别的机制（§7.6 的预计算小写数组、索引，或放宽内存预算），不是把这里
+    的数字再调大。正因如此，条目数放大**不**配套放松字节上限。
+    """
+    return max(
+        MEMORY_CACHE_MAX_ENTRIES,
+        MEMORY_CACHE_FILES_MULTIPLIER * _count_profile_config_files(profile_id),
+    )
 
 
 # ===================== 路径解析（§6.4） =====================
@@ -282,7 +323,7 @@ def _document_entry(ref: FileRef) -> Tuple[CacheKey, _MemoryEntry]:
         sha256=sha,
         node_count=len(document["nodes"]["p"]) - 1,
     )
-    _memory_put(key, entry)
+    _memory_put(key, entry, ref.profile)
     return key, entry
 
 
@@ -326,8 +367,9 @@ def _parse(ref: FileRef, data: bytes) -> Dict[str, Any]:
     }
 
 
-def _memory_put(key: CacheKey, entry: _MemoryEntry) -> None:
+def _memory_put(key: CacheKey, entry: _MemoryEntry, profile_id: str) -> None:
     global _MEMORY_BYTES
+    limit = memory_cache_limit(profile_id)  # 锁外算：一次 listdir 不该进缓存锁
     with _CACHE_LOCK:
         previous = _MEMORY_CACHE.pop(key, None)
         if previous is not None:
@@ -335,7 +377,7 @@ def _memory_put(key: CacheKey, entry: _MemoryEntry) -> None:
         _MEMORY_CACHE[key] = entry
         _MEMORY_BYTES += len(entry.body)
         while _MEMORY_CACHE and (
-            len(_MEMORY_CACHE) > MEMORY_CACHE_MAX_ENTRIES or _MEMORY_BYTES > MEMORY_CACHE_MAX_BYTES
+            len(_MEMORY_CACHE) > limit or _MEMORY_BYTES > MEMORY_CACHE_MAX_BYTES
         ):
             _, evicted = _MEMORY_CACHE.popitem(last=False)
             _MEMORY_BYTES -= len(evicted.body)

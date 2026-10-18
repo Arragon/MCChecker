@@ -573,7 +573,7 @@ def load_document(pid: str, name: str, version: str = "current") -> CompactDoc
 ```
 
 1. 解析出源文件路径 → `os.stat` 得 `(size, mtime_ns)`。
-2. 内存 LRU（`OrderedDict`，上限 24 项且总序列化字节 ≤ 256 MB）键 `(realpath, size, mtime_ns)` → 命中直接返回已序列化 + 已 gzip 的响应体。
+2. 内存 LRU（`OrderedDict`，键 `(realpath, size, mtime_ns)`）→ 命中直接返回**已序列化**的响应体。条目上限 = `max(24, 2 × 该机型配置文件数)`（M4-05 / INH-1907 实测定档，取代原先钉死 24 项；钉死 24 会让 30 文件 × 3 万节点的全局搜索逐出重取，725 ms > §12 的 500 ms），**总序列化字节 ≤ 256 MB 仍是内存的硬护栏，条目数放大不配套放松它**（同规模机型约 71 个文件起就是字节上限先绑）。gzip 由 HTTP 层每次现压、压缩体不进缓存（实测差额 ≈16 ms，缓存它要多吃约 1/6 驻留字节，见 §12 与 `docs/know-how.md`）。
 3. 未命中：读文件字节 → `sha256` → 查磁盘缓存 `cache/doc_v2/<sha256>.json.gz`（内含 `parser_version` 与 `cache_schema=1`，不一致视为未命中）→ 仍未命中则 `to_compact` 并原子写入磁盘缓存。
 4. 读文件时若 `(size, mtime_ns)` 在读取前后不同，重读一次（防止读到正在替换的文件）。
 5. 磁盘缓存是派生数据：损坏即删除重建；清理任务每天删除 30 天未访问的 `doc_v2` 条目与旧 `parse_tree/` 中 7 天以上的条目（保留现有 TTL 语义）。
@@ -725,7 +725,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 
 - `q` 去空白后非空，大小写不敏感，匹配 `label`、`value`、该节点（按旧 ID）的收藏备注；`file` 为空表示全部当前文件。
 - 响应：`{"q","total","files": {"<文件名>": 命中数},"items": [{"file","id","loc","path","label","value","type","note","match": "label|value|note"}],"truncated": bool}`；`limit ≤ 1000`。
-- 实现：对每个文件 `load_document`（命中缓存时只做数组扫描），预先缓存每个文档的小写 label/value 数组；30 个文件 × 3 万节点应在 300 ms 内完成（§12）。
+- 实现：对每个文件 `load_document`（命中缓存时只做数组扫描），缓存的是 §6.5 的**文档响应体**；「预先缓存每个文档的小写 label/value 数组」**未实现**，M4-05 实测也不需要——瓶颈是响应体条目数不够导致的逐出重取（`_read_bytes` 每轮搜索 30 次），按 §6.5 的容量规则放大后 p50 282–296 ms。30 个文件 × 3 万节点应在 300 ms 内完成（§12），但**通过线取 §12 表格的 500 ms**（D3 裁定，M4-05 按此验收；本行的 300 ms 保留不动，不是判据）。
 - 计数语义修正：每个命中节点计 1（旧版父节点命中时计 0，导致“有结果却显示未找到”）。
 
 ### 7.7 收藏
@@ -1268,7 +1268,7 @@ class Scheduler(threading.Thread):
 | 场景 | 预算（参考：4 核 / 8 GB / 千兆内网 / Chrome） | 手段 |
 |---|---|---|
 | 首屏（冷缓存） | ≤ 1.0 s 可交互 | 静态资源 ≈ 90 KB gzip；无框架；ETag 304 |
-| 打开 5 万节点文件（服务端缓存命中） | 请求 ≤ 300 ms，渲染 ≤ 150 ms | 内存 LRU 存已 gzip 的响应体；前端只渲染可视行 |
+| 打开 5 万节点文件（服务端缓存命中） | 请求 ≤ 300 ms，渲染 ≤ 150 ms | 内存 LRU 存**已序列化**的响应体，gzip 每次响应现压（M4-05 实测：现压多花 ≈16 ms，缓存压缩体不划算，见 §6.5）；前端只渲染可视行 |
 | 打开 30 万节点文件（冷） | ≤ 3 s，显示骨架 | 解析一次后写 doc_v2 缓存 |
 | 树滚动 / 展开 | 60 fps；单次展开 ≤ 50 ms（5 万节点） | `size[]` 跳跃、rAF 节流、事件委托 |
 | 文件内筛选 | 5 万节点 ≤ 80 ms | 预计算小写数组；160 ms 防抖 |
