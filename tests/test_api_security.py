@@ -39,7 +39,7 @@ from authz_fixtures import as_role, make_server, seed_roles, write_target
 
 from app.config import Settings
 from app.core import fsutil, storage
-from app.core.errors import FORBIDDEN, AppError
+from app.core.errors import FORBIDDEN, INVALID_INPUT, AppError
 from app.server.http import CSRF_HEADER, CSRF_VALUE
 from app.server.router import build_router
 
@@ -341,19 +341,144 @@ class TestSecurityResponseHeaders:
             script = csp.split("script-src")[1].split(";")[0]
             assert script.strip() == "'self'", script
 
-    def test_production_page_needs_no_inline_script_or_handler(self):
-        """CSP 能收紧的**前提**校验：生产页没有内联脚本 / 内联事件（§8.9 的既有约定）。
+    def test_served_page_carries_nothing_that_csp_would_block(self):
+        """CSP 能收紧的**前提**校验：浏览器**收到**的那份文档里没有 CSP 会拦的东西。
 
-        有人往 index.html 加内联 `<script>` 或 `onclick=`，生产页会在浏览器里当场瞎掉，
-        而本仓没有任何其它用例读这个文件——所以这条必须在这里钉住。
+        断的是 HTTP 响应体（`_dispatch` 交付 `app/web/index.html` 之后客户端实际拿到的
+        字节），不是磁盘上的文件（R45：拿源码文本当断言对象是穿测试衣服的 lint；而且
+        「交付出去的这一份」才是浏览器要执行的那一份）。有人往生产页加内联 `<script>`
+        或 `onclick="…"`，生产页会在浏览器里当场瞎掉，而本仓没有任何其它用例读这份文档
+        ——所以这条必须在这里钉住。
         """
-        with open(os.path.join(WEB_DIR, "index.html"), "r", encoding="utf-8") as fh:
-            html = fh.read()
-        tags = re.findall(r"<script[^>]*>", html, re.I)
-        assert tags, "生产页至少要加载脚本"
-        for tag in tags:
-            assert "src=" in tag, tag
-        assert not re.search(r"\son[a-z]+\s*=\s*[\"']", html, re.I)
+        seed_roles("sec1")
+        with make_server() as server:
+            status, headers, body = as_role(server, "visitor").request("GET", "/index.html")
+            assert status == 200
+            assert headers["Content-Security-Policy"] == SPEC_CSP
+            html = body.decode("utf-8")
+            tags = re.findall(r"<script[^>]*>", html, re.I)
+            assert tags, "生产页至少要加载脚本"
+            for tag in tags:
+                assert "src=" in tag, tag
+            assert not re.search(r"\son[a-z]+\s*=\s*[\"']", html, re.I)
+            assert "<style" not in html.lower(), "内联样式表同样归 style-src 管"
+
+    def test_dev_page_that_needs_inline_script_is_not_served(self):
+        """§8.9 的放行条件：全站 CSP 与「测试页有内联脚本」不冲突，因为生产不交付它。
+
+        `app/web/tests/index.html` 第 24 行是一行内联 `<script>`（mock 开关），在
+        `script-src 'self'` 下必被拦（控制实验实测：给同一份副本打上 §11.3 的 CSP，
+        Chrome 报 `Executing inline script violates … 'script-src 'self''`，页面 7 FAILED）。
+        所以「生产页能过 CSP」这条依赖 `/tests/` 与 `/assets/js/mock/` 一直是 404；
+        有人放开那道闸门，本条当场红，而不是等浏览器里才发现。
+        """
+        seed_roles("sec1")
+        with make_server() as server:
+            for path in ("/tests/index.html", "/assets/js/mock/mock-api.js", "/template.html"):
+                status, _h, _b = as_role(server, "visitor").request("GET", path)
+                assert status == 404, (path, status)
+
+    def test_served_css_needs_no_webfont_and_no_remote_source(self):
+        """`default-src 'self'` 没配 `font-src`：本应用的字体是**系统字体栈**。
+
+        `tokens.css` 的 `--font-ui` / `--font-mono` 只列本地字体名（-apple-system、
+        PingFang SC、Consolas…），不发网络请求，所以既不需要 `font-src`，更不需要把
+        `default-src` 放宽成 `*`。有人引入 webfont 或远程图片时这条会红——正确动作是
+        加一条精确的 `font-src`/`img-src` 来源，而不是动 `default-src`。
+        """
+        seed_roles("sec1")
+        with make_server() as server:
+            for name in ("base.css", "components.css", "views.css", "tokens.css"):
+                status, _h, body = as_role(server, "visitor").request(
+                    "GET", "/assets/css/%s" % name
+                )
+                assert status == 200, (name, status)
+                css = body.decode("utf-8")
+                assert "@font-face" not in css, name
+                assert not re.search(r"url\(\s*['\"]?(https?:)?//", css, re.I), name
+
+
+class TestSecurityHeadersOnTransportLevelResponses:
+    """§11.3「全站」的两个旁路：不经过 `_dispatch` 的响应同样必须带头。
+
+    501（未实现的方法）与 400（畸形请求行）由标准库 `send_error` 发出，原先绕开了
+    `_send_bytes` 这个唯一出口，实测只回 `Server/Date/Content-Type: text/html` 一段
+    HTML 错误页、四个安全头一个都没有。摘掉 `MCRequestHandler.send_error`，这两条必红。
+    """
+
+    def _raw(self, server, payload: bytes):
+        sock = socket.create_connection(("127.0.0.1", server.server_port), timeout=8)
+        try:
+            sock.sendall(payload)
+            sock.settimeout(8)
+            chunks = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if sum(len(c) for c in chunks) > 65536:
+                    break
+            return b"".join(chunks)
+        finally:
+            sock.close()
+
+    def test_unsupported_method_is_501_with_headers_and_json_envelope(self):
+        seed_roles("sec1")
+        with make_server() as server:
+            raw = self._raw(
+                server, b"OPTIONS /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            )
+            head, _, body = raw.partition(b"\r\n\r\n")
+            status_line = head.split(b"\r\n", 1)[0]
+            assert b"501" in status_line, status_line
+            lowered = head.lower()
+            assert b"x-content-type-options: nosniff" in lowered, head
+            assert b"x-frame-options: deny" in lowered, head
+            assert b"referrer-policy: same-origin" in lowered, head
+            assert SPEC_CSP.encode() in lowered, head
+            # 不再是标准库那段把请求行回显进 text/html 的错误页
+            assert b"application/json" in lowered, head
+            assert b"<!DOCTYPE" not in body, body[:120]
+            payload = json.loads(body.decode("utf-8"))
+            assert payload["error"]["code"] == INVALID_INPUT, payload
+            assert payload["error"]["detail"] == {}, payload
+
+    def test_oversized_request_line_is_414_with_headers(self):
+        """414 也走 `send_error` 旁路，而这一次版本可读 ⇒ 头必须带上（第二条旁路证据）。"""
+        seed_roles("sec1")
+        with make_server() as server:
+            raw = self._raw(
+                server, b"GET /" + b"a" * 70000 + b" HTTP/1.1\r\nHost: x\r\n\r\n"
+            )
+            head = raw.split(b"\r\n\r\n", 1)[0]
+            assert b"414" in head.split(b"\r\n", 1)[0], head[:200]
+            lowered = head.lower()
+            assert b"x-content-type-options: nosniff" in lowered, head[:400]
+            assert SPEC_CSP.encode() in lowered, head[:400]
+
+    def test_unparsable_version_leaves_the_response_without_headers_by_protocol(self):
+        """如实记录的边界：请求行读不出 HTTP/1.x 版本时，§11.3 的头**发不出去**。
+
+        机制（不是猜的）：`parse_request()` 把 `self.request_version` 的初值留成
+        `default_request_version`（= `HTTP/0.9`），而 `send_response_only()` 对 0.9
+        「按协议不写任何响应头」。所以畸形请求行（400）与不支持的版本（505）的响应里
+        根本没有头的位置——那是 HTTP/0.9 没有响应头这回事，不是本卡留了旁路。
+        这里能钉住的两件事：响应体已经是本仓的 JSON 封套（不再是标准库那段把请求行
+        回显进 `text/html` 的错误页），且 501/505 不许挂 `STORAGE_FAILURE`
+        （那个码前端按「服务器内部错误」呈现，而坏的是请求）。
+        """
+        seed_roles("sec1")
+        with make_server() as server:
+            for bad_line in (b"GARBAGE-LINE\r\n\r\n", b"GET / HTTP/9.9\r\n\r\n"):
+                raw = self._raw(server, bad_line)
+                # 0.9 形态：连状态行与头都没有，收到的第一个字节就是响应体
+                assert raw.startswith(b"{"), raw[:120]
+                assert b"<!DOCTYPE" not in raw, raw[:120]
+                payload = json.loads(raw.decode("utf-8"))
+                assert payload["error"]["code"] == INVALID_INPUT, payload
+                assert payload["error"]["detail"] == {}, payload
+
 
 
 # ======================================================================

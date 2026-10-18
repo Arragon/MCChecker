@@ -440,6 +440,38 @@ class MCRequestHandler(BaseHTTPRequestHandler):
     def _accepts_gzip(self) -> bool:
         return "gzip" in self.headers.get("Accept-Encoding", "").lower()
 
+    def send_error(self, code, message=None, explain=None):  # noqa: N802 - 基类同名方法
+        """§11.3：把标准库的 `send_error` 旁路也接回统一出口（含全站安全头）。
+
+        501「未实现的方法」（OPTIONS/TRACE/…）、400「请求行畸形」、414「URI 过长」、
+        505「版本不支持」都发生在 `_dispatch` **之前**，走的是 `BaseHTTPRequestHandler`
+        自己的 `send_response`，所以这些响应原先一条安全头都没有（实测 OPTIONS 只回
+        `Server/Date/Connection/Content-Type: text/html;charset=utf-8` 加一段 HTML 错误页）。
+        「全站统一」要包括它们，否则「安全头在 HTTP 层统一加」这句话就是假的。
+
+        同时把响应体换成本仓统一的 JSON 错误封套（§3.4）：这段 HTML 错误页会把请求行
+        回显进 `text/html`，而我们已经不再声明页面可以在任何帧里被嵌（`frame-ancestors 'none'`）。
+        保留基类的 `Connection: close` 与「连接已断时不抛」两个语义。
+        """
+        try:
+            short, _long = self.responses[code]
+        except KeyError:
+            short = "服务器错误"
+        # `explain` 是基类为那段 HTML 错误页准备的长文案，JSON 封套里不收（§11.5）。
+        summary = message or short
+        self.log_error("code %d, message %s", code, summary)
+        self.close_connection = True
+        body = json.dumps(
+            {"error": {"code": _transport_error_code(code), "message": summary, "detail": {}}},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        try:
+            self._send_bytes(code, body, "application/json; charset=utf-8",
+                             extra={"Connection": "close"})
+        except OSError:
+            # 与基类一致：畸形请求常常在半途断开，这里没有可以补救的对象。
+            pass
+
     def log_message(self, fmt: str, *args: Any) -> None:
         # 访问日志的正式格式（含 request_id）在 T-25/M4-03；这里先降噪到 DEBUG。
         logger.debug("%s %s", self.address_string(), fmt % args)
@@ -459,6 +491,23 @@ def _reject_encoded_separators(raw_path: str, decoded_path: str) -> None:
     for token in _ENCODED_UNSAFE:
         if any(token in hay for hay in haystacks):
             raise AppError(INVALID_INPUT, "请求路径含编码的分隔符或空字节")
+
+
+def _transport_error_code(status: int) -> str:
+    """`send_error` 旁路的错误码（§7.1 那套 `code` 口径，但触发方是标准库不是业务）。
+
+    本应用实际只会走到 400（请求行畸形）、414、501、505；403/404 一并给出映射，
+    是因为任何「绕过 `_dispatch` 的错误」将来也应当能从状态码读出封套里的 `code`。
+    """
+    if status == 403:
+        return FORBIDDEN
+    if status == 404:
+        return NOT_FOUND
+    if status in (413, 414):
+        return TOO_LARGE
+    # 501（方法没实现）与 505（版本不支持）跟 4xx 同源：坏的是请求，服务器没有真的故障，
+    # 所以不许它挂 `STORAGE_FAILURE`——那个码在前端按「服务器内部错误」口径呈现。
+    return INVALID_INPUT if status in (501, 505) or status < 500 else STORAGE_FAILURE
 
 
 def _redact_absolute_path(value: Any) -> Any:
