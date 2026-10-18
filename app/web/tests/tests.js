@@ -2,16 +2,49 @@
 (function () {
   "use strict";
   var MC = window.MC;
-  /* F2（卡 7 复审）：全局错误兜底。此前这里没有任何 error/unhandledrejection 监听——
-   * 「用例返回已 resolve 的 Promise 之后才抛出的断言/异常」会被静默吞掉，页面照样
-   * 报 ALL PASSED，正是本卡要消灭的「静默绿」再往下一层。两类失败都记成**合成失败
-   * slot** 并立刻重画汇总——report 幂等可重入，队尾那次与迟到错误谁最后跑谁定标题。
-   * 名字尽量带来源（HTTP 下是 filename:line + 消息；file:// 的 ErrorEvent 被浏览器
-   * 掩成 "Script error."，去 DevTools 控制台找肇事行）。
-   * 实测边界（如实记录）：headless=new + file:// + --virtual-time-budget 下，「串行队列
-   * 进行中产生的 unhandledrejection」在 dump 之前从不派发（CLI 怪癖；error 监听同环境
-   * 正常、两个监听在 HTTP 下都实测命中——见卡报告）。队列进行中晚到的**异常**由 error
-   * 通道兜住；与浏览器派发无关的确定性兜底是下面的用例数钉死。 */
+  /* F2（卡 7 复审）+ 第三轮 C1：全局错误兜底与「这个兜底在什么条件下才成立」。
+   * 此前这里没有任何 error/unhandledrejection 监听——「用例返回已 resolve 的 Promise
+   * 之后才抛出的断言/异常」会被静默吞掉，页面照样报 ALL PASSED，正是本卡要消灭的
+   * 「静默绿」再往下一层。两类失败都记成**合成失败 slot** 并立刻重画汇总——report
+   * 幂等可重入，队尾那次与迟到错误谁最后跑谁定标题。
+   *
+   * 【钉死的验收命令 = HTTP，不是 file://】起一个临时静态服务器服务 app/web/
+   *  —— `./.venv39/bin/python -m http.server 0 --bind 127.0.0.1 --directory <app/web 或其 /tmp 副本>`
+   *  （随机端口；绝不拿仓库 data/ 当服务根；用完关掉），同一个预算跑：
+   *    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+   *      --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom \
+   *      "http://127.0.0.1:<port>/tests/index.html"   → 期望 <title>ALL PASSED (40)</title>
+   *  【HTTP 下两种抖动，重跑而不是改代码】`--virtual-time-budget` 与真实网络延迟竞速，
+   *  预算到点时 Chrome 会取消在途脚本，于是：① dump 早于 report() ⇒ 标题停在初始值
+   *  （既非绿也非红）；② 某个外部 .js 没跑完 ⇒ 一批用例同时报 `X is not a function`
+   *  （看着像回归，其实交付是好的：逐字节核过服务端 80/80 与磁盘一致）。**只认
+   *  `ALL PASSED (n)` / `n FAILED / m` 两种标题**；①②一律重跑。实测抖动率按服务器
+   *  形态排：HTTP/1.1 keep-alive 的多线程服务器 22 次 0 抖；stdlib `python -m http.server`
+   *  （HTTP/1.0，每请求一条连接）24 次抖 5 次；单线程 socketserver 9 次抖 2 次
+   *  ——**验收优先用 keep-alive 那种**。profile 共用与否不是变量，抬预算也不保证。
+   *  完整数据与判据见 docs/know-how.md 第 4 节。
+   *
+   * 【为什么 file:// 不算验收】实测边界（Chrome 155，同一份页面两种来源各跑一遍，
+   * 结论如实记录）：变量是**产生拒绝的那个脚本的来源**，与「串行队列在不在进行中」
+   * 无关——
+   *   ① **外部脚本**（本文件的全部用例、所有视图模块都是外部脚本）里产生的
+   *      unhandledrejection，file:// 下**从不派发**：队列进行中产生的不派发；改到
+   *      report 跑完、队列早已 settle 之后再产生，照样不派发；预算 8000→30000 也一样。
+   *   ② **inline** 页面脚本产生的 rejection 在 file:// 下**会**派发 ⇒ 盲区精确到
+   *      「外部脚本来源」，不是「这个页面里的所有拒绝」。
+   *   ③ error 通道不受此限，file:// 下照样派发，只是外部脚本的 message/filename 被
+   *      浏览器掩成 "Script error."（只有 inline 的带 filename:line，去 DevTools 找肇事行）。
+   *   ④ HTTP 下两个监听都完整命中、含真实 filename:line 与消息。
+   * 后果：「用例不返回那条 Promise 链、断言写在链里」这种形状在 file:// 下确定性地绿——
+   * 用例注册了也启动了（用例数钉死满足）、没有同步抛（error 通道静默），能抓它的只有
+   * rejection 通道，而那条通道在 file:// 下对①是瞎的。所以三层兜底（这两个监听 +
+   * EXPECTED_CASES 钉死 + 队尾宏任务 flush）只有在 HTTP 命令下才是闭合的。 */
+  /* F2（卡 7 复审）：钉死用例总数——某条用例「注册了却没跑到」或干脆没注册时，
+   * 呈现的是更小的绿色数字而不是红。新加用例必须同步改这里（对不上当场判失败）。
+   * 第三轮 nit：这条声明必须排在下面注册的两个监听**之前**——监听在脚本求值期就可能调
+   * report()，那时若常量还没赋值，红会写成「预期 undefined，实际注册 0」（仍然红，
+   * 但不说人话）。 */
+  var EXPECTED_CASES = 40;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -277,7 +310,9 @@
       MC.api.post = function (path, body) { calls.push("POST " + path); return Promise.resolve({ task: {} }); };
       MC.caps.tasks = false;
       poll.call(stubApp);
-      /* startTask 走 reject 而不是「假装任务已开始」；catch 挂上以免留下未处理的拒绝。 */
+      /* startTask 走 reject 而不是「假装任务已开始」；catch 挂上以免留下未处理的拒绝。
+       * 这句 catch **不许摘**：它是本文件唯一一处「不把链交给 test() 的浮空 Promise」，
+       * 正是文件头 C1 描述的那个形状——摘掉以后 HTTP 验收命令当场红，file:// 反而看不见。 */
       start.call(stubApp, { type: "update_all" }).then(null, function () {});
       eq(calls, [], "未接入时不得打 /tasks（决策 14：禁用 + 说明 + 不发请求）");
     } finally {
@@ -312,9 +347,15 @@
        * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。 */
       MC.wiredSettingsSegments.push("people");
       ok(!MC.settingsSegmentWired("people"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
+      /* 第二变异：先裁回原长再验一次（这一句是**变异步骤**，不是恢复——恢复在 finally）。 */
       MC.wiredSettingsSegments.splice(origWired.length);
       ok(MC.settingsSegmentWired("sources") && !MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向打开/关闭门控");
     } finally {
+      /* 第三轮 nit：变异必须自清理，跟本文件其它 fixture 一样。原先只有成功路径上那句
+       * splice 会把 push 进去的 "people" 摘掉，所以上面任一 ok 抛错时「people」就留在
+       * 对外切片里带到跑完，后续读到它的用例会拿到脏值。finally 这一句在成功路径上是
+       * 幂等 no-op（已经裁到 origWired.length），只在失败路径上才真正复原。 */
+      MC.wiredSettingsSegments.splice(origWired.length);
       MC.config.mock = wasMock;
     }
     eq(MC.wiredSettingsSegments, origWired, "MC.wiredSettingsSegments 是快照切片，外部改不动白名单本体（上面的动手变异才是正证）");
@@ -760,6 +801,29 @@
     ok(later.textContent.indexOf("2/5") >= 0 && later.textContent.indexOf("准备中") < 0, "total 已发布 ⇒ 正常 n/m");
   });
 
+  test("M3-06：任务浮层里 total 未发布时**整条进度条都不画**（注释与 markup 不得各说各话）", function () {
+    /* 第三轮 nit 的回归位：F7 的注释一直声称「不在 total 未发布时画 0% 空条」，可 markup
+     * 原先**无条件**画 `.progress`——灰色槽照样出现，只是里面是空的。现在按 hasProgress
+     * 条件渲染，这条用例点开真浮层钉住两侧：未发布⇒0 条，已发布⇒1 条且宽度按 done/total。
+     * 上面那条「准备中」用例只查顶栏按钮文字，看不见浮层，所以两者都要在。 */
+    var slot = MC.util.h("div");
+    document.body.appendChild(slot);
+    function open(tasks) {
+      MC.util.clear(slot);
+      MC.App.prototype.renderTasks.call({ taskSlot: slot, activeTasks: tasks });
+      slot.querySelector("button.task-indicator").click();
+      var bars = document.querySelectorAll(".popover .progress");
+      var width = bars.length ? bars[0].firstElementChild.style.width : null;
+      cleanOverlays();
+      return { bars: bars.length, width: width };
+    }
+    var early = open([{ id: "t1", type: "update_source", target: "x.xml", state: "running", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "张三" }]);
+    eq(early.bars, 0, "total 未发布 ⇒ 一条都不画（旧 markup 会留一条 0% 灰槽，正是注释与 markup 矛盾的地方）");
+    var later = open([{ id: "t2", type: "update_all", target: null, state: "running", progress: { done: 2, total: 5 }, result: { items: [] }, actor: "张三" }]);
+    eq([later.bars, later.width], [1, "40%"], "total 已发布 ⇒ 照旧画一条，宽度 2/5 = 40%");
+    slot.remove();
+  });
+
   test("M3-06 / R19：mock 与后端 /tasks 契约同步——单条任务 0/0 起步、三类两两互斥 409+task_id、未知名 404", function () {
     /* 模板模式的绿不算后端接对的证据（R19），但 mock 必须与后端同口径——这条用例
      * 直接打 MC.mock.handle，钉住卡 6 移交的三处契约：
@@ -1089,9 +1153,7 @@
     tree.destroy();
   });
 
-  /* F2（卡 7 复审）：钉死用例总数——某条用例「注册了却没跑到」或干脆没注册时，
-   * 呈现的是更小的绿色数字而不是红。新加用例必须同步改这里（对不上当场判失败）。 */
-  var EXPECTED_CASES = 39;
+  /* EXPECTED_CASES（钉死用例总数）已提到文件顶部两个监听之前（第三轮 nit）。 */
   function report() {
     var out = document.getElementById("out");
     var failed = 0;

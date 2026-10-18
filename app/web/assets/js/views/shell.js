@@ -836,10 +836,26 @@
       var still = res.items.map(function (t) { return t.id; });
       before.forEach(function (id) {
         if (still.indexOf(id) < 0) {
-          api.get("/tasks/" + api.seg(id)).then(function (r) {
-            MC.bus.emit("task:done", r.task);
-            self.refreshFiles();
-          });
+          api.get("/tasks/" + api.seg(id)).then(
+            function (r) {
+              MC.bus.emit("task:done", r.task);
+              self.refreshFiles();
+            },
+            /* 卡 7 第三轮 C2：这条链原先只有成功分支 ⇒ refetch 一失败就留下无人接手的
+             * 拒绝。file:// 验收命令看不见它，钉死成 HTTP 以后它就是随机红。竞态本身正常：
+             * 任务在这次 poll 与 refetch 之间被惰性清理摘掉 ⇒ 404 NOT_FOUND（与 showTask
+             * 的「任务已结束出窗口」同一口径）。诚实的最小动作：
+             * ① **不**伪造 task:done——两个消费方按 t.type / t.target 过滤（fileview
+             *    的 records 刷新、settings 的 sources 重画），伪造会让别的界面拿假数据刷新；
+             * ② 记一条 console.error 留诊断（同 [boot] / [bus] 的既有做法）；
+             * ③ 404 静默接受，其余错误给部署者看得见的 toast。
+             * 「这条已不在进行中」是真状态且已经画出来了（上面刚替换 activeTasks 并
+             * renderTasks），业务结果面另有修订号轮询兜底，所以这里不补刷新。 */
+            function (err) {
+              console.error("[task-refetch]", id, err);
+              if (!(err && err.status === 404)) MC.toastError("任务结果读取失败", err);
+            }
+          );
         }
       });
       if (res.items.length) self._taskTimer = setTimeout(function () { self.pollTasks(); }, 1200);
@@ -951,10 +967,16 @@
           { style: "padding:8px;width:280px" },
           h("div.section-title", "进行中的任务"),
           running.map(function (x) {
-            var pct = x.progress.total ? Math.round((x.progress.done / x.progress.total) * 100) : 0;
+            /* 第三轮 nit（注释与 markup 矛盾，选「markup 追上注释」而不是删注释）：
+             * F7 那句原本声称「total 未发布时不画 0% 空条」，可 `.progress` 是无条件画的，
+             * pct=0 时照样留一条灰色空槽。现在 total 未发布⇒整条不画（util.h 跳过 null
+             * 子节点），与 taskProgressText 在同一条件下改说「准备中」保持一致。
+             * hasProgress 就是原来那句条件判断，只是提出来复用一次。 */
+            var hasProgress = !!x.progress.total;
+            var pct = hasProgress ? Math.round((x.progress.done / x.progress.total) * 100) : 0;
             /* F7（卡 7 复审）：弹窗与浮层同一套词汇——taskLabel/TASK_STATE_LABELS/
              * taskProgressText，不再裸打 type token，也不在 total 未发布时画 0% 空条。 */
-            return h("div.col", { style: "gap:4px;margin-bottom:10px" }, h("div.row.small", h("span.grow.truncate", taskLabel(x)), h("span.muted.xsmall", x.actor)), h("div.row.xsmall", h("span.grow.muted", (TASK_STATE_LABELS[x.state] || x.state) + " · " + taskProgressText(x))), h("div.progress", h("span", { style: { width: pct + "%" } })));
+            return h("div.col", { style: "gap:4px;margin-bottom:10px" }, h("div.row.small", h("span.grow.truncate", taskLabel(x)), h("span.muted.xsmall", x.actor)), h("div.row.xsmall", h("span.grow.muted", (TASK_STATE_LABELS[x.state] || x.state) + " · " + taskProgressText(x))), hasProgress ? h("div.progress", h("span", { style: { width: pct + "%" } })) : null);
           }),
           h("button.btn.btn-sm", { type: "button", onclick: function () { MC.closePopover(); self.go({ kind: "settings", arg: "sources" }); } }, "查看更新源状态")
         ),
