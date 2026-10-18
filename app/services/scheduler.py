@@ -36,6 +36,9 @@
   「半成品」要靠另一条闸：`temp_store.create()` 的落盘顺序是 makedirs → 原文 → `meta.json`
   最后，所以 `sweep_temp_area()` 传 `skip_incomplete=True`——meta 还没写出来的目录本轮不碰。
   这一条之前是「读不到 meta 就删」，等于每小时去抹别人正在上传的那一半（M3-08 修复轮 Important 3）。
+  不碰也不是永远不碰：这一档带**宽限期**（`temp_store.INCOMPLETE_GRACE_SECONDS`，24 小时），
+  过了宽限期还没有 meta 的目录只会是中途被杀死的孤儿，定时器照收——孤儿的回收不再只依赖
+  「下一次有人上传」。
 
 中断的代价至多是「某个条目还留着、下次再清」，重跑幂等；权威配置 `configs/`、归档 `archive/`、
 记录 `records/` 一个都不在候选路径里，`tests/test_scheduler.py::TestSchedulerWritesNothingAuthoritative`
@@ -49,7 +52,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import threading
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -170,11 +172,14 @@ def system_context(pid: str) -> RequestContext:
 def sweep_temp_area(now: Optional[datetime] = None) -> int:
     """删掉过期临时目录（每小时一次；实现就是 `temp_store` 的惰性清理入口）。
 
-    判定是「meta 里的 `expires_at` 到了」，**不是**年龄，所以半成品要靠 `skip_incomplete`：
-    `create()` 最后才写 `meta.json`，一个还没有 meta 的目录可能就是某次上传正在写的那一半。
-    这里只兜「还没写出来」的那一种；上传路径自己那次（`temp_store.create()` 开头）不带这一档，
-    语义没动。跳过的半成品不是泄漏——它写完了就在下一轮被按过期收掉，写一半崩掉的则留给
-    上传路径自己那次回收（§7.4：临时区不是权威数据）。
+    判定是「meta 里的 `expires_at` 到了」，半成品这一档靠 `skip_incomplete` **加宽限期**：
+    `create()` 最后才写 `meta.json`，一个还没有 meta、年龄没超过 `temp_store.INCOMPLETE_GRACE_SECONDS`
+    的目录可能就是某次上传正在写的那一半，本轮不碰；超过宽限期的只可能是中途死掉的孤儿，照收。
+    被跳过的那一半这样收口：写完了就在之后某轮按 `expires_at` 清掉；写一半崩掉的，先由下一趟上传
+    自己开头那次默认档清理回收，最迟在宽限期届满后由本定时器收掉——孤儿目录的存在**不再**只取决于
+    「有没有人再上传」（§7.4：临时区不是权威数据）。残留要讲清楚：上传路径自己那次是默认档，
+    两趟上传恰好并发时它仍可能删掉对方刚建、还没写 meta 的目录——那是本卡之前就存在的毫秒级竞态
+    （比小时级定时器旧缺陷的窗口小得多），这一档不覆盖它，也不为它去改 `create()` 的语义。
     """
     removed = temp_store.purge_expired(now=now, skip_incomplete=True)
     if removed:

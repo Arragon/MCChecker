@@ -537,6 +537,74 @@ class TestPeriodicCleanup:
         assert os.path.isdir(mid_upload), "半成品被抹掉 ⇒ 上传中的用户拿到一次 FileNotFoundError"
         assert os.path.isfile(half), "原文也不许跟着没"
 
+    def test_a_metaless_directory_past_the_grace_is_swept_by_the_timer(self, pid, clock):
+        """宽限期外的孤儿目录由**定时器**回收——修复轮的洞：`skip_incomplete` 之后，
+        写一半崩掉的目录只剩「下一趟上传开头那次默认档清理」一个出口，没人再上传就永远留着。
+
+        年龄用 `os.utime` 相对**注入时刻**摆位（宽限期 + 60 秒），不睡任何真实时间；
+        假钟之外真实 mtime 是「刚刚」，所以只有年龄判定真的生效才会删。
+        """
+        from app.core import storage
+        from app.services import temp_store
+
+        root = storage.get_temporary_dir()
+        os.makedirs(root, exist_ok=True)
+        dead = os.path.join(root, "deaduploadtoken")
+        os.makedirs(dead, exist_ok=True)
+        with open(os.path.join(dead, temp_store.CONTENT_FILE), "wb") as fh:
+            fh.write(b"<a>1</a>")
+        aged = clock.now().timestamp() - temp_store.INCOMPLETE_GRACE_SECONDS - 60
+        os.utime(dead, (aged, aged))
+
+        assert scheduler_module.sweep_temp_area(now=clock.now()) == 1
+        assert not os.path.exists(dead), "过了宽限期的孤儿必须被定时器收掉，不能只等下一趟上传"
+
+    def test_a_metaless_directory_inside_the_grace_is_still_spared(self, pid, clock):
+        """宽限期**之内**的无 meta 目录照旧不碰——年龄闸不许被放宽成「无 meta 一律过期就删」。
+
+        同一份形状、只把 mtime 摆进宽限期里（差 1 小时届满）：如果实现把宽限期写成恒真，
+        这一条与上一条不可能同时绿。
+        """
+        from app.core import storage
+        from app.services import temp_store
+
+        root = storage.get_temporary_dir()
+        os.makedirs(root, exist_ok=True)
+        recent = os.path.join(root, "recenttoken")
+        os.makedirs(recent, exist_ok=True)
+        half = os.path.join(recent, temp_store.CONTENT_FILE)
+        with open(half, "wb") as fh:
+            fh.write(b"<a>1</a>")
+        aged = clock.now().timestamp() - temp_store.INCOMPLETE_GRACE_SECONDS + 3600
+        os.utime(recent, (aged, aged))
+
+        assert scheduler_module.sweep_temp_area(now=clock.now()) == 0
+        assert os.path.isdir(recent), "宽限期内的目录可能就是某趟上传正在写的那一半"
+        assert os.path.isfile(half)
+
+    def test_create_reclaims_a_metaless_orphan_on_the_real_upload_path(self, pid, clock):
+        """走**真上传入口** `create()`：它开头那次清理必须是默认档，孤儿目录才被回收。
+
+        修复轮复审实测：把 `create()` 改成 `purge_expired(skip_incomplete=True)` 后，
+        直接调 `purge_expired` 的既有用例（`test_the_upload_path_keeps_reclaiming_metaless_directories`）
+        全绿——「唯一回收孤儿的通路」当时一条测试都没有。这条从 `create()` 本身进，
+        谁改动那一档谁当场红。默认档不看年龄，所以孤儿不带 meta、mtime 是「刚刚」也照收。
+        """
+        from app.core import storage
+        from app.services import temp_store
+
+        root = storage.get_temporary_dir()
+        os.makedirs(root, exist_ok=True)
+        orphan = os.path.join(root, "orphanbeforecreate")
+        os.makedirs(orphan, exist_ok=True)
+        with open(os.path.join(orphan, temp_store.CONTENT_FILE), "wb") as fh:
+            fh.write(b"<a>stale</a>")
+
+        meta = temp_store.create(pid, "cid-new", "10.0.0.9", "fresh.xml", b"<a>2</a>", 24, 1024 * 1024)
+
+        assert not os.path.isdir(orphan), "create() 的默认档清理丢了 ⇒ 孤儿只能等 24 小时宽限期，配额继续被吃"
+        assert os.path.isdir(os.path.join(storage.get_temporary_dir(), meta["token"]))
+
     def test_a_temp_directory_with_unreadable_meta_is_still_swept(self, pid, clock):
         """闸只挡「meta 文件还不存在」。meta **在但读不懂**说明这次上传已经死了，照旧回收
         ——否则坏目录永远留在 `data/temporary/`，§7.4 的配额会被孤儿一点点吃光。"""
@@ -557,7 +625,8 @@ class TestPeriodicCleanup:
         """边界声明：`purge_expired` 的**默认**语义没被顺手改掉。
 
         不带 `skip_incomplete` 时照旧回收没有 meta 的目录——那是 `temp_store.create()` 自己在
-        `makedirs` **之前**跑的那一次（它看不到自己的半成品），也是孤儿目录唯一的回收入口。
+        `makedirs` **之前**跑的那一次（它看不到自己的半成品），也是孤儿目录**最早**的回收入口
+        （过了宽限期的孤儿另有定时器兜底，见上面两条宽限期用例）。
         新增的那一档只属于后台调度器；共享服务的既有行为不是本卡的改动面。
         """
         from app.core import storage
