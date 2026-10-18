@@ -1129,13 +1129,14 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
 
 **验证基线（控制方在合并 INH-1914 后亲手实测，两种环境各跑一遍全量）**：**905 passed**（约 60 s，输出干净）、`check_py39.sh` exit 0、前端 `ALL PASSED (29)`。H3 证据从此不看哈希号，看守卫播报：本机 `data/` 存在时打印「H3 守卫执法中：真实 data/ 基线快照 3 个文件…」；在无 `data/` 的检出里打印「H3 守卫未执法…这一轮的『绿』是没有可比对对象的结果，不是『数据完好』的证据」——两种绿是可观察不同的，这条是 R40 的落点。
 
-**三条链正在并行推进（用户已批准"文件面零重叠才并行"；一卡一 PR 与每卡独立评审不变）**，恢复时先查这三处再决定动作：
+**四条链正在并行推进（用户已批准"文件面零重叠才并行"；一卡一 PR 与每卡独立评审不变）**，恢复时先查这三处再决定动作：
 
 | 链 | 工作树 / 分支 | 卡 | 已知状态（控制方实测于 2026-10-18 17:4x） |
 |---|---|---|---|
 | A | `../mcc-m3-08` · `mc-v2/m3-08-scheduler` | INH-1893 调度器 | 原代理**中断且零提交**，留下 2132 行未提交改动（`services/scheduler.py` 589、`api_schedule.py` 48、两个测试文件共 1495 行，另改 `storage/api_session/router/run/conftest/api.js/mock-api.js`）。其自有 96 条用例**由控制方自己跑过是绿的**——但绿只证明作者测试通过。接手代理的要求是"先审计再完成"，重点核：调度线程是否自己写盘（禁止）、`PUT` 400 时 `schedule.json` 是否字节不变、`next_run` 是否算而非存、BUSY 是否重投而非丢弃、为何动了 `api_session.py` 与 `conftest.py`（卡面 Files 未列）。 |
 | B | `../mcc-dl` · `mc-v2/m3-10-dl-math` | INH-1895 DL 求根/正反向 | 只许改 `app/core/dltool.py` + `tests/test_dltool_multi.py`；`dlmath.js` 只读参照。产出签名是 INH-1896/1897 的前置，**故 DL 链内部必须串行**。 |
 | C | `../mcc-n2` · `mc-v2/n2-loopback` | INH-1913 回环拦截 | 只许改 `app/services/upload.py` + 导入相关测试。**卡面原先写的工作量是错的**（声称要重做 `test_api_import.py` 的 `127.0.0.1` 地址方案，实测该文件里 `127.0.0.1` 出现 0 次，用的是不解析的 `example.invalid`），已请 Linear 就地更正。 |
+| D | `../mcc-sec` · `mc-v2/m4-02-security` | INH-1906 安全第二轮（M4，提前并行） | 按 SPEC §16.8 四条逐条建 `tests/test_api_security.py`，**每条都必须附反向对照**（在 /tmp 副本里抹掉防护后新测试要红）；允许改 `http.py`/`fsutil.py`/新建 `security.py`/`app/web/assets/js/**`（但**不含** `core/api.js` 与 `mock/mock-api.js`）；禁止碰 `router.py`/`storage.py`/`upload.py`/`tasks.py`/`updates.py`/`run.py`/`conftest.py`/`know-how.md`。本卡的一项交付是「发现但被禁改文件挡住」的缺口清单。 |
 
 **恢复动作**：`git -C <工作树> status --porcelain` 与 `git -C <工作树> log --oneline -1` 判断每条链是"有未提交工作"还是"已提交待评审"；未提交且代理已终止时，**按 A 的方式派接手审计，禁止直接重做**（重做等于丢掉 2132 行有效工作）。评审一律用 `.superpowers/sdd/MCChecker_M3_M4_PLAN/review-dispatch-template.md`，先 `git worktree add --detach ../mcc-review-<卡> <HEAD_SHA>`。
 **共用文件表**（`router.py` / `core/api.js` / `mock/mock-api.js` / `settings.js` / `tests/conftest.py`）见 `.superpowers/sdd/MCChecker_M3_M4_PLAN/settings-chain-handdowns.md` §0：M3-09 与设置链四张卡**必须等 A 合并后**再动，否则必冲突。
