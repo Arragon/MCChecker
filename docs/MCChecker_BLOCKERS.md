@@ -29,6 +29,25 @@
 4. 发项目状态更新（`save_status_update`，type=project，project=P-INH-14）：卡序调整、D1–D4、R1–R23 摘要。
 5. 把本文件 B2–B5 的最终结论回填到对应卡。
 
+### B1 · 已执行（2026-10-18，Linear 同步：卡 5 收尾 + 两条新立卡）
+
+上方第 1–5 条积压已于本日由 Linear 同步会话全部发完（`INH-1886` Done 证据评论 `6e1f8e74`、`INH-1887` Done `65804484`、`INH-1888` Done `7df95892`、`INH-1889` Done `081a5333`，以及多条项目状态更新）。本轮四条的执行结果：
+
+| # | 动作 | 结果 | Linear 返回的对象 |
+|---|---|---|---|
+| 1 | `INH-1890` 置 **Done** + 完成证据注释 | 成功 | issue `INH-1890`，`completedAt 2026-10-18T10:56:44Z`；评论 `7be89878-51ac-4e46-875b-6af3602a14a1`（`updatedAt 10:58:11Z`） |
+| 2 | 建 **N1** | 成功 | `INH-1912`「源改名的字符集与创建不一致：中文源名能创建但永远改不了名」，priority **High**，project `MC-checker-v2` / team `Inhandy`，status Backlog，`createdAt 10:58:31Z` |
+| 3 | 建 **N2** | 成功 | `INH-1913`「访客临时导入未打开回环拦截（SSRF 未闭合）」，priority **High**，同上，`createdAt 10:59:08Z` |
+| 4 | 关联 PR #41 | 成功（issue 已是 Done，照样加得上，无需跳过） | attachment `3991a7a9-10cd-4bde-86f0-7bbed517b61c` → https://github.com/Arragon/MCChecker/pull/41 |
+
+**素材来源的一处更正**：本文件 B1 与 B1-补 **没有** `INH-1890` 的预写正文（那两段是 2026-10-17 卡 1 的积压，与卡 5 无关）。完成证据注释取自 `.superpowers/sdd/MCChecker_M3_M4_PLAN/progress.md` 的「Task 5 完结」节与 R32/R33/R34，事实未自行增补；合并后的实测数字（**869 passed**、`check_py39.sh` exit 0、`data/` 哈希 `478d9c26ea8dbb8f0d56c77a94a6cd849fee3c1369e209e697e02f94beb48d24` 未变、前端 `ALL PASSED (29)`）由控制方给定并原样写入。
+
+**PR 归属（避免后人误记）**：卡 5 功能 = **PR #40**（`ea34552` 实现 + `becde67` know-how，合并为 `d1b556c`）；合并后补的评审修复轮 = **PR #41**（`6382efa`，合并为集成分支 tip `97a81b8`）。注释里两条都点名，并如实写了「本卡跳过了合并前评审、事后评审判 Needs fixes（3 Important，其中 I3 未披露）」以及三条 Important 的修复结论。
+
+**未做项**：第 5 条「把 B2–B5 的最终结论回填到对应卡」不在本轮四条范围内，仍未执行。
+
+**连接器表现**：`-32603` 抖 1 次（第 1 条注释的修正更新，第 2 次通过），其余调用一次成功。`save_comment` 的 `id` 参数仍是注释 ID，用它做的是「就地更新」而非新建。
+
 ---
 
 ## B2 · 实现方自裁的错误口径 —— **部分闭合，见 B7（我此前的论证不够）**
