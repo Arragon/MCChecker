@@ -2,37 +2,47 @@
 (function () {
   "use strict";
   var MC = window.MC;
+  /* M3-06（修卡 3 遗留）：记下真 API。异步用例把 MC.api.* 换成 stub 后，
+   * 后续用例开始时**必须**已经换回真身——下面这条「隔离证明」按注册序排在
+   * 唯一一条异步 stub 用例（文件详情）之后，用它证明恢复是真的排到了序上。 */
+  var REAL_API = { get: MC.api.get, post: MC.api.post, put: MC.api.put, del: MC.api.del };
   var results = [];
-  var pending = [];
   /*
    * 用例可以是同步的，也可以返回一个 Promise（视图渲染要走 api.get 的 Promise 链，
-   * 断言只能在 DOM 真正画出来之后做）。异步用例先占位为失败，settled 后改写结果，
-   * 因此顺序不变、也不会因为没等到就误判成通过；最后一条汇总要等全部异步用例结束。
+   * 断言只能在 DOM 真正画出来之后做）。
+   *
+   * M3-06 起用例**串行执行**：每条要等上一条（含其异步部分）settle 之后才开始。
+   * 这是机制修复，不是碰时机——卡 3 的旧机制里同步批次先全部跑完、异步用例的
+   * `finally` 恢复 `MC.api.*` 恢复得太晚，整个同步批次期间 API 都是假的（今天恰好
+   * 没人依赖真 API 所以无害，卡 7 起有依赖了）。串行之后，stub 用例结束时恢复，
+   * 后续用例必然看到真 API；顺序断言见「测试隔离」用例。
+   * 异步用例在其 slot 里先占位为失败、settle 成功后才改写，汇总永远是队列的最后一步。
    */
+  var queue = Promise.resolve();
   function test(name, fn) {
-    var slot = { name: name, ok: true, err: null };
-    results.push(slot);
-    try {
-      var r = fn();
-      if (r && typeof r.then === "function") {
-        slot.ok = false;
-        pending.push(
-          r.then(
+    queue = queue.then(function () {
+      var slot = { name: name, ok: true, err: null };
+      results.push(slot);
+      try {
+        var r = fn();
+        if (r && typeof r.then === "function") {
+          slot.ok = false;
+          return r.then(
             function () {
               slot.ok = true;
               slot.err = null;
             },
             function (e) {
-              slot.ok = false;
               slot.err = e && e.message ? e.message : String(e);
             }
-          )
-        );
+          );
+        }
+      } catch (e) {
+        slot.ok = false;
+        slot.err = e && e.message ? e.message : String(e);
       }
-    } catch (e) {
-      slot.ok = false;
-      slot.err = e && e.message ? e.message : String(e);
-    }
+      return undefined;
+    });
   }
   function eq(a, b, msg) {
     var sa = JSON.stringify(a);
@@ -406,6 +416,15 @@
     });
   });
 
+  /* 隔离证明（M3-06）：上一条是**异步**用例，它把 MC.api.get 换成 stub、只在自己 settle
+   * 时恢复。旧机制下所有同步用例先于它跑完，这条按注册序紧随其后的用例就会看到假 API ⇒ 红。
+   * 修好执行序（用例串行 settle）后它必须绿：证明恢复排在序上，不是碰运气。 */
+  test("测试隔离：异步桩用例 settle 后，后续用例必须拿到真 MC.api", function () {
+    ok(MC.api.get === REAL_API.get, "MC.api.get 不是真身：异步用例的 stub 泄漏到了后续用例（卡 3 的桩污染）");
+    ok(MC.api.post === REAL_API.post, "MC.api.post 不是真身：桩泄漏");
+    ok(MC.api.del === REAL_API.del, "MC.api.del 不是真身：桩泄漏");
+  });
+
 
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
     var capOfKind = MC.App.prototype.capOfKind;
@@ -526,6 +545,5 @@
     document.title = sum.textContent;
   }
 
-  if (pending.length) Promise.all(pending).then(report);
-  else report();
+  queue.then(report);
 })();
