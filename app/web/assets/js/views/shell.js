@@ -22,6 +22,23 @@
 
   var POLL_MS = 10000;
 
+  /** 任务类型/状态的展示词汇。§7.10：task.state 只说「跑没跑完」，
+   * 业务结果在条目 status 里（列表页各自显示，两者不混用）。 */
+  var TASK_STATE_LABELS = { queued: "排队中", running: "进行中", succeeded: "已完成", partial: "部分失败", failed: "失败" };
+  function taskLabel(t) {
+    if (t.type === "update_source") return "更新 " + (t.target || "");
+    return { update_all: "全量更新", refresh_records: "拉取修改记录" }[t.type] || t.type;
+  }
+  /**
+   * 进度文案（卡 6 移交的契约）：后端 `services/tasks.py::_publish_single` 在
+   * `updates.update_source` **返回之后**才写 done/total，单条任务在整个下载期间
+   * 都是 0/0 ——那是「还没开始报数」，不是「0 步里完成了 0 步」。渲染成「准备中」，
+   * 与 mock-api.js 同口径（本卡已把 mock 改成建任务时不预发 total）。
+   */
+  function taskProgressText(t) {
+    return t.progress && t.progress.total ? t.progress.done + "/" + t.progress.total : "准备中";
+  }
+
   /** MC.caps 为 false 时对外展示的接入去向，与 CAP_KEYS 一一对应（见 core/api.js）。 */
   var UNWIRED = MC.unwired;
 
@@ -842,19 +859,58 @@
     });
   };
 
+  /**
+   * 409 BUSY 的跳转落点（卡 6 口径：`detail.task_id` 指向那条正在跑的任务）。
+   * 弹窗只讲「任务本身」：类型 / state / 进度 / 发起人；条目业务结果仍看
+   * 更新源列表的「最近结果」列（§7.10 的两套词汇不混用）。
+   * 任务可能在这一步已结束（GET /tasks/{id} 404）：给业务文案，不谎报服务器故障。
+   */
+  App.prototype.showTask = function (taskId) {
+    return api.get("/tasks/" + api.seg(taskId)).then(
+      function (r) {
+        var t = r.task;
+        MC.modal({
+          title: "正在运行的任务",
+          body: h(
+            "div.col",
+            { style: "gap:10px" },
+            h(
+              "dl.kv",
+              h("dt", "任务"),
+              h("dd", taskLabel(t)),
+              h("dt", "状态"),
+              h("dd", (TASK_STATE_LABELS[t.state] || t.state) + "（进度 " + taskProgressText(t) + "）"),
+              h("dt", "发起人"),
+              h("dd", t.actor || "—"),
+              h("dt", "提交时间"),
+              h("dd", util.formatTime(t.created_at))
+            ),
+            h("div.xsmall.muted", "每一项更新的业务结果在「设置 › 更新源」的最近结果列显示；这条任务结束后列表会自动刷新。")
+          ),
+          footer: function (close) {
+            return [h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭")];
+          },
+        });
+      },
+      function (err) {
+        /* 点「查看该任务」时那条任务可能已结束出窗口（GET 404）：业务文案，不是故障。 */
+        MC.toastError("看不到这条任务", err);
+      }
+    );
+  };
+
   App.prototype.renderTasks = function () {
     if (!this.taskSlot) return;
     util.clear(this.taskSlot);
     var running = this.activeTasks.filter(function (t) { return t.state === "running" || t.state === "queued"; });
     if (!running.length) return;
     var t = running[0];
-    var label = { update_all: "全量更新", update_source: "更新 " + (t.target || ""), refresh_records: "拉取修改记录" }[t.type] || t.type;
     var self = this;
     var btn = h(
       "button.task-indicator",
       { type: "button", "aria-live": "polite" },
       h("span.spinner"),
-      label + " " + t.progress.done + "/" + t.progress.total,
+      taskLabel(t) + " " + taskProgressText(t),
       running.length > 1 ? " 等 " + running.length + " 项" : null
     );
     btn.addEventListener("click", function () {

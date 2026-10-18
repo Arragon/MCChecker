@@ -287,6 +287,376 @@
     eq(MC.wiredSettingsSegments, origWired, "MC.wiredSettingsSegments 是快照切片，外部改不动白名单本体");
   });
 
+  /* ---------- M3-06：设置页渲染用例（真 API 路径 + D2 分段门控的行为观测） ----------
+   * 这批用例把 MC.config.mock 暂时置为 false 走「生产」分支，并用 spy 替换 MC.api.*
+   * （视图只经由 MC.api 的方法名调用，替换属性即可拦住真实 fetch）。执行序已串行，
+   * 每例在自己的 settle 里恢复，后续用例拿到真身——由上面的「测试隔离」用例兜底。
+   */
+  function tick() {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, 0);
+    });
+  }
+  function settingsApp(canDeployer) {
+    return {
+      pid: "default",
+      identity: { ip: "10.12.3.21", name: canDeployer ? "部署者甲" : "李娜", registered: true, is_deployer: !!canDeployer, is_admin: !!canDeployer, role_label: canDeployer ? "部署者" : "成员" },
+      can: function (kind) { return kind === "deployer" && !!canDeployer; },
+      session: { profiles: [{ id: "default", name: "默认机型" }] },
+      files: [],
+      activeTasks: [],
+      taskSlot: MC.util.h("div"),
+      p: function (rest) { return "/p/default" + rest; },
+      go: function () {},
+      openFile: function () {},
+      switchProfile: function () {},
+      reloadSession: function () { return Promise.resolve(); },
+      syncRevision: function () { return Promise.resolve(); },
+      refreshFiles: function () { return Promise.resolve(); },
+      refreshTools: function () { return Promise.resolve(); },
+      renderTasks: MC.App.prototype.renderTasks,
+      pollTasks: function () { return Promise.resolve(); },
+      showTask: function (id) { return MC.App.prototype.showTask.call(this, id); },
+      startTask: function (body) { return MC.App.prototype.startTask.call(this, body); },
+    };
+  }
+  function stubApi(handlers) {
+    var orig = { get: MC.api.get, post: MC.api.post, put: MC.api.put, patch: MC.api.patch, del: MC.api.del };
+    var calls = [];
+    function mk(method) {
+      return function (path, arg) {
+        calls.push(method + " " + path + (arg !== undefined ? " " + JSON.stringify(arg) : ""));
+        var h = handlers[method];
+        var r = h ? h(path, arg) : Promise.resolve({ items: [] });
+        return r;
+      };
+    }
+    MC.api.get = mk("GET");
+    MC.api.post = mk("POST");
+    MC.api.put = mk("PUT");
+    MC.api.patch = mk("PATCH");
+    MC.api.del = mk("DELETE");
+    return { calls: calls, restore: function () { Object.keys(orig).forEach(function (k) { MC.api[k] = orig[k]; }); } };
+  }
+  function cleanOverlays() {
+    MC.closePopover();
+    document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+    /* 只清空 toast 内容、不删 .toast-stack 容器：components.js 复用同一个容器变量，
+     * 删掉容器会让后续用例的 toast 落到游离节点上。 */
+    document.querySelectorAll(".toast").forEach(function (t) { t.remove(); });
+  }
+  var SOURCE_LIST = {
+    items: [
+      { name: "a.xml", url: "http://up/a.xml", record_url: "", local_updated_at: "2026-10-18 10:00:00", last_result: { status: "success", label: "已更新", reason: "已归档旧版本 a_20261017.xml", at: "2026-10-18 10:00:00", archived: "a_20261017.xml" } },
+      { name: "b.xml", url: "http://up/b.xml", record_url: "http://up/b_rec.xml", local_updated_at: null, last_result: { status: "rejected", label: "已拒绝", reason: "根节点由 R 变为 html，可能下载到了错误页面，已拒绝替换", at: "2026-10-17 09:00:00", archived: null } },
+      { name: "c.xml", url: "http://up/c.xml", record_url: "", local_updated_at: "2026-10-18 08:00:00", last_result: { status: "download_failed", label: "下载失败", reason: "连接超时（30 秒），已重试 3 次", at: "2026-10-18 08:00:00", archived: null } },
+      { name: "d.xml", url: "http://up/d.xml", record_url: "", local_updated_at: "2026-10-16 08:00:00", last_result: { status: "unchanged", label: "无变化", reason: "内容与当前版本一致，未归档", at: "2026-10-16 08:00:00", archived: null } },
+    ],
+  };
+  function sourceHandlers(patchImpl) {
+    return {
+      GET: function (path) {
+        if (/\/sources$/.test(path)) return Promise.resolve(JSON.parse(JSON.stringify(SOURCE_LIST)));
+        return Promise.resolve({ items: [] });
+      },
+      POST: function () { return Promise.resolve({ task: { id: "tk1", type: "update_source", target: "a.xml", state: "running", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "部署者甲" } }); },
+      PATCH: patchImpl,
+    };
+  }
+  /* 统一的生产模式挂载器：mock 位、视图实例、API 桩、caps 覆盖、浮层 DOM 无论用例
+   * 成败都在 settle 阶段恢复——执行序已串行，这就是「后续用例拿到真 API」的机制保证。 */
+  function productionRun() {
+    var wasMock = MC.config.mock;
+    var stage = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0;width:900px;height:600px" });
+    document.body.append(stage);
+    MC.config.mock = false;
+    var insts = [];
+    var restoreFns = [];
+    var capsPatch = [];
+    var activeRestore = null;
+    var r = {
+      stage: stage,
+      mount: function (app, seg) {
+        var inst = MC.views.settings(app, { kind: "settings", arg: seg, query: {} });
+        stage.append(inst.el);
+        insts.push(inst);
+        return inst;
+      },
+      useApi: function (handlers) {
+        /* 同一时刻只允许一层桩：先摘掉上一层，新桩才会捕获到「真 API」作为恢复目标，
+         * 恢复顺序也就天然正确。 */
+        if (activeRestore) activeRestore();
+        var s = stubApi(handlers);
+        activeRestore = s.restore;
+        restoreFns.push(s.restore);
+        return s;
+      },
+      capOff: function (key) {
+        capsPatch.push({ key: key, was: MC.caps[key] });
+        MC.caps[key] = false;
+      },
+    };
+    function finish() {
+      MC.config.mock = wasMock;
+      insts.forEach(function (i) { i.destroy(); });
+      stage.remove();
+      cleanOverlays();
+      restoreFns.forEach(function (f) { f(); });
+      capsPatch.forEach(function (p) { MC.caps[p.key] = p.was; });
+    }
+    r.run = function (body) {
+      var p;
+      try {
+        p = Promise.resolve(body(r));
+      } catch (e) {
+        p = Promise.reject(e);
+      }
+      return p
+        .catch(function (e) {
+          finish();
+          throw e;
+        })
+        .then(finish);
+    };
+    return r;
+  }
+
+  test("M3-06 / D2：未接入的五个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi({});
+      /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。 */
+      ["schedule", "people", "bindings", "tools", "profiles"].forEach(function (seg) {
+        var inst = r.mount(settingsApp(true), seg);
+        var main = inst.el.querySelector(".settings-main");
+        ok(main.textContent.indexOf(MC.unwiredSettings[seg]) >= 0, seg + "：只读横幅必须给出接入去向「" + MC.unwiredSettings[seg] + "」");
+        var controls = main.querySelectorAll("button, input, select, textarea");
+        ok(controls.length > 0, seg + "：分段要有编辑控件（禁用占位）");
+        controls.forEach(function (c) {
+          ok(c.disabled, seg + " 的编辑控件必须真的 disabled");
+          ok(/M3-\d\d/.test(c.getAttribute("title") || ""), seg + " 控件的 title 要点名接入卡号，实际：" + c.getAttribute("title"));
+        });
+      });
+      return tick().then(function () {
+        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /schedule、/admins、/bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
+      });
+    });
+  });
+
+  test("M3-06：sources 分段在生产模式打 /sources 与 POST /tasks，状态列显示条目状态与原因", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(sourceHandlers());
+      var app = settingsApp(true);
+      var inst = r.mount(app, "sources");
+      var main;
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          eq(spy.calls, ["GET /p/default/sources"], "进入已接入的 sources 只发这一个请求");
+          ["已更新", "已拒绝", "下载失败", "无变化"].forEach(function (label) {
+            ok(main.textContent.indexOf(label) >= 0, "状态列要显示条目状态「" + label + "」（来自 last_result，不是任务 state）");
+          });
+          ok(main.textContent.indexOf("根节点由 R 变为 html") >= 0, "rejected 行要显示原因");
+          ok(main.textContent.indexOf("连接超时（30 秒），已重试 3 次") >= 0, "download_failed 行要显示原因");
+          ok(main.textContent.indexOf("尚未下载") >= 0, "没有本地文件要如实显示");
+          ok(main.textContent.indexOf("修改记录：http://up/b_rec.xml") >= 0, "record_url 要显示");
+          var upds = [].slice.call(main.querySelectorAll("tbody button")).filter(function (b) { return b.textContent.indexOf("更新") >= 0; });
+          eq(upds.length, 4, "每行一个更新按钮");
+          upds.forEach(function (b) { ok(!b.disabled, "分段已接入且 caps.tasks 为真时更新按钮可用"); });
+          upds[0].click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('POST /p/default/tasks {"type":"update_source","name":"a.xml"}') >= 0, "更新按钮只走 POST /tasks，不做第二套同步按钮：" + spy.calls.join(" | "));
+          ok(app.taskSlot.textContent.indexOf("准备中") >= 0, "入队瞬间 total 还没发布 ⇒ 顶栏显示「准备中」而不是 0/0");
+          var all = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("全部立即更新") >= 0; })[0];
+          ok(all && !all.disabled, "有条目且 tasks 已接入时「全部立即更新」可用");
+          all.click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('POST /p/default/tasks {"type":"update_all"}') >= 0, "全部更新同样只走 POST /tasks");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "两次点击各发一个任务请求，没有重试或重复");
+          /* caps.tasks 关掉（模拟未接入）：更新类按钮禁用 + title 给去向，点击不发任务请求。 */
+          r.capOff("tasks");
+          var inst2 = r.mount(settingsApp(true), "sources");
+          return tick().then(function () {
+            var main2 = inst2.el.querySelector(".settings-main");
+            /* 「新增更新源」是 CRUD 按钮（sources 分段自带），不归 tasks 门控管，排除掉。 */
+            var btns = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return /更新/.test(b.textContent) && b.textContent.indexOf("新增") < 0; });
+            ok(btns.length >= 5, "四个行更新按钮 + 全部立即更新都要在，实际 " + btns.length);
+            btns.forEach(function (b) {
+              ok(b.disabled, "tasks 未接入 ⇒ 更新类按钮 disabled");
+              ok(/M3-\d\d/.test(b.getAttribute("title") || ""), "禁用要点名接入卡号，实际：" + b.getAttribute("title"));
+            });
+            btns.forEach(function (b) { b.click(); });
+            return tick();
+          }).then(function () {
+            eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "未接入时点击不发任务请求");
+          });
+        });
+    });
+  });
+
+  test("M3-06：409 BUSY 不是服务器故障——解释互斥、不重试、给跳到 detail.task_id 的入口；404 按业务错误显示", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var runningAll = { id: "t9", profile: "default", type: "update_all", target: null, state: "running", progress: { done: 1, total: 3 }, result: { items: [] }, error: null, actor: "李娜", created_at: "2026-10-18 10:00:00", finished_at: null };
+      var postErr = new MC.ApiError(409, "BUSY", "同类任务正在执行（由 李娜 发起）", { task_id: "t9" });
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/sources$/.test(path)) return Promise.resolve(JSON.parse(JSON.stringify(SOURCE_LIST)));
+          if (path === "/tasks/t9") return Promise.resolve({ task: JSON.parse(JSON.stringify(runningAll)) });
+          return Promise.resolve({ items: [] });
+        },
+        POST: function () { return Promise.reject(postErr); },
+      });
+      var app = settingsApp(true);
+      var inst = r.mount(app, "sources");
+      var main;
+      var rowUpd = function (i) {
+        return [].slice.call(main.querySelectorAll("tbody button")).filter(function (b) { return b.textContent.indexOf("更新") >= 0; })[i];
+      };
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          rowUpd(0).click();
+          return tick();
+        })
+        .then(function () {
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          var warn = toasts.filter(function (x) { return x.className.indexOf("toast-warning") >= 0; })[0];
+          ok(warn, "409 必须是解释性警示而不是错误 toast（BUSY 是预期结果，不是服务器故障）");
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "不得按「无法开始更新/服务器故障」处理");
+          ok(warn.textContent.indexOf("已有任务在运行") >= 0, "文案要说清互斥：" + warn.textContent);
+          ok(warn.textContent.indexOf("李娜") >= 0, "要带上后端 detail 里的发起者");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 1, "409 不自动重试");
+          var action = warn.querySelector("button.btn");
+          ok(action && action.textContent.indexOf("查看该任务") >= 0, "要给出跳转 detail.task_id 的入口");
+          action.click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf("GET /tasks/t9") >= 0, "入口按 detail.task_id 拉那条任务（GET /tasks/{id}）");
+          var modal = [].slice.call(document.querySelectorAll(".modal-backdrop .modal")).pop();
+          ok(modal, "弹出那条任务的详情");
+          ok(modal.textContent.indexOf("全量更新") >= 0 && modal.textContent.indexOf("进行中") >= 0 && modal.textContent.indexOf("1/3") >= 0, "弹窗显示任务类型/状态/进度：" + modal.textContent);
+          /* 换 404（卡 6 裁定：名字不在映射表 ⇒ 404 是业务结果，不是服务器故障）：
+           * 显示后端消息、刷新本列表、不重试。 */
+          document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+          document.querySelectorAll(".toast").forEach(function (x) { x.remove(); });
+          postErr = new MC.ApiError(404, "NOT_FOUND", "该文件没有配置更新源", { name: "a.xml" });
+          rowUpd(1).click();
+          return tick();
+        })
+        .then(function () {
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "404 不走「服务器故障」式错误 toast");
+          var warn = toasts.filter(function (x) { return x.className.indexOf("toast-warning") >= 0 && x.textContent.indexOf("该文件没有配置更新源") >= 0; })[0];
+          ok(warn, "404 显示后端业务消息：" + toasts.map(function (x) { return x.className + "|" + x.textContent; }).join(" ; "));
+          var gets = spy.calls.filter(function (c) { return c === "GET /p/default/sources"; }).length;
+          ok(gets >= 2, "404 说明列表已过期 ⇒ 刷新本列表（GET /sources 第二次），实际 " + gets + " 次");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "两次点击各一次 POST：409 与 404 都不自动重试");
+        });
+    });
+  });
+
+  test("M3-06：改名对话框带 migrate_files 勾选；字段级错误保留输入；保存成功只刷新列表", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(
+        sourceHandlers(function () {
+          return Promise.reject(new MC.ApiError(409, "FILE_EXISTS", "已存在同名更新源", { field: "name", name: "改名.xml" }));
+        })
+      );
+      var app = settingsApp(true);
+      var inst = r.mount(app, "sources");
+      var modal, nameField, migrate;
+      return tick()
+        .then(function () {
+          var main = inst.el.querySelector(".settings-main");
+          main.querySelector('tbody button[aria-label="更多操作"]').click();
+          var edit = [].slice.call(document.querySelectorAll(".popover .menu-item")).filter(function (m) { return m.textContent.indexOf("编辑") >= 0; })[0];
+          ok(edit, "行菜单里有「编辑」");
+          edit.click();
+          modal = [].slice.call(document.querySelectorAll(".modal-backdrop .modal")).pop();
+          nameField = modal.querySelectorAll(".field input.input-mono")[0];
+          migrate = modal.querySelector('input[type="checkbox"]');
+          ok(migrate, "改名对话框必须有「是否迁移本地文件」勾选");
+          ok(migrate.checked, "缺省勾选迁移（与后端 migrate_files 缺省 True 同口径）");
+          ok(modal.textContent.indexOf("迁移") >= 0, "勾选旁要说明迁移范围（本地文件、历史、收藏、建议）");
+          migrate.checked = false;
+          nameField.value = "改名.xml";
+          nameField.dispatchEvent(new Event("input"));
+          var save = [].slice.call(modal.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save.click();
+          return tick();
+        })
+        .then(function () {
+          var patchCalls = spy.calls.filter(function (c) { return c.indexOf("PATCH") === 0; });
+          eq(patchCalls.length, 1, "一次点击一次 PATCH");
+          ok(patchCalls[0].indexOf("PATCH /p/default/sources/a.xml ") === 0, "PATCH 打到旧名字（改名前的键）：" + patchCalls[0]);
+          ok(patchCalls[0].indexOf('"migrate_files":false') >= 0, "取消勾选要如实提交 migrate_files=false：" + patchCalls[0]);
+          var fieldWrap = nameField.closest ? nameField.closest(".field") : nameField.parentNode;
+          var errEl = fieldWrap.querySelector(".field-error");
+          ok(errEl && !errEl.classList.contains("hidden") && errEl.textContent.length > 0, "detail.field=name 的错误显示在「文件名」输入框下方");
+          eq(nameField.value, "改名.xml", "字段错误必须保留用户输入");
+          ok(nameField.classList.contains("is-invalid"), "输入框标红");
+          /* 接口恢复正常后再保存一次：成功 ⇒ 对话框关闭、只重新拉本列表（不整页 reload）。 */
+          migrate.checked = false;
+          var spy2 = r.useApi(
+            sourceHandlers(function () {
+              return Promise.resolve({ item: { name: "改名.xml", url: "http://up/a.xml", record_url: "" } });
+            })
+          );
+          var save2 = [].slice.call(modal.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save2.click();
+          return tick().then(function () {
+            ok(!document.body.contains(modal), "保存成功后对话框关闭");
+            var gets = spy2.calls.filter(function (c) { return c === "GET /p/default/sources"; }).length;
+            ok(gets >= 1, "保存成功后重新拉本列表刷新（而不是整页 reload）");
+            var patch2 = spy2.calls.filter(function (c) { return c.indexOf("PATCH") === 0; });
+            eq(patch2.length, 1, "第二次点击只发一次 PATCH");
+          });
+        });
+    });
+  });
+
+  test("M3-06：非部署者进 sources 可查看，但页级只读横幅说明原因、写控件全部禁用", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(sourceHandlers());
+      var inst = r.mount(settingsApp(false), "sources");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        ok(spy.calls.indexOf("GET /p/default/sources") >= 0, "读取仍允许（读接口全部角色可用）");
+        ok(main.textContent.indexOf("只读") >= 0 && main.textContent.indexOf("部署者") >= 0, "页级横幅要说清身份与原因：" + main.textContent.slice(0, 160));
+        var writeBtns = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return /新增|更新/.test(b.textContent); });
+        ok(writeBtns.length >= 3, "覆盖面：新增、每行更新、全部立即更新都要在");
+        writeBtns.forEach(function (b) {
+          ok(b.disabled, "非部署者的写按钮必须禁用");
+          ok((b.getAttribute("title") || "").indexOf("部署者") >= 0, "禁用要说明原因");
+        });
+      });
+    });
+  });
+
+  test("M3-06：顶栏任务进度在 total 未发布时渲染「准备中」，不显示 0/0", function () {
+    /* 后端契约（卡 6 移交）：update_source 的 progress.total 在下载结束后才回填，
+     * 下载期间就是 0/0 ⇒ UI 必须渲染成「准备中」。 */
+    function slotFor(tasks) {
+      var slot = MC.util.h("div");
+      MC.App.prototype.renderTasks.call({ taskSlot: slot, activeTasks: tasks });
+      return slot;
+    }
+    var early = slotFor([{ id: "t1", type: "update_source", target: "x.xml", state: "running", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "张三" }]);
+    ok(early.textContent.indexOf("准备中") >= 0, "total=0 ⇒ 「准备中」，实际：" + early.textContent);
+    ok(early.textContent.indexOf("0/0") < 0, "不能再出现 0/0");
+    var later = slotFor([{ id: "t2", type: "update_all", target: null, state: "running", progress: { done: 2, total: 5 }, result: { items: [] }, actor: "张三" }]);
+    ok(later.textContent.indexOf("2/5") >= 0 && later.textContent.indexOf("准备中") < 0, "total 已发布 ⇒ 正常 n/m");
+  });
+
   test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
     var calls = [];
     var origDel = MC.api.del;
