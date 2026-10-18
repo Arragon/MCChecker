@@ -44,7 +44,12 @@
    * 第三轮 nit：这条声明必须排在下面注册的两个监听**之前**——监听在脚本求值期就可能调
    * report()，那时若常量还没赋值，红会写成「预期 undefined，实际注册 0」（仍然红，
    * 但不说人话）。 */
-  var EXPECTED_CASES = 43;
+  /* M3-09 合并轮实测：本行取的是**页面自己报出的注册数**，不是两边各自写的数字。
+   * 合并前 29719a1 写 43（本卡 +1）、0dd72b1 写 42（M4-02 +2 却没同步改这里），
+   * git 默认合并对这一行不报冲突（只有一侧动过它），于是 43 直接胜出、42 侧的
+   * 两条用例照样注册 ⇒ 语义冲突只能靠实测拆穿。HTTP keep-alive 形态下三轮都是
+   * 「预期 43，实际注册 45」，45 条全部真跑到且绿，唯一红的就是这条闸。 */
+  var EXPECTED_CASES = 45;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
