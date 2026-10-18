@@ -29,7 +29,7 @@ from ..core.errors import (
     TOO_LARGE,
     AppError,
 )
-from ..services import auth
+from ..services import auth, tasks
 from ..services.context import RequestContext
 from .router import Response, Router
 
@@ -417,12 +417,37 @@ def _content_type(path: str) -> str:
 
 
 class MCServer(ThreadingHTTPServer):
-    """收敛并发与连接行为（§3.5）。"""
+    """收敛并发与连接行为（§3.5）。
+
+    `runner`（卡 6 的后台任务队列）一旦注入，`shutdown()` 就**先排空在途任务再关
+    HTTP**（R9）。次序的理由不是「工作线程非 daemon、进程不退出」——`ThreadPoolExecutor`
+    的 worker 从**提交方**继承 daemon 位（`threading.py:828`），而 `submit` 正是这批
+    HTTP 处理线程调的，所以现网的 `mctask_N` 就是 daemon；它们照样会被等到，因为
+    `concurrent.futures.thread` 注册了 `_python_exit`，解释器退出前会把它们 join 掉。
+    真正的问题是**停止序列比 join 先走完**：`serve_forever` 一退出，主线程一路往下
+    删单实例锁，而 worker 还在写 `data/`。所以次序仍是「先 `runner.shutdown()` 排空、
+    后关 HTTP」，且删锁前必须按**线程名**数人（谓词是 `tasks.worker_threads()`，
+    见 `run.stop_and_release`，C1）。这个次序放在服务器自己身上，是为了让「任何调用方
+    关掉这个 server」都自动满足它；`run.ordered_stop` 里还显式排了同一次序
+    （`runner.shutdown()` 幂等，两次调用不会重复 join，见 R10）。
+
+    `daemon_threads = True` 只管 HTTP 处理线程本身；它既不决定 worker 的 daemon 位
+    （那随提交方继承），也不是「还有没有人在写 `data/`」的判据——判据是线程名前缀。
+    """
 
     daemon_threads = True
     request_queue_size = 128
 
-    def __init__(self, settings: Settings, router: Router) -> None:
+    def __init__(
+        self, settings: Settings, router: Router, runner: Optional[tasks.TaskRunner] = None
+    ) -> None:
         self.settings = settings
         self.router = router
+        self.runner = runner
         super().__init__((settings.host, settings.port), MCRequestHandler)
+
+    def shutdown(self) -> None:
+        """有序停止：先等后台任务收尾（至多 30 秒），再让 `serve_forever` 退出。"""
+        if self.runner is not None:
+            self.runner.shutdown(tasks.DEFAULT_SHUTDOWN_TIMEOUT)
+        super().shutdown()

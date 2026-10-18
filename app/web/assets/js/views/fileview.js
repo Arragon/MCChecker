@@ -942,9 +942,9 @@
 
     function drawRecords() {
       var res = S.records;
-      // 「立即拉取」要 POST /tasks，属 M3-08；生产模式下禁用并说明原因，别打空接口。
-      var mayFetch = app.can("deployer") && res.record_url && MC.caps.tools;
-      var fetchTitle = !res.record_url ? "未配置修改记录链接" : !app.can("deployer") ? "仅部署者可手动拉取" : !MC.caps.tools ? "拉取修改记录需要任务接口（M3-07 / M3-09）" : null;
+      // 「立即拉取」要 POST /tasks，属 M3-07 / M3-09；生产模式下禁用并说明原因，别打空接口。
+      var mayFetch = app.can("deployer") && res.record_url && MC.caps.tasks;
+      var fetchTitle = !res.record_url ? "未配置修改记录链接" : !app.can("deployer") ? "仅部署者可手动拉取" : !MC.caps.tasks ? "拉取修改记录需要任务接口（M3-07）" : null;
       var refresh = h("button.btn.btn-sm", { type: "button", disabled: !mayFetch, title: fetchTitle }, icon("refresh"), "立即拉取");
       refresh.addEventListener("click", function () {
         MC.withBusy(refresh, function () {

@@ -72,7 +72,14 @@
     function sources(sec) {
       return api.get(app.p("/sources")).then(function (res) {
         var running = app.activeTasks.some(function (t) { return t.type === "update_all" && t.state === "running"; });
-        var all = h("button.btn.btn-primary", { type: "button", disabled: running || !res.items.length }, icon("download"), running ? "全量更新进行中…" : "全部立即更新");
+        // D4（M3-07）：更新按钮只走 POST /tasks，任务接口未接入时禁用并说明，不发请求。
+        var tasksOff = !MC.caps.tasks ? MC.unwired.tasks : null;
+        var all = h(
+          "button.btn.btn-primary",
+          { type: "button", disabled: running || !!tasksOff || !res.items.length, title: tasksOff },
+          icon("download"),
+          running ? "全量更新进行中…" : "全部立即更新"
+        );
         all.addEventListener("click", function () {
           MC.withBusy(all, function () {
             return app.startTask({ type: "update_all" }).then(function () { MC.toast.info("已开始全量更新", "顶部会显示进度，可继续其他操作"); }, function (err) { MC.toastError("无法开始更新", err); });
@@ -82,7 +89,16 @@
         var rows = res.items.map(function (it) {
           var st = it.last_result;
           var dot = !st ? "" : st.status === "success" ? ".dot-success" : st.status === "unchanged" ? ".dot-primary" : st.status === "skipped" ? "" : ".dot-danger";
-          var upd = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, icon("refresh"), "更新");
+          var upd = h(
+            "button.btn.btn-sm",
+            {
+              type: "button",
+              disabled: ro() || !!tasksOff,
+              title: ro() ? "只有部署者（在服务器本机访问）可以修改" : tasksOff,
+            },
+            icon("refresh"),
+            "更新"
+          );
           upd.addEventListener("click", function () {
             MC.withBusy(upd, function () {
               return app.startTask({ type: "update_source", name: it.name }).then(function () { MC.toast.info("已开始更新 " + it.name); }, function (err) { MC.toastError("无法开始更新", err); });
