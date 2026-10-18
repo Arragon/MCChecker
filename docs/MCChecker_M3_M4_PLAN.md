@@ -30,7 +30,7 @@
 
 ## 1. 现状与差距（事实源已对齐）
 
-Linear P-INH-14 共 54 卡：**28 Done / 10 In Progress / 16 Todo**。M0（9）、M1（7）、M2（12）全绿；M3（17）、M4（9）共 **26 卡未完成**。集成分支 `feat/mc-v2-delivery`，全量测试 506 passed，前端测试页 ALL PASSED (26)，`data/` 哈希 `478d9c26ea8dbb8f`。
+Linear P-INH-14 共 **57 卡**（原 54 + 执行中新立 INH-1912 / INH-1913 / INH-1914）：**34 Done / 23 未完成**。M0（9）、M1（7）、M2（12）、M3 已合入 6 张（01–05、07）；M3 余 11 张、M4 余 9 张。集成分支 `feat/mc-v2-delivery`。**卡数、测试数、哈希号一律当场实测再写**（见 R40/R43），本行此前长期停在「54 卡 / 28 Done / 506 passed」这种过期快照上。
 
 ### 1.1 「In Progress」的真实含义（读卡评论得出，不是字面进度）
 
@@ -1037,10 +1037,14 @@ gh pr merge <n> --merge
 
 以下是控制方逐张卡读真实代码得出的结论。**后续派发该卡时必须把对应条目随 brief 下发**，不要重新发现一遍。
 
-### 基线（实测，非引用文档）
+### 基线（当场实测，禁止引用本文数字）
 
-`pytest -q` → **506 passed in 16.22s**；`check_py39.sh` exit 0；`data/` 内容哈希 `478d9c26ea8dbb8f0d56c77a94a6cd849fee3c1369e209e697e02f94beb48d24`。
-`data/` 被 `.gitignore` 忽略且**完全未被跟踪** ⇒ H3 的前后哈希**只能在真实工作区测**，另开 worktree/clone 里没有 `data/`。仓库内**禁止**嵌套 clone（会被 pytest 从根目录连带收集，污染计数）。
+**2026-10-18 更新，取代此前写在本文里的所有旧基线**：全量测试数每张卡都在涨（506 → … → **905**），`ALL PASSED` 也在涨（26 → … → 29）。**派发任何一张卡前，自己跑一遍拿到当下的数**，不要把本文任何一个数字当事实源（R43）。
+
+H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数据」的唯一可信证据是 `tests/data_guard.py` 会话级守卫的红/绿**，它每一轮都当场播报「执法中(N 个文件)」或「未执法」。守卫绿 = 首末快照一致，**不等于**期间无人写入（两个盲区见 R40）。
+> 历史说明：本节原先写着「`data/` 内容哈希 `478d9c26ea8dbb8f…`（实测）」，而那个号后来被证明**从未被真正测过**、是抄文档来的，当前树也复现不出来（本机实测 `5591aacb4a22f34c`，且本机 `data/` 全是测试残留）。这条教训的全文见 `.superpowers/sdd/MCChecker_M3_M4_PLAN/h3-baseline-audit.md`。
+
+`data/` 被 `.gitignore` 忽略且**完全未被跟踪** ⇒ 任何数据完整性检查**只能在真实工作区做**，另开 worktree/clone 里没有 `data/`（守卫在这种情况下会明确播报「未执法」，不会假装绿）。仓库内**禁止**嵌套 clone（会被 pytest 从根目录连带收集，污染计数）。
 
 ### 卡 2（M3-02）
 
@@ -1066,7 +1070,8 @@ gh pr merge <n> --merge
 ### 卡 6 / 卡 8（M3-07 / M3-08）
 
 现状：`run.py:72-79` 信号处理器用 `threading.Thread(target=server.shutdown, daemon=True)`；`http.py:422` `daemon_threads = True`。
-- **R9** 停止顺序必须 **先 `runner.shutdown(30)` 再 `server.shutdown()`**；`ThreadPoolExecutor` 保持非 daemon（正是「不残留非 daemon 工作线程」这条验收所需）。顺序反了会让主线程先退出、任务被丢或被悬挂线程拖住。`_handle_signal` 与正常退出路径两处都要改。
+- **R9** 停止顺序必须 **先 `runner.shutdown(...)` 再 `server.shutdown()`**，`_handle_signal` 与正常退出路径两处都要走同一条。
+  **（卡 6 实测更正，2026-10-18）** 原文里「`ThreadPoolExecutor` 保持非 daemon，所以进程退出前一定把在途任务跑完」这条前提**是错的**：Python 3.9 `threading.py:828` 是 `self._daemonic = current_thread().daemon`，**工作线程继承提交方的 daemon 位**，而 `MCServer.daemon_threads = True`，因此从 HTTP 请求发起的任务跑在 daemon 线程里。「有没有人还在写」的判据只能是**线程名**（`tasks.THREAD_NAME_PREFIX`，见 `worker_threads()`）。真正兜住退出的是 `concurrent.futures.thread` 用 `threading._register_atexit` 注册的 `_python_exit`，它不分 daemon 地 join 工作线程——但那发生在**解释器退出阶段**，比 `run.py` 往下走完要晚，所以「删锁」必须显式等到线程散尽（卡 6 的 `stop_and_release`）。派发卡 8 时必须把这条随 brief 下发，否则它会照一条假标准验收。
 - **R10** `shutdown()` 必须幂等（信号连按两次不得抛、不得重复 join）。
 - **R11** 调度线程是 daemon，`stop()` 靠 Event 唤醒自循环退出，「等任务跑完」由 `runner.shutdown` 负责，两者不要混。
 
@@ -1100,32 +1105,32 @@ gh pr merge <n> --merge
 - **R38** 外部写入（Linear）交给**独立 CLI 会话**跑是有效的：`qoder-cli` 的新会话有自己的 MCP 注册表，能调到本会话启动时快照里没有的 Linear 连接器。用法：`--session-id <uuid> --system-prompt ... -- "任务"`，再 `--resume <uuid> "继续"` 追问；正文让它自己从 `docs/MCChecker_BLOCKERS.md` 读，控制方不在 prompt 里重编事实。约束要写进 prompt：**只准编辑那一个文档、禁止任何 git 写操作**，否则会和同工作区里跑的评审/实现互相踩。
 - **R39** `revision` 分量口径（卡 5/6 定稿）：`update_all` 自己不递增 `settings`（`updates.py` 里只在 create/update/delete source 递增），由 runner 在任务结束时按 `FINISH_PARTS = {"update_all": ("settings",)}` 补一次；`files` **不补**，因为 `update_source` 只在字节真变了才递增，runner 无从判断，补了就是虚假通知。M3-08 的调度器复用 runner 时必须沿用同一张表，不要在 handler 里另写一次 bump。
 - **R23**（H4/H5 的具体形态）：实现代理曾在 `docs/MCChecker_DELIVERY_PLAN.md` 第 11 节写下「M3-01 已完成」，而当时**未提交、未评审、未合并**。交付文档是后续 agent 的接力入口，写早了等于伪造进度。口径：**状态词只能由控制方在真合并之后写实**，代理一律写「已实现待评审/待合并」。
+- **R40** **H3 的证据形式已变更（INH-1914 起生效）**：从此「测试没损伤权威数据」的唯一可信证据是 `tests/data_guard.py` 会话级守卫的**红/绿**，不是任何人报出的哈希号。历史基线 `478d9c26ea8dbb8f` **作废**——它只存在于文档里、从未被真正测过，当前树实测是 `5591aacb4a22f34c`（旧号在任何路径拼法下都复现不出来）。两个已知盲区必须知道：**用例内写了又删** → 守卫看（最终态）= 绿；**会话结束之后才落盘的写入** → 绿，且 `mctask` 之外的线程（`ui.timer`、`asyncio`、卡 8 的调度线程）不在守卫可见范围内。所以「守卫绿」**不等于**「没有测试写过 `data/`」，只等于「首末快照一致」。
+- **R41** **控制方并行派出两个实现代理，是本项目最贵的流程错误（犯过两次，卡 6 一次、卡 7 一次）**。两个代理同时改同一个工作区时，一个的中间态会污染另一个的验证结果，甚至产出一个双方都不认识、但测试可能全绿的产物。控制方派卡 7 时又派了一个，与卡 6 的修复代理同时在跑，发现后立即 `TaskStop` 停掉第二个并确认工作区无残留。**How to apply:** 派发前必须确认上一个实现代理已收尾（收到完成通知）；需要并行时必须各用**独立 worktree**且文件面零重叠。
+- **R42** **评审用工作树必须与被评审 SHA 同源，派发词里要评审方回显 `git log --oneline -1`**（R37 的加强版）。同一轮里我给评审方的路径是对的、但那个工作树还 checkout 在上一轮的 base，评审方读到的全是修复前的代码——它把「没修复」当成结论，而这次我在派出去之后才发现，只能停掉重派。路径正确但提交号没跟上，和路径指错一样致命。
+- **R43** `docs/MCChecker_DELIVERY_PLAN.md` 与 `docs/MCChecker_M3_M4_PLAN.md` 里凡是写死「M3 合入 N 张 / 基线 N passed」的句子都是**会过期的快照**，不是事实源。改动它们时必须**当场实测**后再写，否则就会重演 R40 那类「抄文档报数」的失效。
+- **R44** Linear 的卡号（`P-INH-*`）与正文里的编号会漂移：本项目实测过公告正文里写的卡号与实际返回的 issue id 不一致（1914/1915/1912/1913 那批）。凡外部系统的写入，**以接口返回的对象 id 为准**，不要相信自己起草时写的号。
 
-## 11. 执行状态快照（2026-10-18 04:30，恢复时从这里接）
+## 11. 执行状态快照（2026-10-18 07:10，恢复时从这里接）
 
-**里程碑计数**：54 卡 / 33 Done / 21 未完成。已合入集成分支：M3-01…M3-05（含卡 5 的 fix-forward PR #41）与若干文档 PR。集成分支 tip 以 `git log --oneline -1 origin/feat/mc-v2-delivery` 为准，不要相信本文写死的 SHA。
+**里程碑**：**57 卡 / 34 Done / 23 未完成**。已合入集成分支：M3-01…M3-05、M3-07（卡 6，PR #43）、H3 守卫（INH-1914，PR #44），加上文档 chore。**集成分支 tip 一律用 `git log --oneline -1 origin/feat/mc-v2-delivery` 现查**，别信本文任何写死的 SHA（R43）。
 
-**卡 6（M3-07 / INH-1892）状态**：代码已完成并提交在 `mc-v2/m3-07-tasks` = `455dbe0`（2 个提交：`2fb11a4` 实现 + `455dbe0` know-how），基线 `6382efa`，相对集成分支只有本卡 14 文件 +2143/−24，PR 会是干净的。干净工作区实测：**869 passed**、`check_py39.sh` exit 0、`data/` 哈希 `478d9c26ea8dbb8f0d56c77a94a6cd849fee3c1369e209e697e02f94beb48d24` 未变、前端 `ALL PASSED (29)`、`grep -c "MC.caps.tools" fileview.js` = 0。**第一次评审作废（R37），第二轮评审正在跑**；恢复时先看后台评审结论或直接重派，评审通过后再 `gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge`。
+**验证基线（控制方在合并 INH-1914 后亲手实测，两种环境各跑一遍全量）**：**905 passed**（约 60 s，输出干净）、`check_py39.sh` exit 0、前端 `ALL PASSED (29)`。H3 证据从此不看哈希号，看守卫播报：本机 `data/` 存在时打印「H3 守卫执法中：真实 data/ 基线快照 3 个文件…」；在无 `data/` 的检出里打印「H3 守卫未执法…这一轮的『绿』是没有可比对对象的结果，不是『数据完好』的证据」——两种绿是可观察不同的，这条是 R40 的落点。
 
-**评审用工作树**：`/Users/wangdongxin/projects/mcc-review-m3-07`（detached @ `455dbe0`）。用完 `git worktree remove ../mcc-review-m3-07` 清掉，别留在仓库内。
+**卡 7 = M3-06 / INH-1891（更新源设置页 + D2 分段门控）是下一张**，尚未开工。brief = `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-7-brief.md`，**必须同时下发** `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-7-handdowns.md`（卡 6 移交的后端口径、卡 3 遗留的 `MC.api.get` 桩污染必修项、D2 唯一插入点、`progress.total` 与 409 文案两项改派）。必带裁定：R14、R19、R39、R40。
 
-**Linear 已同步到**：M3-01…M3-05 = Done（含 PR #41 的证据注释），N1 = **INH-1912**、N2 = **INH-1913** 均已建卡入 Backlog（ID 取自 `docs/MCChecker_BLOCKERS.md` 的「B1 · 已执行」表，那是 Linear 返回对象的原样记录）。卡 6 合并后还欠：`INH-1892` → Done + 证据注释。
+**之后**：M3-08 → 09 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17（17 恒为最后）。M4 九张（INH-1903…1911）照 §9 纲要。另有三张执行中新立的卡：INH-1912（N1 中文改名）、INH-1913（N2 访客临时导入的回环拦截未开）、INH-1914 已完成。
 
-**恢复后的动作顺序**：
-1. 收卡 6 评审 →（如有 Important/Critical）在 `mc-v2/m3-07-tasks` 上修复并二次评审 → 合并 → 同步 Linear。
-2. 卡 7 = **M3-06 / INH-1891**（更新源设置页 + D2 分段门控），brief = `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-7-brief.md`，必带裁定：R14（门控只插 `settings.js:62-67` 的 `renderSection()`）、R19（mock 非权威）、R39（runner 的 bump 口径）、卡 3 遗留的 `MC.api.get` 桩隔离问题。
-3. 之后：M3-08 → 09 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17（17 必须最后）。M4 九张（INH-1903…1911）照 §9 纲要。
+**流程红线（每张卡都适用，全部是踩过才写的）**：R34 不得跳过合并前评审；R35/R41 实现代理一律串行，一个工作区同一时刻只属于一张卡；R36 切分支只能在代理停止之后；R37/R42 评审方必须用与被评审 SHA 同源的独立工作树，并回显 `git log --oneline -1`；R40 H3 只认守卫红/绿、禁止抄哈希号；R23 未合并不得在文档里自称完成。
 
-**流程红线（血的教训，每张卡都适用）**：R34 不得跳过合并前评审；R35 实现代理一律串行，一个工作区同一时刻只属于一张卡；R36 切分支只能在代理停止之后；R37 评审断言先复核再采纳。
+**本机的两个后台代理**（不属于代码，恢复时先确认状态）：`同步 Linear 进度` 会话负责外部写入（禁止它动 git 与被追踪文件，结果落 `.superpowers/linear-sync-log.md`）；`.superpowers/` 已写进 `.git/info/exclude`（本地生效，未改仓库配置），不会污染 `git status`。
 
-## 12. Linear 同步欠账
+## 12. Linear 同步状态
 
-**已结清**（2026-10-18，由独立 CLI 会话 `a723637b-49f4-4b73-8976-1d3fb3f9b00c` 执行并逐条回帖，明细见 `docs/MCChecker_BLOCKERS.md` 的 B1）：原列 4 条全部发出 —— `INH-1890` 完成证据 + Done、`INH-1886` 三条、`INH-1887`/`INH-1889` 各一条、项目状态更新，N1/N2 建卡。
+**已结清**（执行明细与返回 id 见 `docs/MCChecker_BLOCKERS.md` 的「B1 · 已执行」与 `.superpowers/linear-sync-log.md`）：M3-01…M3-05 与 INH-1914 的 Done + 证据注释、N1/N2 建卡（INH-1912 / INH-1913）、H3 基线作废的**公开更正公告**（旧评论不删，就地补正，Linear 留有编辑痕迹）。更早发出的：`INH-1886` D1 裁定 `0337c38d`、`INH-1887` 的 R19 评论 `d87d91dd`、项目状态更新 `8b3551ef`。
 
-**仍欠**：
-1. `INH-1892`（卡 6）合并后的 Done + 证据注释。
-2. 一条流程性通报：本项目对**共享集成分支**有过一次直推（`78d0fbb`，纯文档），未改写历史；后续一律走 PR（R34 之后又补的口径）。
-3. 每合并一张卡都要同步该卡状态与证据，不要攒 —— 看板比实际乐观是真实交付风险。
-
-
-**更早发出的**（连接器恢复前）：`INH-1886` 状态 In Progress、D1 裁定评论 `0337c38d`；`INH-1887` 的 R19 评论 `d87d91dd`；项目状态更新 `8b3551ef`（卡序 + D1–D4）。
+**仍需跟进**：
+1. `INH-1892`（M3-07，PR #43）合并后的 Done + 证据注释。
+2. 本项目对**共享集成分支**有过一次直推（`78d0fbb`，纯文档），未改写历史；此后一律走 PR。
+3. 每合并一张卡都当场同步该卡状态与证据，不要攒——看板比实际乐观是真实的交付风险。
+4. 外部系统的编号**以接口返回的 id 为准**（R44）：起草时写的卡号与实际创建的曾出现过不一致。
