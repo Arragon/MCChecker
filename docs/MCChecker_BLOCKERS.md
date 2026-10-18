@@ -6,7 +6,7 @@
 
 ---
 
-## B1 · Linear 连接器 —— **App 层已修复（ready），但本会话用不了，需开新会话**
+## B1 · Linear 连接器 —— **本会话无法恢复，需开新会话补发**（积压内容见下）
 
 **2026-10-17 处置结果**：`query_mcp list_servers` 查到 `plugin:product-management:linear`（serverId `c634f9ea-03f7-474c-8c0b-1de0db0738a9`）状态是 `failed` / `failureCategory=connectivity` / `MCP_REMOTE_CONNECTION_CLOSED`，而 `enabled=true`、`sourcePresent=true` —— 也就是**插件没被卸载也没被禁用，是连接断了**。对它执行 `manage_mcp retry` 后，`get_server` 显示 **`status=ready`、`failureCategory=null`**。
 
@@ -125,11 +125,18 @@ M3 计划估约 21 人日、M4 约 9.5 人日，共 26 卡。执行约束是「�
 
 ### B1-补 · 待发注释的成品正文（新会话直接复制发送）
 
-**① → `INH-1886`（进度真相，最要紧，看板现在误导人）**
+**① → `INH-1886`：置 Done 的证据注释（卡 1 已合并，2026-10-17）**
 
-> ## 状态更正：本卡未完成，勿按 Done 理解
-> Linear 显示 In Progress，实际是：代码已提交在**未合并**分支 `mc-v2/m3-01-review-apply`（`cc90ffb`），已通过独立评审且评审判定「需要修复」，正在修 3 条 Important。本轮合入 `feat/mc-v2-delivery` 的卡数 = **0**，里程碑仍 28/54。
-> 期间 Linear 连接器断线（`MCP_REMOTE_CONNECTION_CLOSED`），retry 后 App 层已 `ready`，但会话工具注册表未恢复，故以下同步积压在本节。
+> ## 完成（已合并进集成分支 `feat/mc-v2-delivery`，tip `9cbee91`）
+> PR: https://github.com/Arragon/MCChecker/pull/36 · 提交 `3792ebd`（实现）+ `fccb6f6`（修复轮）；另 PR #35 = 计划/裁定/搁置清单文档。
+>
+> **已完成**：`core/reviewing.apply_edits(src, fmt, edits) -> bytes` 在原文字节上只改选中节点；§6.7 第 6 步三段语义校验（节点数与 `t` 序列不变 → 有值节点 loc 集合的对称差恰好等于本次 edits → 逐个比验证望值），不过则抛 `REVIEW_UNSAFE` 且不返回任何字节；新增公开 `parser.collect_ns_prefixes`；类型规则真去重（`value_type_hint` 收进 core，`services/review.py::_required_type` 转发）。新路径不调用旧 `serialize_tree`。
+>
+> **验收证据（3.9.11，控制方独立复跑）**：`pytest -q` → **605 passed**（基线 506；`test_review_apply.py` 99 passed）；`check_py39.sh` exit 0；`data/` 哈希 `478d9c26ea8dbb8f…` 前后一致；TDD RED=`ImportError: cannot import name 'apply_edits'`；变异验证 9 次。独立评审→修复→限定复查：3 条 Important 全部 ADDRESSED、无新 Critical/Important。
+>
+> **高风险变更（显式报告）**：① SPEC §6.7 补入「null 是只读值」（D1 裁定，维持现状不加代码分支，属规范文本变更）；② `fileview.js` 原本对 NoneType **没有任何分支**，本卡**新增** disabled+title 门控，因此该门控**无 DOM 级自动化用例**（该文件不在前端测试页加载列表内）→ 处置见本文件 B5，由 INH-1888 决定纳入测试页或记入待人工确认。
+>
+> **留给后续**：`_write_effective_text` 跨度边界无回归测试（代码正确、覆盖率洞，随 INH-1887 补）；元素内含注释时写回后注释落在值之后（B8 默认接受）；`mock-api.js:793` 第三份类型规则拷贝无同步保证；`parser.py:544` 显示路径仍整文件 `upper()` 扫描。
 
 **② → `INH-1886`（D1 的实际落地与覆盖缺口）**
 
