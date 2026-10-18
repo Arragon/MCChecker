@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 全部完成（12/12）**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API、M2-09 历史列表与对比选择器、M2-10 临时文件与上传/链接导入、M2-11 导入对话框与临时标签、M2-12 删除文件进入恢复区）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 feat/mc-v2-delivery` 为准）；全量测试 **506 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (26)**、`data/` 哈希 `478d9c26ea8dbb8f` 不变。**本轮批准的交付范围（M1 收尾 + M2 全量）到此结束**。M3 尚未开始，下一张是 **M3-01 / INH-1886 审阅写回**（`reviewing.apply_edits` + `/review`），开工前需要再次确认范围。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 全部完成（12/12）**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API、M2-09 历史列表与对比选择器、M2-10 临时文件与上传/链接导入、M2-11 导入对话框与临时标签、M2-12 删除文件进入恢复区）；**M3 已合入 5/17**（M3-01～M3-05）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 origin/feat/mc-v2-delivery` 为准）；当前基线：全量测试 **869 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (29)**、`check_py39.sh` exit 0、`data/` 哈希 `478d9c26ea8dbb8f` 不变。**下一张卡 M3-06 / INH-1891**（前提：M3-07 评审并合并），逐卡方案见 `docs/MCChecker_M3_M4_PLAN.md`。
 
 ---
 
@@ -168,27 +168,29 @@ PR: <url> · 提交 `<sha>`
 | M2-11 | INH-1884 | Done | 导入对话框与临时文件标签（`WIRED` 放行 `import`/`temp`） |
 | M2-12 | INH-1885 | Done | 删除文件进入恢复区（`services/recovery.py` + `DELETE /files/{name}`，`WIRED` 放行 `delete`） |
 
-### M3 审阅、更新、DL 与设置（0/17）
+### M3 审阅、更新、DL 与设置（5/17，截至 2026-10-18）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
-| M3-01 | INH-1886 | Todo | 审阅写回：原文修改与语义校验 |
-| M3-02 | INH-1887 | Todo | 审阅提交 API：部分提交、冲突与幂等 |
-| M3-03 | INH-1888 | In Progress | 审阅页与本地草稿 |
-| M3-04 | INH-1889 | Todo | 安全下载器 |
-| M3-05 | INH-1890 | Todo | 更新源校验提交与映射接口 |
-| M3-06 | INH-1891 | In Progress | 更新源设置页 |
-| M3-07 | INH-1892 | Todo | 后台任务队列与任务接口 |
-| M3-08 | INH-1893 | In Progress | 标准库调度器与定时设置 |
-| M3-09 | INH-1894 | In Progress | 修改记录拉取与文件内查看 |
+| M3-01 | INH-1886 | Done | 审阅写回：原文修改与语义校验 |
+| M3-02 | INH-1887 | Done | 审阅提交 API：部分提交、冲突与幂等 |
+| M3-03 | INH-1888 | Done | 审阅页与本地草稿 |
+| M3-04 | INH-1889 | Done | 安全下载器 |
+| M3-05 | INH-1890 | Done | 更新源校验提交与映射接口（含 PR #41 的锁范围补修） |
+| M3-06 | INH-1891 | Todo | 更新源设置页 |
+| M3-07 | INH-1892 | In Progress | 后台任务队列与任务接口（代码已提交在 `mc-v2/m3-07-tasks`，**评审中、尚未合并**） |
+| M3-08 | INH-1893 | Todo | 标准库调度器与定时设置 |
+| M3-09 | INH-1894 | Todo | 修改记录拉取与文件内查看 |
 | M3-10 | INH-1895 | Todo | DL 求根与正向反向计算 |
 | M3-11 | INH-1896 | Todo | DL 试算、提取预览与条件保存 |
-| M3-12 | INH-1897 | In Progress | DL 计算页 |
-| M3-13 | INH-1898 | In Progress | IP 对应表与管理员名单 |
-| M3-14 | INH-1899 | In Progress | 变量绑定编辑与校验 |
-| M3-15 | INH-1900 | In Progress | 外部工具菜单 |
-| M3-16 | INH-1901 | In Progress | 机型切换、复制与删除 |
-| M3-17 | INH-1902 | In Progress | 修订号与多用户更新横幅 |
+| M3-12 | INH-1897 | Todo | DL 计算页 |
+| M3-13 | INH-1898 | Todo | IP 对应表与管理员名单 |
+| M3-14 | INH-1899 | Todo | 变量绑定编辑与校验 |
+| M3-15 | INH-1900 | Todo | 外部工具菜单 |
+| M3-16 | INH-1901 | Todo | 机型切换、复制与删除 |
+| M3-17 | INH-1902 | Todo | 修订号与多用户更新横幅 |
+
+> 本表是 Linear 项目 `P-INH-14` 的镜像，冲突以 Linear 为准。**开工顺序 ≠ 卡号顺序**（M3-07 提前到 M3-06 之前，因为 M3-06 的验收要 `POST /tasks`），逐卡方案与执行期裁定见 `docs/MCChecker_M3_M4_PLAN.md`。
 
 ### M4 收尾：兼容、安全、迁移、发布与去 NiceGUI（0/9）
 
@@ -313,4 +315,6 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步**：本轮批准的范围（M1 收尾 + M2 全量）已全部完成，M2 = 12/12。M3 已开工，卡序（**≠卡号序**）、四个前置决策与逐卡方案见 `docs/MCChecker_M3_M4_PLAN.md`。M3-01（`INH-1886`）**代码已写完，尚未评审、尚未合并**（合并后再由控制方把本文件与第 7 节台账写实，不要在 PR 之前自称已完成）：`core/reviewing.apply_edits(src, fmt, edits) -> bytes` 在原文字节上只改选中节点 + §6.7 第 6 步语义校验（不过则 `REVIEW_UNSAFE` 且不返回任何字节），配套公开 `parser.collect_ns_prefixes` / `parser.pointer_unescape`，回归在 `tests/test_review_apply.py`。**下一张卡：M3-02（`INH-1887`）** —— `GET /review`、`POST /review/submit`（部分提交、`REVIEW_CONFLICT`、`request_id` 幂等、legacy 建议唯一定位），它按 M3-01 的 `apply_edits` 签名调用，别改签名。M2-12 已完成：`services/recovery.py` 先把当前版本 + `archive/<name>/` + `records/<name>/` **复制**进 `data/recovery/<ts>_delete_file_<pid>_<name>/` 并逐文件比对 sha256，校验通过才删源，然后才清映射/收藏/绑定/建议并写 `manifest.json`；中途失败逆序回滚（原文放回、JSON 回到删除前快照、恢复区只留空目录、不谎报成功）；`storage.delete_config_file` 的旧硬删语义未动；`conftest.DATA_SUBDIRS` 加了 `recovery`；`WIRED` 放行 `delete`，前端确认框用 `requireText` 敲文件名；UC-11 的口径见第 8 节决策 19。M2-11 已完成：导入对话框、链接导入与临时标签在真实后端逐项验过（UC-17/27/28/29）；小遗留——链接导入拿 URL 末段当文件名，遇到 `…/raw` 这类结尾会得到 `raw` 这个名字，用户可在对话框里改，更聪明的默认值另开卡：把 `import`/`temp` 加进 `WIRED`，接 `views/importer.js` 与临时标签，核对 UC-17、UC-27～UC-29；**临时标签不得写进 `mc.tabs.<pid>`**（C24），1 GB / 20 个上限要有明确前端文案。M2-10 已完成：`POST /temp`、`GET /temp/{token}/document|raw`、`PUT /files/{name}`、`POST /import-url` 全在真实后端验过，temp 侧对比（M2-08 遗留）也已补上；**SSRF 白名单仍属 M3-04**，本卡只做 http/https 前缀校验：`services/temp_store.py`（`data/temporary/<token>/`、`meta.json` 所有者、同一所有者 ≤ 20 个、全局 ≤ 1 GB、惰性过期清理）、`POST /temp`、`GET /temp/{token}/document|raw`（仅上传者）、`POST /import-url`；顺手补 M2-08 留下的 `temp` 侧对比用例，并把 `api.js` 的 `temp` 放进 `WIRED`。M2-09 已完成：`history`/`compare`/`records` 放行，UC-14/15/16/18/19 在真实后端逐项验过（UC-16 的基准反向缺陷已修）：把 `history`/`compare`/`records` 加进 `api.js` 的 `WIRED`，接 `GET /files/{name}/archives`、`GET /files/{name}/records` 与 `POST /compare`，核对 UC-14（当前 + 归档、统计正确）、UC-15（历史直达对比：基准=该归档、目标=当前并自动运行）、UC-16（勾选两行 → 较旧为基准）。M2-08 已完成：`compare_documents()` 给出逐行 items，`summarize_documents()` 改为委托它（摘要与条目同口径），`differ` 不再在模块级 import `storage`。临时侧 `{"temp": …}` 现在返回 400「临时文件对比将在 M2-10 接入」，M2-10 要补上所有者校验与相应用例。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的 NoneType 规范疑问已在 M3-01 裁定完毕（null 是只读值，说明已写进 §6.7 第 4 步，见第 8 节决策 20），**不再是任何卡的前置阻塞**。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。
+**下一步（2026-10-18 写实）**：M2 = 12/12 已完成。**M3 已合入 5 张**（M3-01 审阅写回、M3-02 审阅提交 API、M3-03 审阅页、M3-04 安全下载器、M3-05 更新源接口 + PR #41 补修），基线从 506 passed 涨到 **869 passed**，前端测试页 **ALL PASSED (29)**，`check_py39.sh` exit 0，`data/` 哈希 `478d9c26ea8dbb8f` 始终未变。M3-07（`INH-1892` 后台任务队列）**代码已提交在 `mc-v2/m3-07-tasks`，正在独立评审，尚未合并** —— 合并前不得自称完成（R23）。**下一张卡：M3-06（`INH-1891` 更新源设置页 + D2 分段门控）**，它消费 M3-05 的 `/sources` CRUD 与 M3-07 的 `POST /tasks`，所以必须排在 M3-07 合并之后。卡序（**≠卡号序**）、四个前置决策（D1 null 只读 / D2 分段门控 / D3 / D4 `tasks` 能力键）、执行期裁定 R1–R39 与逐卡方案全部在 `docs/MCChecker_M3_M4_PLAN.md`（第 3 节卡序、第 10 节裁定、第 11 节恢复快照）；未闭合的问题记在 `docs/MCChecker_BLOCKERS.md`（N1 = INH-1912 中文改名、N2 = INH-1913 回环拦截）。历史交接记录（M2 各卡的实际口径与遗留）保留在下方，仍是有效信息。
+
+M3-01（`INH-1886`）：`core/reviewing.apply_edits(src, fmt, edits) -> bytes` 在原文字节上只改选中节点 + §6.7 第 6 步语义校验（不过则 `REVIEW_UNSAFE` 且不返回任何字节），配套公开 `parser.collect_ns_prefixes` / `parser.pointer_unescape`，回归在 `tests/test_review_apply.py`。M3-02 按该签名调用，签名未变过。M2-12 已完成：`services/recovery.py` 先把当前版本 + `archive/<name>/` + `records/<name>/` **复制**进 `data/recovery/<ts>_delete_file_<pid>_<name>/` 并逐文件比对 sha256，校验通过才删源，然后才清映射/收藏/绑定/建议并写 `manifest.json`；中途失败逆序回滚（原文放回、JSON 回到删除前快照、恢复区只留空目录、不谎报成功）；`storage.delete_config_file` 的旧硬删语义未动；`conftest.DATA_SUBDIRS` 加了 `recovery`；`WIRED` 放行 `delete`，前端确认框用 `requireText` 敲文件名；UC-11 的口径见第 8 节决策 19。M2-11 已完成：导入对话框、链接导入与临时标签在真实后端逐项验过（UC-17/27/28/29）；小遗留——链接导入拿 URL 末段当文件名，遇到 `…/raw` 这类结尾会得到 `raw` 这个名字，用户可在对话框里改，更聪明的默认值另开卡：把 `import`/`temp` 加进 `WIRED`，接 `views/importer.js` 与临时标签，核对 UC-17、UC-27～UC-29；**临时标签不得写进 `mc.tabs.<pid>`**（C24），1 GB / 20 个上限要有明确前端文案。M2-10 已完成：`POST /temp`、`GET /temp/{token}/document|raw`、`PUT /files/{name}`、`POST /import-url` 全在真实后端验过，temp 侧对比（M2-08 遗留）也已补上；**SSRF 白名单仍属 M3-04**，本卡只做 http/https 前缀校验：`services/temp_store.py`（`data/temporary/<token>/`、`meta.json` 所有者、同一所有者 ≤ 20 个、全局 ≤ 1 GB、惰性过期清理）、`POST /temp`、`GET /temp/{token}/document|raw`（仅上传者）、`POST /import-url`；顺手补 M2-08 留下的 `temp` 侧对比用例，并把 `api.js` 的 `temp` 放进 `WIRED`。M2-09 已完成：`history`/`compare`/`records` 放行，UC-14/15/16/18/19 在真实后端逐项验过（UC-16 的基准反向缺陷已修）：把 `history`/`compare`/`records` 加进 `api.js` 的 `WIRED`，接 `GET /files/{name}/archives`、`GET /files/{name}/records` 与 `POST /compare`，核对 UC-14（当前 + 归档、统计正确）、UC-15（历史直达对比：基准=该归档、目标=当前并自动运行）、UC-16（勾选两行 → 较旧为基准）。M2-08 已完成：`compare_documents()` 给出逐行 items，`summarize_documents()` 改为委托它（摘要与条目同口径），`differ` 不再在模块级 import `storage`。临时侧 `{"temp": …}` 现在返回 400「临时文件对比将在 M2-10 接入」，M2-10 要补上所有者校验与相应用例。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的 NoneType 规范疑问已在 M3-01 裁定完毕（null 是只读值，说明已写进 §6.7 第 4 步，见第 8 节决策 20），**不再是任何卡的前置阻塞**。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。

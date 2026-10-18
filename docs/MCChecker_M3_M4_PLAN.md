@@ -1094,31 +1094,38 @@ gh pr merge <n> --merge
 - **R14** D2 的分段门控只需插一处：`settings.js:62-67` 的 `renderSection()` 是唯一调度器，第 66 行的 `fn(sec)` 就是发请求处 —— 未接入时在其之前直接渲染只读横幅并 `return`，压根不调 `fn`。
 - **R22**（计划自身缺陷，控制方责任）：卡 1 的 D1 动作第 3 步原写「在 `tests/test_review_apply.py` 断言 NoneType 提 `"null"` 返回『与当前值相同』」**是错位的** —— 那是 §6.7 第 1 步、属 `services/review.py::submit`；`apply_edits` 不做此检查。正确归属 `tests/test_api_remarks.py`。若实现者为此把 service 判断塞进 core，是越层而非缺陷，由控制方改判。
 - **D4** `tasks` 能力键（`CAP_KEYS` 增至 16 项）落在卡 6；改完 `fileview.js` 后 `MC.caps.tools` 不应再出现在 `fileview.js` 里。
+- **R37**（评审会读到「过期草稿」，控制方必须复核每条断言）：卡 6 的第一次任务评审被判**作废**。它报的 1 Critical + 2 Important 建立在一整套本卡最终提交里**不存在**的机制上（`_decrement`、`_ensure_capacity_locked`、`update_state`、runner 里 `storage.save_settings` 调用、`run.py` 的 `from app.core import scheduler`）。根因不是编造，而是**它按 prompt 去主工作区读 `app/services/tasks.py`，而那份文件是 R35/R36 期间并行事故留下的过期草稿**（同一文件的最终版重写过的标志：`update_state()` → 拆成 `mark_running()`/`mark_finished()`）。主工作区当时 checkout 在 `6382efa`，卡 6 的文件在磁盘上根本不属于任何提交 —— 磁盘内容、HEAD、被评审的 SHA 三者不同源。真实代码在 `tasks.py:386` 用 `_active.pop(...)` 释放互斥键（`:286` 是 submit 回滚分支）、`:207` 输出 `finished_at`、runner 的 import 只有 `revision, updates`；`git log --all -S"_decrement"` 全历史零命中，而草稿还多一段最终版没有的 `_dedupe_names`。
+  **对策（写死）**：① **派评审前先建 detached worktree**：`git worktree add --detach ../mcc-review-<卡> <HEAD_SHA>`，prompt 里给这个绝对路径，明确禁止读主工作区；② 评审结论里凡是「某机制缺失」的断言，控制方先 `grep` 该符号 + 追状态写入点复核，复核不过就作废重派，**不要先派修复**；③ 重派 prompt 里点名上一轮为何作废，并要求每条断言逐字引用 file:line、断言机制缺失前先说明搜到了什么；④ 若评审提到主工作区磁盘状态，先问自己「磁盘 == 被评审的 SHA 吗」。
+  **代价**：照单全收会为了「修好」一个不存在的 bug 重写正确实现，比跳过评审闸门（R34）更隐蔽 —— 跳过评审至少不破坏代码。
+- **R38** 外部写入（Linear）交给**独立 CLI 会话**跑是有效的：`qoder-cli` 的新会话有自己的 MCP 注册表，能调到本会话启动时快照里没有的 Linear 连接器。用法：`--session-id <uuid> --system-prompt ... -- "任务"`，再 `--resume <uuid> "继续"` 追问；正文让它自己从 `docs/MCChecker_BLOCKERS.md` 读，控制方不在 prompt 里重编事实。约束要写进 prompt：**只准编辑那一个文档、禁止任何 git 写操作**，否则会和同工作区里跑的评审/实现互相踩。
+- **R39** `revision` 分量口径（卡 5/6 定稿）：`update_all` 自己不递增 `settings`（`updates.py` 里只在 create/update/delete source 递增），由 runner 在任务结束时按 `FINISH_PARTS = {"update_all": ("settings",)}` 补一次；`files` **不补**，因为 `update_source` 只在字节真变了才递增，runner 无从判断，补了就是虚假通知。M3-08 的调度器复用 runner 时必须沿用同一张表，不要在 handler 里另写一次 bump。
+- **R23**（H4/H5 的具体形态）：实现代理曾在 `docs/MCChecker_DELIVERY_PLAN.md` 第 11 节写下「M3-01 已完成」，而当时**未提交、未评审、未合并**。交付文档是后续 agent 的接力入口，写早了等于伪造进度。口径：**状态词只能由控制方在真合并之后写实**，代理一律写「已实现待评审/待合并」。
 
-## 11. 执行状态快照（2026-10-17 20:57，恢复时从这里接）
+## 11. 执行状态快照（2026-10-18 04:30，恢复时从这里接）
 
-**里程碑计数**：54 卡 / 28 Done / 26 未完成。**本轮合并进集成分支的卡数：0**。卡 1（M3-01 / INH-1886）处于「代码写完、未提交、未评审、未合并」。
+**里程碑计数**：54 卡 / 33 Done / 21 未完成。已合入集成分支：M3-01…M3-05（含卡 5 的 fix-forward PR #41）与若干文档 PR。集成分支 tip 以 `git log --oneline -1 origin/feat/mc-v2-delivery` 为准，不要相信本文写死的 SHA。
 
-**分支与工作区**：分支 `mc-v2/m3-01-review-apply`（基于 `feat/mc-v2-delivery` = `9660867`，远端未推送）。当前 `HEAD=830731b`。未提交改动 6 处，全部属于卡 1，是有效工作产物，**不要丢弃**：
-`M app/core/parser.py`（新增公开 `collect_ns_prefixes`）、`M app/core/reviewing.py`（`apply_edits` + `_verify_semantics`，约 +318 行）、`M app/web/assets/js/views/fileview.js`（NoneType 表单 disabled + 文案）、`M docs/MCChecker_REDESIGN_SPEC.md`（§6.7 补一句 null 只读）、`M docs/MCChecker_DELIVERY_PLAN.md`（第 8 节决策 20 + 第 11 节）、新文件 `tests/test_review_apply.py`。
+**卡 6（M3-07 / INH-1892）状态**：代码已完成并提交在 `mc-v2/m3-07-tasks` = `455dbe0`（2 个提交：`2fb11a4` 实现 + `455dbe0` know-how），基线 `6382efa`，相对集成分支只有本卡 14 文件 +2143/−24，PR 会是干净的。干净工作区实测：**869 passed**、`check_py39.sh` exit 0、`data/` 哈希 `478d9c26ea8dbb8f0d56c77a94a6cd849fee3c1369e209e697e02f94beb48d24` 未变、前端 `ALL PASSED (29)`、`grep -c "MC.caps.tools" fileview.js` = 0。**第一次评审作废（R37），第二轮评审正在跑**；恢复时先看后台评审结论或直接重派，评审通过后再 `gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge`。
 
-**后台实现代理**：仍在跑最终验证（全量测试 + 变异验证），完成后会写 `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-1-report.md` 并提交。该文件与 SDD 台账是 git-ignored，恢复会话时先读它们。
+**评审用工作树**：`/Users/wangdongxin/projects/mcc-review-m3-07`（detached @ `455dbe0`）。用完 `git worktree remove ../mcc-review-m3-07` 清掉，别留在仓库内。
 
-**恢复后的前四步**（评审 BASE 用快照自身的提交号 `6d1d87c`，不是 `830731b`；若恢复时 HEAD 已推进，以 `git log --oneline 6d1d87c..HEAD` 的实际范围为准）：
-1. `git log --oneline 830731b..HEAD` 看是否已提交；已提交则 `scripts/review-package docs/MCChecker_M3_M4_PLAN.md 830731b HEAD` 生成评审包，派独立评审（双判决：规格合规 + 代码质量）。
-2. **必须作为 Critical 提出的未闭合发现（R23）**：代理在 `DELIVERY_PLAN` 第 11 节写了「M3-01 已完成」，而当时未提交、未评审、未合并 —— 违反 H4/H5「未运行的检查不得报告为通过」，且该文档是后续 agent 的接力入口。要求改成「已实现待评审/待合并」，真合并后再由控制方写实。同节的**决策 20（D1 全文）口径正确，保留**。
-3. 评审通过后：`gh pr create --base feat/mc-v2-delivery` → `gh pr merge --merge` → `INH-1886` 置 Done + 证据注释（**顺带补发三次 `-32603` 失败的那条中期通报**：`LookupError`→`PARSE_FAILED` 的分支、R22 归属，以及评审的三条 Important 已修复）。类型规则一节按修复后的事实写：`INT_RE`/`TYPE_HINTS`/`value_type_hint` 已收进 `core`，`services/review.py::_required_type` 改为转发（真去重，非加一致性测试）；**剩下的第三份拷贝在前端 `mock-api.js:793-800`**，与 core 无同步保证，已 deferred。
-4. 派发卡 2（INH-1887）：brief = `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-2-brief.md`，JIT 计划 = 同目录 `task-2-plan.md`（4 个子任务、带真实测试代码与变异验证），并带上 §10 的 R1/R2/R3/R6/R7/R8/R19。
+**Linear 已同步到**：M3-01…M3-05 = Done（含 PR #41 的证据注释），N1 = **INH-1912**、N2 = **INH-1913** 均已建卡入 Backlog（ID 取自 `docs/MCChecker_BLOCKERS.md` 的「B1 · 已执行」表，那是 Linear 返回对象的原样记录）。卡 6 合并后还欠：`INH-1892` → Done + 证据注释。
 
-**待办（不要在实现代理运行中做分支手术）**：`a165106` 与 `830731b` 两个文档提交目前混在卡 1 分支上，卡 1 合并前应拆成独立 `chore/m3-m4-plan-doc` PR，让卡 1 的 PR 只含本卡改动。
+**恢复后的动作顺序**：
+1. 收卡 6 评审 →（如有 Important/Critical）在 `mc-v2/m3-07-tasks` 上修复并二次评审 → 合并 → 同步 Linear。
+2. 卡 7 = **M3-06 / INH-1891**（更新源设置页 + D2 分段门控），brief = `.superpowers/sdd/MCChecker_M3_M4_PLAN/task-7-brief.md`，必带裁定：R14（门控只插 `settings.js:62-67` 的 `renderSection()`）、R19（mock 非权威）、R39（runner 的 bump 口径）、卡 3 遗留的 `MC.api.get` 桩隔离问题。
+3. 之后：M3-08 → 09 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17（17 必须最后）。M4 九张（INH-1903…1911）照 §9 纲要。
 
-## 12. Linear 同步欠账（连接器在本会话被移除，恢复后先补这些）
+**流程红线（血的教训，每张卡都适用）**：R34 不得跳过合并前评审；R35 实现代理一律串行，一个工作区同一时刻只属于一张卡；R36 切分支只能在代理停止之后；R37 评审断言先复核再采纳。
 
-`plugin:product-management:linear` 于卡 1 实现完成后从可用 MCP 列表消失，会话中途重新授权的工具调不到，需重新接入并开新会话。截至 `cc90ffb`，以下同步**尚未发出**，属于「看板比实际乐观」的真实缺口：
+## 12. Linear 同步欠账
 
-1. `INH-1886`：缺「本卡未完成 / 会话曾暂停」的说明（尝试 6 次全部 `MCP error -32603`，缩正文无效）。**若他人按 Linear 判断进度，会以为卡 1 已交付 —— 它是 In Progress，代码已提交在未合并的分支上。**
-2. `INH-1886` 的 D1 通报补充：`fileview.js` 原本**没有** NoneType 分支，D1 第 2 步的「若已如此」前提不成立，实际是新增门控；且该门控目前无 DOM 级用例覆盖（`fileview.js` 不在前端测试页加载列表内、`renderSuggest` 是私有闭包）。
-3. `INH-1886` 的完成证据注释（按交付手册第 4 节模板：PR/提交、已完成、验收证据 576→基线 506、`check_py39.sh` exit 0、`data/` 哈希不变、`ALL PASSED (26)`、两轮变异验证），以及评审后新裁定的口径（尤其实现方自裁的「不承载值节点 → `REVIEW_CONFLICT`」与 prolog/epilog 丢失是否进 §17）。
-4. 项目状态更新：需说明「本轮合入集成分支 0 卡，M3-01 在评审中」。
+**已结清**（2026-10-18，由独立 CLI 会话 `a723637b-49f4-4b73-8976-1d3fb3f9b00c` 执行并逐条回帖，明细见 `docs/MCChecker_BLOCKERS.md` 的 B1）：原列 4 条全部发出 —— `INH-1890` 完成证据 + Done、`INH-1886` 三条、`INH-1887`/`INH-1889` 各一条、项目状态更新，N1/N2 建卡。
 
-**已发出的**：`INH-1886` 状态 In Progress、D1 裁定评论 `0337c38d`；`INH-1887` 的 R19 评论 `d87d91dd`；项目状态更新 `8b3551ef`（卡序 + D1–D4）。
+**仍欠**：
+1. `INH-1892`（卡 6）合并后的 Done + 证据注释。
+2. 一条流程性通报：本项目对**共享集成分支**有过一次直推（`78d0fbb`，纯文档），未改写历史；后续一律走 PR（R34 之后又补的口径）。
+3. 每合并一张卡都要同步该卡状态与证据，不要攒 —— 看板比实际乐观是真实交付风险。
+
+
+**更早发出的**（连接器恢复前）：`INH-1886` 状态 In Progress、D1 裁定评论 `0337c38d`；`INH-1887` 的 R19 评论 `d87d91dd`；项目状态更新 `8b3551ef`（卡序 + D1–D4）。
