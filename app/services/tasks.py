@@ -7,9 +7,17 @@
 
 三条不显然的约束：
 
-1. **工作线程不是 daemon**（R9）。`ThreadPoolExecutor` 默认如此，因此「进程能退出」
-   等价于「在途任务已结束」。停止序列必须是先 `shutdown()` 等任务、再关 HTTP，
-   见 `run.ordered_stop`；顺序反了 `serve_forever` 会先退出、主线程走完而任务还在跑。
+1. **「进程真正退出」确实要等在途任务结束，但别拿 `daemon` 位当判据**（R9 / C1）。
+   `ThreadPoolExecutor` 的工作线程从**创建它的线程**继承 daemon 位（`threading.py:828`）：
+   测试里从主线程提交 ⇒ 非 daemon；真实服务器里 `submit` 由 HTTP 处理线程调、
+   `MCServer.daemon_threads = True` ⇒ 那几条工作线程就是 daemon。两种形态下解释器最后都
+   会等它们（非 daemon 由 `threading._shutdown` join，daemon 由 `concurrent.futures.thread`
+   注册的 `_python_exit` join），**但单实例锁是在那之前被删的**——所以删锁前必须自己
+   数线程，判据是线程名，见 `worker_threads()` / `wait_for_workers()` / `run.stop_and_release`。
+   停止序列本身仍然是先 `shutdown()` 等任务、再关 HTTP，见 `run.ordered_stop`；顺序反了
+   `serve_forever` 会先退出、主线程走完而任务还在跑。
+   `shutdown()` 的超时**只是「这一层不等了」**（没有 `cancel_futures`），所以删锁之前还要
+   `wait_for_workers()` 再等一次、等不散就不删（C1）。
 2. **`fn` 跑在工作线程里，机型锁由 `fn` 自己加**（§10.1）。HTTP 线程只做「解析 →
    授权 → 入队 → 202」，绝不持锁等下载（有回归用例用真实 `MCServer` 钉住这点）。
    因此 handler 侧不允许出现任何超过 2 秒的同步下载。
@@ -34,9 +42,10 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -58,6 +67,23 @@ TASK_PART = "tasks"
 DEFAULT_SHUTDOWN_TIMEOUT = 30.0
 #: 工作线程名前缀：测试用它筛「有没有残留线程」。
 THREAD_NAME_PREFIX = "mctask"
+
+#: `shutdown()` 自己那条等待线程的名字：同样带前缀，但它只跑 `pool.shutdown`，一个字节都不写。
+SHUTDOWN_WAITER_NAME = "%s-shutdown" % THREAD_NAME_PREFIX
+
+#: **删单实例锁之前**还要再等多久（C1，取值见下面的推导）。
+#:
+#: `shutdown()` 那 30 秒只是「HTTP 侧的停止要多快」，不是「写的人多久会散」：
+#: `app/config.py` 给的是 `DEFAULT_DOWNLOAD_TIMEOUT_S = 30` × `DEFAULT_DOWNLOAD_RETRIES = 3`
+#: 再加退避 `downloader._RETRY_DELAYS = (1.0, 2.0)` ⇒ **一个卡死的源最坏 ≈ 93 秒**，
+#: 而 `updates.update_all` 是**串行**遍历映射项的，所以「批量更新进行中收到 SIGTERM」
+#: 几乎必然撞穿 30 秒的排空预算。既然超时是常态，删锁前必须再等一次，且预算要**明显**
+#: 大于排空预算：300 秒 = 排空预算的 10 倍，也盖得住串行撞三个死源（3 × 93 ≈ 279 秒）。
+#: 再往上加没意义——`wait_for_workers` 等不散时**不删锁**并说明原因，而残留锁是可以被
+#: 下一个实例按 pid 接管的（`SingleInstanceLock.acquire` → `_process_alive`，
+#: `http.py:139-152`），「删了锁但写的人还在」却不可恢复。取值本身有回归用例守着
+#: （`tests/test_api_tasks.py::TestLockOutlivesWriters::test_exit_budget_is_far_larger_than_the_drain_budget`）。
+EXIT_WORKER_TIMEOUT = 300.0
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -128,6 +154,25 @@ def _state_from_items(items: List[Dict[str, Any]]) -> str:
     if not items or not failed:
         return SUCCEEDED
     return FAILED if len(failed) == len(items) else PARTIAL
+
+
+def worker_threads() -> List[threading.Thread]:
+    """还没散去的 `mctask` 工作线程——「现在还有人写 `data/` 吗」的唯一可信读数。
+
+    判据只能用**线程名**，不能用 `daemon` 位：CPython 的 `Thread.__init__`
+    （`threading.py:828`）把 daemon 从创建者继承下来，而真实服务器里 `submit` 是 HTTP
+    处理线程调的、`MCServer.daemon_threads = True`，所以池里那几条工作线程**就是 daemon**。
+    第一版按 `not t.daemon` 过滤，手工 SIGTERM 验证时 30 秒就把锁删了而下载还在跑，
+    等于没修（C1 就栽在这上面，见 `docs/know-how.md`）。
+
+    唯一要摘掉的是 `shutdown()` 自己那条 `mctask-shutdown` 等待线程：它不写盘，而且会
+    一直活到排空结束，留着它判「写的人散没散」就永远散不了。
+    """
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith(THREAD_NAME_PREFIX) and thread.name != SHUTDOWN_WAITER_NAME
+    ]
 
 
 class _ObservedDict(dict):
@@ -316,12 +361,16 @@ class TaskRunner:
 
         revision.bump(pid, TASK_PART)  # queued 入队也要让人看见
         try:
-            self._pool.submit(self._run, task, fn)
+            future = self._pool.submit(self._run, task, fn)
         except RuntimeError as exc:  # 池刚好在并发的 shutdown 里关掉了
             with self._lock:
                 self._active.pop(key, None)
             self._finish(task, FAILED, error="服务器正在停止，任务未启动")
             raise AppError(MAINTENANCE, "服务器正在停止，不再接收新任务") from exc
+        # I3：`_run` 收口之后仍然可能有异常逸出（`_finish` 自己再崩一次、`finally` 里
+        # 又抛、……），而原先这只 Future 没人 inspect ⇒ 异常直接消失。挂个 done-callback
+        # 兜最后一道记录；`add_done_callback` 对已完成的 Future 会立刻回调，没有竞态。
+        future.add_done_callback(_log_escaping_error)
         logger.info("任务入队: %s %s（id=%s, 机型=%s, actor=%s）", ttype, clean_target or "-", task.id, pid, task.actor)
         return task
 
@@ -349,7 +398,12 @@ class TaskRunner:
 
         **幂等**（R10）：信号可能连按两次，第二次直接返回，绝不重复 join、绝不抛。
         等待本身放在一个 daemon 线程里做，因为 `ThreadPoolExecutor.shutdown()` 没有
-        超时参数；超时后不再等，但工作线程是非 daemon 的，进程退出前仍会把它们跑完。
+        超时参数；`cancel_futures` 也**没有**传——预算到期只是「这一层不等了」，队列里
+        还没启动的条目照样会被启动，而工作线程会一直跑到自己结束为止。
+
+        所以超时**不等于**这些写入消失了，只是把等待交到了退出前：调用方在删单实例锁
+        之前必须再 `wait_for_workers()` 一次（C1）。这条 WARNING 是给运维看的，措辞要
+        说清「等待挪到哪去了」，别让人以为进程马上就退了。
         """
         with self._lock:
             if self._closed:
@@ -359,17 +413,43 @@ class TaskRunner:
         waiter = threading.Thread(
             target=self._pool.shutdown,
             kwargs={"wait": True},
-            name="%s-shutdown" % THREAD_NAME_PREFIX,
+            name=SHUTDOWN_WAITER_NAME,
             daemon=True,
         )
         waiter.start()
         waiter.join(max(0.0, float(timeout)))
         if waiter.is_alive():
             logger.warning(
-                "后台任务在 %.1f 秒内没有结束，停止时不再等待（进行中：%s）", timeout, ", ".join(in_flight)
+                "后台任务在 %.1f 秒内没有结束：这一层停止等待，等待挪到退出前——工作线程还在写 "
+                "data/，进程要等它们结束才会删单实例锁（见 run.stop_and_release），等不散就把锁"
+                "留在原地。进行中：%s",
+                timeout,
+                ", ".join(in_flight),
             )
         else:
             logger.info("任务队列已停止（等待了 %d 个在途任务）", len(in_flight))
+
+    def wait_for_workers(self, timeout: float = EXIT_WORKER_TIMEOUT) -> bool:
+        """等到 `mctask` 工作线程归零；返回 True 表示「已经没有人在写 `data/` 了」。
+
+        这是删单实例锁前那道闸（C1）：`shutdown()` 的预算管「HTTP 侧停得多快」，这份
+        明显更大的预算管「写的人散没散」（推导见 `EXIT_WORKER_TIMEOUT` 的注释）。
+        排空成功时工作线程已经被 `pool.shutdown(wait=True)` join 完，这里立刻返回 True，
+        正常停止一点都不会被拖慢。
+
+        返回 False 时调用方**不要**删锁：残留锁能被下一个实例按 pid 接管
+        （`SingleInstanceLock.acquire` → `_process_alive`），删错的锁不能。
+        """
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            alive = worker_threads()
+            if not alive:
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            for thread in alive:  # join 而不是轮询：线程一散就立刻返回
+                thread.join(remaining)
 
     # ------------------------------------------------------------------
     # 内部
@@ -393,6 +473,9 @@ class TaskRunner:
         # 都只进那只没人 inspect 的 `Future`，而 `_active[key]` 永远被占住——这个
         # `(机型, 类型, target)` 从此只回 409 BUSY，任务还停在「进行中」，惰性清理又永远
         # 跳过 active 任务，于是连内存里那条记录也不会消失（卡 6 复审 F4）。
+        # 状态与键在这里兜住之后，**异常本身**仍然可能继续往外跑（`_finish` 自己在状态
+        # 落终态之后崩一次，`finally` 就管不着了）——那一份由 `submit` 挂的 done-callback
+        # 记录，见 `_log_escaping_error`（I3）。
         try:
             task.mark_running()
             revision.bump(task.profile, TASK_PART)
@@ -459,6 +542,26 @@ class TaskRunner:
         if dropped:
             logger.debug("清理已结束任务 %d 条（保留 %d 小时 / %d 条）", dropped, RETAIN_SECONDS // 3600, RETAIN_MAX)
         return dropped
+
+
+def _log_escaping_error(future: Future) -> None:
+    """最后一道记录：`_run` 没接住的异常原先会**无声消失**（I3）。
+
+    `submit` 拿到的是 `ThreadPoolExecutor` 的 Future，从来没人 `inspect()`/`result()`，
+    所以任何逃出 `_run` 的异常——包括 `_finish` 自己在状态落终态之后崩一次这种
+    `finally` 也管不着的路径——连一行日志都不留。回调只做一件事：把它记下来。
+    回调本身不许再抛（它跑在工作线程里，`_invoke_callbacks` 虽然会兜住，但那只会
+    多一条没人认领的堆栈）。
+    """
+    try:
+        error = future.exception()
+    except BaseException:  # pragma: no cover - 已取消 / 池被打破等极端形态
+        return
+    if error is None:
+        return
+    logger.error(
+        "异常逸出了 `_run`：队列的收口没能接住它（I3 的最后一道记录）。异常：%r", error, exc_info=error
+    )
 
 
 def _expired(task: Task, now_text: str) -> bool:
@@ -530,8 +633,12 @@ def get_runner() -> TaskRunner:
 def reset_runner(timeout: float = 5.0) -> None:
     """关掉当前单例并清空（`tests/conftest.py` 的 autouse 夹具用）。
 
-    工作线程是非 daemon 的，不 reset 就会带着上一条用例的任务泄漏进下一条；这里给一个
-    有上限的等待，避免测试里忘了放行的假任务把整轮 pytest 卡死。
+    工作线程不 reset 就会带着上一条用例的任务泄漏进下一条；这里给一个有上限的等待，
+    避免测试里忘了放行的假任务把整轮 pytest 卡死。
+
+    调用方传的预算必须**长过**测试里闸门自己的兜底（`conftest.RUNNER_DRAIN_TIMEOUT` >
+    `conftest.GATE_TIMEOUT`），否则那条线程会活到 monkeypatch 撤销之后、往仓库真实的
+    `data/` 里写（I2 / H3）。
     """
     global _runner
     with _runner_lock:

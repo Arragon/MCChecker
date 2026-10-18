@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from authz_fixtures import as_role, make_server, seed_roles
+from conftest import GATE_TIMEOUT
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -81,7 +82,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         gate = route.get("wait")
         if gate is not None:
-            gate.wait(20)  # 「handler 不得同步下载」那条用：挂着直到测试放行（超时兜底防卡死）
+            gate.wait(GATE_TIMEOUT)  # 「handler 不得同步下载」那条用：挂着直到测试放行（超时兜底防卡死）
         self._reply(route.get("status", 200), route.get("headers", {}), route.get("body", b""))
 
     def _reply(self, status: int, headers: dict, body: bytes) -> None:
@@ -191,10 +192,31 @@ def _blocking(release: threading.Event, entered: Optional[threading.Event] = Non
     def fn(task):
         if entered is not None:
             entered.set()
-        release.wait(20)
+        release.wait(GATE_TIMEOUT)
         task.result["items"].append(_ok_item())
 
     return fn
+
+
+def _submit_like_http(runner, target_pid: str, ttype: str, target, fn):
+    """按**现网的形状**提交任务：从一条 daemon 线程调 `submit`。
+
+    `MCServer.daemon_threads = True`，而 CPython 的 `Thread.__init__` 把 daemon 位从
+    **创建者**继承下去（`threading.py:828`），所以真实服务器里池那几条 `mctask_N` 工作线程
+    就是 daemon。从主线程提交（本文件其余用例的形状）拿到的是非 daemon，正好让
+    「按 `daemon` 过滤」这种错判据看起来成立——C1 的第一版就死在这里，是手工 SIGTERM
+    验证发现的（30 秒删锁、下载还在跑），见 `docs/know-how.md`。
+    """
+    box: Dict[str, Any] = {}
+
+    def go():
+        box["task"] = runner.submit(_ctx(target_pid), ttype, target, fn)
+
+    caller = threading.Thread(target=go, daemon=True, name="http-handler-stub")
+    caller.start()
+    caller.join(5)
+    assert "task" in box, "daemon 提交线程没跑完：submit 自己卡住了"
+    return box["task"]
 
 
 def tasks_handler(ttype: str):
@@ -268,8 +290,8 @@ def _block(source: str, marker: str, length: int = 1800) -> str:
 
 
 class TestTaskContract:
-    def test_task_fields_are_exactly_the_section_7_10_shape(self, pid):
-        release = threading.Event()
+    def test_task_fields_are_exactly_the_section_7_10_shape(self, pid, gates):
+        release = gates()
         entered = threading.Event()
         task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -370,11 +392,11 @@ class TestTaskContract:
         assert task["state"] == "failed"
         assert task["error"] == "文件超过上限，已放弃"
 
-    def test_list_filters_by_profile_and_active_only(self, pid):
+    def test_list_filters_by_profile_and_active_only(self, pid, gates):
         from app.core import device_models
 
         other = device_models.add_model("tasks-other")
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         running = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         done = _runner().submit(_ctx(pid), "update_source", "done.xml", _noop)
@@ -391,9 +413,9 @@ class TestTaskContract:
         release.set()
         _wait_state(pid, running.id)
 
-    def test_worker_threads_are_not_daemon(self, pid):
+    def test_worker_threads_are_not_daemon(self, pid, gates):
         """R9 的形态前提：工作线程非 daemon，进程退出前一定会把在途任务跑完。"""
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -419,10 +441,10 @@ class TestBusyAndMutex:
             _runner().submit(_ctx(target_pid), ttype, target, _noop)
         return info.value
 
-    def test_same_key_second_submit_is_busy_and_points_to_first(self, pid):
+    def test_same_key_second_submit_is_busy_and_points_to_first(self, pid, gates):
         from app.core.errors import BUSY
 
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         first = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -436,8 +458,8 @@ class TestBusyAndMutex:
         release.set()
         _wait_state(pid, first.id)
 
-    def test_update_all_and_update_source_are_mutually_exclusive(self, pid):
-        release = threading.Event()
+    def test_update_all_and_update_source_are_mutually_exclusive(self, pid, gates):
+        release = gates()
         entered = threading.Event()
         source = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -445,7 +467,7 @@ class TestBusyAndMutex:
         release.set()
         _wait_state(pid, source.id)
 
-        release2 = threading.Event()
+        release2 = gates()
         entered2 = threading.Event()
         bulk = _runner().submit(_ctx(pid), "update_all", None, _blocking(release2, entered2))
         entered2.wait(5)
@@ -454,9 +476,9 @@ class TestBusyAndMutex:
         release2.set()
         _wait_state(pid, bulk.id)
 
-    def test_update_all_blocks_every_source_of_the_same_profile(self, pid):
+    def test_update_all_blocks_every_source_of_the_same_profile(self, pid, gates):
         """互斥轴是「机型」，不是「文件名」：同一机型同时只允许一个更新类任务改同一批文件。"""
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         first = _runner().submit(_ctx(pid), "update_all", None, _blocking(release, entered))
         entered.wait(5)
@@ -466,7 +488,7 @@ class TestBusyAndMutex:
         release.set()
         _wait_state(pid, first.id)
 
-    def test_other_target_or_profile_is_allowed(self, pid):
+    def test_other_target_or_profile_is_allowed(self, pid, gates):
         """互斥面**之内**仍然并行的只有「同一类型的不同 target」与「别的机型」。
 
         卡 6 复审 F2 之后，「同机型的别的类型」这一轴已经不在这里成立了：三类更新任务
@@ -477,7 +499,7 @@ class TestBusyAndMutex:
 
         other = device_models.add_model("tasks-other")
         another = device_models.add_model("tasks-another")
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         first = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -491,7 +513,7 @@ class TestBusyAndMutex:
         for task in (first, second, third, fourth):
             _wait_state(task.profile, task.id)
 
-    def test_refresh_records_and_update_all_are_mutually_exclusive(self, pid):
+    def test_refresh_records_and_update_all_are_mutually_exclusive(self, pid, gates):
         """卡 6 复审 F2：`update_all` 自己就逐项跑 `refresh_records`（`updates.py:164`）。
 
         单独 POST 一条 `refresh_records` 与 `update_all` 并发，就是在同一机型、同一
@@ -499,7 +521,7 @@ class TestBusyAndMutex:
         而且**不看 target**（`update_all` 会碰所有映射项，`refresh_records` 的 target 换
         一个也照样撞进同一批文件）。
         """
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         records = _runner().submit(_ctx(pid), "refresh_records", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -507,7 +529,7 @@ class TestBusyAndMutex:
         release.set()
         _wait_state(pid, records.id)
 
-        release2 = threading.Event()
+        release2 = gates()
         entered2 = threading.Event()
         bulk = _runner().submit(_ctx(pid), "update_all", None, _blocking(release2, entered2))
         entered2.wait(5)
@@ -516,9 +538,9 @@ class TestBusyAndMutex:
         release2.set()
         _wait_state(pid, bulk.id)
 
-    def test_refresh_records_and_update_source_are_mutually_exclusive(self, pid):
+    def test_refresh_records_and_update_source_are_mutually_exclusive(self, pid, gates):
         """同一条记录面也会被 `update_source` 撞上：两个方向都要挡，同样不看 target。"""
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         records = _runner().submit(_ctx(pid), "refresh_records", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -526,7 +548,7 @@ class TestBusyAndMutex:
         release.set()
         _wait_state(pid, records.id)
 
-        release2 = threading.Event()
+        release2 = gates()
         entered2 = threading.Event()
         source = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release2, entered2))
         entered2.wait(5)
@@ -574,6 +596,74 @@ class TestBusyAndMutex:
         # 键确实归还了：同一个 `(机型, 类型, target)` 现在还能再排一条并正常跑完。
         second = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
         assert _wait_task(second, FINISHED_STATES, timeout=5.0)["state"] == "succeeded"
+
+    def test_base_exception_from_the_task_body_still_frees_the_key(self, pid, caplog):
+        """I3：`except Exception` 接不住 `BaseException`——`finally` 必须照样收口并留下日志。
+
+        键被占住的后果是永久的：`_active` 里那条永远停在 running，惰性清理**跳过** active
+        任务，于是这个 `(机型, 类型, target)` 从此只回 409 BUSY，直到进程重启。
+        打桩点选任务体自己抛，不动生产代码的形状。
+        """
+
+        class Fatal(BaseException):
+            """不是 `Exception` 的子类：`_run` 里那两个 `except` 都不会接住它。"""
+
+        def fn(task):
+            raise Fatal("工作线程里逸出的致命错误")
+
+        broken = _runner().submit(_ctx(pid), "update_source", NAME, fn)
+        with caplog.at_level(logging.ERROR, logger="app.services.tasks"):
+            payload = _wait_task(broken, FINISHED_STATES, timeout=5.0)
+            second = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
+            done = _wait_task(second, FINISHED_STATES, timeout=5.0)
+
+        assert payload["state"] == "failed"
+        assert payload["error"], "BaseException 逸出也要留下一条能看的错误"
+        assert done["state"] == "succeeded", "键没归还：同一条 key 又被占住了"
+        # 异常本身必须在日志里（`logger.exception` 带的堆栈），不能只进那只没人看的 Future。
+        assert "工作线程里逸出的致命错误" in caplog.text
+
+    def test_exception_escaping_the_runner_is_logged_instead_of_vanishing(self, pid, caplog, monkeypatch):
+        """I3：`self._pool.submit(self._run, task, fn)` 原先把 Future 丢掉——逸出的异常无声消失。
+
+        造一条「收口之后又崩一次」的**第二次**故障：`fn` 先失败，`_finish()` 已经把状态
+        落到终态、互斥键也已经归还，紧接着它自己那次 `revision.bump` 再抛。这条异常既不在
+        `_run` 的两个 `except` 里，也不会触发 `finally`（状态已是终态），只能由 Future 的
+        done-callback 记下来；没有回调时它就消失在没人 inspect 的 Future 里。
+        """
+        from app.services import revision, tasks
+
+        real_bump = revision.bump
+        watched: Dict[str, Any] = {}
+
+        def bump_after_the_finish(target_pid: str, part: str) -> None:
+            task = watched.get("task")
+            if (
+                task is not None
+                and threading.current_thread().name.startswith(tasks.THREAD_NAME_PREFIX)
+                and task.state in tasks.FINISHED_STATES
+            ):
+                raise RuntimeError("收口之后递增修订号又崩了一次")
+            real_bump(target_pid, part)
+
+        def boom(task):
+            watched["task"] = task  # 在工作线程里登记，保证 `_finish` 之前一定看得见
+            raise ValueError("任务体先失败")
+
+        monkeypatch.setattr(revision, "bump", bump_after_the_finish)
+        with caplog.at_level(logging.ERROR, logger="app.services.tasks"):
+            broken = _runner().submit(_ctx(pid), "update_source", NAME, boom)
+            payload = _wait_task(broken, FINISHED_STATES, timeout=5.0)
+            # 撤掉第二次故障，证明互斥键真的回来了。
+            watched["task"] = None
+            second = _runner().submit(_ctx(pid), "update_source", NAME, _noop)
+            done = _wait_task(second, FINISHED_STATES, timeout=5.0)
+
+        assert payload["state"] == "failed"
+        assert done["state"] == "succeeded"
+        assert "收口之后递增修订号又崩了一次" in caplog.text, (
+            "逸出 `_run` 的异常必须被记进日志，不能留在没人 inspect 的 Future 里"
+        )
 
     def test_submit_rejects_an_unknown_task_type(self, pid):
         """卡 6 复审 F4：类型清单是 key 语义的一部分，校验要落在 `submit` 上。
@@ -651,11 +741,11 @@ class TestRetention:
         assert [t.id for t in _runner().list(pid, False)] == []
         assert ids[0] not in [t.id for t in _runner().list(pid, False)]
 
-    def test_active_tasks_are_never_purged(self, pid, monkeypatch):
+    def test_active_tasks_are_never_purged(self, pid, monkeypatch, gates):
         from app.services import tasks
 
         monkeypatch.setattr(tasks, "RETAIN_MAX", 0)
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         running = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -690,8 +780,8 @@ class TestRetention:
 
 
 class TestShutdown:
-    def test_shutdown_waits_for_the_running_task(self, pid):
-        release = threading.Event()
+    def test_shutdown_waits_for_the_running_task(self, pid, gates):
+        release = gates()
         entered = threading.Event()
         task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -702,9 +792,45 @@ class TestShutdown:
         assert task.state == "succeeded"
         assert task.finished_at is not None
 
-    def test_shutdown_is_idempotent_and_never_rejoins(self, pid):
+    def test_gate_and_fixture_budgets_are_aligned(self):
+        """I2 的另一半：夹具等 runner 的预算必须**长过**闸门自己的兜底。
+
+        夹具会无条件放行闸门（`conftest.gates`），这条断言守的是那个「万一」：
+        有人绕过 `gates()` 自己 `threading.Event()` 卡住工作线程时，夹具的等待也要比
+        闸门醒来得晚，否则线程会在 monkeypatch 撤销之后落到真实的 `data/` 里写（H3）。
+        """
+        from conftest import GATE_TIMEOUT, RUNNER_DRAIN_TIMEOUT
+
+        assert GATE_TIMEOUT == 20.0
+        assert RUNNER_DRAIN_TIMEOUT == 30.0
+        assert RUNNER_DRAIN_TIMEOUT > GATE_TIMEOUT, (
+            "夹具比闸门先放弃 = 孤儿线程活到 monkeypatch 撤销之后（H3）"
+        )
+
+    def test_shutdown_timeout_warning_moves_the_wait_to_exit(self, pid, caplog, gates):
+        """C1：旧文案写「停止时不再等待」，是句反话——进程会一直活到工作线程跑完。
+
+        读这条日志的是看 systemd 的运维，必须让他知道等待**挪到了退出前**、
+        以及锁文件在这种情况下不会被删。
+        """
+        release = gates()
+        entered = threading.Event()
+        task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
+        assert entered.wait(5)
+        try:
+            with caplog.at_level(logging.WARNING, logger="app.services.tasks"):
+                _runner().shutdown(0.01)  # 排空预算到期
+            text = caplog.text
+            assert "没有结束" in text
+            assert "退出" in text, "超时警告要说清等待挪到了退出前"
+            assert "不再等待" not in text, "「停止时不再等待」是反话：这一刻进程还没退"
+        finally:
+            release.set()
+            _wait_task(task)
+
+    def test_shutdown_is_idempotent_and_never_rejoins(self, pid, gates):
         """R10：信号可能连按两次，第二次不得抛、不得重复 join。"""
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
         entered.wait(5)
@@ -783,11 +909,11 @@ class TestRevisionBumps:
         assert _parts(pid)["tasks"] > before
         _wait_state(pid, task.id)
 
-    def test_progress_change_bumps_tasks_while_running(self, pid):
+    def test_progress_change_bumps_tasks_while_running(self, pid, gates):
         """§10.1「每次进度变化递增 tasks」——必须在任务还在跑的时候就能看见。
 
         两个读数都取在**工作线程内**（同一个线程里读写才有确定的先后关系）。"""
-        hold = threading.Event()
+        hold = gates()
         seen = threading.Event()
         box: Dict[str, int] = {}
 
@@ -798,7 +924,7 @@ class TestRevisionBumps:
             task.result["items"].append(_ok_item())
             box["mid"] = _parts(pid)["tasks"]
             seen.set()
-            hold.wait(20)
+            hold.wait(GATE_TIMEOUT)
 
         task = _runner().submit(_ctx(pid), "update_source", NAME, fn)
         seen.wait(5)
@@ -1010,16 +1136,16 @@ class TestTasksApi:
         assert _runner().list(pid, False) == []
         assert _parts(pid) == before
 
-    def test_second_post_while_first_runs_is_409_with_first_task_id(self, pid, monkeypatch):
+    def test_second_post_while_first_runs_is_409_with_first_task_id(self, pid, monkeypatch, gates):
         """卡面验收：并发两次相同任务，第二次 409 且 `detail.task_id` 指向第一次。"""
         from app.services import updates
 
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
 
         def slow(pid_, name, actor):  # 阻塞的假任务：真实 handler 会调它
             entered.set()
-            release.wait(20)
+            release.wait(GATE_TIMEOUT)
             return updates.refresh_records(pid_, name, actor)
 
         monkeypatch.setattr(updates, "update_source", slow)
@@ -1042,9 +1168,9 @@ class TestTasksApi:
             release.set()
             _wait_state(pid, first["task"]["id"])
 
-    def test_post_returns_immediately_and_never_downloads_in_the_http_thread(self, pid, servers):
+    def test_post_returns_immediately_and_never_downloads_in_the_http_thread(self, pid, servers, gates):
         """卡面：handler 不得同步跑超过 2 秒的下载——下载只发生在工作线程里。"""
-        gate = threading.Event()
+        gate = gates()
         srv = servers({"/new.xml": {"body": XML_V2, "wait": gate}})
         _seed_mapping(pid, [{"name": NAME, "url": srv.url("/new.xml"), "record_url": ""}])
         with make_server() as server:
@@ -1201,11 +1327,11 @@ class TestOrderedStop:
         run.ordered_stop(runner, _StubServer(log), timeout=5)
         assert runner.timeouts == [5]
 
-    def test_ordered_stop_waits_for_in_flight_task_before_stopping_http(self, pid):
+    def test_ordered_stop_waits_for_in_flight_task_before_stopping_http(self, pid, gates):
         """变异靶子之二（行为面）：顺序反了就会带着进行中任务去关 HTTP。"""
         import run
 
-        release = threading.Event()
+        release = gates()
         entered = threading.Event()
         runner = _runner()
         task = runner.submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
@@ -1220,7 +1346,7 @@ class TestOrderedStop:
         assert task.state == "succeeded"
         assert _worker_threads() == []
 
-    def test_mcserver_shutdown_drains_the_runner_first(self, pid, tmp_path):
+    def test_mcserver_shutdown_drains_the_runner_first(self, pid, tmp_path, gates):
         from app.config import Settings
         from app.server.http import MCServer
         from app.server.router import build_router
@@ -1235,7 +1361,7 @@ class TestOrderedStop:
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
         try:
-            release = threading.Event()
+            release = gates()
             entered = threading.Event()
             task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
             entered.wait(5)
@@ -1281,6 +1407,160 @@ class TestOrderedStop:
         from app.server.http import MCServer
 
         assert MCServer.daemon_threads is True
+
+
+# ---------------------------------------------------------------------------
+# 7b. 单实例锁必须活得比写的人久（C1 / H3；卡 6 修复轮 2）
+# ---------------------------------------------------------------------------
+
+
+class _ExitStubServer:
+    """退出序列里的假 HTTP 服务器：只记录「关 HTTP」这一步发生的先后。"""
+
+    def __init__(self, log: List[str]) -> None:
+        self.log = log
+
+    def shutdown(self) -> None:
+        self.log.append("http")
+
+    def server_close(self) -> None:
+        self.log.append("close")
+
+
+class _SpyLock:
+    """真 `SingleInstanceLock` + 「`release()` 那一刻还有几个工作线程」的录像。"""
+
+    def __init__(self, data_dir: str) -> None:
+        from app.server.http import SingleInstanceLock
+
+        self._lock = SingleInstanceLock(data_dir, 0)
+        self.workers_at_release: Any = "release 没有被调用"
+
+    @property
+    def path(self) -> str:
+        return self._lock.path
+
+    def acquire(self) -> None:
+        self._lock.acquire()
+
+    def release(self) -> None:
+        from app.services import tasks
+
+        self.workers_at_release = sorted(t.name for t in tasks.worker_threads())
+        self._lock.release()
+
+
+class TestLockOutlivesWriters:
+    """`lock.release()` 是无条件 `os.unlink`，而它挡的是**跨进程**唯一那道写锁。
+
+    `shutdown()` 的 30 秒排空预算**小于**一个卡死下载的最坏耗时（30 s × 3 次 + 退避，
+    而且 `updates.update_all` 串行跑多个源），所以「排空超时」是常态不是意外。超时后
+    原先照样删锁：此刻端口已释放、工作线程还在写 `data/profiles/<pid>/…`，第二个实例
+    （systemd 自动重启 / `docker restart`）进来就是两个进程同写一份权威数据
+    ——`locks.profile_lock` 是 `threading.RLock`、`write_gate` 只在进程内，跨进程一点
+    都挡不住。这几条用例把新次序钉住：**先等写的人散，再删锁；等不散就不删**。
+    """
+
+    def _held_lock(self, tmp_path) -> _SpyLock:
+        lock = _SpyLock(str(tmp_path / "data"))
+        lock.acquire()
+        return lock
+
+    def test_exit_keeps_the_lock_while_workers_are_still_writing(
+        self, pid, tmp_path, caplog, monkeypatch, gates
+    ):
+        import run
+        from app.services import tasks
+
+        # 排空预算给到几乎为零：这就是「批量更新进行中收到 SIGTERM」那条真实路径。
+        monkeypatch.setattr(tasks, "DEFAULT_SHUTDOWN_TIMEOUT", 0.01)
+        lock = self._held_lock(tmp_path)
+        runner = tasks.TaskRunner(1)
+        release = gates()
+        entered = threading.Event()
+        try:
+            _submit_like_http(runner, pid, "update_source", NAME, _blocking(release, entered))
+            assert entered.wait(5), "假任务没有进入工作线程"
+            # 现网形状（daemon 继承）下也必须看得见这条线程，否则「等不散就不删」形同虚设。
+            assert tasks.worker_threads(), (
+                "任务正在跑却被判成「没有工作线程」：`worker_threads()` 又拿 daemon 位当判据了（C1）"
+            )
+
+            with caplog.at_level(logging.ERROR, logger="mcchecker"):
+                released = run.stop_and_release(
+                    runner, _ExitStubServer([]), lock, exit_timeout=0.1
+                )
+
+            assert released is False
+            assert os.path.exists(lock.path), (
+                "工作线程还在写 data/profiles/，锁文件却已经被 unlink：此刻端口也已释放，"
+                "第二个实例会进来同写同一批文件（H3）。退出路径必须等不散就不删。"
+            )
+            assert lock.workers_at_release == "release 没有被调用"
+            assert "锁文件保留" in caplog.text  # 运维要在日志里看见「为什么没删」
+            # 保留 ≠ 卡死：写的人还活着的时候第二个实例就该被挡住（等它真的散了以后
+            # 由 `acquire()` 认 pid 接管，那条既有路径见
+            # tests/test_api_http.py::test_stale_lock_is_taken_over）。
+            from app.server.http import SingleInstanceLock
+
+            second = SingleInstanceLock(str(tmp_path / "data"), 0)
+            with pytest.raises(RuntimeError) as info:
+                second.acquire()
+            assert "已在运行" in str(info.value)
+        finally:
+            release.set()
+            runner.shutdown(5)  # 幂等；中途红也要把池关掉，别把空闲线程留给解释器退出
+            assert runner.wait_for_workers(10), "拆用例前必须把工作线程等散（H3）"
+            lock.release()
+
+    def test_exit_releases_the_lock_only_after_the_last_worker_exits(self, pid, tmp_path):
+        import run
+        from app.services import tasks
+
+        lock = self._held_lock(tmp_path)
+        runner = tasks.TaskRunner(2)
+        log: List[str] = []
+        try:
+            for index in range(4):
+                _wait_task(
+                    _submit_like_http(runner, pid, "update_source", "s%d.xml" % index, _noop)
+                )
+
+            started = time.time()
+            released = run.stop_and_release(runner, _ExitStubServer(log), lock, exit_timeout=10)
+
+            assert released is True
+            assert lock.workers_at_release == []  # 删锁的那一刻已经没有人还在写
+            assert not os.path.exists(lock.path)
+            assert log == ["http", "close"]  # 先停 HTTP，再收口锁
+            assert time.time() - started < 2.0, "排空了的 runner 也等满了退出预算：正常停止必须立刻走完"
+        finally:
+            runner.shutdown(5)  # 断言中途红也不能把自建 runner 的工作线程留给下一个用例
+            assert not tasks.worker_threads(), "自建 runner 必须在本用例里散干净（H3）"
+            lock.release()
+
+    def test_exit_budget_is_far_larger_than_the_drain_budget(self):
+        """退出预算的取值依据（`EXIT_WORKER_TIMEOUT` 的注释里逐条写了出处）。"""
+        from app.config import DEFAULT_DOWNLOAD_RETRIES, DEFAULT_DOWNLOAD_TIMEOUT_S
+        from app.core import downloader
+        from app.services import tasks
+
+        # 一个卡死的源最坏多久：30 s 超时 × 3 次尝试 + 退避 (1 s, 2 s)。
+        hung_source = DEFAULT_DOWNLOAD_TIMEOUT_S * DEFAULT_DOWNLOAD_RETRIES + sum(
+            downloader._RETRY_DELAYS
+        )
+        assert tasks.DEFAULT_SHUTDOWN_TIMEOUT == 30.0  # §10.1：HTTP 侧只等 30 秒
+        assert tasks.EXIT_WORKER_TIMEOUT == 300.0
+        assert tasks.EXIT_WORKER_TIMEOUT > 3 * hung_source  # 串行撞三个死源也覆盖得住
+        assert tasks.EXIT_WORKER_TIMEOUT > 5 * tasks.DEFAULT_SHUTDOWN_TIMEOUT
+
+    def test_run_py_deletes_the_lock_only_through_the_exit_wait(self):
+        """`main()` 的 `finally` 只能经 `stop_and_release` 删锁，不许再直接 `lock.release()`。"""
+        src = _js("run.py")
+        tail = src[src.index("    finally:") :]
+
+        assert "stop_and_release(runner, server, lock)" in tail
+        assert "lock.release()" not in tail, "退出路径上直接删锁 = 写的人还活着时锁就没了（C1）"
 
 
 # ---------------------------------------------------------------------------
