@@ -30,6 +30,13 @@
 `--profile-dir` 是给手上有真实数据的人的逃生口，风险与「真实语料下 §12 判定行只报实测、
 不给 PASS」的理由见 `--help`。
 
+**规模行的执法闸门是逐行的、看实测的**：§12 那几行的毫秒数绑死了样本规模（30 文件 × 3 万
+节点、30 万节点冷、5 万节点命中/筛选/对比），所以每一行在判之前先拿**这一轮真正跑到的**
+文件数与节点数和它自己声明的规模比对（`row_scale_met`）：够才判 PASS/FAIL，不够就写「不可判」
+并把实测规模印在预算线列——不给 PASS、也不冒充违反预算。原先闸门看的是「语料是不是合成的」，
+于是 `--files 3 --nodes 500` 这种小冒烟跑会在一条写着 30×3 万的行上打 PASS，而它测的是
+1,497 个节点（M4-05 评审 Important 1，和真实语料那条是同一族假绿）。
+
 退出码：0 全部达标；1 有用例超预算或断言不成立；2 仓库 `data/` 前后不一致（H3）；
 3 环境/语料问题（服务起不来、请求非 200 等——失败绝不折算成通过）。
 
@@ -61,6 +68,16 @@ WEB_DIR = os.path.join(ROOT, "app", "web")
 
 #: §12 表格「全局搜索」行的通过线；D3 裁定取表格值（§7.6 正文写 300 ms，不作判据）。
 SEARCH_BUDGET_MS = 500.0
+#: §12 各规模行**声明的样本规模**（毫秒数绑在这些规模上才有意义）。逐行拿去和实测规模比对，
+#: 见 `row_scale_met`。
+DECLARED_SEARCH_FILES = 30
+DECLARED_SEARCH_NODES = 30000
+DECLARED_COLD_NODES = 300000
+DECLARED_MID_NODES = 50000
+#: §12「服务端内存」行「+LRU ≤ 256 MB」的硬护栏。**故意写成规范里的数字而不是读
+#: `documents.MEMORY_CACHE_MAX_BYTES`**：那个常量正是本行要监的对象，拿它当判据就成了
+#: 「护栏自己证明自己没越界」，把常量乘 10 谁都不会红（M4-05 评审 Important 2）。
+SPEC_LRU_MEMORY_BUDGET_BYTES = 256 * 1024 * 1024
 #: 一行 `<param_NNNNN desc="…">v</param_NNNNN>` 产生 2 个节点（元素 + 属性），
 #: 另有 3 个结构节点（文件名 / CONFIG_ROOT / input）——与 `bench_search.py` 同一算法。
 NODES_PER_LINE = 2
@@ -92,6 +109,32 @@ def lines_for(nodes: int) -> int:
 
 def expected_nodes(nodes: int) -> int:
     return STRUCTURAL_NODES + NODES_PER_LINE * lines_for(nodes)
+
+
+#: `lines_for()` 只能按整数行凑节点数，所以 30000 的目标得到 29999、300000 得到 299999。
+#: 判「实测够不够那一行声明的规模」时容忍这一档取整误差，其余缺口一律算不够。
+SCALE_NODE_TOLERANCE = NODES_PER_LINE + STRUCTURAL_NODES
+
+
+def row_scale_met(
+    measured_files: int, measured_nodes_per_file: int, declared_files: int, declared_nodes_per_file: int
+) -> bool:
+    """§12 的规模类预算行能不能被**这一轮真正跑到的语料**满足（评审 Important 1）。
+
+    闸门必须逐行看实测的文件数与节点数，而不是看「语料是不是合成的」：原先它只看
+    `corpus["synthetic"]`，于是 `--files 3 --nodes 500` 这条被文档写明的 CLI 用法得到一个
+    1,497 节点的语料，却照样在「30 文件 × 3 万节点 ≤ 500 ms」那一行打 PASS——和真实语料
+    那条是同一个缺陷（行过了，但它声明的规模根本没被跑到），只是入口不同。
+
+    `measured_nodes_per_file <= 0` 表示节点数压根没量过（`--profile-dir` 的现成文件），
+    那种情况一律不够：宁可少判一行，也不拿「这台机器请求一次很快」冒充「真实数据满足 §12」。
+    """
+    if measured_nodes_per_file <= 0:
+        return False
+    return (
+        measured_files >= declared_files
+        and measured_nodes_per_file >= declared_nodes_per_file - SCALE_NODE_TOLERANCE
+    )
 
 
 def make_xml(nodes: int, seed: int) -> bytes:
@@ -195,7 +238,7 @@ def adopt_data_root(data_dir: str) -> Dict[str, Any]:
         "search_pid": pid,
         "files_pid": pid,
         "search_files": names,
-        "search_nodes": 0,  # 真实数据：节点数只有解析后才知道；规模类判定行因此降级为仅报告
+        "search_nodes": 0,  # 真实数据：节点数只有解析后才知道；`row_scale_met` 据此把规模行判成不够
         "big_name": names[0],
         "big_nodes": 0,
         "mid_names": names[1:3],
@@ -414,6 +457,7 @@ class Case:
         cold: bool = False,
         pct: float = 0.95,
         fixed_runs: bool = False,
+        report_label: str = "仅报告",
     ) -> None:
         self.key = key
         self.label = label
@@ -427,6 +471,9 @@ class Case:
         self.cold = cold
         self.pct = pct
         self.fixed_runs = fixed_runs  # 不受 --samples 影响（§7.3 的 P99 要 50 个样本）
+        # 没有毫秒预算线时判定列写什么：「仅报告」（规范本来就没给线）还是「不可判」（有线但
+        # 这一轮的实测规模不够，见 `size_budget`）。两者都不给 PASS，也都不算违反预算。
+        self.report_label = report_label
 
 
 class Row:
@@ -463,8 +510,13 @@ class Row:
         if self.failures:
             return "FAIL（断言不成立）"
         if self.case.budget_ms is None:
-            return "仅报告"
+            return self.case.report_label
         return "PASS" if self.judged_ms <= self.case.budget_ms else "FAIL（超预算）"
+
+    @property
+    def undetermined(self) -> bool:
+        """这一行本来有 §12 的预算线，但因为**实测规模不够**而没判成（不是「规范没给线」）。"""
+        return self.case.budget_ms is None and self.case.report_label == "不可判"
 
     @property
     def failed(self) -> bool:
@@ -603,18 +655,39 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
         {"base": {"file": corpus["mid_names"][0]}, "target": {"file": corpus["mid_names"][1]}}
     ).encode("utf-8")
 
-    def size_budget(budget_ms: float, budget_src: str) -> Tuple[Optional[float], str]:
-        """§12 的规模类预算行只在合成语料上才是判据。
+    def size_budget(
+        budget_ms: float,
+        budget_src: str,
+        declared: Tuple[int, int],
+        measured: Tuple[int, int],
+    ) -> Tuple[Optional[float], str, str]:
+        """§12 规模行的闸门：**逐行**拿这一轮的实测规模和这一行声明的规模比（`row_scale_met`）。
 
-        「30 文件 × 3 万节点 ≤ 500 ms」「5 万节点命中 ≤ 300 ms」这类行的预算写死了样本
-        规模。`--profile-dir` 用的是客户机里现成的文件，规模既不是 5 万也不是 30×3 万，
-        在这种文件上打出一个 0.4 ms 的 PASS 说的不是「你的真实数据满足 §12」，而是「这台
-        机器请求一次很快」——那是假绿，M4-05 拿真实形态的数据根跑过才知道有多容易误读。
-        判定退成「仅报告」，实测毫秒数照打；只有与规模无关的 §7.3 轮询行仍然判。
+        「30 文件 × 3 万节点 ≤ 500 ms」「5 万节点命中 ≤ 300 ms」这类行的预算写死了样本规模，
+        所以够不够那个规模才是这一行能不能判的唯一前提，两种不够的情形分开说：
+
+        - 节点数没量过（`--profile-dir` 的现成文件）：判定退成「仅报告」，毫秒数照打。在这种
+          文件上打出一个 0.4 ms 的 PASS 说的是「这台机器请求一次很快」，不是「真实数据满足 §12」。
+        - 合成语料但这一轮的实测规模够不上那一行（`--files 3 --nodes 500` ⇒ 1,497 节点）：
+          判定写「不可判」并把实测与声明都印进预算线列。它不是违反预算（没人拿 1,497 个节点
+          去要求 500 ms），但也绝不是那一行被满足了——闸门原先只看 `corpus["synthetic"]`，
+          于是这条被文档写明的 CLI 用法照样打 PASS（M4-05 评审 Important 1）。
+
+        够得上才返回毫秒线；与规模无关的 §7.3 轮询行不走这里。
         """
-        if synthetic:
-            return budget_ms, budget_src
-        return None, "真实语料规模不等于 §12 那一行的场景（原线 %s）⇒ 仅报告" % budget_src
+        declared_files, declared_nodes = declared
+        measured_files, measured_nodes = measured
+        if row_scale_met(measured_files, measured_nodes, declared_files, declared_nodes):
+            return budget_ms, budget_src, "仅报告"
+        if measured_nodes <= 0:
+            return None, "真实语料规模不等于 §12 那一行的场景（原线 %s）⇒ 仅报告" % budget_src, "仅报告"
+        return None, (
+            "实测 %d 文件 × %d 节点 = %d 节点，够不上 §12 那一行声明的 %d 文件 × %d 节点"
+            "（原线 %s）⇒ 不可判，不给 PASS" % (
+                measured_files, measured_nodes, measured_files * measured_nodes,
+                declared_files, declared_nodes, budget_src,
+            )
+        ), "不可判"
 
     def size_label(name: str, nodes: int) -> str:
         """样本列：合成语料能写准节点数，真实语料不能拿 0 冒充已知规模。"""
@@ -779,26 +852,81 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
         ), ("" if caught == 0 else "计数读取出现了 %d 次磁盘打开" % caught)
 
     def lru_bytes() -> Tuple[List[float], str, str]:
+        """§12「服务端内存」行：驻留字节受 256 MB 硬护栏约束，且这一行要**自己证明护栏在干活**。
+
+        判据绝不读 `documents.MEMORY_CACHE_MAX_BYTES`——那个常量正是本行要监的对象，拿它当尺子
+        就是「护栏自己证明自己没越界」，把它乘 10 谁都不会红（M4-05 评审 Important 2）。这里比的是
+        `SPEC_LRU_MEMORY_BUDGET_BYTES`（§12 表格「+LRU ≤ 256 MB」），并额外做一次护栏自证：
+        把一个**单个体积就越过上限**的条目塞进真实的 `_memory_put`（此刻条目上限按机型文件数算，
+        远不止 1 项 ⇒ 能逐出它的只有字节护栏）。护栏在，驻留就该被压回上限内；把常量抬高，这一步
+        立刻变红。`bytes(n)` 是 calloc，探针页没被写过就不占物理内存。
+        """
         clear_all()
         started = time.perf_counter()
         for name in search_files:  # 全量预热：这就是 §12 内存行要防的最坏驻留
             api.expect("GET", document_url(search_pid, name))
         elapsed = (time.perf_counter() - started) * 1000.0
         info = documents.cache_info()
-        limit = documents.MEMORY_CACHE_MAX_BYTES
-        return [elapsed], "全量预热 %d 文件耗时 %.0f ms，之后驻留 %d 项 / %s（字节上限 %s）" % (
-            len(search_files), elapsed, info["entries"], mb(info["bytes"]), mb(limit)
-        ), ("" if info["bytes"] <= limit else "驻留字节越过 §12 的「+LRU ≤ 256 MB」")
+        entry_limit = documents.memory_cache_limit(search_pid)
+        failures: List[str] = []
+        if info["bytes"] > SPEC_LRU_MEMORY_BUDGET_BYTES:
+            failures.append(
+                "§12 规模实测越界：全量预热 %d 个文件后驻留 %s，已超过规范「+LRU ≤ 256 MB」这条硬护栏"
+                "（代码里的 `MEMORY_CACHE_MAX_BYTES` 现在是 %s，比 §12 宽就等于把护栏拆了）" % (
+                    len(search_files), mb(info["bytes"]), mb(documents.MEMORY_CACHE_MAX_BYTES))
+            )
+        if info["bytes"] > SPEC_LRU_MEMORY_BUDGET_BYTES:
+            ceiling_works = "驻留已越过 §12 上限却没有被逐出 ⇒ 护栏没在干活"
+        elif info["entries"] < len(search_files):
+            ceiling_works = "字节护栏正在逐出（驻留 %d/%d 项、%s，已顶到 §12 上限）" % (
+                info["entries"], len(search_files), mb(info["bytes"]))
+        else:
+            ceiling_works = "本轮语料还没到 binding 点（%d 项全驻留、%s < §12 的 %s，余量 %s）" % (
+                info["entries"], mb(info["bytes"]), mb(SPEC_LRU_MEMORY_BUDGET_BYTES),
+                mb(SPEC_LRU_MEMORY_BUDGET_BYTES - info["bytes"]))
+        probe_size = SPEC_LRU_MEMORY_BUDGET_BYTES + 1024 * 1024
+        probe_key = ("/bench_api/lru-ceiling-probe", probe_size, 0)
+        documents._memory_put(
+            probe_key,
+            documents._MemoryEntry(body=bytes(probe_size), etag='"probe"', sha256="probe", node_count=0),
+            search_pid,
+        )
+        probe_info = documents.cache_info()
+        documents.reset_cache()  # 探针不留在缓存里影响后续容量对比表
+        if probe_info["bytes"] > SPEC_LRU_MEMORY_BUDGET_BYTES:
+            failures.append(
+                "字节护栏没在干活：塞进一个单个体积 %s（> §12 的 %s）的条目后仍驻留 %d 项 / %s，而条目上限是 "
+                "%d 项（不可能由条目数逐出）。判据取 §12 的 256 MB、不读代码常量，所以抬高 "
+                "`MEMORY_CACHE_MAX_BYTES` 就会在这里红" % (
+                    mb(probe_size), mb(SPEC_LRU_MEMORY_BUDGET_BYTES), probe_info["entries"],
+                    mb(probe_info["bytes"]), entry_limit)
+            )
+        note = "全量预热 %d 文件 %.0f ms；驻留 %d/%d 项（条目上限 %d）、%s / §12 硬护栏 %s（代码 MEMORY_CACHE_MAX_BYTES=%s）→ %s；护栏自证：塞入单个体积 %s 的条目后驻留 %d 项 / %s" % (
+            len(search_files), elapsed, info["entries"], len(search_files), entry_limit,
+            mb(info["bytes"]), mb(SPEC_LRU_MEMORY_BUDGET_BYTES), mb(documents.MEMORY_CACHE_MAX_BYTES),
+            ceiling_works, mb(probe_size), probe_info["entries"], mb(probe_info["bytes"]),
+        )
+        return [elapsed], note, "；".join(failures)
 
-    cold_budget, cold_src = size_budget(3000.0, "§12「30 万节点冷 ≤ 3 s」")
-    hit_budget, hit_src = size_budget(300.0, "§12「5 万节点缓存命中 ≤ 300 ms」")
-    search_budget, search_src = size_budget(
-        SEARCH_BUDGET_MS, "§12 表格（D3：取 500 ms，不取 §7.6 的 300 ms）"
+    cold_budget, cold_src, cold_label = size_budget(
+        3000.0, "§12「30 万节点冷 ≤ 3 s」", (1, DECLARED_COLD_NODES), (1, corpus["big_nodes"])
     )
-    filter_budget, filter_src = size_budget(
-        80.0, "§12「文件内筛选 5 万节点 ≤ 80 ms」（该行原指前端）"
+    hit_budget, hit_src, hit_label = size_budget(
+        300.0, "§12「5 万节点缓存命中 ≤ 300 ms」", (1, DECLARED_MID_NODES), (1, corpus["mid_nodes"])
     )
-    compare_budget, compare_src = size_budget(800.0, "§12「对比 2×5 万节点结构化 ≤ 800 ms」")
+    search_budget, search_src, search_label = size_budget(
+        SEARCH_BUDGET_MS, "§12 表格（D3：取 500 ms，不取 §7.6 的 300 ms）",
+        (DECLARED_SEARCH_FILES, DECLARED_SEARCH_NODES),
+        (len(search_files), corpus["search_nodes"]),
+    )
+    filter_budget, filter_src, filter_label = size_budget(
+        80.0, "§12「文件内筛选 5 万节点 ≤ 80 ms」（该行原指前端）",
+        (1, DECLARED_MID_NODES), (1, corpus["mid_nodes"])
+    )
+    compare_budget, compare_src, compare_label = size_budget(
+        800.0, "§12「对比 2×5 万节点结构化 ≤ 800 ms」",
+        (2, DECLARED_MID_NODES), (2, corpus["mid_nodes"])
+    )
     search_sample = (
         "%d 文件 × %d 节点 = %d 节点" % (
             len(search_files), corpus["search_nodes"], len(search_files) * corpus["search_nodes"]
@@ -810,28 +938,28 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
     return [
         Case("doc_cold_big", "打开大文件（冷）", "GET /files/{name}/document",
              size_label(corpus["big_name"], corpus["big_nodes"]),
-             "冷", cold_budget, cold_src, cold_document, runs=3),
+             "冷", cold_budget, cold_src, cold_document, runs=3, report_label=cold_label),
         Case("doc_hit_mid", "打开 5 万节点文件（服务端缓存命中）", "GET /files/{name}/document",
              size_label(corpus["mid_names"][0], corpus["mid_nodes"]),
-             "热", hit_budget, hit_src, lambda: warm_document(mid_url)),
+             "热", hit_budget, hit_src, lambda: warm_document(mid_url), report_label=hit_label),
         Case("doc_hit_mid_gzip", "同上但客户端接受 gzip（内存缓存不存压缩体）", "GET /files/{name}/document",
              size_label(corpus["mid_names"][0], corpus["mid_nodes"]),
-             "热", hit_budget, hit_src, lambda: warm_document(mid_url, "gzip")),
+             "热", hit_budget, hit_src, lambda: warm_document(mid_url, "gzip"), report_label=hit_label),
         Case("search_warm", "全局搜索（内存缓存已预热；§12 预算的前提）", "GET /search?q=…",
              search_sample,
-             "热", search_budget, search_src, search_warm),
+             "热", search_budget, search_src, search_warm, report_label=search_label),
         Case("search_cold", "全局搜索（冷：含首次解析与写缓存）", "GET /search?q=…",
              "%d 文件 × %d 节点" % (len(search_files), corpus["search_nodes"]),
              "冷", None, "§12 未给冷启动全局搜索定预算", search_cold, runs=1),
         Case("filter_in_file", "文件内筛选（服务端扫描单文件，对应 §12 前端的行）", "GET /search?file=…",
              size_label(corpus["mid_names"][0], corpus["mid_nodes"]),
-             "热", filter_budget, filter_src, filter_in_file),
+             "热", filter_budget, filter_src, filter_in_file, report_label=filter_label),
         Case("compare_2x50k", "结构化对比（两个不同文件）", "POST /compare",
              "%s × %s：各 %s" % (
                  corpus["mid_names"][0], corpus["mid_names"][1],
                  "%d 节点" % corpus["mid_nodes"] if synthetic else "节点数未知（真实语料）",
              ),
-             "热", compare_budget, compare_src, compare_warm),
+             "热", compare_budget, compare_src, compare_warm, report_label=compare_label),
         Case("files_list", "文件列表（结构树顶层）", "GET /files",
              "%d 个文件" % len(search_files), "热", None, "§12 未定预算", files_list),
         Case("archives_cold", "历史版本列表（冷：首次计算相邻版本结构摘要）", "GET /files/{name}/archives",
@@ -853,7 +981,8 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
              "热", None, "§7.3「纯内存计数」→ 判定读盘次数为 0", revision_memory, runs=1),
         Case("lru_bytes", "文档内存缓存驻留字节（§12 服务端内存行）", "services.documents.cache_info",
              "全量预热 %d 文件" % len(search_files),
-             "热", None, "§12「+LRU ≤ 256 MB」→ 判定驻留不超字节上限", lru_bytes, runs=1),
+             "热", None, "§12「+LRU ≤ 256 MB」→ 判据取规范的 256 MB，另做护栏自证（见实测说明）",
+             lru_bytes, runs=1),
     ]
 
 
@@ -870,11 +999,27 @@ def node_count(payload: bytes) -> Any:
 def sweep_caps(
     api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any], specs: List[str], samples: int
 ) -> List[List[str]]:
-    """同一份语料、同一条查询，只改容量钩子；每个配置都重跑预热 + 计时。"""
+    """同一份语料、同一条查询，只改容量钩子；每个配置都重跑预热 + 计时。
+
+    这一表的判定列和主表 `search_warm` 走**同一个规模闸门**（`row_scale_met`）：它比的是
+    §12 那一行的 500 ms，所以实测语料够不上 30 文件 × 3 万节点时，它也没有资格说 PASS
+    （评审 Important 1 的同族缺口——小冒烟跑在这儿打 1.3 ms 的 PASS 一样骗人）。
+    """
     documents = ctx["documents"]
     opens = ctx["opens"]
     defaults = ctx["cap_defaults"]
     url = search_url(corpus["search_pid"], q="param_00007", limit=10)
+    judged = row_scale_met(
+        len(corpus["search_files"]), corpus["search_nodes"],
+        DECLARED_SEARCH_FILES, DECLARED_SEARCH_NODES,
+    )
+    budget_col = "≤ %.0f ms" % SEARCH_BUDGET_MS
+    if not judged:
+        budget_col = "—（实测 %d 文件 × %d 节点不足 §12 的 %d × %d）" % (
+            len(corpus["search_files"]), corpus["search_nodes"],
+            DECLARED_SEARCH_FILES, DECLARED_SEARCH_NODES,
+        ) if corpus["search_nodes"] > 0 else "—（真实语料，规模未知）"
+    skip_label = "仅报告" if corpus["search_nodes"] <= 0 else "不可判"
     rows: List[List[str]] = []
     for spec in specs:
         documents.MEMORY_CACHE_MAX_ENTRIES = defaults["entries"]
@@ -916,8 +1061,9 @@ def sweep_caps(
             "%.1f" % (sum(refetch) / len(refetch)),
             "%.1f" % (sum(disk_opens) / len(disk_opens)),
             "%d / %.0f MB" % (info["entries"], info["bytes"] / 1048576),
-            "≤ %.0f ms" % SEARCH_BUDGET_MS,
-            "PASS" if percentile(timings, 0.95) <= SEARCH_BUDGET_MS else "FAIL（超预算）",
+            budget_col,
+            ("PASS" if percentile(timings, 0.95) <= SEARCH_BUDGET_MS else "FAIL（超预算）")
+            if judged else skip_label,
         ])
     documents.MEMORY_CACHE_MAX_ENTRIES = defaults["entries"]
     documents.MEMORY_CACHE_FILES_MULTIPLIER = defaults["multiplier"]
@@ -955,12 +1101,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             "读放大与耗时都是真的：本脚本实测 100 文件 × 3 万节点的机型会把内存驻留顶到 256 MB 上限"
             "（71 项 / 254 MB），真实语料更大时进程内存就是这个量级。请先备份、先确认剩余空间与可"
             "接受的运行时长，并且只指向仓库之外的目录——指向仓库内部（含 data/）一律拒绝（H3）。\n"
-            "  真实语料下的判定口径：§12 的规模类预算行（5 万命中 / 30 万冷 / 30×3 万搜索 / 5 万筛选 /"
-            " 2×5 万对比）写死了样本规模，客户机里现成的文件不是那个规模，打 PASS 说的是「这台机器"
-            "请求一次很快」而不是「真实数据满足 §12」⇒ 这些行只报实测毫秒（判定列「仅报告」），"
-            "容量对比表同理只作观察；只有与规模无关的 §7.3 轮询行仍按预算判，且它在数据根缺"
-            " device_models.json / ip_mapping.json / admin_users.json 时报「不可判」而不是 PASS。"
-            "要复现决策 17 的场景请直接用合成语料。\n"
+            "  规模行的判定口径（合成与真实语料都按**实测**逐行判）：§12 的规模类预算行（5 万命中 /"
+            " 30 万冷 / 30×3 万搜索 / 5 万筛选 / 2×5 万对比）把样本规模写进了预算里，所以每行在判之前"
+            "先拿这一轮真正跑到的文件数与节点数和它自己声明的规模比对：够才判 PASS/FAIL；节点数没量过"
+            "（真实语料）退成「仅报告」；合成语料但实测规模不够（如 `--files 3 --nodes 500` ⇒ 1,497 节点）"
+            "判「不可判」，实测与声明都印在预算线列——两种都不给 PASS，主表下方还会逐行点名。与规模无关的"
+            " §7.3 轮询行仍按预算判，且它在数据根缺 device_models.json / ip_mapping.json /"
+            " admin_users.json 时报「不可判」而不是 PASS。要复现决策 17 的场景请直接用默认合成语料。\n"
             "预算线：§12 表格 + §7.3；没有预算线的用例判定列写「仅报告」，不参与退出码。"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1037,10 +1184,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             corpus = build_corpus(
                 data_dir, args.files, args.nodes, args.big_nodes, args.mid_nodes, args.seed
             )
-            print("语料：合成 %d 文件 × %d 节点（决策 17 场景，机型 %s）+ 机型 %s 里 %d 节点大文件 1 个、"
+            # 「决策 17 场景」这一串是这一轮语料的**声明**，只有实测规模真够得上 §12 那一行才准这么说
+            # （M4-05 评审 Important 1：`--files 3 --nodes 500` 曾顶着这句话报 1,497 个节点的 PASS）。
+            search_scale_tag = (
+                "决策 17 场景"
+                if row_scale_met(
+                    len(corpus["search_files"]), corpus["search_nodes"],
+                    DECLARED_SEARCH_FILES, DECLARED_SEARCH_NODES,
+                )
+                else "非 §12 搜索行的 %d 文件 × %d 节点，那一行本轮不可判" % (
+                    DECLARED_SEARCH_FILES, DECLARED_SEARCH_NODES)
+            )
+            print("语料：合成 %d 文件 × %d 节点（%s，机型 %s）+ 机型 %s 里 %d 节点大文件 1 个、"
                   "%d 节点中等文件 2 个、%d 节点历史文件 1 个及其归档/记录各 %d 个；"
                   "原文合计 %.1f MB；种子 %d；内容指纹 %s" % (
-                      len(corpus["search_files"]), corpus["search_nodes"], corpus["search_pid"],
+                      len(corpus["search_files"]), corpus["search_nodes"], search_scale_tag,
+                      corpus["search_pid"],
                       corpus["files_pid"], corpus["big_nodes"], corpus["mid_nodes"],
                       corpus["history_nodes"], HISTORY_VERSIONS, corpus["bytes"] / 1048576,
                       args.seed, corpus["digest"]))
@@ -1077,6 +1236,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         rows = [run_case(case, args.samples, clear_all, args.case_seconds) for case in build_cases(api, corpus, ctx)]
         print()
         print(render_rows(rows, "【主表 · 真实 HTTP 请求 · 判定用 p95（§7.3 那行用 p99）· 计时含环回传输，不含前端解析】"))
+        undetermined = [row for row in rows if row.undetermined]
+        if undetermined:
+            print("      本次有 %d 行**本来带 §12 的预算线**，但这一轮实测规模够不上那一行声明的样本规模，"
+                  "于是按「不可判」输出：不给 PASS，也不算违反预算。别把这种运行读成 §12 被满足了"
+                  "（缓存容量对比表的判定列同口径）：" % len(undetermined))
+            for row in undetermined:
+                print("      - %-16s %s" % (row.case.key, row.case.budget_src))
 
         specs = [item.strip() for item in args.caps.split(",") if item.strip()]
         sweep_rows = sweep_caps(api, corpus, ctx, specs, args.samples)
@@ -1112,7 +1278,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("H3 tripwire（收工后）：仓库 data/ %s" % (
                 "前后 %d 个文件逐一比对一致" % len(after) if after
                 else "本机不存在 data/（空信号，见开工前那条说明）"))
-            print("全部有预算线/断言的用例达标。")
+            print("全部有预算线/断言的用例达标。" + (
+                "" if not undetermined
+                else " 另有 %d 行因**实测规模**够不上 §12 声明的规模而判「不可判」（见主表下方逐行说明），"
+                     "本次运行不构成那些行的证据。" % len(undetermined)
+            ))
             code = 0
     except BenchError as exc:
         print("基准无法进行：%s" % exc, file=sys.stderr)
