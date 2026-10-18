@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from typing import List
+from typing import Dict, List, Optional
 
 import pytest
 
@@ -18,9 +18,71 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from app.core import device_models, dltool, storage  # noqa: E402
+from data_guard import (  # noqa: E402
+    compare_snapshots,
+    format_diff_report,
+    has_differences,
+    session_notice_lines,
+    snapshot_data_tree,
+)
 
 # 真实数据根必须在任何 monkeypatch 发生之前采集，作为后续重绑定的基准。
 REAL_DATA_DIR = storage.DATA_DIR
+
+#: H3 守卫在 pytest 生命周期里的**全部接线**（钩子名 + 夹具名）。
+#: `tests/test_data_guard_enforcement.py` 生成的临时 conftest 按这份清单原样重导出，
+#: 所以给守卫加新钩子必须同时加进这里——漏了那条钩子，执法路径的永久证明会立刻红，
+#: 而不是悄悄少测一半。改名同理（`getattr` 不带默认值，改名直接红）。
+H3_GUARD_PLUGIN_MEMBERS = (
+    "pytest_sessionstart",
+    "pytest_terminal_summary",
+    "h3_data_guard",
+)
+
+#: H3 守卫的会话基线（{归一化相对路径: sha256}），由 `pytest_sessionstart` 在
+#: collection 之前填好——session 级夹具是「首次使用才实例化」的，把快照放在夹具
+#: 装序里理论上来得及（第一个用例的 setup 先于任何写入），但放在钩子里才是真正
+#: 的「会话一开始就拍」，不给未来的 collection 期写入留窗口。
+_H3_BASELINE: Optional[Dict[str, str]] = None
+
+
+def pytest_sessionstart(session):
+    """H3 守卫（INH-1914）：在任何测试写入之前对真实 `data/` 拍基线快照。"""
+    global _H3_BASELINE
+    _H3_BASELINE = snapshot_data_tree(REAL_DATA_DIR)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus) -> None:
+    """H3 守卫的会话级公告（C1）：把「这次到底有没有在执法」打在结果行旁边。
+
+    `data/` 不存在或快照为空时，守卫手里没有可比对的东西，绿不带来任何保证；这一行
+    必须让它说出来，否则「没数据可保护」和「保护完且干净」在终端上长得一模一样——
+    那正是本卡要消灭的误读（干净检出 / CI / 别人的 clone 都没有 `data/`，它被 gitignore
+    了）。选 `pytest_terminal_summary` 而不是 `pytest_report_header`：后者在 `-q` 下
+    根本不打印，而每张卡的验证命令都是 `-q`。
+    """
+    for line in session_notice_lines(_H3_BASELINE):
+        terminalreporter.write_line(line, yellow=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def h3_data_guard():
+    """会话结束重新快照真实 `data/` 并比对，任何差异都判失败（H3 的自动执法）。
+
+    纯函数在 `tests/data_guard.py`（快照、分类比对、点名报告、执法状态公告），这里只
+    接线。排除根一级的 `.mcchecker.lock`（运行时产物）与目录；口径见该模块 docstring。
+    本夹具**不**替代 `isolated_data_root` / `isolated_task_runner` 的事前隔离，是它们
+    漏网之后的事后网；也不参与那两个夹具的装/拆序（那是卡 6 复审刻意钉住的）。
+
+    能力边界（I2，完整来历见 `docs/know-how.md`）：绿只证明会话首末两次快照一致，
+    不证明期间没有测试写过 `data/`；「写完又删掉」和「最后一个快照之后才落盘的线程」
+    都看不见。执法与否由 `pytest_terminal_summary` 每次自己说出口，不靠读的人猜。
+    """
+    yield
+    diffs = compare_snapshots(_H3_BASELINE, snapshot_data_tree(REAL_DATA_DIR))
+    if has_differences(diffs):
+        pytest.fail(format_diff_report(diffs), pytrace=False)
+
 
 #: 测试里「任务闸门」（Event）自锁的兜底上限：万一没人放行，工作线程最多阻塞这么久
 #: （防整轮 pytest 卡死）。`tests/test_api_tasks.py` 从这里取，别再写字面量。
