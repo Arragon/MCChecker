@@ -165,9 +165,14 @@ def update_all(pid: str, actor: str, task: Optional[Any] = None) -> Dict[str, An
             for item in items[started:]:
                 _publish(task, done, total, item)
         last_run = _last_run(items)
-        schedule = storage.load_schedule()
-        schedule["last_run"] = last_run
-        storage.save_schedule(schedule)
+        # §5.4：`schedule.json` 是**用户配置**，读-改-写必须在同一把机型锁里完成。
+        # 分两次加锁的话，两次锁之间进来的 `PUT /schedule`（卡 7 的部署者设置）会被这次
+        # 读到的旧副本整份覆盖掉——正是 §5.4 要防的丢失更新。`storage.save_schedule` 内部
+        # 另取的 `_profile_write()` 解析到同一把 per-pid RLock，可重入、无死锁。
+        with storage.profile_write(pid):
+            schedule = storage.load_schedule()
+            schedule["last_run"] = last_run
+            storage.save_schedule(schedule)
     return {"items": items, "last_run": last_run}
 
 
@@ -251,12 +256,18 @@ def rename_source(
     改名与迁移**必须共用 `storage.update_config_mapping`**（M0-07 的实现：configs、archive、
     records 三份产物 + 收藏/绑定/建议/DL 绑定四处引用 + 失败 `_rollback`），
     这里不复制一套移动逻辑。目标已存在任一项时它抛 409 `FILE_EXISTS`。
+
+    `update_status.json` 的键不在 M0-07 那份清单里（它是本卡新增的文件），所以由这里跟着搬——
+    搬它是改名的一部分，不是可选的收尾：留旧键等于让状态列当场失真。
     """
     original = _validated_name(original_name)
     target = _validated_name(name)
     clean_url = _validated_url(url, "url")
     clean_record = _validated_url(record_url, "record_url", required=False)
-    with storage.use_profile(pid):
+    # 改名是一次跨多份数据的读-改-写（映射 + 五份引用 + 三处产物 + `update_status.json` 的键），
+    # 整段扣在同一把机型锁里：`update_config_mapping` 内部另取的 `_profile_write()` 解析到
+    # 同一把 per-pid RLock，可重入、无死锁（与 `create_source` 同形）。
+    with storage.use_profile(pid), storage.profile_write(pid):
         if _mapping_entry(original) is None:
             raise AppError(NOT_FOUND, "更新源不存在", name=original)
         try:
@@ -275,7 +286,14 @@ def rename_source(
         except ValueError as exc:
             # `storage._sanitize_config_filename`（M0-07 的改名迁移）仍是 ASCII 白名单，
             # 裸 `ValueError` 到 HTTP 层会变成 500；这里只把它翻成 400，不改那条边界本身。
+            # 上面已经把「名字（`fsutil`）与两个 url」都校验过，`update_config_mapping` 里
+            # 唯一还能抛 `ValueError` 的就是那步净化。留一条 WARNING：万一净化内部真出了
+            # 别的 `ValueError`，400 不会把它一路掩成「用户文件名写错了」。
+            logger.warning("更新源改名在净化步被拒（%s -> %s）：%s", original, target, exc)
             raise AppError(INVALID_INPUT, str(exc), field="name") from exc
+        if target != original:
+            # 状态键按**映射名**走，与 `migrate_files` 无关：不搬的话改名后 `last_result` 恒 null。
+            _retarget_update_status(original, target)
         entry = _mapping_entry(target)
         if entry is None:
             raise AppError(NOT_FOUND, "更新源不存在", name=original)
@@ -285,10 +303,16 @@ def rename_source(
 
 
 def delete_source(pid: str, name: Any) -> bool:
-    """删除映射项（部署者）。**只删映射，不删文件**（§7.9），也不动 `update_status.json`。"""
+    """删除映射项（部署者）。**只删映射，不删文件**（§7.9），但会清掉 `update_status.json` 的键。
+
+    旧键留着等于给下一个同名源预置了一条「最近结果」——用同一个名字重建时，新源会显示
+    上一个同名源的更新历史，而这条历史从未发生在它身上。见 `_retarget_update_status`。
+    """
     clean = _optional_validated_name(name)
     with storage.use_profile(pid):
         removed = bool(clean) and storage.remove_config_mapping(clean)
+        if removed:
+            _retarget_update_status(clean, None)
     if removed:
         revision.bump(pid, SETTINGS_PART)
         logger.info("删除更新源映射: %s", clean)
@@ -433,15 +457,40 @@ def _finish(result: Dict[str, Any], actor: str) -> Dict[str, Any]:
     """§10.2 第 7 步：把本次结果合进 `update_status.json`，然后原样返回。
 
     调用方必须已处在 `storage.use_profile(pid)` 上下文里（写的是当前机型的状态文件）。
+    合并是「读整份 → 改一个键 → 写整份」，按 §5.4 整段都要扣在同一把机型锁里：
+    读与写之间分开的窗口里，另一个源的结果会被这份旧副本整份盖掉。卡 6 的 TaskRunner
+    一旦放开 `update_source` 与 `refresh_records` 并发就会踩到，所以这里不指望调用方持锁。
+    锁取当前机型的（`load_update_status` / `save_update_status` 都按 active profile 落盘）。
     """
     name = str(result.get("name") or "")
     logger.info(
         "更新源 %s: %s（actor=%s）%s", name, result.get("status"), actor, result.get("reason")
     )
-    status = storage.load_update_status()
-    status[name] = {key: result[key] for key in ("status", "label", "reason", "at", "archived")}
-    storage.save_update_status(status)
+    with storage.profile_write():
+        status = storage.load_update_status()
+        status[name] = {key: result[key] for key in ("status", "label", "reason", "at", "archived")}
+        storage.save_update_status(status)
     return result
+
+
+def _retarget_update_status(original: str, target: Optional[str]) -> None:
+    """把 `update_status.json` 的键跟着改名/删除走（本卡自己定义的数据生命周期）。
+
+    §7.9 的迁移清单没点这个名字（`update_status.json` 是本卡新增的文件），但不处理有三笔账：
+    改名后 `GET /sources` 的 `last_result` 恒为 `null`（UC-31 的状态列当场失真）、旧键成为
+    永久孤儿（文件只增不减）、删除后用同一个名字重建的新源会显示上一个同名源的「最近结果」。
+    删除选**清除**而不是保留：保留就是第三笔账。规则已记进 `docs/know-how.md`。
+
+    同样是读-改-写，整段扣在同一把机型锁里；键本来不存在时不写文件。
+    """
+    with storage.profile_write():
+        status = storage.load_update_status()
+        if original not in status:
+            return
+        payload = status.pop(original)
+        if target is not None:
+            status[target] = payload
+        storage.save_update_status(status)
 
 
 def _last_run(items: List[Dict[str, Any]]) -> Dict[str, Any]:

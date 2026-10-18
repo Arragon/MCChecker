@@ -1,12 +1,15 @@
 """更新源校验提交与映射接口（M3-05 / INH-1890，规范 §10.2、§7.9、§5.4）。
 
-三层用例分别证明三件事：
+四层用例分别证明四件事：
 
 1. `services/updates.py::update_source` 的 §10.2 七步——**直接调用函数**，不经 HTTP：
    任务队列在卡 6，本卡的函数必须能被同步测试直接跑；
 2. `storage` 新增的 `update_status.json` 三个函数（新增持久化文件，点名验证它
    **不**随机型复制）；
-3. `/sources` CRUD 走真实 `MCServer` + 四角色夹具（UC-31 改名迁移、UC-32 错误页保护）。
+3. `/sources` CRUD 走真实 `MCServer` + 四角色夹具（UC-31 改名迁移、UC-32 错误页保护）；
+4. `TestReadModifyWriteLocks`：本卡自己写的两处「读-改-写」（`schedule.json.last_run` 与
+   `update_status.json` 的合并）必须整段扣在同一把机型锁里（§5.4），以及
+   `update_status.json` 的键跟着改名/删除走的生命周期规则（见 know-how）。
 
 下载一律打本地 `http.server`（127.0.0.1 随机端口）：卡 4 的 `fetch` 会做逐跳地址校验与
 分块限流，打桩 `urlopen` 既进不去、又会把这两件事一起屏蔽（见 `docs/know-how.md` 第 4 节）。
@@ -17,8 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import threading
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
@@ -42,6 +47,16 @@ BIG_XML = b"<config><big>" + b"x" * (1024 * 1024 + 64) + b"</big></config>"
 RESULT_KEYS = {"name", "status", "label", "reason", "at", "archived"}
 #: `update_status.json` 里每项的字段（§10.2 第 7 步，不带 `name`——名字就是键）。
 STATUS_FIELDS = {"status", "label", "reason", "at", "archived"}
+#: 直接写进 `update_status.json` 的一条「最近结果」（改名/删除的生命周期用例用它当哨兵）。
+SAMPLE_RESULT = {
+    "status": "success",
+    "label": "已更新",
+    "reason": "已归档旧版本 config_20261018.xml",
+    "at": "2026-10-18 10:00:00",
+    "archived": "config_20261018.xml",
+}
+#: 中文更新源名（C26 允许「建」，M0-07 的改名迁移仍拒绝——两条哨兵用例都围绕它）。
+CN = "机型配置.xml"
 #: §10.2 与卡面契约允许的 status 取值。
 ALLOWED_STATUSES = {
     "success",
@@ -226,6 +241,54 @@ def _sources_api(target_pid: str, body: Any):
     """POST /sources 的快捷入口（真实服务器，用完即关）。"""
     with make_server() as server:
         return as_role(server, "deployer").json("POST", "/api/v1/p/%s/sources" % target_pid, body)
+
+
+def _source_path(target_pid: str, name: str) -> str:
+    """`/sources/{name}`：前端按 C26 发 `encodeURIComponent(name)`，HTTP 层再 unquote 回来。"""
+    return "/api/v1/p/%s/sources/%s" % (target_pid, urllib.parse.quote(name))
+
+
+def _status_file(target_pid: str) -> Dict[str, Any]:
+    from app.core import storage
+
+    with storage.use_profile(target_pid):
+        return storage.load_update_status()
+
+
+#: 竞争线程完成写入的等待上限。坏实现（读在锁外）里它几毫秒就回来；好实现里锁还扣在
+#: 主线程手上，它**必然**超时——两条路径都能让主线程确定性继续，不需要猜时序。
+RACE_WINDOW = 0.5
+
+
+def _race_after_first_load(monkeypatch, owner, attr: str, competitor) -> List[threading.Thread]:
+    """把 `owner.attr`（读函数）换成「读到结果后立刻拉起 `competitor` 线程并等它」。
+
+    §5.4「读-改-写在同一把锁内」只能被**另一个线程**证伪：同线程注入会重入同一把 per-pid
+    `RLock`，锁内锁外都写得下去，看不出区别。返回拉起过的线程，调用方 join 之后再断言。
+    """
+    real = getattr(owner, attr)
+    done = threading.Event()
+    threads: List[threading.Thread] = []
+    fired: List[bool] = []
+
+    def run_competitor() -> None:
+        try:
+            competitor()
+        finally:
+            done.set()
+
+    def hooked(*args: Any, **kwargs: Any):
+        value = real(*args, **kwargs)
+        if not fired:
+            fired.append(True)
+            thread = threading.Thread(target=run_competitor, daemon=True)
+            threads.append(thread)
+            thread.start()
+            done.wait(RACE_WINDOW)
+        return value
+
+    monkeypatch.setattr(owner, attr, hooked)
+    return threads
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +717,75 @@ class TestUpdateAll:
             assert storage.load_schedule()["last_run"]["success"] == 0
 
 
+class TestReadModifyWriteLocks:
+    """§5.4「读-改-写必须在同一把锁内」：本卡两处自己写的读-改-写各有用例（评审 I1、I2）。
+
+    两条都用 `_race_after_first_load` 在「读」与「写」之间放进一个**真线程**的竞争写——
+    同线程注入会重入同一把 per-pid `RLock`，锁内锁外都改得动，测不出丢更新。
+    """
+
+    def test_update_all_last_run_does_not_clobber_a_concurrent_schedule_edit(
+        self, pid, servers, monkeypatch
+    ):
+        """I1：写 `schedule.json.last_run` 期间部署者改 `interval_hours` 不能丢（§5.4、§7.9）。"""
+        from app.core import storage
+        from app.services import updates
+
+        srv = servers({"/new.xml": {"body": XML_V2}})
+        _seed(pid, url=srv.url("/new.xml"))
+        with storage.use_profile(pid):
+            storage.save_schedule({"enabled": True, "interval_hours": 24})
+
+        def deployer_changes_interval() -> None:
+            # 卡 7 的 `PUT /schedule` 形状：读整份 → 改一个字段 → 写整份。
+            with storage.use_profile(pid), storage.profile_write(pid):
+                schedule = storage.load_schedule()
+                schedule["interval_hours"] = 99
+                storage.save_schedule(schedule)
+
+        rivals = _race_after_first_load(
+            monkeypatch, storage, "load_schedule", deployer_changes_interval
+        )
+        summary = updates.update_all(pid, "system")
+        for thread in rivals:
+            thread.join(timeout=5)
+
+        with storage.use_profile(pid):
+            schedule = storage.load_schedule()
+        assert schedule["interval_hours"] == 99  # 部署者的新值没被这次读到的旧副本盖掉
+        assert schedule["last_run"] == summary["last_run"]  # last_run 也照常写入
+        assert schedule["enabled"] is True
+
+    def test_two_sources_finishing_concurrently_both_keep_their_results(self, pid, monkeypatch):
+        """I2：`update_status.json` 的合并在锁外读就会互相丢项（卡 6 放开并发后必踩）。"""
+        from app.core import storage
+        from app.services import updates
+
+        _seed_mapping(
+            pid,
+            [
+                {"name": "a.xml", "url": "", "record_url": ""},
+                {"name": "b.xml", "url": "", "record_url": ""},
+            ],
+        )
+
+        def other_source_finishes() -> None:
+            updates.update_source(pid, "b.xml", "tester")
+
+        rivals = _race_after_first_load(
+            monkeypatch, storage, "load_update_status", other_source_finishes
+        )
+        first = updates.update_source(pid, "a.xml", "tester")
+        for thread in rivals:
+            thread.join(timeout=5)
+
+        assert first["status"] == "skipped"
+        assert _status_of(pid, "a.xml") is not None
+        # 不是「后写覆盖前写」：两条结果都要在最终文件里
+        assert _status_of(pid, "b.xml") is not None
+        assert set(_status_file(pid)) == {"a.xml", "b.xml"}
+
+
 class TestRefreshRecordsSkeleton:
     def test_missing_mapping_is_not_found(self, pid):
         from app.services import updates
@@ -1006,6 +1138,39 @@ class TestSourcesApi:
             assert _sha(storage.load_config_file("renamed.xml")) == _sha(XML_V2)
             assert storage.load_config_file(NAME) is None
 
+    @pytest.mark.parametrize("migrate_files", [True, False])
+    def test_rename_moves_last_result_to_the_new_name(self, migrate_files):
+        """I3：`update_status.json` 的键也要跟着改名走。
+
+        不搬有三重后果：UC-31 的「状态列」在改名那一刻恒为 `null`、旧键成为永久孤儿，
+        而删掉同名重建时新源会继承上一个同名的历史。`migrate_files=False` 只搬本地文件，
+        **映射名照样改了**，所以状态键两种情况下都必须跟随。
+        """
+        target = seed_roles("p1")
+        _seed(target, url="http://example.invalid/a.xml")
+        from app.core import storage
+
+        with storage.use_profile(target):
+            storage.save_update_status({NAME: SAMPLE_RESULT})
+
+        with make_server() as server:
+            status, _, body = as_role(server, "deployer").json(
+                "PATCH",
+                _source_path(target, NAME),
+                {
+                    "name": "renamed.xml",
+                    "url": "http://example.invalid/new.xml",
+                    "migrate_files": migrate_files,
+                },
+            )
+            assert status == 200, body
+            _, _, got = as_role(server, "visitor").json("GET", "/api/v1/p/%s/sources" % target)
+
+        assert [item["name"] for item in got["items"]] == ["renamed.xml"]
+        assert got["items"][0]["last_result"] == SAMPLE_RESULT  # 改名后状态列不失真
+        # 旧键不留下：文件只增不减的话，孤儿键迟早会被同名重建捡走
+        assert _status_file(target) == {"renamed.xml": SAMPLE_RESULT}
+
     def test_rename_by_admin_is_403(self):
         """改名也是部署者的事：管理员（非部署者）同样 403（§4.2）。"""
         target = seed_roles("p1")
@@ -1151,6 +1316,76 @@ class TestSourcesApi:
         assert body["error"]["code"] == "INVALID_INPUT"
         assert body["error"]["detail"]["field"] == "name"
 
+    def test_rename_of_a_chinese_named_source_is_400_not_500(self):
+        """已知边界的**更严重的一半**（评审补测）：源名本身是中文时 PATCH 也 400。
+
+        `storage.update_config_mapping` 对**新旧两个名字**都要过 `_sanitize_config_filename`
+        （M0-07 的 ASCII 白名单），所以已经建好的中文源连「名字不动、只改 url」都做不到。
+        上面那条只钉住了「目标名是中文」，这一半没有回归保护。
+        N1 把白名单收敛到 `fsutil.validate_filename` 时，这条的期望值要改成 200。
+        """
+        target = seed_roles("p1")
+        _seed(target, name=CN, url="http://example.invalid/a.xml")
+        path = _mapping_file(target)
+        sha_before = _file_sha(path)
+        before = _parts(target)
+        with make_server() as server:
+            status, _, body = as_role(server, "deployer").json(
+                "PATCH",
+                _source_path(target, CN),
+                {"name": CN, "url": "http://example.invalid/new.xml", "record_url": ""},
+            )
+        assert status == 400
+        assert body["error"]["code"] == "INVALID_INPUT"
+        assert body["error"]["detail"]["field"] == "name"
+        # 400 发生在任何写入之前：映射与文件一个字节都没动，修订号也不递增
+        assert _file_sha(path) == sha_before
+        assert _parts(target) == before
+
+    def test_rename_value_error_translation_leaves_a_warning(self, caplog):
+        """小项：把裸 `ValueError` 翻成 400 时得带上原消息并留一条 WARNING。
+
+        `except ValueError` 包的是整个 `update_config_mapping` 调用；没有这条日志，净化内部
+        真出别的 `ValueError` 也会被一路掩成「用户文件名写错了」，bug 就没痕迹了。
+        """
+        from app.core.errors import AppError, INVALID_INPUT
+        from app.services import updates
+
+        target = seed_roles("p1")
+        _seed(target, url="http://example.invalid/a.xml")
+
+        with caplog.at_level(logging.WARNING, logger="app.services.updates"):
+            with pytest.raises(AppError) as info:
+                updates.rename_source(target, NAME, CN, "http://example.invalid/x.xml", "")
+
+        assert info.value.code == INVALID_INPUT
+        # 原消息带着走（不改写成一句笼统的「文件名不合法」）
+        assert info.value.message == "文件名包含非法字符"
+        assert "文件名包含非法字符" in caplog.text
+        assert CN in caplog.text  # 日志记到改名两侧的名字，事后能定位是哪一次调用
+
+    def test_chinese_named_source_can_still_be_updated_and_deleted(self, servers):
+        """400 处置只贴在改名那一步：中文名的 `update_source` 与 `DELETE` 不能被带坏（评审补测）。"""
+        from app.services import updates
+
+        target = seed_roles("p1")
+        srv = servers({"/new.xml": {"body": XML_V2}})
+        _seed(target, name=CN, url=srv.url("/new.xml"))
+
+        result = updates.update_source(target, CN, "deployer")
+        assert result["status"] == "success"
+        assert _current(target, CN) == XML_V2
+        assert _status_of(target, CN)["status"] == "success"
+
+        with make_server() as server:
+            status, _, body = as_role(server, "deployer").json("DELETE", _source_path(target, CN))
+        assert status == 200
+        assert body == {"removed": True}
+        with make_server() as server:
+            _, _, got = as_role(server, "visitor").json("GET", "/api/v1/p/%s/sources" % target)
+        assert got["items"] == []
+        assert _current(target, CN) == XML_V2  # §7.9：只删映射，不删文件
+
     def test_delete_removes_mapping_only(self):
         target = seed_roles("p1")
         _seed(target, url="http://example.invalid/a.xml")
@@ -1172,6 +1407,35 @@ class TestSourcesApi:
         with storage.use_profile(target):
             assert storage.load_config_mapping() == []
             assert os.path.isdir(os.path.join(storage.get_archive_root_dir(), NAME)) is True
+
+    def test_recreated_source_does_not_inherit_the_deleted_ones_result(self):
+        """I3：删除要**清掉** `update_status.json` 的键——新同名源不该显示一条没发生过的更新。
+
+        §7.9 只说 DELETE「只删映射，不删文件」；状态文件按名字记的是「这个源最近一次结果」，
+        留着旧键的话，删掉再用同一个名字 `POST` 回来的新源会直接继承旧历史。
+        """
+        target = seed_roles("p1")
+        _seed(target, url="http://example.invalid/a.xml")
+        from app.core import storage
+
+        with storage.use_profile(target):
+            storage.save_update_status({NAME: SAMPLE_RESULT})
+
+        with make_server() as server:
+            deployer = as_role(server, "deployer")
+            assert deployer.json("DELETE", _source_path(target, NAME))[2] == {"removed": True}
+            status, _, _body = deployer.json(
+                "POST",
+                "/api/v1/p/%s/sources" % target,
+                {"name": NAME, "url": "http://example.invalid/a.xml", "record_url": ""},
+            )
+            assert status == 201
+            _, _, got = as_role(server, "visitor").json("GET", "/api/v1/p/%s/sources" % target)
+
+        assert [item["name"] for item in got["items"]] == [NAME]
+        assert got["items"][0]["last_result"] is None
+        assert _status_file(target) == {}
+        assert _current(target) == XML_V1  # 删历史结果不等于删文件
 
     def test_delete_unknown_name_removes_nothing_and_does_not_bump(self):
         target = seed_roles("p1")
