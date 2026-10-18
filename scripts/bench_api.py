@@ -689,8 +689,15 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
                 "P99 那一半是过的（见 p50/最差列）。"
                 % (REVISION_POLLS, caught, "%.1f" % (caught / float(REVISION_POLLS)), opens.rel())
             )
-        return timings, "%d 次逐次计时；数据根内 open %d 次（%s）" % (
-            REVISION_POLLS, caught, opens.rel()
+        vacuous = ""
+        if caught == 0:
+            vacuous = (
+                "；注意这是**空信号**：数据根里没有 `device_models.json` / "
+                "`ip_mapping.json` / `admin_users.json` 时 `fsutil.read_json` 连 open 都不做，"
+                "本条必然过（合成语料会建这三个文件，所以主表那条才有意义）"
+            )
+        return timings, "%d 次逐次计时；数据根内 open %d 次（%s）%s" % (
+            REVISION_POLLS, caught, opens.rel(), vacuous
         ), failure
 
     def revision_memory() -> Tuple[List[float], str, str]:
@@ -850,12 +857,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             " 失败。本机没有 data/ 时这一条自己说破是空信号。\n"
             "  --profile-dir 的风险（后果自负）：把真实数据根指给基准之后，基准会**读**其中"
             "每个配置文件（搜索/筛选/对比/列表都会全量扫描），并往数据根里**写**派生缓存"
-            "（profiles/<pid>/cache/doc_v2、cache/diff_v2）。读接口不会改动 configs/archive/"
-            "records 里的权威文件，但磁盘占用、读放大与耗时都是真的；本脚本实测 100 文件 ×"
-            " 3 万节点的机型会把内存驻留顶到 256 MB 上限（71 项 / 254 MB），真实语料更大时"
-            "进程内存就是这个量级。请先备份、先确认剩余空间与可接受的运行时长，并且只指向"
-            "仓库之外的目录——指向仓库内部（含 data/）一律拒绝（H3）。合成语料已足够复现"
-            "决策 17 的场景。\n"
+            "（profiles/<pid>/cache/doc_v2、cache/diff_v2）；此外 `GET /files` 经 "
+            "`storage.list_config_files()` → `_ensure_dirs()` 会补建机型目录骨架"
+            "（archive/、records/、cache/ 等空目录）——那是既有读路径的行为，不是本脚本新造的写，"
+            "但在真实数据上跑之前你要知道数据根会长出这些。读接口不会改动 configs/archive/records "
+            "里的权威文件；磁盘占用、读放大与耗时都是真的：本脚本实测 100 文件 × 3 万节点的机型会把"
+            "内存驻留顶到 256 MB 上限（71 项 / 254 MB），真实语料更大时进程内存就是这个量级。"
+            "请先备份、先确认剩余空间与可接受的运行时长，并且只指向仓库之外的目录——指向仓库内部"
+            "（含 data/）一律拒绝（H3）。合成语料已足够复现决策 17 的场景。\n"
             "预算线：§12 表格 + §7.3；没有预算线的用例判定列写「仅报告」，不参与退出码。"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
