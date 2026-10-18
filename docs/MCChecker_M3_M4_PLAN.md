@@ -964,19 +964,17 @@ cd /Users/wangdongxin/projects/mcchecker
 git fetch && git checkout feat/mc-v2-delivery && git pull --ff-only
 git checkout -b mc-v2/<卡号小写>-<slug>
 
-# H3：data/ 哈希前
-B=$(find data -type f -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256)
-
 # 全量 + 定向
 ./.venv39/bin/python -m pytest -q
 ./.venv39/bin/python -m pytest -q tests/test_<本卡>.py
 
 # 3.9 守护
-PYTHON=./.venv39/bin/python scripts/check_py39.sh          # exit 0
+PYTHON=./.venv39/bin/python scripts/check_py39.sh          # exit 0（只编译 app run.py main.py，不覆盖 tests/）
 
-# H3：data/ 哈希后
-A=$(find data -type f -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256)
-[ "$B" = "$A" ] && echo "✅ data 未变 ($A)" || echo "❌ data 被改动"
+# H3：不敲哈希命令 —— 全量跑完，守卫自己播报其中一条，把它贴进 PR：
+#   「H3 守卫执法中：真实 data/ 基线快照 N 个文件…」  ← 证据
+#   「H3 守卫未执法：data/ 不存在或为空…」            ← 无保护，不得写成「数据完好」
+# 权威机器要硬约束：MCCHECKER_REQUIRE_H3=1（干净检出/CI 上不要开，那边本就没有 data/）
 
 # 涉及前端时
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu \

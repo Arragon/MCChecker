@@ -66,14 +66,16 @@ M4 收尾：feat/mc-v2-delivery → v1.0.1 一条汇总 PR
 5. **验证（证据三件套）**：
    ```bash
    ./.venv39/bin/python -m pytest -q                      # 全量（定向加 tests/test_xxx.py）
-   PYTHON=./.venv39/bin/python scripts/check_py39.sh      # 3.9 守护
-   # H3：测试前后 data/ 内容哈希一致
-   B=$(find data -type f -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256)
-   # …跑测试…
-   A=$(find data -type f -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256); [ "$B" = "$A" ] && echo ✅
+   PYTHON=./.venv39/bin/python scripts/check_py39.sh      # 3.9 守护（注意：只编译 app run.py main.py，不覆盖 tests/）
+   # H3：不敲哈希命令。会话级守卫会自己播报，PR 里贴出它出现的是哪一条：
+   #   「H3 守卫执法中：真实 data/ 基线快照 N 个文件…」  ← 这才是证据
+   #   「H3 守卫未执法：data/ 不存在或为空…」            ← 这台机器/检出上没人被保护，不得当证据写
+   # 权威机器上想把它变成硬约束：MCCHECKER_REQUIRE_H3=1 ./.venv39/bin/python -m pytest -q
    ```
+   **为什么不再手敲 `find data | shasum`**（INH-1914 之前这里是事故源）：① 一旦开始报数字，人就倾向于抄文档里的旧数字而不是当场跑 —— 已有五个合并 PR 这么报过一个**从未实测、也复现不出来**的哈希；② 原先抄在文档里的这条命令**没有** `-not -name '.mcchecker.lock'`，服务在跑时必然给出假的「❌ data 被改动」；③ 它按整行排序，与 `tests/data_guard.py`（按路径排序）给出的聚合值本来就**不相等**，两处「权威数字」互相打脸。守卫的红/绿取代它。若确实必须给出数字，只能贴**当场跑的命令 + 原始输出**，且必须写「本机值，不代表基线」。
+   **守卫绿只证明首末快照一致**，不证明期间无人写入（两个盲区见 `docs/know-how.md`）。
    涉及前端时补：`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "file://$PWD/app/web/tests/index.html"` → `<title>ALL PASSED (n)</title>`。
-   涉及 HTTP 时补：真实 `run.py --port <随机> --data-dir "$(mktemp -d)"` + `curl` 走一遍本卡的验收条目。
+   涉及 HTTP 时补：真实 `run.py --port <随机> --data-dir "$(mktemp -d)"` + `curl` 走一遍本卡的验收条目 —— **必须用临时 `--data-dir`**，否则真实服务写字节会被守卫判为改动而红。
 6. **提交**：`feat(<域>): <一句话>（<卡号> / <INH-xxxx>）`；同分支多次提交可，但**一个卡一个 PR**。
 7. **PR + 合并**：写清「范围／改动／验证（命令+结果）／已知取舍」；`gh pr create --base feat/mc-v2-delivery` → `gh pr merge <n> --merge` → 本地 `feat/mc-v2-delivery` 拉平。
 8. **Linear 收尾**：状态 **Done** + 证据注释（模板见第 4 节）。
