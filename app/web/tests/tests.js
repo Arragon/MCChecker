@@ -3,12 +3,35 @@
   "use strict";
   var MC = window.MC;
   var results = [];
+  var pending = [];
+  /*
+   * 用例可以是同步的，也可以返回一个 Promise（视图渲染要走 api.get 的 Promise 链，
+   * 断言只能在 DOM 真正画出来之后做）。异步用例先占位为失败，settled 后改写结果，
+   * 因此顺序不变、也不会因为没等到就误判成通过；最后一条汇总要等全部异步用例结束。
+   */
   function test(name, fn) {
+    var slot = { name: name, ok: true, err: null };
+    results.push(slot);
     try {
-      fn();
-      results.push({ name: name, ok: true });
+      var r = fn();
+      if (r && typeof r.then === "function") {
+        slot.ok = false;
+        pending.push(
+          r.then(
+            function () {
+              slot.ok = true;
+              slot.err = null;
+            },
+            function (e) {
+              slot.ok = false;
+              slot.err = e && e.message ? e.message : String(e);
+            }
+          )
+        );
+      }
     } catch (e) {
-      results.push({ name: name, ok: false, err: e && e.message ? e.message : String(e) });
+      slot.ok = false;
+      slot.err = e && e.message ? e.message : String(e);
     }
   }
   function eq(a, b, msg) {
@@ -178,14 +201,16 @@
     ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
   });
 
-  test("M2-12：删除文件已在生产放行，未实现的接口不得提前打开", function () {
+  test("M3-03：审阅页已在生产放行，未实现的接口不得提前打开", function () {
     var prod = MC.capsFor(false);
-    ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete"].forEach(function (k) {
+    ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["schedule", "review", "dl", "settings", "tools"].forEach(function (k) {
+    ["schedule", "dl", "settings", "tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
+    /* 放行只改 WIRED：未接入文案必须留着，M4-08 删本机制前 view 仍靠它给禁用提示。 */
+    ok(/M\d-\d\d/.test(MC.unwired.review), "review 的未接入说明要保留并点名卡号：" + MC.unwired.review);
   });
 
   test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
@@ -264,11 +289,94 @@
     ok(/24 小时/.test(dc[1].text), "临时项要说明过期时间");
   });
 
+  test("文件详情：null 值节点的提交建议输入框与按钮禁用并说明只读（§6.7 D1 / UC-13）", function () {
+    var app = {
+      pid: "default",
+      files: [],
+      identity: { registered: true, name: "张三", role: "deployer", role_label: "部署者" },
+      can: function () { return true; },
+      p: function (rest) { return "/api/v1/p/default" + rest; },
+      go: function () {},
+      setTabTitle: function () {},
+      renderTabbar: function () {},
+      downloadFile: function () {},
+      syncRevision: function () {},
+      refreshFiles: function () {},
+      openFile: function () {},
+      startTask: function () {},
+    };
+    var nodes = MC.mockParse.parse(JSONTXT, "cfg.json").nodes;
+    var doc = {
+      format: "json",
+      file: { name: "cfg.json", version: "current", updated_at: "2026-10-18T00:00:00Z", size: 64, node_count: nodes.p.length, sha256: "0123456789abcdef" },
+      nodes: nodes,
+    };
+    var origGet = MC.api.get;
+    MC.api.get = function (path) {
+      if (/\/favorites$/.test(path)) return Promise.resolve({ groups: [] });
+      if (/\/remarks$/.test(path)) return Promise.resolve({ items: [] });
+      return Promise.resolve(doc);
+    };
+    /* 单独一块离屏容器，避免与 #host 上的虚拟树用例互相干扰。 */
+    var stage = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0;width:600px;height:400px;display:flex" });
+    document.body.append(stage);
+    var inst = MC.views.f(app, { kind: "f", arg: "cfg.json", query: { node: "/a/n" } });
+    stage.append(inst.el);
+
+    function suggestSection() {
+      var hit = [...inst.el.querySelectorAll(".insp-section")].filter(function (s) {
+        var t = s.querySelector(".section-title");
+        return t && /^修改建议/.test(t.textContent);
+      })[0];
+      ok(hit, "详情面板里必须渲染出「修改建议」区块（说明选中与渲染链路没断）");
+      return hit;
+    }
+    function submitButton(sec) {
+      var b = [...sec.querySelectorAll("button.btn")].filter(function (x) { return x.textContent.indexOf("提交建议") >= 0; })[0];
+      ok(b, "「修改建议」区块里要有提交按钮");
+      return b;
+    }
+
+    /* 文档要等 api.get 的 Promise 链跑完才落到 DOM，这里让出一个宏任务再查。 */
+    return new Promise(function (resolve) {
+      setTimeout(resolve, 0);
+    }).then(function () {
+      try {
+        var head = inst.el.querySelector(".inspector-head h3");
+        ok(head && head.textContent === "n", "路由 ?node= 应选中 null 节点，实际选中的是 " + (head ? head.textContent : "（无）"));
+        eq(inst.el.querySelector(".inspector-head .badge").textContent, "NoneType");
+
+        var sec = suggestSection();
+        var input = sec.querySelector("input.input-mono");
+        ok(input, "null 节点也要走到「输入框 + 提交按钮」这一分支（否则本用例没有验证到门控）");
+        ok(input.disabled, "null 值的建议输入框必须禁用");
+        ok(/null 值为只读/.test(input.title), "禁用要说明原因：" + input.title);
+        var btn = submitButton(sec);
+        ok(btn.disabled, "null 值的提交按钮必须禁用");
+        ok(/null 值为只读/.test(btn.title), "按钮禁用也要说明原因：" + btn.title);
+
+        /* 反例：同一文档里普通值节点的提交建议仍然可用，证明上面不是「整块都禁用」造成的假通过。 */
+        inst.update({ kind: "f", arg: "cfg.json", query: { node: "/a/b~1c" } });
+        var head2 = inst.el.querySelector(".inspector-head h3");
+        ok(head2 && head2.textContent === "b/c", "切换到 int 节点，实际选中的是 " + (head2 ? head2.textContent : "（无）"));
+        var sec2 = suggestSection();
+        var input2 = sec2.querySelector("input.input-mono");
+        ok(input2 && !input2.disabled, "普通值节点的输入框可用");
+        ok(!input2.title, "普通值节点不该带只读提示");
+        ok(!submitButton(sec2).disabled, "普通值节点的提交按钮可用");
+      } finally {
+        inst.destroy();
+        stage.remove();
+        MC.api.get = origGet;
+      }
+    });
+  });
+
 
   test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
     var capOfKind = MC.App.prototype.capOfKind;
     MC.caps = MC.capsFor(false);
-    ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t"), "速览、文件、搜索与临时标签已接入真实后端");
+    ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t") && capOfKind("review"), "速览、文件、搜索、临时标签与审阅页已接入真实后端");
     ok(!capOfKind("settings"), "未接入的 kind 不可用");
     MC.caps = MC.capsFor(true);
     ok(capOfKind("settings") && capOfKind("t"), "接入后可用");
@@ -368,17 +476,22 @@
     tree.destroy();
   });
 
-  var out = document.getElementById("out");
-  var failed = 0;
-  results.forEach(function (r) {
-    var li = document.createElement("li");
-    li.className = r.ok ? "pass" : "fail";
-    li.textContent = (r.ok ? "✓ " : "✗ ") + r.name + (r.ok ? "" : " — " + r.err);
-    if (!r.ok) failed++;
-    out.appendChild(li);
-  });
-  var sum = document.getElementById("summary");
-  sum.textContent = failed ? failed + " FAILED / " + results.length : "ALL PASSED (" + results.length + ")";
-  sum.className = failed ? "fail" : "pass";
-  document.title = sum.textContent;
+  function report() {
+    var out = document.getElementById("out");
+    var failed = 0;
+    results.forEach(function (r) {
+      var li = document.createElement("li");
+      li.className = r.ok ? "pass" : "fail";
+      li.textContent = (r.ok ? "✓ " : "✗ ") + r.name + (r.ok ? "" : " — " + r.err);
+      if (!r.ok) failed++;
+      out.appendChild(li);
+    });
+    var sum = document.getElementById("summary");
+    sum.textContent = failed ? failed + " FAILED / " + results.length : "ALL PASSED (" + results.length + ")";
+    sum.className = failed ? "fail" : "pass";
+    document.title = sum.textContent;
+  }
+
+  if (pending.length) Promise.all(pending).then(report);
+  else report();
 })();

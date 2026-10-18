@@ -37,6 +37,8 @@
 - 使用 pytest 运行测试，`pytest tests/ -v`
 - Python 3.9 兼容性不能只靠 `compileall`：函数注解里的 `X | None` 能编译，但在导入时求值才报 `TypeError`。验证方式是用 3.9 解释器实际导入模块（`python3.9 -c "import app.core.storage"`）；当前 v1.0.1 的 `storage.py`、`differ.py`、`dltool.py` 在 3.9.11 下导入即失败。
 - 前端模板（`app/web/`）的纯逻辑测试：浏览器打开 `app/web/tests/index.html`，或 `google-chrome --headless=new --dump-dom http://127.0.0.1:<port>/tests/index.html` 检查 `<title>ALL PASSED`。
+- `tests.js` 的 `test()` 支持**返回 Promise 的异步用例**（M3-03 加）：视图的 DOM 断言必须走这条路，因为 `fileview.js`/`review.js` 的渲染在 `api.get(...)` 的 Promise 链末端才落到 DOM，同步断言只能看到空壳。做法是 stub `MC.api.get` 后让出一个宏任务（`setTimeout(resolve, 0)`）再查 DOM；汇总会等全部异步用例 settle 后才写 `<title>`，所以 headless 的 `--virtual-time-budget` 照常能抓到结果。新增异步用例别忘了它**默认记为失败**，只有 settle 后才改写——断言必须真的跑到。
+- 视图脚本要进测试页就直接加进 `app/web/tests/index.html` 的加载列表（`importer.js` M2-11、`fileview.js` M3-03 都是这么做的既有做法），**不要**为了好测把工厂闭包内的私有函数（如 `renderSuggest`）导出成公共 API。
 - 存储层测试使用 monkeypatch 替换 DATA_DIR 为临时目录
 - 下载器测试使用 unittest.mock.patch 模拟 urllib
 - 对比引擎测试需注意文件名不同导致路径不匹配的问题
