@@ -1134,7 +1134,9 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
 4. **M4-06 / INH-1908**（`mc-rel`，分支 `mc-v2/m4-06-release` @ `bd961c8`）：离线发布包在跑。验收边界已交代：§16.7 的「断网浏览器实测」**不得**由本卡报绿，只能报「构建产物里不存在外部主机引用」，并要求负向对照（种一条 `https://cdn…` 必须让构建失败）。
 5. **N1 / INH-1912**（`mcc-n1`，分支 `mc-v2/n1-rename-charset` @ `5ca9611`）：刚开工，要求**先复现再修**。控制方已排除两层：创建与改名共用同一校验（`updates.py:229`/`:263-264` → `fsutil.py:130`，允许中文），HTTP 路由也正常（`http.py:232`/`:241` 已 unquote、`router.py:77` 用 `[^/]+`）。剩余嫌疑：`api.seg` 前端编码、映射键归一化（NFC/NFD）、`update_config_mapping` 搬文件、`update_status.json` 搬键。
 
-**评审工作树**：`mcc-review-m3-10`（detached @ `1b55e7f`，M3-10 复评前先 `git -C … checkout --detach <新 SHA>` 并让评审者回显 `git log --oneline -1`，见 R42）；`mcc-review-n2`（@ `8fdac3f`，已可 `git worktree remove` 清掉）。
+**评审工作树**：`mcc-review-m3-10`（detached @ `1b55e7f`，M3-10 复评前先 `git -C … checkout --detach <新 SHA>` 并让评审者回显 `git log --oneline -1`，见 R42）；`mcc-review-m3-08`（detached @ `05c8dd0`）。`mcc-review-n2` 已随 N2 合并清掉。
+
+**M3-08 评审第一轮作废（R37 同型事故，别再当成有效结论）**：那份输出通篇是 FastAPI / uvicorn / Jinja2 / pandas / psutil / 股票指标图 / `tests/requirements.txt`，这些在本仓库**一个都不存在**，且 usage 显示 tool_uses=0（它一行代码也没读）。作废判据不是“语气不对”而是**内容与仓库事实不符**：控制方复核方式是看它有没有引用任何本项目真实存在的符号、以及工具调用计数。第二轮派发词已点名作废理由，并要求逐字引用 file:line、断言缺失前先说明搜了什么。**教训补一条**：评审派发的usage 里 `tool_uses` 为 0 就直接作废，不必读正文。
 
 **Linear 已同步到**：INH-1913 → Done + 完整证据注释；INH-1895 → 进行中（评审结论 + 两条 Important 的处置）；INH-1912 → In Progress。发送方式仍是转发给会话 `f08af9f1-…`（MCP 连接器在会话启动时快照，中途授权不生效）。**仍欠**：INH-1893（M3-08）Done、M4-02/M4-06 的开工与完成注释。
 
