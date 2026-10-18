@@ -900,6 +900,35 @@
     );
   };
 
+  /**
+   * 更新类任务启动失败的共享口径（卡 7 复审 F1：从 settings 闭包提到与 showTask 同层）。
+   * 设置页「立即更新/全部更新」与文件页「立即拉取」撞的是同一条互斥规则（三类任务
+   * 同机型两两互斥），文案必须同源，否则两个界面对同一种 409 各说各话。
+   * - 409 BUSY 是正常业务结果不是服务器故障：warning + 解释互斥 + 按 detail.task_id
+   *   跳去那条正在跑的任务；**不重试**（重试只会再撞一次 409）。
+   * - 404＝名字已不在映射表（多半刚被他人删除）：warning 显示后端业务消息，
+   *   opts.onNotFound 给调用方刷新自己列表的钩子。
+   * opts.notFoundTitle / opts.faultTitle 供各界面用准确动词（「更新」/「拉取」）。
+   */
+  MC.taskStartError = function (app, err, opts) {
+    opts = opts || {};
+    if (err && err.status === 409 && err.code === "BUSY") {
+      var taskId = err.detail && err.detail.task_id;
+      MC.toast.warning(
+        "已有任务在运行",
+        MC.errorText(err) + "。同一机型内「单条更新 / 全量更新 / 拉取修改记录」互斥，" + (taskId ? "点这里查看那条正在运行的任务。" : "请等它结束后再试。"),
+        taskId ? { action: { label: "查看该任务", onClick: function () { app.showTask(taskId); } } } : null
+      );
+      return;
+    }
+    if (err && err.status === 404) {
+      MC.toast.warning(opts.notFoundTitle || "无法开始更新", MC.errorText(err));
+      if (opts.onNotFound) opts.onNotFound();
+      return;
+    }
+    MC.toastError(opts.faultTitle || "无法开始更新", err);
+  };
+
   App.prototype.renderTasks = function () {
     if (!this.taskSlot) return;
     util.clear(this.taskSlot);
@@ -923,7 +952,9 @@
           h("div.section-title", "进行中的任务"),
           running.map(function (x) {
             var pct = x.progress.total ? Math.round((x.progress.done / x.progress.total) * 100) : 0;
-            return h("div.col", { style: "gap:4px;margin-bottom:10px" }, h("div.row.small", h("span.grow.truncate", x.type + (x.target ? " · " + x.target : "")), h("span.muted.xsmall", x.actor)), h("div.progress", h("span", { style: { width: pct + "%" } })));
+            /* F7（卡 7 复审）：弹窗与浮层同一套词汇——taskLabel/TASK_STATE_LABELS/
+             * taskProgressText，不再裸打 type token，也不在 total 未发布时画 0% 空条。 */
+            return h("div.col", { style: "gap:4px;margin-bottom:10px" }, h("div.row.small", h("span.grow.truncate", taskLabel(x)), h("span.muted.xsmall", x.actor)), h("div.row.xsmall", h("span.grow.muted", (TASK_STATE_LABELS[x.state] || x.state) + " · " + taskProgressText(x))), h("div.progress", h("span", { style: { width: pct + "%" } })));
           }),
           h("button.btn.btn-sm", { type: "button", onclick: function () { MC.closePopover(); self.go({ kind: "settings", arg: "sources" }); } }, "查看更新源状态")
         ),

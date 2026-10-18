@@ -87,28 +87,11 @@
 
     var ro = function () { return !app.can("deployer"); };
 
-    /* 更新任务的失败口径（卡 6 移交，§7.10 / 卡 6 复审 F2）：
-     * - 409 BUSY 是「三类任务同机型两两互斥」的正常业务结果，不是服务器故障：
-     *   「全部更新」在跑时点「立即拉取/单条更新」**必然**撞车。解释互斥规则、
-     *   给跳去 detail.task_id 那条任务的入口，**不重试**（重试只会再撞一次 409）。
-     * - 404「该文件没有配置更新源」＝名字已不在映射表（多半刚被他人删除），
-     *   按字段级业务错误显示后端消息并刷新本列表，同样不当服务器故障。 */
+    /* 更新任务的失败口径走共享面 MC.taskStartError（shell.js，卡 7 复审 F1 从本闭包提升：
+     * 文件页「立即拉取」撞同一条互斥规则，文案必须同源，不能再各写一份）。
+     * 本视图唯一的差异是 404（名字已不在映射表）后要刷新自己的列表。 */
     function taskStartError(err) {
-      if (err && err.status === 409 && err.code === "BUSY") {
-        var taskId = err.detail && err.detail.task_id;
-        MC.toast.warning(
-          "已有任务在运行",
-          MC.errorText(err) + "。同一机型内「单条更新 / 全量更新 / 拉取修改记录」互斥，" + (taskId ? "点这里查看那条正在运行的任务。" : "请等它结束后再试。"),
-          taskId ? { action: { label: "查看该任务", onClick: function () { app.showTask(taskId); } } } : null
-        );
-        return;
-      }
-      if (err && err.status === 404) {
-        MC.toast.warning("无法开始更新", MC.errorText(err));
-        renderSection(true);
-        return;
-      }
-      MC.toastError("无法开始更新", err);
+      MC.taskStartError(app, err, { onNotFound: function () { renderSection(true); } });
     }
 
     /* ---------- 更新源 ---------- */
