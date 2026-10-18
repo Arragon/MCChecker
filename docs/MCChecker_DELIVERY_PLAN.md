@@ -6,7 +6,7 @@
 > |---|---|
 > | `docs/MCChecker_REDESIGN_SPEC.md` | 需求与技术规范（§15 任务卡 T-01–T-30、§16 验收） |
 > | `docs/MCChecker_FEATURE_CHANGES.md` | 行为变更 C01–C32（相对 v1.0.1） |
-> | Linear 项目 **MC-checker-v2**（`P-INH-14`，54 卡） | 每卡范围/验收/开发方案与执行状态 |
+> | Linear 项目 **MC-checker-v2**（`P-INH-14`，**57 卡** = 原 54 + 执行中新立 INH-1912/1913/1914） | 每卡范围/验收/开发方案与执行状态 |
 > | 本文件 | 执行协议、进度台账、已定决策、接力入口 |
 >
 > 卡定义在 Linear；进度以 Linear 为准，本文件第 7 节是镜像台账（如两者不一致，以 Linear 为准并回填本文件）。
@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-17）
 
-**M0、M1 全部完成（9 + 7 卡）**；**M2 全部完成（12/12）**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API、M2-09 历史列表与对比选择器、M2-10 临时文件与上传/链接导入、M2-11 导入对话框与临时标签、M2-12 删除文件进入恢复区）；**M3 已合入 5/17**（M3-01～M3-05）；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 origin/feat/mc-v2-delivery` 为准）；当前基线：全量测试 **869 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (29)**、`check_py39.sh` exit 0、`data/` 完整性以 `tests/conftest.py::h3_data_guard` 自动守卫的红/绿为证据（INH-1914 起这才是证据；哈希不许抄文档数字，要报就当场跑口径命令并把命令一起贴上——本机残留树实测 `5591aacb4a22f34c`，只代表这台机器，旧号 `478d9c26ea8dbb8f` 不可复现、已作废、禁止再引用）。**下一张卡 M3-06 / INH-1891**（前提：M3-07 评审并合并），逐卡方案见 `docs/MCChecker_M3_M4_PLAN.md`。
+**M0、M1 全部完成（9 + 7 卡）**；**M2 全部完成（12/12）**（M2-01 收藏 API、M2-02 速览与结构树收藏、M2-03 建议提交、M2-04 建议面板放行、M2-05 全局搜索 API、M2-06 搜索页与 Ctrl+K、M2-07 历史与修改记录列表及摘要、M2-08 结构化对比 API、M2-09 历史列表与对比选择器、M2-10 临时文件与上传/链接导入、M2-11 导入对话框与临时标签、M2-12 删除文件进入恢复区）；**M3 已合入 6/17**（M3-01～M3-05、M3-07），另合入 H3 会话级守卫 INH-1914；集成分支 `feat/mc-v2-delivery`（tip 以 `git log -1 origin/feat/mc-v2-delivery` 为准）；当前基线：全量测试 **905 passed**（Python 3.9.11）、前端测试页 **ALL PASSED (29)**、`check_py39.sh` exit 0、`data/` 完整性以 `tests/conftest.py::h3_data_guard` 自动守卫的红/绿为证据（INH-1914 起这才是证据；哈希不许抄文档数字，要报就当场跑口径命令并把命令一起贴上——本机残留树实测 `5591aacb4a22f34c`，只代表这台机器，旧号 `478d9c26ea8dbb8f` 不可复现、已作废、禁止再引用）。**下一张卡 M3-06 / INH-1891**（其前提 M3-07 已合并，H3 守卫也已落地），逐卡方案见 `docs/MCChecker_M3_M4_PLAN.md`。
 
 ---
 
@@ -121,7 +121,9 @@ PR: <url> · 提交 `<sha>`
 
 ---
 
-## 6. 卡序与依赖（54 卡全表）
+## 6. 卡序与依赖（原 54 卡全表）
+
+> 执行中新立的三张不在下表里：**INH-1912**（更新源改名字符集与创建不一致，中文源名能创建但永远改不了）、**INH-1913**（访客临时导入未打开回环拦截，SSRF 面未闭合）、**INH-1914**（H3 会话级 `data/` 完整性守卫，已完成）。以 Linear 为准。
 
 > 状态快照于 2026-10-17。**In Progress = 前端界面已在模板中完成、后端/接口未做**（历史上 18 张卡如此标记，注释里写了「已完成/还没做/接着做」）。后端完成后才能置 Done。
 
@@ -168,7 +170,7 @@ PR: <url> · 提交 `<sha>`
 | M2-11 | INH-1884 | Done | 导入对话框与临时文件标签（`WIRED` 放行 `import`/`temp`） |
 | M2-12 | INH-1885 | Done | 删除文件进入恢复区（`services/recovery.py` + `DELETE /files/{name}`，`WIRED` 放行 `delete`） |
 
-### M3 审阅、更新、DL 与设置（5/17，截至 2026-10-18）
+### M3 审阅、更新、DL 与设置（6/17，截至 2026-10-18）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -177,8 +179,8 @@ PR: <url> · 提交 `<sha>`
 | M3-03 | INH-1888 | Done | 审阅页与本地草稿 |
 | M3-04 | INH-1889 | Done | 安全下载器 |
 | M3-05 | INH-1890 | Done | 更新源校验提交与映射接口（含 PR #41 的锁范围补修） |
-| M3-06 | INH-1891 | Todo | 更新源设置页 |
-| M3-07 | INH-1892 | In Progress | 后台任务队列与任务接口（代码已提交在 `mc-v2/m3-07-tasks`，**评审中、尚未合并**） |
+| M3-06 | INH-1891 | Todo | 更新源设置页（**下一张**；含 D2 分段门控基础设施，并接手卡 6 改派来的 `progress.total` 与 409 文案） |
+| M3-07 | INH-1892 | Done | 后台任务队列与任务接口（PR #43；历经 4 轮评审，第 1 轮作废、合并前修掉一条会损坏用户数据的缺陷） |
 | M3-08 | INH-1893 | Todo | 标准库调度器与定时设置 |
 | M3-09 | INH-1894 | Todo | 修改记录拉取与文件内查看 |
 | M3-10 | INH-1895 | Todo | DL 求根与正向反向计算 |
@@ -315,6 +317,6 @@ PR: <url> · 提交 `<sha>`
 
 **交接出口标准**（任一时刻退出都要满足）：工作区干净或已 stash 说明；线性状态与代码一致；PR/集成分支 tip 记录在本文件第 7 节与 Linear 注释里；下一步的卡号写明确。
 
-**下一步（2026-10-18 写实）**：M2 = 12/12 已完成。**M3 已合入 5 张**（M3-01 审阅写回、M3-02 审阅提交 API、M3-03 审阅页、M3-04 安全下载器、M3-05 更新源接口 + PR #41 补修），基线从 506 passed 涨到 **869 passed**，前端测试页 **ALL PASSED (29)**，`check_py39.sh` exit 0，`data/` 完整性的证据自 INH-1914 起是自动守卫 `tests/conftest.py::h3_data_guard` 的红/绿（它会当场公告「执法中 N 个文件」或「未执法：data/ 不存在或为空」）；哈希必须当场跑口径命令并连命令一起报，本机残留树实测 `5591aacb4a22f34c` 只代表这台机器，旧号 `478d9c26ea8dbb8f` 抄自文档、复现不出来、已作废且禁止再引用。M3-07（`INH-1892` 后台任务队列）**代码已提交在 `mc-v2/m3-07-tasks`，正在独立评审，尚未合并** —— 合并前不得自称完成（R23）。**下一张卡：M3-06（`INH-1891` 更新源设置页 + D2 分段门控）**，它消费 M3-05 的 `/sources` CRUD 与 M3-07 的 `POST /tasks`，所以必须排在 M3-07 合并之后。卡序（**≠卡号序**）、四个前置决策（D1 null 只读 / D2 分段门控 / D3 / D4 `tasks` 能力键）、执行期裁定 R1–R39 与逐卡方案全部在 `docs/MCChecker_M3_M4_PLAN.md`（第 3 节卡序、第 10 节裁定、第 11 节恢复快照）；未闭合的问题记在 `docs/MCChecker_BLOCKERS.md`（N1 = INH-1912 中文改名、N2 = INH-1913 回环拦截）。历史交接记录（M2 各卡的实际口径与遗留）保留在下方，仍是有效信息。
+**下一步（2026-10-18 写实）**：M2 = 12/12 已完成。**M3 已合入 6 张**（M3-01 审阅写回、M3-02 审阅提交 API、M3-03 审阅页、M3-04 安全下载器、M3-05 更新源接口 + PR #41 补修、M3-07 后台任务队列 PR #43），另合入 H3 会话级守卫 INH-1914（PR #44），基线从 506 passed 涨到 **905 passed**，前端测试页 **ALL PASSED (29)**，`check_py39.sh` exit 0，`data/` 完整性的证据自 INH-1914 起是自动守卫 `tests/conftest.py::h3_data_guard` 的红/绿（它会当场公告「执法中 N 个文件」或「未执法：data/ 不存在或为空」）；哈希必须当场跑口径命令并连命令一起报，本机残留树实测 `5591aacb4a22f34c` 只代表这台机器，旧号 `478d9c26ea8dbb8f` 抄自文档、复现不出来、已作废且禁止再引用。M3-07（`INH-1892` 后台任务队列）**已合并（PR #43）**：历经 4 轮独立评审，第 1 轮因读到并行事故留下的过期草稿而作废（R37），合并前修掉一条会损坏用户数据的缺陷（停服务时先删单实例锁、后台仍在写 `data/`）。**下一张卡：M3-06（`INH-1891` 更新源设置页 + D2 分段门控）**，它消费 M3-05 的 `/sources` CRUD 与 M3-07 的 `POST /tasks`（两者均已合并），并接手卡 6 改派来的两项：`progress.total` 契约对齐与 409 BUSY 的前端文案。卡序（**≠卡号序**）、四个前置决策（D1 null 只读 / D2 分段门控 / D3 / D4 `tasks` 能力键）、执行期裁定 R1–R44 与逐卡方案全部在 `docs/MCChecker_M3_M4_PLAN.md`（第 3 节卡序、第 10 节裁定、第 11 节恢复快照）；未闭合的问题记在 `docs/MCChecker_BLOCKERS.md`（N1 = INH-1912 中文改名、N2 = INH-1913 回环拦截，两张都还在 Backlog）。历史交接记录（M2 各卡的实际口径与遗留）保留在下方，仍是有效信息。
 
 M3-01（`INH-1886`）：`core/reviewing.apply_edits(src, fmt, edits) -> bytes` 在原文字节上只改选中节点 + §6.7 第 6 步语义校验（不过则 `REVIEW_UNSAFE` 且不返回任何字节），配套公开 `parser.collect_ns_prefixes` / `parser.pointer_unescape`，回归在 `tests/test_review_apply.py`。M3-02 按该签名调用，签名未变过。M2-12 已完成：`services/recovery.py` 先把当前版本 + `archive/<name>/` + `records/<name>/` **复制**进 `data/recovery/<ts>_delete_file_<pid>_<name>/` 并逐文件比对 sha256，校验通过才删源，然后才清映射/收藏/绑定/建议并写 `manifest.json`；中途失败逆序回滚（原文放回、JSON 回到删除前快照、恢复区只留空目录、不谎报成功）；`storage.delete_config_file` 的旧硬删语义未动；`conftest.DATA_SUBDIRS` 加了 `recovery`；`WIRED` 放行 `delete`，前端确认框用 `requireText` 敲文件名；UC-11 的口径见第 8 节决策 19。M2-11 已完成：导入对话框、链接导入与临时标签在真实后端逐项验过（UC-17/27/28/29）；小遗留——链接导入拿 URL 末段当文件名，遇到 `…/raw` 这类结尾会得到 `raw` 这个名字，用户可在对话框里改，更聪明的默认值另开卡：把 `import`/`temp` 加进 `WIRED`，接 `views/importer.js` 与临时标签，核对 UC-17、UC-27～UC-29；**临时标签不得写进 `mc.tabs.<pid>`**（C24），1 GB / 20 个上限要有明确前端文案。M2-10 已完成：`POST /temp`、`GET /temp/{token}/document|raw`、`PUT /files/{name}`、`POST /import-url` 全在真实后端验过，temp 侧对比（M2-08 遗留）也已补上；**SSRF 白名单仍属 M3-04**，本卡只做 http/https 前缀校验：`services/temp_store.py`（`data/temporary/<token>/`、`meta.json` 所有者、同一所有者 ≤ 20 个、全局 ≤ 1 GB、惰性过期清理）、`POST /temp`、`GET /temp/{token}/document|raw`（仅上传者）、`POST /import-url`；顺手补 M2-08 留下的 `temp` 侧对比用例，并把 `api.js` 的 `temp` 放进 `WIRED`。M2-09 已完成：`history`/`compare`/`records` 放行，UC-14/15/16/18/19 在真实后端逐项验过（UC-16 的基准反向缺陷已修）：把 `history`/`compare`/`records` 加进 `api.js` 的 `WIRED`，接 `GET /files/{name}/archives`、`GET /files/{name}/records` 与 `POST /compare`，核对 UC-14（当前 + 归档、统计正确）、UC-15（历史直达对比：基准=该归档、目标=当前并自动运行）、UC-16（勾选两行 → 较旧为基准）。M2-08 已完成：`compare_documents()` 给出逐行 items，`summarize_documents()` 改为委托它（摘要与条目同口径），`differ` 不再在模块级 import `storage`。临时侧 `{"temp": …}` 现在返回 400「临时文件对比将在 M2-10 接入」，M2-10 要补上所有者校验与相应用例。§12 的搜索预算瓶颈见第 8 节决策 17（>24 个文件时由文档内存缓存逐出造成，留给 M4-05，不要在搜索侧做二次缓存）。M2-03 遗留的 NoneType 规范疑问已在 M3-01 裁定完毕（null 是只读值，说明已写进 §6.7 第 4 步，见第 8 节决策 20），**不再是任何卡的前置阻塞**。此后每张写卡都必须调用 `authz.authorize(ctx, action)` 并用 `tests/authz_fixtures.py` 补四角色测试、写成功后 `revision.bump`。

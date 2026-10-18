@@ -1192,7 +1192,7 @@ class TaskRunner:
 ```
 
 - `fn` 在工作线程中执行，内部通过 `task.progress`/`task.result.items.append()` 更新，结束设置 `state`；任何异常 → `failed` 并记录 `error`（用户可读）与日志堆栈。
-- 每次进度变化递增机型的 `tasks` 修订计数；结束时递增 `files`/`settings`。
+- 每次进度变化递增机型的 `tasks` 修订计数；结束时按类型递增：`update_all` 递增 `settings`，`update_source` 的 `files` **只在文件字节真的变了时**由服务层递增（runner 不补，否则 `unchanged` 会给所有客户端弹虚假的「文件已更新」横幅）。
 
 ### 10.2 更新源更新（`services/updates.py::update_source`）
 
