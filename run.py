@@ -13,6 +13,7 @@ import logging
 import signal
 import sys
 import threading
+import time
 from typing import Any, List, Optional
 
 from app import __version__
@@ -81,15 +82,19 @@ def stop_and_release(
     """
     ordered_stop(runner, server)
     server.server_close()
-    if runner.wait_for_workers(exit_timeout):
+    started = time.monotonic()
+    drained = runner.wait_for_workers(exit_timeout)
+    elapsed = time.monotonic() - started
+    if drained:
         lock.release()
         logger.info("已停止，锁文件已删除")
         return True
     logger.error(
-        "退出前仍有后台任务在写 data/，锁文件保留在 %s 没有删除（已等 %.1f 秒）："
+        "退出前仍有后台任务在写 data/，锁文件保留在 %s 没有删除（已实测等待 %.1f 秒，预算 %.1f 秒）："
         "删掉它等于放第二个实例进来同写一份权威数据。这些线程结束后进程才会真正退出，"
         "届时残留锁会被下一次启动按 pid 接管。",
         getattr(lock, "path", "?"),
+        elapsed,
         exit_timeout,
     )
     return False

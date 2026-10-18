@@ -33,6 +33,7 @@ import pytest
 
 from authz_fixtures import as_role, make_server, seed_roles
 from conftest import GATE_TIMEOUT
+from app.services import tasks
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -56,8 +57,10 @@ TASK_FIELDS = {
 }
 ACTIVE_STATES = ("queued", "running")
 FINISHED_STATES = ("succeeded", "partial", "failed")
-#: runner 的工作线程名前缀（断言「停止后不残留非 daemon 线程」用它筛）。
-THREAD_PREFIX = "mctask"
+#: 「还有没有人在写 data/」的判据只有一个出处：`tasks.worker_threads()`——按 `mctask`
+#: **线程名**筛、摘掉不写盘的 `mctask-shutdown` 等待线程（daemon 位从提交方继承，
+#: 现网就是 daemon，不可用，见 `docs/know-how.md` M3-07 / C1）。本文件不再自带前缀常量、
+#: 也不再自己按裸前缀筛（修复轮 3 / Item 5）。
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +274,8 @@ def _parts(target_pid: str) -> Dict[str, int]:
 
 
 def _worker_threads() -> List[threading.Thread]:
-    return [t for t in threading.enumerate() if t.name.startswith(THREAD_PREFIX)]
+    """生产谓词的别名（Item 5）：判据只认 `tasks.worker_threads()`，别再自己筛裸前缀。"""
+    return tasks.worker_threads()
 
 
 def _js(*parts: str) -> str:
@@ -413,18 +417,50 @@ class TestTaskContract:
         release.set()
         _wait_state(pid, running.id)
 
-    def test_worker_threads_are_not_daemon(self, pid, gates):
-        """R9 的形态前提：工作线程非 daemon，进程退出前一定会把在途任务跑完。"""
+    def test_worker_daemonness_follows_the_submitter_not_the_pool(self, pid, gates):
+        """R9 / C1 的形态事实：daemon 位从**提交方**继承，不是池子自带的——判据只能是线程名。
+
+        CPython 3.9 `threading.py:828` 就是 `self._daemonic = current_thread().daemon`，
+        两种形态本机都实测过：从主线程提交（单测的形状）⇒ 非 daemon；从 daemon 线程提交
+        （现网 HTTP 处理线程的形状，`_submit_like_http`）⇒ daemon。所以 `daemon` 位
+        在哪个形态下都当不了「还有没有人在写 `data/`」的判据——`tasks.worker_threads()`
+        按 `mctask` 名字前缀筛，两种形态都看得见同几条线程。
+        """
+        # 形态一：主线程提交 ⇒ 非 daemon（这正是「按 daemon 筛」看起来成立的那个形状）。
         release = gates()
         entered = threading.Event()
-        task = _runner().submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
-        entered.wait(5)
+        runner = tasks.TaskRunner(1)
+        try:
+            task = runner.submit(_ctx(pid), "update_source", NAME, _blocking(release, entered))
+            assert entered.wait(5)
+            workers = tasks.worker_threads()
+            assert workers and all(not t.daemon for t in workers), "主线程提交出来的工作线程应是非 daemon"
+            assert all(t.name.startswith(tasks.THREAD_NAME_PREFIX) for t in workers)
+        finally:
+            release.set()
+            runner.shutdown(5)
+            assert runner.wait_for_workers(10), "形态一的工作线程必须在本用例里散干净（H3）"
 
-        workers = _worker_threads()
-        assert workers and all(not t.daemon for t in workers)
-
-        release.set()
-        _wait_state(pid, task.id)
+        # 形态二：daemon 提交线程（现网形状，`MCServer.daemon_threads = True`）⇒ 工作线程也是 daemon。
+        release2 = gates()
+        entered2 = threading.Event()
+        runner2 = tasks.TaskRunner(1)
+        try:
+            task2 = _submit_like_http(runner2, pid, "update_source", NAME, _blocking(release2, entered2))
+            assert entered2.wait(5)
+            workers2 = tasks.worker_threads()
+            assert workers2 and all(t.daemon for t in workers2), (
+                "现网形状下工作线程就是 daemon——C1 的第一版按 `not t.daemon` 过滤，把「还没散」"
+                "读成「已散尽」，30 秒就删了锁而下载还在跑（见 docs/know-how.md）"
+            )
+            assert all(t.name.startswith(tasks.THREAD_NAME_PREFIX) for t in workers2), (
+                "liveness 谓词是名字：daemon 与否，worker_threads() 都看得见它们"
+            )
+        finally:
+            release2.set()
+            _wait_task(task2)
+            runner2.shutdown(5)
+            assert runner2.wait_for_workers(10), "形态二的工作线程必须在本用例里散干净（H3）"
 
 
 # ---------------------------------------------------------------------------
@@ -1403,7 +1439,13 @@ class TestOrderedStop:
         assert "runner.shutdown" in src and "server.shutdown" in src
 
     def test_http_worker_threads_stay_daemon(self):
-        """R9 的边界：`daemon_threads = True` 只覆盖 HTTP 处理线程，本卡不动它。"""
+        """R9 的边界：`daemon_threads = True` 管的是 HTTP 处理线程本身，本卡不动它。
+
+        任务工作线程不从这里拿 daemon 位——`submit` 正是这批 HTTP 线程调的，daemon 位
+        沿创建链继承下去（`threading.py:828`）；「还有没有人在写」两种形状下都只按
+        线程名判（`tasks.worker_threads()`，见
+        `test_worker_daemonness_follows_the_submitter_not_the_pool`）。
+        """
         from app.server.http import MCServer
 
         assert MCServer.daemon_threads is True
@@ -1561,6 +1603,177 @@ class TestLockOutlivesWriters:
 
         assert "stop_and_release(runner, server, lock)" in tail
         assert "lock.release()" not in tail, "退出路径上直接删锁 = 写的人还活着时锁就没了（C1）"
+
+
+# ---------------------------------------------------------------------------
+# 7c. `wait_for_workers` 的预算要真的封顶（修复轮 3 / Item 1）
+# ---------------------------------------------------------------------------
+
+
+class _StubExitRunner:
+    """`wait_for_workers` 耗时**不等于**配置预算的 runner 桩，专门用来验日志里的秒数。
+
+    `run.stop_and_release` 给运维的那句「已等 %.1f 秒」必须是实测等待时长而不是
+    `exit_timeout` 常量：桩在预算 0.05 秒时等 0.3 秒再返回 False，旧实现会印 0.1。
+    """
+
+    def __init__(self, wait_seconds: float) -> None:
+        self._wait_seconds = wait_seconds
+
+    def shutdown(self, timeout: float = 30) -> None:  # ordered_stop 会先调它
+        pass
+
+    def wait_for_workers(self, timeout: float) -> bool:
+        time.sleep(self._wait_seconds)
+        return False
+
+
+class TestExitWaitBudget:
+    def test_wait_for_workers_total_is_bounded_by_the_budget(self, pid, gates):
+        """预算按**整次调用**封顶，不按每条线程各发一份 `remaining`。
+
+        旧实现每轮只算一次 `deadline - now`，然后把它交给每一个还卡着的线程逐个
+        `join(remaining)`：本轮代价 = N × remaining。本机用循环副本实测过——预算
+        1.0 秒 + 4 条卡死线程 ⇒ 4.03 秒才返回 False；照 `EXIT_WORKER_TIMEOUT=300` ×
+        `DEFAULT_MAX_WORKERS=4` 推下去，停止路径能坐到约 20 分钟，而常量注释和文档
+        承诺的都是 300 秒。0.9 秒的容差 = 预算的 3 倍（新实现只超几毫秒），仍明显
+        小于 4 × 0.3 = 1.2 秒（旧实现的下界）。
+        """
+        from app.config import DEFAULT_MAX_WORKERS
+
+        runner = tasks.TaskRunner(DEFAULT_MAX_WORKERS)
+        release = gates()
+        entered = threading.Event()
+        try:
+            for index in range(DEFAULT_MAX_WORKERS):
+                _submit_like_http(
+                    runner, pid, "update_source", "hung%d.xml" % index, _blocking(release, entered)
+                )
+            assert entered.wait(5)
+            deadline = time.time() + 5
+            while len(tasks.worker_threads()) < DEFAULT_MAX_WORKERS and time.time() < deadline:
+                time.sleep(0.01)
+            assert len(tasks.worker_threads()) == DEFAULT_MAX_WORKERS, "全部 worker 都应卡在闸门里"
+
+            started = time.monotonic()
+            drained = runner.wait_for_workers(0.3)
+            elapsed = time.monotonic() - started
+
+            assert drained is False
+            assert elapsed < 0.9, (
+                "wait_for_workers 超支：每条卡死线程都吃满同一份 remaining——实测 %.2f 秒，"
+                "预算只有 0.3 秒（修复轮 3 Item 1：remaining 必须每次 join 前重算）" % elapsed
+            )
+        finally:
+            release.set()
+            runner.shutdown(5)
+            assert runner.wait_for_workers(10), "本用例的工作线程必须散干净（H3）"
+
+    def test_stop_and_release_logs_the_measured_elapsed_seconds(self, tmp_path, caplog):
+        """运维看见的「已等 N 秒」必须是实测值：桩只等 0.3 秒，配置预算是 0.05 秒。
+
+        旧实现无论实际等多久都印 `exit_timeout`——它是这条路径唯一的操作员可见信号，
+        印错等于把「等了 20 分钟」报成「等了 300 秒」。
+        """
+        import run
+
+        lock = _SpyLock(str(tmp_path / "data"))
+        lock.acquire()
+        try:
+            with caplog.at_level(logging.ERROR, logger="mcchecker"):
+                released = run.stop_and_release(
+                    _StubExitRunner(0.3), _ExitStubServer([]), lock, exit_timeout=0.05
+                )
+            assert released is False
+            assert os.path.exists(lock.path), "等不散就不能删锁（C1）"
+            match = re.search(r"等待 (\d+(?:\.\d+)?) 秒", caplog.text)
+            assert match is not None, caplog.text
+            logged = float(match.group(1))
+            assert 0.2 <= logged <= 1.5, (
+                "日志印的是配置值（%.1f 秒）而不是实测等待时长（桩等了 0.3 秒）——Item 1："
+                "stop_and_release 必须计时后把实际秒数写进 ERROR" % logged
+            )
+        finally:
+            lock.release()
+
+
+# ---------------------------------------------------------------------------
+# 7d. liveness 谓词只有一个出处 + 夹具放行环有哨兵（修复轮 3 / Items 4、5）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module", autouse=True)
+def gate_release_sentinel():
+    """盯住 `isolated_task_runner` 拆夹具时的**无条件放行环**（Item 4 的哨兵状态）。
+
+    放行环删掉后全部既有用例照样绿——闸门自己有 `GATE_TIMEOUT` 兜底会把孤儿线程接住
+    （只是白等 20 秒），这正是「没人盯的基础设施会被下一个人简化掉」的形状。本夹具是
+    module 作用域：它的拆（teardown）发生在**本模块最后一条用例的 function 级夹具**
+    （含 `isolated_task_runner`）拆完之后，所以它来得及看一眼就只答得出来的那个问题：
+    哨兵闸门是被夹具 `set()` 放开的，还是自己到点散的？
+    """
+    state: Dict[str, Any] = {"armed": False, "released": None}
+    done = threading.Event()
+    yield state, done
+    if state["armed"]:
+        assert done.wait(GATE_TIMEOUT + 10), "哨兵线程既没被夹具放行、也没到自己的兜底：放行环和 GATE_TIMEOUT 同时失效"
+        assert state["released"] is True, (
+            "哨兵闸门最后是自己 20 秒到点散的，不是被 `isolated_task_runner` 拆夹具时的无条件放行"
+            "放开的——那两行 `gate.set()` 被删或没跑到（I2 / H3：用例断言中途红时孤儿线程会"
+            "活到 monkeypatch 撤销之后，往真实的 data/ 里写）。"
+        )
+
+
+class TestFixtureOwnsEveryGate:
+    def test_registered_gate_is_released_by_the_fixture_even_if_the_test_never_sets_it(
+        self, gates, isolated_task_runner, gate_release_sentinel
+    ):
+        """故意在 happy path 不放行闸门：这条 Event 只有夹具的放行环能开。
+
+        用例体内断言「登记归夹具所有」；「放行真的发生」由 module 级哨兵夹具在本夹具
+        拆完之后核对——被 `set()` 放开 ⇒ 绿，靠 `GATE_TIMEOUT` 到点 ⇒ 红。删掉
+        `conftest.isolated_task_runner` 里那两行 `gate.set()` 本用例必红（变异验证见
+        修复轮 3 报告）。
+        """
+        state, done = gate_release_sentinel
+        gate = gates()
+        assert gate in isolated_task_runner, (
+            "`gates` 工厂没把闸门登记进 `isolated_task_runner` 的放行名单：用例中途红时就没人"
+            "放行，孤儿线程会活到 monkeypatch 撤销之后（I2 / H3）"
+        )
+
+        def holder() -> None:
+            gate.wait(GATE_TIMEOUT)
+            state["released"] = gate.is_set()  # 被 set 放开 ⇒ 夹具干的；到点散 ⇒ 放行环没了
+            done.set()
+
+        state["armed"] = True
+        threading.Thread(target=holder, name="gate-release-sentinel").start()
+        # 到这里绝不 gate.set()：这条用例要证明的就是「用例绿、没人放行」时夹具兜底。
+
+
+class TestLivenessPredicateSingleSource:
+    def test_mctask_shutdown_waiter_is_never_counted_as_a_writer(self):
+        """谓词单一出处（Item 5）：生产、`_worker_threads()`、夹具 survivors 三处都必须是 `tasks.worker_threads()`。
+
+        裸前缀筛法会把 `mctask-shutdown`（只跑 `pool.shutdown`、一个字节都不写）当成
+        「还有人写 data/」：旧夹具在排空恰好踩满预算时会把用例判红成「任务队列已经拆完，
+        但仍有工作线程活着：mctask-shutdown」。这里挂一条同名哨兵线程睡 0.5 秒，
+        覆盖三层——① 本用例体内直接调 `tasks.worker_threads()`；② 本文件的
+        `_worker_threads()`；③ 拆夹具时的 survivors 检查（拆点在哨兵还睡着时到达：
+        夹具若退回裸前缀筛，会在自己的 teardown 里把本用例判失败）。
+        """
+        waiter = threading.Thread(
+            target=time.sleep, args=(0.5,), name=tasks.SHUTDOWN_WAITER_NAME, daemon=True
+        )
+        waiter.start()
+        assert tasks.worker_threads() == [], (
+            "mctask-shutdown 等待线程一个字节都不写，不该被算进「还有人在写 data/」"
+        )
+        assert _worker_threads() == [], (
+            "`_worker_threads()` 又自己筛裸前缀了：必须调用 tasks.worker_threads()，谓词单一出处"
+        )
+        # ③ 不在这里断言：本用例一返回夹具就拆，survivors 检查落在 0.5 秒哨兵的睡眠窗口里。
 
 
 # ---------------------------------------------------------------------------

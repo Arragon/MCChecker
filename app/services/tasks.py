@@ -171,7 +171,7 @@ def worker_threads() -> List[threading.Thread]:
     return [
         thread
         for thread in threading.enumerate()
-        if thread.name.startswith(THREAD_NAME_PREFIX) and thread.name != SHUTDOWN_WAITER_NAME
+        if thread.name.startswith(THREAD_NAME_PREFIX) and thread.name != SHUTDOWN_WAITER_NAME and thread.name != SHUTDOWN_WAITER_NAME
     ]
 
 
@@ -439,16 +439,21 @@ class TaskRunner:
 
         返回 False 时调用方**不要**删锁：残留锁能被下一个实例按 pid 接管
         （`SingleInstanceLock.acquire` → `_process_alive`），删错的锁不能。
+
+        总耗时以 `timeout` **封顶**（修复轮 3 / Item 1）：`remaining` 必须在每次
+        `join` 前重算——旧实现每轮只算一次、再逐个交给每条卡死的线程去消费，一轮就是
+        N × remaining（实测预算 1.0 秒 + 4 条卡死线程 ⇒ 4.03 秒），照 300 × 4 推下去
+        停止路径能坐到约 20 分钟，与常量注释和 `docs/know-how.md` 承诺的 300 秒不符。
         """
         deadline = time.monotonic() + max(0.0, float(timeout))
         while True:
             alive = worker_threads()
             if not alive:
                 return True
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return False
             for thread in alive:  # join 而不是轮询：线程一散就立刻返回
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
                 thread.join(remaining)
 
     # ------------------------------------------------------------------

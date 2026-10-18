@@ -139,7 +139,12 @@ def isolated_task_runner(isolated_data_root):
     for gate in registry:
         gate.set()  # ① 不管用例是绿是红，闸门一律放行：线程不许被扣到夹具之外
     tasks.reset_runner(RUNNER_DRAIN_TIMEOUT)  # ② 再等它散，预算长过闸门自己的兜底
-    survivors = [t.name for t in threading.enumerate() if t.name.startswith(tasks.THREAD_NAME_PREFIX)]
+    # ③ 谓词单一出处（Item 5）：`tasks.worker_threads()` 按名字筛且摘掉不写盘的
+    #    `mctask-shutdown` 等待线程——这里绝不再自己按裸前缀 enumerate 一遍，
+    #    否则排空踩满预算时会把一个非写入方报成「还有人活着」。
+    #    上面 ① 的放行环有哨兵盯着：`tests/test_api_tasks.py::TestFixtureOwnsEveryGate`
+    #    ——删掉那两行 `gate.set()` 它会红，别把本夹具「简化」回去。
+    survivors = [thread.name for thread in tasks.worker_threads()]
     if survivors:
         pytest.fail(
             "任务队列已经拆完，但仍有工作线程活着：%s。它会在这次 monkeypatch 撤销之后"
