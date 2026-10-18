@@ -1145,6 +1145,22 @@ H3 的证据形式已变更：**从 INH-1914 起，「测试没损伤权威数�
 
 **Linear 已同步到**（明细与注释 ID 在 `.superpowers/linear-sync-log.md`）：INH-1913 Done（`completedAt 18:13:07Z`）、INH-1895 两条进展、INH-1912 三条进展（含根因与控方复测数字）、INH-1893 一条进展（明写未置 Done）、INH-1907 开工、INH-1908/1904 进行中。**仍欠**：M3-08/N1/M3-10 合并后的 Done + 证据；三张在飞卡的完成状态。
 
+## 11.1 调度器（M3-08 / INH-1893）第二轮评审结论 · 2026-10-18 18:36 UTC（合并前必读）
+
+**结论：Approved for merge（0 Critical / 3 Important / 6 Minor）**，评审者是在同源独立检出 `mcc-review-m3-08 @ 05c8dd0` 上读的，回显过 SHA，工作树前后都干净，并自己跑了聚焦 **98 passed**、`ALL PASSED (42)` 三次、`check_py39.sh` exit 0、六个文件 `py_compile` exit 0。它没有替我背书全量 1015/917（那是我控制的数），也逐次声明 H3 未执法。**卡的核心不变式被两种方式证实**：调度线程可达的被调方里没有任何 `save_*`（它打开了 `services/revision.py` 才放行——正是上一轮被推翻的那种"只读调用方"错误），且删掉外层机型锁会让并发用例当场红。
+
+**合并前处置（三条 Important 都要修，不修不合）**：
+1. `tests/test_api_schedule.py:449-467` 三条**源码文本 grep** 断言（R45 明令禁止的形状）——直接删。行为已被另外两处钉住：`test_api_schedule.py:262`（服务端 `detail.field=="interval"`）与 tests.js 的 UC-33 用例。
+2. 旗舰用例 `tests/test_scheduler.py:609-618` 的白名单是**从被测常量本身**推导的，所以放宽删除范围时断言跟着放宽、永远不会红；且该用例没把权威文件调老，实测加 `"../configs"` 仍绿。两行修法：白名单写死 `("doc_v2","diff_v2")`，并 `os.utime(authoritative, (old, old))`（同文件 :496-497 已有先例）。兄弟用例 :473-502 确实会红，所以性质有覆盖，只是被 docstring 与提交信息引用的那条不是。
+3. `scheduler.py:31-33`、`run.py:51-53`、新写入 `docs/know-how.md` 的那条，用同一句话「按 mtime 年龄判定，永远删不到正在写的那一份」概括两个清扫，但**临时目录那半是假的**：`temp_store.create()` 先建目录后写 `meta.json`，而 `purge_expired` 在 `meta is None` 时无条件删（`temp_store.py:155-156`），所以一个正在上传的目录会被删；本卡把它从"顺带清扫"变成**独立的每小时定时器**，暴露在锁释放之后、跨进程无保护。修法是先写 `meta.json`（或让 `purge_expired` 要求 meta 存在并按目录 mtime 过筛），并把两处docstring分开写。**控方裁定**：`data/temporary/` 按 §7.4 不属于权威数据，最坏后果是一次上传丢失重传，所以维持 Important 不升 Critical——但这正是评审者列出的唯一改变结论的条件，若你判断临时标签在产品里算用户可见的持久内容，就必须升级为 Critical 走修复轮。
+
+**Minor 里值得顺手修的**：`test_scheduler.py:648` 那行是空的（该用例从未 `start()`，没有线程可记），`:894` 的 `or sched.stopping` 吞掉了它要防的情形，`_sweep_if_due` 两半用不同时钟（:462 注入的 moment vs :209 的 `time.time()`），PUT 缺 `enabled` 会被当成关闭且规范与用例都没写（`scheduler.py:523`）。
+
+**另一处报告纪律的收获**：简报里列了 `views/overview.js` 为 Modify，实际不在 diff——评审者查证后确认门控早已由 M2-02 的 `51c83a5` 建好，本卡只需放行 `WIRED`，功能无缺口。**下次写简报别再列已完成的文件**，会逼评审解释一个不存在的缺口。
+
+**修复轮的边界**：只在 `mcc-m3-08`（分支 `mc-v2/m3-08-scheduler` @ `05c8dd0`，已推远端）做上述 1-3 与可选 Minor；改完要重跑聚焦两文件 + 全量（当场重测）+ 前端 `ALL PASSED (n)`（HTTP 形态）；然后 scoped 复评，再按合并顺序纪律先合远端集成分支（`docs/know-how.md` 与 `tests.js` 会与 N1/M4-02 撞，禁止 `-X ours/theirs`）。
+
+
 ## 11. 执行状态快照（2026-10-18 18:11 UTC 更新，恢复时从这里接）
 
 **本轮增量（覆盖下方 07:10 那份快照里的计数，旧段落只作过程记录）**：**N2 / INH-1913 已合并**（PR #53，合并 commit `5ca9611`，评审 0 Critical / 0 Important / 4 Minor，全量 **924 passed**、基线 **917** 为分支自测）。**M3 = 7/17，项目 36 Done / 21 未完成**，集成分支 tip 现查。
