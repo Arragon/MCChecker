@@ -181,15 +181,28 @@ class TestTempUpload:
             assert "filename*=UTF-8''" in disposition
 
     def test_unknown_and_unsafe_tokens_are_404(self):
+        """未知/超长 token 是 404（不承认它存在）；**穿越形状**的 token 是 400/403。
+
+        后半句由 M4-02（INH-1904）按 §16.8 第 3 条改：`_dispatch` 现在在路由之前拒掉
+        编码分隔符，所以它不再伪装成「没有这个接口」。见 `tests/test_api_security.py`
+        的 `test_temp_token_traversal_is_rejected`。
+        """
         with make_server() as server:
             caller = as_role(server, "member")
-            for token in ("nope", "..%2F..%2Fetc", "a" * 200):
+            for token in ("nope", "a" * 200):
                 status, _h, body = caller.request(
                     "GET",
                     "/api/v1/p/%s/temp/%s/document" % (self.pid, token),
                     headers={"Cookie": "mc_cid=%s" % MINE},
                 )
                 assert status == 404, (token, body)
+            for token in ("..%2F..%2Fetc", "..%5C..%5Cwindows"):
+                status, _h, body = caller.request(
+                    "GET",
+                    "/api/v1/p/%s/temp/%s/document" % (self.pid, token),
+                    headers={"Cookie": "mc_cid=%s" % MINE},
+                )
+                assert status in (400, 403), (token, body)
 
 
 class TestPutFile:

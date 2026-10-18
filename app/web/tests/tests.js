@@ -44,7 +44,7 @@
    * 第三轮 nit：这条声明必须排在下面注册的两个监听**之前**——监听在脚本求值期就可能调
    * report()，那时若常量还没赋值，红会写成「预期 undefined，实际注册 0」（仍然红，
    * 但不说人话）。 */
-  var EXPECTED_CASES = 40;
+  var EXPECTED_CASES = 42;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -215,6 +215,77 @@
     eq(MC.util.safeUrl("javascript:alert(1)"), null);
     ok(MC.util.safeUrl("http://10.0.0.1/x"), "允许 http");
     eq(MC.util.fileFormat("A.JSON"), "json");
+  });
+
+  /* M4-02（§16.8 第 1、2 条的前端那一半）。
+   * 后端只保证「送出去的是数据」（tests/test_api_security.py），**「以文本显示、
+   * 不执行」只能在真实 DOM 上判**，所以这条在这里。执法点是 util.js 的 append()
+   * 走 createTextNode；把 append 换成 innerHTML 赋值，本条立刻红（nodeType 变 1、
+   * img 出现、onerror 触发 alert）。
+   * 必须在 HTTP 形态下跑（见文件顶部钉死的命令）：file:// 里外部脚本的
+   * unhandledrejection 根本不派发，这类失败会报绿。 */
+  test("注入串以文本节点渲染且不执行（§16.8 第 1 条）", function () {
+    var PAYLOAD = "<img src=x onerror=alert(1)>";
+    var alerted = 0;
+    var realAlert = window.alert;
+    window.alert = function () { alerted++; };
+    var host = document.createElement("div");
+    try {
+      // 1) 字符串子节点（所有视图渲染标签/值/备注/工具名的唯一通道）
+      var cell = MC.util.h("td", PAYLOAD);
+      eq(cell.childNodes.length, 1, "只应有一个子节点");
+      eq(cell.firstChild.nodeType, 3, "子节点必须是文本节点（TEXT_NODE）");
+      eq(cell.firstChild.textContent, PAYLOAD, "文本必须逐字等于注入串");
+      eq(cell.querySelector("img"), null, "绝不能生成 img 元素");
+      host.appendChild(cell);
+
+      // 2) 属性值（侧栏工具链接的 title 就是这条路径，shell.js:481）
+      var link = MC.util.h("a", { href: "#", title: PAYLOAD, "data-name": PAYLOAD });
+      eq(link.getAttribute("title"), PAYLOAD, "属性值必须原样");
+      eq(link.querySelector("img"), null, "属性里注入不出元素");
+      eq(link.childNodes.length, 0);
+      host.appendChild(link);
+
+      // 3) 搜索高亮（另一条会拼 DOM 的路径）
+      var frag = MC.util.highlight(PAYLOAD, "img");
+      var box = MC.util.h("span", {}, frag);
+      eq(box.querySelector("img"), null, "高亮片段里不能出现 img");
+      eq(box.textContent, PAYLOAD, "高亮后的可见文本仍是原串");
+      host.appendChild(box);
+
+      // 4) replace() 复用同一条 append 通道
+      var again = MC.util.replace(MC.util.h("div"), PAYLOAD);
+      eq(again.firstChild.nodeType, 3);
+      host.appendChild(again);
+
+      document.body.appendChild(host);
+      eq(document.body.querySelectorAll("img").length, 0, "全页都不该因注入串多出 img");
+      eq(alerted, 0, "alert 被调用过 ⇒ 内联事件真的执行了（XSS 成立）");
+    } finally {
+      window.alert = realAlert;
+      host.remove();
+    }
+  });
+
+  test("safeUrl：非 http(s) 协议一律拒绝（§16.8 第 2 条渲染侧）", function () {
+    [
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      " javascript:alert(1)",
+      "java\tscript:alert(1)",
+      "javascript:alert(1)//",
+      "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+      "vbscript:msgbox(1)",
+      "file:///etc/passwd",
+      "ftp://example.com/x",
+    ].forEach(function (bad) {
+      eq(MC.util.safeUrl(bad), null, "必须拒绝：" + JSON.stringify(bad));
+    });
+    ok(MC.util.safeUrl("http://10.0.0.9/a.xml"), "http 放行");
+    ok(MC.util.safeUrl("https://example.com/b.xml"), "https 放行");
+    // 相对地址会被解析成同源 http(s)：这是**允许**的（侧栏写 `/tools` 这类站内链接），
+    // 如实记下这条边界，别让它被误读成「safeUrl 会拦住一切非绝对地址」。
+    eq(String(MC.util.safeUrl("/inside/path")).indexOf(location.protocol), 0, "站内相对地址解析为同源");
   });
 
   test("标签淘汰：打开第 16 个文件时关掉最久未用的干净标签，有草稿的留下", function () {
