@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import warnings
 from typing import Dict, List, Optional
 
 import pytest
@@ -22,8 +23,13 @@ from data_guard import (  # noqa: E402
     compare_snapshots,
     format_diff_report,
     has_differences,
+    h3_enforcement_required,
+    is_enforcing,
+    requirement_failure_notice,
     session_notice_lines,
+    session_notice_warnings,
     snapshot_data_tree,
+    SnapshotStats,
 )
 
 # 真实数据根必须在任何 monkeypatch 发生之前采集，作为后续重绑定的基准。
@@ -33,6 +39,9 @@ REAL_DATA_DIR = storage.DATA_DIR
 #: `tests/test_data_guard_enforcement.py` 生成的临时 conftest 按这份清单原样重导出，
 #: 所以给守卫加新钩子必须同时加进这里——漏了那条钩子，执法路径的永久证明会立刻红，
 #: 而不是悄悄少测一半。改名同理（`getattr` 不带默认值，改名直接红）。
+#: 命名口径（复审 Minor：原来「忘加就红」只对**内部用例真的观察到的**钩子成立，纯增量的
+#: 钩子没人断言就永远静默不成立）：conftest 里模块级的 `pytest_*` 钩子与 `h3_*` 夹具
+#: 一律必须出现在这个元组里，`tests/test_data_guard.py` 用 AST 扫 conftest 钉住这条。
 H3_GUARD_PLUGIN_MEMBERS = (
     "pytest_sessionstart",
     "pytest_terminal_summary",
@@ -45,24 +54,42 @@ H3_GUARD_PLUGIN_MEMBERS = (
 #: 的「会话一开始就拍」，不给未来的 collection 期写入留窗口。
 _H3_BASELINE: Optional[Dict[str, str]] = None
 
+#: 两轮快照（基线 + 会话末）的代价与盲区，累计在同一个对象上：公告要把字节数与秒数
+#: 印出来，读不到/消失的条目也要点名（复审两条 Minor）。
+_H3_COST = SnapshotStats()
+
 
 def pytest_sessionstart(session):
     """H3 守卫（INH-1914）：在任何测试写入之前对真实 `data/` 拍基线快照。"""
     global _H3_BASELINE
-    _H3_BASELINE = snapshot_data_tree(REAL_DATA_DIR)
+    _H3_BASELINE = snapshot_data_tree(REAL_DATA_DIR, _H3_COST)
 
 
-def pytest_terminal_summary(terminalreporter, exitstatus) -> None:
-    """H3 守卫的会话级公告（C1）：把「这次到底有没有在执法」打在结果行旁边。
+def pytest_terminal_summary(terminalreporter) -> None:
+    """H3 守卫的会话级公告（C1）+ 警告通道（复审 I1）：「这次到底有没有在执法」。
 
     `data/` 不存在或快照为空时，守卫手里没有可比对的东西，绿不带来任何保证；这一行
     必须让它说出来，否则「没数据可保护」和「保护完且干净」在终端上长得一模一样——
     那正是本卡要消灭的误读（干净检出 / CI / 别人的 clone 都没有 `data/`，它被 gitignore
     了）。选 `pytest_terminal_summary` 而不是 `pytest_report_header`：后者在 `-q` 下
     根本不打印，而每张卡的验证命令都是 `-q`。
+
+    光有文案不够：两种绿都是退出码 0 加同一句「N passed」，CI 日志、JUnit 消费者、
+    以及每张卡贴上来的「905 passed」都读不出差别。所以这里**同时**把结论走一遍
+    `warnings`，让结果统计行自己变成「1 passed, 1 warning」。位置就选在这里，理由是
+    pytest 7.4.4 自己的接线（`_pytest/warnings.py` 里那个包住 `pytest_terminal_summary`
+    的 hookwrapper，用 `catch_warnings_for_item` 记录）在离开上下文时经
+    `pytest_warning_recorded` 把警告灌进 `TerminalReporter.stats["warnings"]`；
+    而写统计行的是 `_pytest/terminal.py::TerminalReporter.pytest_sessionfinish` 里的
+    `summary_stats()`，它排在**整个 `pytest_terminal_summary` 钩子返回之后**——
+    于是这里 warn 出去的警告一定落在最终那一行上（`-q` 下也自带一节「warnings
+    summary」）。反过来放在 `pytest_sessionstart`/夹具装序里的警告只会散在几十行
+    进度点中间，抄数字的人照样看不见。
     """
-    for line in session_notice_lines(_H3_BASELINE):
+    for line in session_notice_lines(_H3_BASELINE, _H3_COST):
         terminalreporter.write_line(line, yellow=True)
+    for message, category in session_notice_warnings(_H3_BASELINE, _H3_COST):
+        warnings.warn(message, category, stacklevel=1)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -76,12 +103,21 @@ def h3_data_guard():
 
     能力边界（I2，完整来历见 `docs/know-how.md`）：绿只证明会话首末两次快照一致，
     不证明期间没有测试写过 `data/`；「写完又删掉」和「最后一个快照之后才落盘的线程」
-    都看不见。执法与否由 `pytest_terminal_summary` 每次自己说出口，不靠读的人猜。
+    都看不见。执法与否由 `pytest_terminal_summary` 每次自己说出口（文案 + 警告两条通道），
+    不靠读的人猜。
+
+    `MCCHECKER_REQUIRE_H3=1`（口径与默认值见 `data_guard.h3_enforcement_required`）：
+    把「未执法」从警告升级成会话末硬失败——这台装着真实 `data/` 的权威开发机用它，
+    让「这一轮根本没保护任何数据」绿不出去。默认关：干净检出与 CI 都没有 `data/`，
+    不许因此变红（那是本守卫当初那条 Critical）。「有字节没比较」也照旧只走警告，
+    不给它单独加红——它的响动来自「1 warning」这一行。
     """
     yield
-    diffs = compare_snapshots(_H3_BASELINE, snapshot_data_tree(REAL_DATA_DIR))
+    diffs = compare_snapshots(_H3_BASELINE, snapshot_data_tree(REAL_DATA_DIR, _H3_COST))
     if has_differences(diffs):
         pytest.fail(format_diff_report(diffs), pytrace=False)
+    if h3_enforcement_required() and not is_enforcing(_H3_BASELINE):
+        pytest.fail(requirement_failure_notice(), pytrace=False)
 
 
 #: 测试里「任务闸门」（Event）自锁的兜底上限：万一没人放行，工作线程最多阻塞这么久

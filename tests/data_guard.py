@@ -18,13 +18,26 @@
 看不见的东西（刻意口径，别当 bug 修）：只比内容哈希，**权限位、mtime、属主的单独
 变化一律不可见**——H3 保护的是数据字节；一次 `chmod`/`touch` 不会让守卫红，
 一次「改权限同时改内容」只会以内容变更的名义红。
+
+两条会话级开关/通道（INH-1914 复审 I1 + 三项 Minor）：
+- **警告通道**：`session_notice_warnings()` 把「本轮没有执法」和「有字节根本没比较」
+  两类结论交给 `warnings`，由 `tests/conftest.py::pytest_terminal_summary` 发出去。
+  光靠终端文案不算证据——两种绿照样都是退出码 0 和同一句「N passed」，抄数字的人
+  读不出来；警告会让结果统计行变成「… 1 warning」，机器读得到。
+- **硬要求开关** `MCCHECKER_REQUIRE_H3`：**默认关**（干净检出 / CI / 别人的 clone 都
+  没有 `data/`，不能因此变红，那正是本守卫当初那条 Critical）。设成 `1`（或任何非空
+  且非 `0` 的值）后，「未执法」从警告升级为**会话末硬失败**；只有这台装着真实
+  `data/` 的权威开发机该这么跑，让「没在保护」变成发不出去的东西。
+  见 `h3_enforcement_required`。
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Type
 
 #: 快照 = {归一化相对路径: 内容 sha256 十六进制}。
 Snapshot = Dict[str, str]
@@ -55,11 +68,71 @@ EXCLUDED_ROOT_FILENAMES = frozenset({".mcchecker.lock"})
 
 _READ_CHUNK = 65536
 
+#: 打开「未执法即硬失败」的环境变量名（口径见模块 docstring 与 `h3_enforcement_required`）。
+REQUIRE_H3_ENV_VAR = "MCCHECKER_REQUIRE_H3"
+
+#: 快照期间「根本没读到手」的文件里，这一类的原因写得出来（消失）；其余按异常类名写。
+VANISHED_REASON = "os.walk 列出之后、打开之前消失了"
+
+
+@dataclass
+class SnapshotStats:
+    """一次（或连续两次）快照的**代价与盲区**——复审两条 Minor 都落在这里。
+
+    - `total_bytes` / `seconds`：守卫每会话把整棵树**哈希两遍**（会话开头一遍、会话末
+      一遍），代价随真实用户数据的体积线性增长。三张小文件时无所谓，但 `data/` 的设计
+      用途是装用户的归档与记录，第二遍还安静地跑在 teardown 里——几 GB 的树看起来就是
+      「pytest 卡住了」。所以把价格印到公告上，不许假装没有。
+      **停止可接受的门槛（复审建议）：单会话 > 约 1 GB 或 > 约 30 秒**；越过这两条就
+      该换机制（增量/清单式快照、只保护被引用子集），**不是**在这里加体积上限、
+      **更不是**跳过文件：跳过的字节必须进 `unhashed` 被点名，永远不许静默省略。
+    - `unhashed`：本棵树里守卫**没能比较**的部分（读不到的文件、遍历不了的目录、
+      快照途中消失的文件），元素是 `(归一化相对路径, 原因)`。目录遍历失败尤其容易
+      漏：`os.walk` 默认把 scandir 的异常咽掉，那整个子树会静默变成「没有差异」。
+    """
+
+    files: int = 0
+    total_bytes: int = 0
+    seconds: float = 0.0
+    unhashed: List[Tuple[str, str]] = field(default_factory=list)
+
+
+class H3NonEnforcementWarning(UserWarning):
+    """「本轮没有执法」的警告类别：类别名会印在警告行上，机器可以按名 grep，
+    不必依赖读中文段落里的某一句（复审 I1 的正身）。"""
+
+
+class H3UncomparedWarning(UserWarning):
+    """「有字节本轮根本没比较」的警告类别（读不到/遍历不了/中途消失）。"""
+
+
+def h3_enforcement_required(environ: Optional[Mapping[str, str]] = None) -> bool:
+    """`MCCHECKER_REQUIRE_H3` 这次是不是被打开（口径见模块 docstring）。
+
+    `MCCHECKER_REQUIRE_H3=1` 即打开；除「未设置 / 空串 / `0`」之外**一律算打开**——刻意不把
+    `true`/`yes` 这类写法当成「关」：一个想要求执法却写成 `=true` 的人，得到的却是
+    默认不执法的绿，那正是 H3 要消灭的静默失效。
+    """
+    env = os.environ if environ is None else environ
+    value = (env.get(REQUIRE_H3_ENV_VAR) or "").strip()
+    return value not in ("", "0")
+
+
 #: 数据根不存在或快照为空 = 守卫手里没有可比对的东西，绝不允许静默绿（C1）。
 NOT_ENFORCING_NOTICE = (
     "H3 守卫未执法：data/ 不存在或为空，本次运行没有保护任何真实数据；"
     "这一轮的「绿」是没有可比对对象的结果，不是「数据完好」的证据。"
 )
+
+
+def requirement_failure_notice() -> str:
+    """`MCCHECKER_REQUIRE_H3` 打开却没能执法时的失败文案（要被「点名」，故独立成函数）。"""
+    return (
+        "H3 守卫执法要求未满足（{var}=1）：{notice} "
+        "要么在这台机器上准备好非空的真实 data/ 再跑，要么取消 {var}；"
+        "不许把这一轮的绿读成 H3 已通过。"
+    ).format(var=REQUIRE_H3_ENV_VAR, notice=NOT_ENFORCING_NOTICE)
+
 
 #: 绿的含义说清楚（I2）：两个盲区都是实测存在的，不是理论顾虑。
 GREEN_SEMANTICS_NOTE = (
@@ -84,53 +157,149 @@ def is_enforcing(baseline: Optional[Snapshot]) -> bool:
     return bool(baseline)
 
 
-def session_notice_lines(baseline: Optional[Snapshot]) -> List[str]:
+def unhashed_notice_lines(stats: Optional[SnapshotStats]) -> List[str]:
+    """守卫**没能比较**的那部分字节，逐条点名（复审 Minor：读不到≠没变化）。
+
+    这一行既不归「没变」也不归「被删/被建」：读不到就是没有证据，说它没变是静默跳过，
+    说它被某个用例删掉是冤枉用例。所以单独成一条，并且逐个点名、一个都不省略。
+    """
+    if stats is None or not stats.unhashed:
+        return []
+    named = ", ".join("{}（{}）".format(rel, reason) for rel, reason in sorted(stats.unhashed))
+    return [
+        "H3 守卫有 {} 个条目本轮**没有被比较**：{}。它们不是「没变」，是根本没读到手，"
+        "这一轮的绿不覆盖这些字节；先修可读性（或停掉正在改 data/ 的 run.py 服务）再重跑，"
+        "别把它读成「数据完好」。".format(len(stats.unhashed), named)
+    ]
+
+
+def session_notice_lines(
+    baseline: Optional[Snapshot], cost: Optional[SnapshotStats] = None
+) -> List[str]:
     """会话级公告（打在终端摘要里，`-q` 也看得见）：两种绿必须是两种观测结果。
 
     两个分支没有共享文案：未执法时**不出现**「执法中」，执法时**不出现**「未执法」，
     钩子完全没跑时两条都不出现——「没数据可保护」「保护完且干净」「守卫没接线」
     是三个可区分的观测结果，任何一个都不许被读成「已验证」。
+
+    `cost` 是这两轮快照的代价与盲区（见 `SnapshotStats`）：执法那一行要把**总共哈希了
+    多少字节、花了多少秒**印出来，价格不许隐形；有没读到的条目时两种状态都要追加一行。
     """
     if not is_enforcing(baseline):
-        return [
+        lines = [
             NOT_ENFORCING_NOTICE,
             "→ 本轮结论不能当 H3 的证据；换一台 `data/` 非空的机器重跑，或直接读上一条说明。",
         ]
-    return [
-        "H3 守卫执法中：真实 data/ 基线快照 {} 个文件，会话末逐文件比对；"
-        "绿=首末快照一致，不证明期间无人写入（盲区见 docs/know-how.md）".format(len(baseline))
-    ]
+    else:
+        cost_segment = ""
+        if cost is not None:
+            cost_segment = "，本会话两轮快照共 {} 字节、耗时 {:.2f} 秒".format(
+                cost.total_bytes, cost.seconds
+            )
+        lines = [
+            "H3 守卫执法中：真实 data/ 基线快照 {} 个文件，会话末逐文件比对{}；"
+            "绿=首末快照一致，不证明期间无人写入（盲区见 docs/know-how.md）".format(
+                len(baseline), cost_segment
+            )
+        ]
+    return lines + unhashed_notice_lines(cost)
 
 
-def snapshot_data_tree(root: str) -> Snapshot:
+def session_notice_warnings(
+    baseline: Optional[Snapshot], cost: Optional[SnapshotStats] = None
+) -> List[Tuple[str, Type[Warning]]]:
+    """必须走**警告通道**的结论（复审 I1）：文案只给眼睛看，警告才改结果统计行。
+
+    返回 `(消息, 类别)` 列表，由 `tests/conftest.py::pytest_terminal_summary` 原样
+    `warnings.warn` 出去。两类各自独立可 grep：`H3NonEnforcementWarning`（本轮没人执法）
+    和 `H3UncomparedWarning`（有字节根本没比较）；执法且全树可读时列表为空——
+    「执法中」这一档既无警告也无失败，三个状态就此在输出上分开。
+    """
+    items: List[Tuple[str, Type[Warning]]] = []
+    if not is_enforcing(baseline):
+        items.append((NOT_ENFORCING_NOTICE, H3NonEnforcementWarning))
+    if cost is not None and cost.unhashed:
+        items.append((unhashed_notice_lines(cost)[0], H3UncomparedWarning))
+    return items
+
+
+def snapshot_data_tree(root: str, stats: Optional[SnapshotStats] = None) -> Snapshot:
     """对 `root` 下每个常规文件做 {归一化相对路径: sha256} 快照。
 
     同一棵树无论 `root` 写成 `data`、`./data` 还是 `data/`，返回值必须一致
     （键已归一化）。目录不进快照；`root` 不存在时返回空快照——会话结束仍会
     比对，凭空出现一棵树同样是变化。快照为空**不代表安全**，只代表没东西可保护，
     执法状态由 `is_enforcing` / `session_notice_lines` 明确说出口。
+
+    `stats` 传进来就顺便记账：哈希过的文件数、字节数、耗时，以及**没读到手**的条目
+    （见 `SnapshotStats`）。单个文件读失败绝不许裸抛 traceback 出到 teardown——那会把
+    「这台机器的 data/ 正在被 churn / 权限不对」渲染成「守卫自己炸了」，反而更没法信；
+    但也绝不许当成「没变化」。分类口径见函数体里那三段注释。
     """
+    started = time.perf_counter()
     base = os.path.normpath(root)
     snapshot: Snapshot = {}
-    if not os.path.isdir(base):
+    try:
+        if not os.path.isdir(base):
+            return snapshot
+
+        def _walk_error(error: OSError) -> None:
+            # os.walk 默认把 scandir 的异常咽掉：一个读不了的目录会让整棵子树静默
+            # 消失，看起来「没有差异」。记账并点名（尾部带 / 表明这是目录，不是文件）。
+            if stats is None:
+                return
+            rel = os.path.relpath(getattr(error, "filename", base) or base, base)
+            stats.unhashed.append(
+                (
+                    rel.replace(os.sep, "/") + "/",
+                    "目录无法遍历 {}".format(error.__class__.__name__),
+                )
+            )
+
+        for dirpath, _dirnames, filenames in os.walk(base, onerror=_walk_error):
+            at_root = dirpath == base
+            for name in sorted(filenames):
+                path = os.path.join(dirpath, name)
+                # 磁盘锁只豁免根一级（理由见 EXCLUDED_ROOT_FILENAMES）。
+                if at_root and name in EXCLUDED_ROOT_FILENAMES:
+                    continue
+                # 与 BSD find `-type f` 同口径：不跟随符号链接，非常规文件不哈希内容。
+                if os.path.islink(path) or not os.path.isfile(path):
+                    continue
+                rel = os.path.relpath(path, base).replace(os.sep, "/")
+                digest = hashlib.sha256()
+                size = 0
+                try:
+                    with open(path, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(_READ_CHUNK), b""):
+                            digest.update(chunk)
+                            size += len(chunk)
+                except FileNotFoundError:
+                    # 列进目录之后、打开之前没了：对 H3 来说这不是「什么都没发生」，
+                    # 而是**这些字节已经不在这棵树里**。所以如实让它不进快照——比对
+                    # 会按事实把它归到 删除（末尾没它）或 新建（基线没它），类别是
+                    # 「数据少了」而不是「守卫炸了」；同时登记原因，免得读者以为是
+                    # 某个用例动的手，而真实原因只是这台机器上有个服务在 churn。
+                    if stats is not None:
+                        stats.unhashed.append((rel, VANISHED_REASON))
+                    continue
+                except OSError as error:
+                    # 文件在、读不到（权限 / EBUSY / 编码外的 IO 错误）：四类里哪一类
+                    # 都是撒谎——说「没变」是静默跳过，说「被删/被建」是冤枉用例。
+                    # 只登记为未比较并在公告+警告里点名，让它响、但不给它扣罪名。
+                    if stats is not None:
+                        stats.unhashed.append(
+                            (rel, "读取失败 {}".format(error.__class__.__name__))
+                        )
+                    continue
+                if stats is not None:
+                    stats.files += 1
+                    stats.total_bytes += size
+                snapshot[rel] = digest.hexdigest()
         return snapshot
-    for dirpath, _dirnames, filenames in os.walk(base):
-        at_root = dirpath == base
-        for name in sorted(filenames):
-            path = os.path.join(dirpath, name)
-            # 磁盘锁只豁免根一级（理由见 EXCLUDED_ROOT_FILENAMES）。
-            if at_root and name in EXCLUDED_ROOT_FILENAMES:
-                continue
-            # 与 BSD find `-type f` 同口径：不跟随符号链接，非常规文件不哈希内容。
-            if os.path.islink(path) or not os.path.isfile(path):
-                continue
-            digest = hashlib.sha256()
-            with open(path, "rb") as fh:
-                for chunk in iter(lambda: fh.read(_READ_CHUNK), b""):
-                    digest.update(chunk)
-            rel = os.path.relpath(path, base).replace(os.sep, "/")
-            snapshot[rel] = digest.hexdigest()
-    return snapshot
+    finally:
+        if stats is not None:
+            stats.seconds += time.perf_counter() - started
 
 
 def compare_snapshots(before: Snapshot, after: Snapshot) -> DiffResult:

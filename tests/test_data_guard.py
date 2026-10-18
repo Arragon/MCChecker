@@ -13,31 +13,81 @@
 当成全项目的前提，还会让「快照为空 = 没人执法」那种假绿重新变得看不出来。
 执法与否改由守卫自己在会话摘要里公告（`session_notice_lines`），它的两个分支由
 `pytester` 用例钉住；本文件只钉公告文案本身的口径。
+
+复审 I1 + 四项 Minor 之后，本文件另外钉住这些口径（都在纯函数层，起不了 pytest 会话）：
+接线清单 `H3_GUARD_PLUGIN_MEMBERS` 的**完备性**（AST 扫 conftest）、警告通道的条目与类别
+（`session_notice_warnings`）、`MCCHECKER_REQUIRE_H3` 开关的默认值与解析、快照的**代价**
+（字节/秒，`SnapshotStats`），以及**读不到/中途消失**的文件如何归类。带进程的三态证明在
+`tests/test_data_guard_enforcement.py`。
 """
 
 from __future__ import annotations
 
+import ast
+import builtins
 import hashlib
 import os
 import re
 from typing import Dict
 
+import data_guard
 from data_guard import (
     DIFF_CATEGORIES,
     DIFF_LABELS,
+    H3NonEnforcementWarning,
+    H3UncomparedWarning,
+    NOT_ENFORCING_NOTICE,
+    REQUIRE_H3_ENV_VAR,
+    SnapshotStats,
+    VANISHED_REASON,
     compare_snapshots,
     format_diff_report,
+    h3_enforcement_required,
     has_differences,
     is_enforcing,
+    requirement_failure_notice,
     session_notice_lines,
+    session_notice_warnings,
     snapshot_data_tree,
+    unhashed_notice_lines,
 )
 
 _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
 
+#: 守卫接线的命名口径（`tests/conftest.py::H3_GUARD_PLUGIN_MEMBERS` 的注释写了这条约定）：
+#: conftest 里凡是模块级 `pytest_*` 钩子或 `h3_*` 夹具，都属于守卫接线，必须出现在元组里。
+CONFTEST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conftest.py")
+_GUARD_MEMBER_NAME = re.compile(r"\A(?:pytest_|h3_)[A-Za-z0-9_]+\Z")
+#: 元组里此刻应当存在的三条接线（清单本身不许靠删空来「变得完备」）。
+KNOWN_GUARD_MEMBERS = {"pytest_sessionstart", "pytest_terminal_summary", "h3_data_guard"}
+
 
 def _sha256_of(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _conftest_guard_members():
+    """用 AST 读 `tests/conftest.py`，不 import 它（那会把 app/nicegui 整套再装一遍）。
+
+    返回 `(模块级定义的守卫接线名, H3_GUARD_PLUGIN_MEMBERS 里声明的名字)`。
+    """
+    with open(CONFTEST_PATH, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read(), filename=CONFTEST_PATH)
+    defined = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _GUARD_MEMBER_NAME.match(node.name)
+    }
+    declared = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "H3_GUARD_PLUGIN_MEMBERS" for t in node.targets):
+            continue
+        declared = frozenset(elt.value for elt in node.value.elts)
+    assert declared is not None, "tests/conftest.py 里找不到 H3_GUARD_PLUGIN_MEMBERS 的赋值"
+    return defined, declared
 
 
 def _snapshot_a(tmp_path) -> Dict[str, str]:
@@ -290,3 +340,206 @@ def test_snapshot_and_compare_end_to_end_on_temp_tree(tmp_path) -> None:
     diffs = compare_snapshots(snap, snapshot_data_tree(str(root)))
     assert diffs["created"] == ["zz.tmp"]
     assert has_differences(diffs) is True
+
+
+# ---------------------------------------------------------------------------
+# 接线清单的完备性（复审 Minor：「忘加就红」只对被人断言到的钩子成立）
+# ---------------------------------------------------------------------------
+
+
+def test_every_conftest_guard_hook_is_listed_in_the_plugin_tuple() -> None:
+    """钉住 `H3_GUARD_PLUGIN_MEMBERS` 的**完备性**，而不只是「已列出的那些被证明」。
+
+    内部会话只重导出元组里的名字，所以一条纯增量、没人断言的新钩子漏进元组时，
+    永久证明照样全绿——那句「漏了就会红」只对内部用例真的观察到的钩子成立。这里直接
+    扫 conftest 的模块级定义：`pytest_*` 钩子与 `h3_*` 夹具一个都不许漏；反向也不许留
+    过期名字（改名已被内部 conftest 的 `getattr` 钉住，这里连「清单里有条目但函数没了」
+    一起钉，并当场说出是哪个名字）。清单本身还必须有那三条接线，防止「删空即完备」。
+    """
+    defined, declared = _conftest_guard_members()
+    missing = sorted(defined - declared)
+    stale = sorted(declared - defined)
+    assert not missing, "tests/conftest.py 里这些守卫接线没进 H3_GUARD_PLUGIN_MEMBERS：%s" % (
+        ", ".join(missing)
+    )
+    assert not stale, "H3_GUARD_PLUGIN_MEMBERS 里这些名字在 tests/conftest.py 已不存在：%s" % (
+        ", ".join(stale)
+    )
+    assert KNOWN_GUARD_MEMBERS <= declared, sorted(declared)
+
+
+# ---------------------------------------------------------------------------
+# 警告通道与硬要求开关（复审 I1：两种绿不许都只是终端文案）
+# ---------------------------------------------------------------------------
+
+
+def test_non_enforcement_and_uncompared_bytes_are_warnings_not_only_prose() -> None:
+    """「没执法」与「有字节没比较」都必须进警告通道；执法且全树可读时必须为空。
+
+    类别名会印在警告行上，机器可以按名 grep，不必读中文段落里的某一句。执法态返回空
+    列表正是三态可区分的那一半（另一个状态各带一条）。
+    """
+    items = session_notice_warnings({}, None)
+    assert [cat for _msg, cat in items] == [H3NonEnforcementWarning], items
+    assert [msg for msg, _cat in items] == [NOT_ENFORCING_NOTICE], items
+    assert session_notice_warnings(None, None) == [(NOT_ENFORCING_NOTICE, H3NonEnforcementWarning)]
+
+    readable = SnapshotStats(files=2, total_bytes=8, seconds=0.01)
+    assert session_notice_warnings({"a.txt": _sha256_of(b"a")}, readable) == []
+
+    stats = SnapshotStats(unhashed=[("secret.txt", "读取失败 PermissionError")])
+    warned = session_notice_warnings({"a.txt": _sha256_of(b"a")}, stats)
+    assert [cat for _msg, cat in warned] == [H3UncomparedWarning], warned
+    assert "secret.txt" in warned[0][0], warned
+
+
+def test_h3_enforcement_required_switch_defaults_off_and_names_the_var(monkeypatch) -> None:
+    """开关口径：`MCCHECKER_REQUIRE_H3=1` 开、默认关；只有空串与 `0` 才算关。
+
+    写 `=true`/`=yes` 的人想要的是执法，绝不能静默拿到「不执法也绿」——那恰好是 H3
+    要消灭的那类失效，所以非空非 `0` 一律按打开处理。
+    """
+    assert REQUIRE_H3_ENV_VAR == "MCCHECKER_REQUIRE_H3"
+    monkeypatch.delenv(REQUIRE_H3_ENV_VAR, raising=False)
+    assert h3_enforcement_required() is False, "默认必须关：干净检出与 CI 没有 data/"
+    assert h3_enforcement_required({}) is False
+    assert h3_enforcement_required({REQUIRE_H3_ENV_VAR: ""}) is False
+    assert h3_enforcement_required({REQUIRE_H3_ENV_VAR: "0"}) is False
+    monkeypatch.setenv(REQUIRE_H3_ENV_VAR, "1")
+    assert h3_enforcement_required() is True
+    for spelling in ("true", "yes", " 1 ", "2"):
+        monkeypatch.setenv(REQUIRE_H3_ENV_VAR, spelling)
+        assert h3_enforcement_required() is True, spelling
+    # 硬失败必须把开关与原因点名出来，光有退出码没法 triage。
+    notice = requirement_failure_notice()
+    assert REQUIRE_H3_ENV_VAR in notice and "未执法" in notice, notice
+
+
+# ---------------------------------------------------------------------------
+# 守卫的代价与盲区（复审两条 Minor：价格要看得见、读不到不许算成没变化）
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_stats_accumulate_the_price_of_both_passes(tmp_path) -> None:
+    """两轮快照的字节数/秒数都要记账，而且是**累加**在同一个 stats 上。
+
+    守卫每会话把整棵树哈希两遍（会话开头一遍、teardown 一遍），代价随真实数据线性
+    增长；第二遍跑在 teardown 里本来毫无声响，几 GB 的树看起来就像 pytest 卡死。
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    payload = 256 * 1024
+    (root / "a.txt").write_bytes(b"abc")
+    (root / "sub").mkdir()
+    (root / "sub" / "big.bin").write_bytes(b"x" * payload)
+
+    stats = SnapshotStats()
+    first = snapshot_data_tree(str(root), stats)
+    assert set(first) == {"a.txt", "sub/big.bin"}, sorted(first)
+    assert (stats.files, stats.total_bytes) == (2, 3 + payload), stats
+    assert stats.seconds > 0.0, "耗时必须真的测出来，不是写死的 0"
+    assert stats.unhashed == []
+
+    snapshot_data_tree(str(root), stats)  # 会话末那第二遍
+    assert (stats.files, stats.total_bytes) == (4, 2 * (3 + payload)), stats
+
+    # 不传 stats 时口径完全不变：返回值仍然只是 {路径: sha256}。
+    assert snapshot_data_tree(str(root)) == first
+
+
+def test_enforcing_notice_prints_the_price_next_to_the_file_count() -> None:
+    """执法那行公告必须带上字节与秒，同时原有的文件数/盲区文案一条不许被挤掉。"""
+    cost = SnapshotStats(files=6, total_bytes=4096, seconds=1.5)
+    priced = "\n".join(session_notice_lines({"a.txt": _sha256_of(b"a")}, cost))
+    assert "4096 字节" in priced and "1.50 秒" in priced, priced
+    assert "基线快照 1 个文件" in priced, priced
+    assert "不证明期间无人写入" in priced, priced
+    # 没记账时不许出现半截价格（老的单参调用口径不变）。
+    assert "字节" not in "\n".join(session_notice_lines({"a.txt": _sha256_of(b"a")})), priced
+
+
+def test_unreadable_file_is_named_as_uncompared_instead_of_blaming_the_guard(tmp_path) -> None:
+    """读不到的文件不许在 teardown 里裸抛 traceback（那是把机器的权限问题算成守卫炸了），
+    也不许当成「没变化」——它本轮**根本没被比较**，必须逐条点名并走警告通道。
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "ok.txt").write_text("ok", encoding="utf-8")
+    secret = root / "secret.txt"
+    secret.write_text("nope", encoding="utf-8")
+    secret.chmod(0)
+
+    stats = SnapshotStats()
+    snapshot = snapshot_data_tree(str(root), stats)  # 关键：这一句不许抛
+    secret.chmod(0o600)
+
+    assert set(snapshot) == {"ok.txt"}, sorted(snapshot)
+    assert [rel for rel, _reason in stats.unhashed] == ["secret.txt"], stats.unhashed
+    assert "读取失败 PermissionError" in stats.unhashed[0][1], stats.unhashed
+    assert stats.files == 1 and stats.total_bytes == 2, stats
+
+    notice = "\n".join(unhashed_notice_lines(stats))
+    assert "没有被比较" in notice and "secret.txt" in notice, notice
+    assert "数据完好" in notice, notice
+    # 两轮都读不到时比对是「没差异」，所以唯一的响动就是这条警告——它必须响。
+    assert [cat for _msg, cat in session_notice_warnings(snapshot, stats)] == [H3UncomparedWarning]
+
+
+def test_unreadable_directory_is_named_instead_of_silently_vanishing(tmp_path) -> None:
+    """`os.walk` 默认把 scandir 的异常咽掉：一个读不了的目录会让**整棵子树**静默变成
+    「没有差异」，比单个文件更危险，所以同样点名（尾部带 `/` 表明是目录）。
+    """
+    root = tmp_path / "tree"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    (locked / "inside.txt").write_text("x", encoding="utf-8")
+    (root / "ok.txt").write_text("ok", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        stats = SnapshotStats()
+        snapshot = snapshot_data_tree(str(root), stats)
+    finally:
+        locked.chmod(0o755)
+
+    assert set(snapshot) == {"ok.txt"}, sorted(snapshot)
+    assert [rel for rel, _reason in stats.unhashed] == ["locked/"], stats.unhashed
+    assert "目录无法遍历 PermissionError" in stats.unhashed[0][1], stats.unhashed
+    assert [cat for _msg, cat in session_notice_warnings(snapshot, stats)] == [H3UncomparedWarning]
+
+
+def test_file_that_vanishes_mid_snapshot_is_compared_as_absent_and_explained(
+    tmp_path, monkeypatch
+) -> None:
+    """`os.walk` 列出之后、`open` 之前文件没了（真实服务正在 churn `data/` 时很现实）。
+
+    诚实的分类是「这些字节已经不在这棵树里」：让它**不进快照**，比对就按事实把它归到
+    删除（基线有、末尾没）或新建（基线没、末尾有）——响得起来，又不会把权限/并发问题
+    渲染成守卫自己炸了。同时登记真实原因，免得读者以为是某个用例动的手。
+    这里窄窄地替换 `data_guard.open`，只为把那 1 毫秒的竞态窗口做成确定性的。
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    gone = root / "gone.txt"
+    gone.write_text("bye", encoding="utf-8")
+    before = snapshot_data_tree(str(root))
+    assert set(before) == {"gone.txt"}, sorted(before)
+
+    real_open = builtins.open
+
+    def _vanishing_open(file, *args, **kwargs):
+        if os.path.abspath(str(file)) == os.path.abspath(str(gone)):
+            raise FileNotFoundError(2, "No such file or directory", str(file))
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(data_guard, "open", _vanishing_open, raising=False)
+    stats = SnapshotStats()
+    after = snapshot_data_tree(str(root), stats)  # 不许抛
+
+    assert after == {}, sorted(after)
+    assert stats.unhashed == [("gone.txt", VANISHED_REASON)], stats.unhashed
+    assert stats.files == 0 and stats.total_bytes == 0, stats
+    diffs = compare_snapshots(before, after)
+    assert diffs["deleted"] == ["gone.txt"], diffs
+    assert has_differences(diffs) is True
+    # 消失不是「没发生」：这一条差异要在点名报告里出现。
+    assert DIFF_LABELS["deleted"] in format_diff_report(diffs)
