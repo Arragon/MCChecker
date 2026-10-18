@@ -16,7 +16,7 @@
 
 - **H1 Python 3.9.11**：禁用 `match`、`tomllib`、`slots=True`、`zip(strict=)`、运行期 `X | Y` 注解。每个模块首行 `from __future__ import annotations`。守护：`PYTHON=./.venv39/bin/python scripts/check_py39.sh` 必须 exit 0。
 - **H2 零运行时第三方依赖**：`app/` 新代码只 import 标准库 + 项目内部模块。`app/pages/`、`app/core/scheduler.py`、`app/utils/auth.py` 是旧 NiceGUI 路径，M4-07 才删，M3 期间**不 import 它们、也不修改它们**。
-- **H3 权威数据不可损伤**：每张卡验证前后 `data/` 内容哈希必须一致（当前基线 `478d9c26ea8dbb8f`）。临时脚本不得在 pytest 之外跑 `storage`（见 `docs/know-how.md` 第 7 节）。
+- **H3 权威数据不可损伤**：每张卡验证前后 `data/` 内容必须一致，证据是 `tests/conftest.py::h3_data_guard` 自动守卫的红/绿（INH-1914 起这才是唯一可信证据；守卫每一轮都当场公告「执法中 N 个文件」或「未执法：data/ 不存在或为空」，绿只证明会话首末快照一致，两个盲区见 `docs/know-how.md`）。要报哈希必须当场跑口径命令并把命令一起贴上：`478d9c26ea8dbb8f` 是从文档抄的、当前树上任何拼法都复现不出来、已作废且禁止再引用；本机残留树实测 `5591aacb4a22f34c`，只代表这台机器。临时脚本不得在 pytest 之外跑 `storage`（见 `docs/know-how.md` 第 7 节）。
 - **分层红线（§3.3）**：handler 不得直接读写业务文件；持久化一律走 `storage`；`core` 不 import HTTP。
 - **授权与修订号**：每个新写接口必须 `authz.authorize(ctx, action)` + 用 `tests/authz_fixtures.py` 补四角色测试；写成功后在 **service 层** `revision.bump(pid, part)`，handler 不碰计数；读接口、失败写（400/403/404/409）与「删了 0 条」都不递增。
 - **CSRF 硬条件**：写接口依赖 `http.py` 已有的 `X-Requested-With` 检查，不要在新 handler 里重复实现或放宽。
