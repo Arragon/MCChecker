@@ -415,7 +415,7 @@ def _read_url(text: str, start: int) -> str:
     `src="http://\\n evil.example/x"` 是真发得出去的。路径段就不跟着删了：删下去只会把
     后面整行吞进「地址」，而「联系哪台机器」在权威段结束时就定死了。
     特殊 scheme 的 `\\` 与 `/` 一样结束权威段（WHATWG authority state），所以它也要置
-    `past_authority`，否则 `https:\evil.example.com\n/x` 会把整行吞进来；**开头两个分隔符**的
+    `past_authority`，否则 `https:\\evil.example.com\\n/x` 会把整行吞进来；**开头两个分隔符**的
     无 scheme 写法同理（模块文档字符串 ② 的那一整族反斜杠权威段——基址是特殊的 http，
     `\\` 在那里与 `/` 等价，一样结束权威段）。
     解码成 `/` 的数字字符引用（`&#47;`、`&#x2f;`，分号可省）整段留在 token 里并置

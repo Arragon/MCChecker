@@ -34,6 +34,7 @@ EXPECTED_MEMBERS = {
     "app/core/downloader.py",
     "app/core/reviewing.py",
     "app/core/storage.py",
+    "app/services/search.py",
     "app/static/favicon.svg",
     "app/web/assets/css/base.css",
     "app/web/assets/js/app.js",
@@ -119,6 +120,14 @@ def source_tree(tmp_path: Path) -> Path:
         ),
         "app/core/reviewing.py": (
             "#  命名空间 URI 天然带 `/`（`{http://…}tag`），按 `/` 切会切错。\n"
+            # 名单上另一条放行的宿主形状（照真实注释抄）：`\\x00` 按 WHATWG 的无 scheme 读法
+            # 会被切成主机 `x00`，但它是 BOM 嗅探的说明文字，不进 URL 解析器。
+            r"#  UTF-16 认 BOM，也认 `<\\x00` / `\\x00<`（NUL 在 XML 里是非法字符）。" + "\n"
+        ),
+        # `INERT_URL_LITERALS` 里 `app/services/search.py` 那条的宿主文件：字符类里的
+        # `\` + 十六进制转义会被切成主机 `x00-`，逐条核对过它不是网络目标（见 make_release 的注释）。
+        "app/services/search.py": (
+            "import re\n" + r"""_JSON_ESCAPED = re.compile(r'["\\\x00-\x1f]')""" + "\n"
         ),
         "app/web/index.html": CLEAN_INDEX_HTML,
         "app/web/assets/css/base.css": "body { font-family: sans-serif; }\n",
@@ -145,7 +154,13 @@ def source_tree(tmp_path: Path) -> Path:
     for rel in EXCLUDED_SOURCE_PATHS:
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("不该进包的内容\n", encoding="utf-8")
+        # 三个被排除的位置**故意各藏一条真外链**：闸门只逐产物成员扫描，所以这三条既不该让
+        # 构建变红（红=扫描范围漏到了名单外），也不该出现在成员集合里（见
+        # `test_decoys_never_become_members`）。第四轮复核「扫描确实逐成员」的正向证据。
+        text = "不该进包的内容\n"
+        if rel in ("data/x.xml", "tests/test_decoy.py", "app/web/assets/js/mock/mock-api.js"):
+            text = 'href="&#47;&#47;evil.example.com/x.js" src="https://telemetry.example.com/ping"\n'
+        path.write_text(text, encoding="utf-8")
     return root
 
 
@@ -170,7 +185,12 @@ def test_member_set_is_exactly_the_inclusion_list(source_tree: Path, tmp_path: P
 
 
 def test_decoys_never_become_members(source_tree: Path, tmp_path: Path) -> None:
-    """ planted 的 data/、.venv、tests、.git、缓存、草稿目录都不得出现在产物里。 """
+    """ planted 的 data/、.venv、tests、.git、缓存、草稿目录都不得出现在产物里。
+
+    夹具在 `data/x.xml`、`tests/test_decoy.py`、`app/web/assets/js/mock/mock-api.js` 三处藏了
+    真外链（协议相对 + scheme 各一条）：**这一条能构建成功**就是「扫描只逐产物成员」的正向证据
+    ——扫描要是越界读到名单外的文件，这里会直接红而不是绿。
+    """
     zip_path = build(source_tree, tmp_path / "out")
     names = set(content_members(zip_path))
     for rel in EXCLUDED_SOURCE_PATHS:
@@ -233,6 +253,21 @@ def test_manifest_sha256_matches_extracted_bytes(source_tree: Path, tmp_path: Pa
     assert manifest["release_notes"] == [
         "%s 变更标题 %s" % (cid, cid) for cid in mr.RELEASE_NOTE_IDS
     ]
+
+
+def test_url_bytes_inside_binary_member_fail_the_build(source_tree: Path, tmp_path: Path) -> None:
+    """扫描逐成员跑，**二进制也一样**：往 favicon.png 尾巴上追加一串 URL 字节必须红。
+
+    第四轮复核项（复审点名要重验的形状之一）：`_as_text()` 解不出 UTF-8 会退回 latin-1 逐字节看，
+    所以「藏进二进制资源」不是躲过闸门的路。顺带证明产物落地前这一步真的跑过。
+    """
+    png = source_tree / "app" / "static" / "favicon.png"
+    png.write_bytes(bytes(range(256)) + b"|https://telemetry.example.com/ping|")
+    out = tmp_path / "out"
+    zip_path = out / "MCChecker-2.0.0.zip"
+    with pytest.raises(mr.ReleaseError, match=re.escape("telemetry.example.com")):
+        mr.build_release(source_tree, zip_path)
+    assert not zip_path.exists(), "验收没过的包不许落地"
 
 
 def test_verifier_detects_tampered_member(source_tree: Path, tmp_path: Path) -> None:
@@ -393,30 +428,89 @@ def test_inert_entry_for_a_file_that_left_the_artifact_fails(source_tree: Path, 
 def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
     source_tree: Path, tmp_path: Path
 ) -> None:
-    """精确性对照：两条新规则都不是「看见 `\\` 或 `//` 就杀」。
+    r"""精确性对照：反斜杠与数字引用这两族规则都不是「看见 `\` 或 `//` 就杀」。
 
-    反斜杠规则照 WHATWG 只作用在会联网的那五个特殊 scheme（http/https/ftp/ws/wss）上，所以 Windows
-    路径与 `file:` 本机路径
-    照旧放行；Markdown 规则只认真引用语法（`](` / `]:` 后面紧跟 `//`），所以站内链接、
-    相对链接、锚点、整除与行注释都不受影响。这一条红了就说明闸门开始误杀正文了。
+    带 scheme 的反斜杠规则照 WHATWG 只作用在会联网的那五个特殊 scheme（http/https/ftp/ws/wss）上，
+    所以 `file:` 本机路径照旧放行；不带 scheme 的那一族只认**开头连续两个**权威分隔符
+    （`//`、`/\`、`\\`、`/\\`），Markdown 规则只认真引用语法（`](` / `]:` 后面紧跟这两个分隔符，
+    或两个恰好解码成 `/` 的数字引用），所以站内链接、相对链接、锚点、整除与行注释都不受影响。
+    第四轮补上的两族同样咬不住这些正文：单个反斜杠的相对路径 (`\evil.example.com\manual`)、
+    Windows 路径 (`C:\Users\me\app.py`)、本机共享名 (`\\localhost\x.js`、`\\127.0.0.1\x.js`)、
+    `&#470;`（解出 `ǖ`）、`&#X2F&#X2Fevil`（`E` 还是十六进制位，解出 `˾`）、单个 `&#47;`，
+    以及被 WHATWG 判为解析失败的主机段非法字符（`|`、`^` 等）。
+    **这一条红了就说明闸门开始误杀正文了**——闸门一误杀，下一个接手的人就会把它调松，那比漏放更贵。
     """
+    legitimate = [
+        r"配置放在 `C:\Users\mc\cfg.xml`，另有机型目录 `D:\data`。",
+        r"历史写法：`file:///d:/Project/数据/x.xml` 与 `file:\d:\Project\x.xml`。",
+        "内链：[说明](/manual/ch2)、![图标](images/a.png)、[锚点](#ch2)、[相对](../docs/a.md)、[空格](</manual/a b>)。",
+        "代码里的整除 `a // b`，行注释 `// 说明`，正则 `/^https?:\\/\\//i`。",
+        # 第四轮 Important 1 的边界：单个分隔符开头 = 相对路径，两个才算权威段。
+        r"单个反斜杠是相对路径：[说明](\evil.example.com\manual) 与 <a href='\evil.example.com\manual'>。",
+        r"Windows 绝对路径：`C:\Users\me\app.py`、`D:\数据\cfg.xml`。",
+        r"本机共享写法（主机是 localhost/127.0.0.1，不需要名单条目）：`\\localhost\x.js`、`\\127.0.0.1\x.js`。",
+        "非法主机字符按 WHATWG 解析失败（实测 Invalid URL），所以这两处正文字面量不算主机："
+        "unsafe_chars = '<>:\"/\\\\|?*'、ILLEGAL_CHARS = frozenset('\\\\/:*?\"<>|')。",
+        # 第四轮 Important 2 的边界：只有**恰好**解码成 `/` 的数字引用才算。
+        "`&#470;evil.example.com/x.js` 解出 `ǖ`；`&#X2F&#X2Fevil.example.com/x.js` 解出 `˾`；单个 `&#47;evil.example.com/x.js` 是根相对路径。",
+        "代码块里的注释不算引用：",
+        "```bash",
+        "# diff 风格：+ //comment，以及整段 //old//new",
+        "```",
+        "README 里的访问地址是占位：`http://<服务器IP>:50001`。",
+    ]
     manual = source_tree / "docs" / "manual.md"
     manual.write_text(
-        manual.read_text(encoding="utf-8")
-        + "\n".join(
-            [
-                r"配置放在 `C:\Users\mc\cfg.xml`，另有机型目录 `D:\data`。",
-                r"历史写法：`file:///d:/Project/数据/x.xml` 与 `file:\d:\Project\x.xml`。",
-                "内链：[说明](/manual/ch2)、![图标](images/a.png)、[锚点](#ch2)、[相对](../docs/a.md)、[空格](</manual/a b>)。",
-                "代码里的整除 `a // b`，行注释 `// 说明`，正则 `/^https?:\\/\\//i`。",
-                "",
-            ]
-        ),
+        manual.read_text(encoding="utf-8") + "\n".join(legitimate) + "\n",
         encoding="utf-8",
     )
     zip_path = build(source_tree, tmp_path / "out")
     names = set(content_members(zip_path))
     assert "docs/manual.md" in names  # 真的带着这正文出了包，不是没打包所以绿
+    with zipfile.ZipFile(str(zip_path)) as archive:
+        shipped = archive.read("docs/manual.md").decode("utf-8")
+    for line in legitimate:
+        assert line in shipped, "绿是绿的，但这行正文没进包：%s" % line
+
+
+@pytest.mark.parametrize(
+    "url, host",
+    [
+        # `_host_of` 的两族新形状与其边界，逐条对着 node 24 的 `new URL(href, 基址)` 抄下来。
+        # 反斜杠权威段：开头两个分隔符才算。
+        (r"\\evil.example.com\x.js", "evil.example.com"),
+        (r"/\evil.example.com\x.js", "evil.example.com"),
+        (r"/\\evil.example.com\x.js", "evil.example.com"),
+        (r"\\evil.example.com\manual", "evil.example.com"),
+        (r"\\d:\Project\x.xml", "d"),  # 实测主机就是单字母 `d`：反斜杠结束权威段
+        (r"\\localhost\x.js", "localhost"),  # 本机名 ⇒ 绿色，且不再报成 `localhost\x`
+        (r"//localhost\x", "localhost"),  # 第三轮的误报：改前读成 `localhost\x`
+        (r"\evil.example.com\manual", ""),  # 单个反斜杠 ⇒ 相对路径
+        (r"C:\Users\me\app.py", ""),  # Windows 路径 ⇒ 无主机
+        (r"images\a.png", ""),
+        # 数字字符引用：只还原恰好解码成 `/` 的。
+        ("&#47;&#47;evil.example.com/x.js", "evil.example.com"),
+        ("&#47;&#47evil.example.com/x.js", "evil.example.com"),  # 省略分号是 HTML 的 legacy 规则
+        ("&#x2F;&#x2F;evil.example.com/x.js", "evil.example.com"),
+        ("&#X002f;&#47;evil.example.com/x.js", "evil.example.com"),  # 前导零/大小写/混着写
+        ("https:&#47;&#47evil.example.com/x.js", "evil.example.com"),
+        ("&#47;&#47evil.example.com\\x.js", "evil.example.com"),
+        ("&#47evil.example.com/x.js", ""),  # 单个分隔符
+        ("&#470;evil.example.com/x.js", ""),  # ǖ：数字后面还有数字就不是 `/`
+        ("&#X2F&#X2Fevil.example.com/x.js", ""),  # ˾：E 仍是十六进制位
+        ("&sol;&sol;evil.example.com/x.js", ""),  # 命名实体不在解码范围（已知边界 ④）
+        ("%2F%2Fevil.example.com/x.js", ""),  # 百分号编码按 WHATWG 本来也不进权威段
+        # 主机段含 WHATWG 禁止字符 ⇒ 浏览器解析失败 ⇒ 没有目标（保住正则字符类那两处正文）。
+        (r"\\\x00-\x1f", "x00-"),  # 允许的主机段形状：照旧算主机（所以进惰性名单）
+        ("/\\|?*", ""),
+        ("\\\\/:*?\"<>|", ""),
+        ("//evil.example.com^x", ""),
+        ("//evil.example.com|x/y", ""),
+    ],
+)
+def test_host_extraction_matches_whatwg_for_the_new_families(url: str, host: str) -> None:
+    """两族新判据的**边界**钉在纯函数上：整条链路（build_release）的红/绿都要靠这两族读对主机。"""
+    assert mr._host_of(url) == host, (url, mr._host_of(url), host)
 
 
 @pytest.mark.parametrize(
@@ -477,6 +571,13 @@ def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
         # 同一族里 WHATWG 还认的两种写法（special authority ignore slashes）。
         ("app/web/index.html", '<a href="https:/evil.example.com/x.js">', "evil.example.com"),
         ("app/web/index.html", '<a href="https:///evil.example.com/x.js">', "evil.example.com"),
+        # 带 scheme 的那一族剩下的几种写法（第四轮复核逐条对过 node 24：大小写不敏感、
+        # wss/ftp 一样会联网、`/\` 混着写与四个反斜杠都跳完分隔符才进权威段）。
+        ("app/web/index.html", r'<a href="HTTPS:\evil.example.com\a.js">', "evil.example.com"),
+        ("app/web/index.html", r'<a href="wss:\evil.example.com\a.js">', "evil.example.com"),
+        ("app/web/index.html", r'<a href="ftp:\evil.example.com\a.js">', "evil.example.com"),
+        ("app/web/index.html", r'<a href="https:/\evil.example.com\x.js">', "evil.example.com"),
+        ("app/web/index.html", r'<a href="https:\\\\evil.example.com\\x.js">', "evil.example.com"),
         # 第二轮复审 Important 2：不带 scheme 又不在引号里的 Markdown 引用目标，
         # 旧的两条捕网（scheme 前缀、引号后 `//`）都够不着，位置网又不认 `](`。
         ("docs/manual.md", "[说明](//evil.example.com/manual)", "evil.example.com"),
@@ -486,6 +587,35 @@ def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
         ("README.md", "详细说明见 [手册](//evil.example.com/manual)。", "evil.example.com"),
         # 反斜杠写法躲过的不只是 HTML：真放到前端脚本与文档字符串里同样红。
         ("app/web/assets/js/app.js", r'var BASE = "https:\evil.example.com"; ', "evil.example.com"),
+        # ---- 第四轮复审 Important 1：不带 scheme 的反斜杠权威段 ----
+        # 这三条在改之前**整绿着出了 zip**，而 node 24 拿本应用真实基址实测
+        # `new URL("\\\\evil.example.com\\x.js", "http://127.0.0.1:50002/index.html").host`
+        # 就是 `evil.example.com`（`/\…`、`/\\…` 同理）：特殊 scheme 的基址下 `\` 与 `/` 等价，
+        # 开头连续两个分隔符就进权威段。判据是**两个**分隔符，不是一个——见下面的绿色对照。
+        ("app/web/index.html", r'<a href="\\evil.example.com\x.js">', "evil.example.com"),
+        ("app/web/index.html", r'<a href="/\evil.example.com\x.js">', "evil.example.com"),
+        ("app/web/index.html", r'<a href="/\\evil.example.com\x.js">', "evil.example.com"),
+        ("docs/manual.md", r"[说明](\\evil.example.com\manual)", "evil.example.com"),
+        ("app/web/assets/js/app.js", r'var MC_SHARE = "\\evil.example.com"; ', "evil.example.com"),
+        # 主机段里塞换行：同一个族（浏览器先删控制符再解析，实测主机仍是 evil.example.com）。
+        ("app/web/index.html", '<a href="\\\\evil.example.co\nm/x.js">', "evil.example.com"),
+        # UNC 共享名按 WHATWG 就是主机（实测 `\\nas01\共享\x.xml` 的 host 是 `nas01`）：
+        # 文档里要写共享路径就写进代码块或换单个反斜杠，别指望闸门放过真主机。
+        ("docs/manual.md", r"[说明](\\nas01\共享\配置.xml)", "nas01"),
+        # ---- 第四轮复审 Important 2：数字字符引用编码的权威段 ----
+        # `&#47;` / `&#x2f;` 在 HTML 解析阶段就变成 `/`，交给 URL 解析器时已经是 `//host`
+        # （实测 decoded host = evil.example.com）。这是**构建期就能确定地解码**的写法，
+        # 不是运行期拼接，所以属于闸门本身，不属于「已知边界」。
+        ("app/web/index.html", '<a href="&#47;&#47;evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#x2F;&#x2F;evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#47;&#47evil.example.com/x.js">', "evil.example.com"),
+        ("docs/manual.md", "[说明](&#47;&#47;evil.example.com/manual)", "evil.example.com"),
+        ("app/web/index.html", '<img srcset="/local.png 1x, &#47;&#47;evil.example.com/remote.png 2x">', "evil.example.com"),
+        ("app/web/index.html", '<meta http-equiv="refresh" content="0;url=&#47;&#47;evil.example.com/x">', "evil.example.com"),
+        ("app/web/index.html", '<a href="https:&#47;&#47evil.example.com/x.js">', "evil.example.com"),
+        # 引用式定义的尖括号目的地：渲染器剥掉 `<…>` 后交给 URL 解析器，同样是真引用语法。
+        ("docs/manual.md", "[ref]: <//evil.example.com/manual>", "evil.example.com"),
+        ("docs/manual.md", "[ref]: <&#47;&#47;evil.example.com/manual>", "evil.example.com"),
     ],
 )
 def test_planted_shapes_fail_the_build(
@@ -757,7 +887,7 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 19 个" in first.stdout, first.stdout
+    assert "成员 20 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
     assert "已放行 app/static/favicon.svg" in first.stdout, first.stdout
@@ -796,7 +926,11 @@ def test_inert_allowlist_is_a_list_of_pairs_not_a_directory_rule() -> None:
     assert len(keys) == len(set(keys)), "同一路径+地址列了两遍，第二条永远是死的"
     for rel, url, why in mr.INERT_URL_LITERALS:
         assert not rel.endswith("/") and "." in rel.rsplit("/", 1)[-1], rel  # 指文件，不指目录
-        assert "://" in url or url.startswith("//"), (rel, url)
+        # 条目必须写成一个**权威段字面量**：`://`、`//`，或本轮补上的反斜杠权威段（`\\`、`/\`）；
+        # 光一个词或一条路径当不了条目。形状之外还要求闸门自己读得出主机——读不出主机的条目
+        # 根本不会与产物撞上，留着就是死条目（`find_stale_inert_entries()` 另外在管这件事）。
+        assert "://" in url or url.startswith(("//", "/\\", "\\\\")), (rel, url)
+        assert mr._host_of(url), (rel, url)
         assert why.strip(), (rel, url)
 
 
