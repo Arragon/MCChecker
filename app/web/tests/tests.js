@@ -52,7 +52,7 @@
    * M3-13（INH-1898）同样按实测重定：先留着 45 跑一轮，让页面自己报「预期 45，实际
    * 注册 50」（本卡 +5 条 people 用例），再把这个它自己数出来的数字写在这里——
    * 数字是读出来的，不是算出来的。 */
-  var EXPECTED_CASES = 50;
+  var EXPECTED_CASES = 51;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1095,6 +1095,78 @@
         /* 本用例改写的是**共享的** default 机型状态与全局身份（mock 是模板模式的活数据）。
          * 还原只放在异步链的 `.finally` 里；外层再套同步 `try/finally` 是**错的**：那会在
          * Promise 刚返回的那一刻就还回去，等于没还原（串行只保证「settle 之后」，不保证内容）。 */
+        P.people = keep.people;
+        P.admins = keep.admins;
+        MC.mock.setIdentity(keep.identity);
+      });
+  });
+
+  test("M3-13：mock 与后端同口径拒掉「加得进来、删不出去」的管理员姓名，同时照旧放行 IP 行姓名与存量行删除", function () {
+    /* 后端把这一档只挡在创建端（`people._validated_admin_name` / `_validated_ip_key`），
+     * mock 必须跟着动：模板模式里加得进来、真后端 400 拒掉的名字，就是本项目禁的
+     * 「mock 发明了后端没有的行为」（R19 / know-how 第 2 节那条未定契约）。
+     * 判据有两半，缺一半都算假绿：
+     *   ① 创建端拒——裸 `/`、`\\`（`api.seg()` 编成 `%2F`/`%5C` 撞 §16.8 守卫）与
+     *      **字面** `%2f` / `%5c` / `%00`（`%` 先编成 `%25`、解码后又长出这三只 token，
+     *      守卫看的是 raw 与解码后两份）；两侧同判向、同文案由
+     *      `tests/test_api_people.py::TestMockPeopleContract` **执行** mock 真身逐值核住，
+     *      所以这里不重复比文案，只核 mock 自己的判决。
+     *   ② 放行侧不许跟着收紧——`ip_mapping` 的 `name` 不吃这一档（删除按 IP 寻址），
+     *      `DELETE /admins/{name}` 也**不吃**（v1 直接写文件留下的存量行必须有出路），
+     *      `%` 后面不是那三只 token 的名字照旧收。这一半才是「不对称是裁定、不是疏漏」的执法者。
+     * 与上面那条 R19 用例同一个理由：**一条一条串行 await**，不许 `Promise.all`——
+     * mock 每次延迟 140+random(120) 毫秒且并发落盘顺序不定，会把断言刷成随机红。 */
+    var P = MC.mock.profileState("default");
+    var keep = {
+      people: JSON.parse(JSON.stringify(P.people)),
+      admins: JSON.parse(JSON.stringify(P.admins)),
+      identity: MC.mock.identityKey(),
+    };
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    /* 「含 `%XX`（X 为十六进制）」的名字故意**不**出现在这里的放行名单：后端今天也删不出
+     * 它们（路径被解码了两次，见 `test_a_name_with_a_literal_percent_escape_is_double_decoded`），
+     * mock 只解一次，所以在 mock 里「删得出去」不能当成后端删得出去的证据。 */
+    var rejected = ["王/强", "王%2F强"];
+    MC.mock.setIdentity("deployer-admin");
+    P.admins = [{ name: "李/强", updated_at: "2026-10-18 09:00:00" }]; // v1 式存量行
+    function expectRejected(name) {
+      return call("POST", "/p/default/admins", { name: name }).then(function (res) {
+        eq(res.status, 400, "不可管理的管理员姓名必须 400，实际 " + res.status + "：" + name);
+        eq(res.body.error.code, "INVALID_INPUT", name);
+        eq(res.body.error.detail.field, "name", "必须带字段（守卫那只 400 不带，所以只在创建端做得到）：" + name);
+      });
+    }
+    /* 只打 5 次 `handle`：mock 每次延迟 140+random(120) 毫秒，而 `--virtual-time-budget=8000`
+     * 是整页的硬截止（know-how 第 4 节 F2.4）。本卡实测这条加到 13 次调用时，页面在 8000 下
+     * **确定地**停在「运行中…」（既不是绿也不是红，也不是那两种抖动——重跑多少次都一样），
+     * 6 次调用时也只能在 7000 与 8000 之间勉强收线；原来的 50 条 suite 在 6000 下还是绿的。
+     * ⇒ 覆盖面交给 `tests/test_api_people.py::TestMockPeopleContract`（它**执行** mock 真身、
+     * 逐值核全部名单，不花页面的预算），这里只留「不对称」那两半各一条最小判据。 */
+    return expectRejected(rejected[0])
+      .then(function () { return expectRejected(rejected[1]); })
+      .then(function () {
+        eq(P.admins.length, 1, "两条被拒的姓名一条都不该进名单（失败写不落盘）");
+        return call("PUT", "/p/default/ip-mapping/10.4.4.4", { ip: "10.4.4.4", name: "王/强" });
+      })
+      .then(function (res) {
+        eq(res.status, 200, "IP 行的姓名不吃管理员那一档（它不进路径段）：" + JSON.stringify(res.body));
+        eq(res.body.item.name, "王/强", "同一串 `王/强` 当姓名必须登记得进来");
+        eq(P.people.filter(function (x) { return x.ip === "10.4.4.4"; }).length, 1,
+          "那一行按 IP 落进了表（清理靠 `.finally` 还原，不多打一次请求——预算账见上面注释）");
+        return call("POST", "/p/default/admins", { name: "100%达标" });
+      })
+      .then(function (res) {
+        eq(res.status, 201, "`%` 后面不是那三只 token 的名字不许被连坐拒掉：" + JSON.stringify(res.body));
+        return call("DELETE", "/p/default/admins/" + encodeURIComponent("李/强"));
+      })
+      .then(function (res) {
+        eq(res.body, { removed: true }, "删除端不许跟着创建端收紧——v1 存量行全靠这一条出路");
+        eq(P.admins.map(function (x) { return x.name; }), ["100%达标"],
+          "撤掉的是存量行那一条；放行侧那一条还在，被拒的两条从来没进过名单");
+      })
+      .finally(function () {
         P.people = keep.people;
         P.admins = keep.admins;
         MC.mock.setIdentity(keep.identity);
