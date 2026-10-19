@@ -232,7 +232,8 @@ def _list_versions(directory: str) -> List[Dict[str, Any]]:
     """按修改时间倒序列出目录里的版本文件。
 
     只用 `get_archive_root_dir` / `get_record_dir` 拼路径再判断 `isdir`：`storage.get_archive_dir()`
-    会 `makedirs`，读一次历史列表不该在数据目录里留下新目录或新归档（§5.4）。
+    会 `makedirs`，读一次历史列表不该在数据目录里留下新目录或新归档（仓库自身口径，执法见
+    `tests/test_readonly_paths.py`；规范 §5.4 讲的是 `core/fsutil.py` 的写入可靠性，不是这一条，别引它）。
     """
     if not os.path.isdir(directory):
         return []

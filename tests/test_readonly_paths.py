@@ -22,6 +22,12 @@
 另一条裁定，不归 B10.2 这张卡管）。本文件只断「只读请求不改变数据根的目录集合与
 既有文件的字节」。
 
+同一族的例外还有版本差异请求：它经 `history._cache_write()`（`app/services/history.py`）
+写 `cache/diff_v2/`，机制与 `doc_v2` 那条一模一样——`fsutil.atomic_write_bytes()` 在
+`app/core/fsutil.py` 里自己 `makedirs`。这两处都是**设计内**的派生缓存写，本文件按上面的
+口径把它们排除在断言之外；别把它们当成「读路径还有洞没修」，也别顺手把断言范围扩到它们身上
+（那需要另一张卡先裁定派生缓存到底该不该在请求里落盘）。
+
 已知的残留（**不在本卡范围**，别把本文件误读成「全仓库读路径都不建目录」）：
 `storage.get_record_dir()` 与 `get_archive_dir()` 仍带 `makedirs`，而读它们的
 `list_record_versions` / `list_archived_versions` / `load_archived_file` 只挂在旧
