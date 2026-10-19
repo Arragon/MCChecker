@@ -268,3 +268,44 @@ def gates(isolated_task_runner):
 
     return make
 
+
+#: 拆夹具时等调度线程退出的上限。它只是「确认线程真的散了」的兜底：`stop()` 不等 join
+#: （R11），而调度线程睡的是 `Event.wait(<=60)`，`stop()` 一置位就立刻醒。
+SCHEDULER_DRAIN_TIMEOUT = 5.0
+
+
+@pytest.fixture(autouse=True)
+def isolated_scheduler(isolated_task_runner):
+    """卡 8 / M3-08：调度线程是**手搓的 daemon 线程，两道守卫都看不见它**（H3）。
+
+    为什么必须自带这条夹具（卡 8 手递手 §2）：
+
+    * `concurrent.futures.thread._python_exit` 只 join 池线程，不 join 本线程；
+    * `isolated_task_runner` 的存活判据按线程名 `mctask` 筛，`mcsched` **故意**不在里面
+      （那条判据的语义是「还有没有人在写 `data/`」）；
+    * `h3_data_guard` 的第二个已证明盲区正是「最后一次快照之后才落盘的线程」。
+
+    所以泄漏只能由本卡自己钉死，不能指望远端守卫。这里显式依赖 `isolated_task_runner`
+    （进而依赖 `isolated_data_root`）：pytest 的拆序是装序的反面，因此本夹具一定在
+    `runner` 关掉**之前**先让调度线程停止提交，也在 `storage` 的数据根被恢复成仓库真实的
+    `data/` **之前**把线程拆干净——万一它还在睡，醒来也是在临时根里。
+
+    等不散就点名判失败，与 `isolated_task_runner` 对残留工作线程的做法一致。
+    """
+    from app.services import scheduler
+
+    scheduler.reset_scheduler(SCHEDULER_DRAIN_TIMEOUT)  # 装之前先清：别带着上一条的线程进来
+    yield
+    scheduler.reset_scheduler(SCHEDULER_DRAIN_TIMEOUT)
+    survivors = [
+        thread.name
+        for thread in threading.enumerate()
+        if thread.name.startswith(scheduler.THREAD_NAME)
+    ]
+    if survivors:
+        pytest.fail(
+            "调度线程已经 stop 并且等过 %.0f 秒，仍然活着：%s。它会在本次 monkeypatch 撤销之后"
+            "继续按周期醒来提交任务（H3）。用例请调用 scheduler.reset_scheduler()，或不要把线程"
+            "start 出来——不要放宽上面的等待，也不要改线程名绕过检查。"
+            % (SCHEDULER_DRAIN_TIMEOUT, ", ".join(sorted(survivors)))
+        )

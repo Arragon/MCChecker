@@ -2,9 +2,10 @@
 
 `main.py` 仍是 `from run import main; main()`，保持旧命令行兼容。
 
-本模块只做：解析配置 → 初始化（数据根、日志、布局、单实例锁、后台任务队列）→
-启动 HTTP → 有序停止（`ordered_stop` 关 HTTP，`stop_and_release` 再等后台工作线程散尽
-才删单实例锁，C1）。业务接口挂在 `app/server/router.py`（M1 起逐步补齐）。
+本模块只做：解析配置 → 初始化（数据根、日志、布局、单实例锁、后台任务队列、定时调度）→
+启动 HTTP → 有序停止（`ordered_stop` 先停调度器再排空任务队列、最后关 HTTP；
+`stop_and_release` 再等后台工作线程散尽才删单实例锁，C1）。业务接口挂在
+`app/server/router.py`（M1 起逐步补齐）。
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any, List, Optional
 from app import __version__
 from app.config import SettingsError, load_settings
 from app.core import storage
+from app.services import scheduler as services_scheduler
 from app.services import tasks
 
 logger = logging.getLogger("mcchecker")
@@ -33,17 +35,28 @@ def configure_logging(level: str) -> None:
 def ordered_stop(
     runner: tasks.TaskRunner, server: Any, timeout: Optional[float] = None
 ) -> None:
-    """有序停止（R9）：**先**停止接收新任务并等在途任务收尾，**再**关 HTTP。
+    """有序停止：**调度器 → 排空任务队列 → 关 HTTP**（R9 / R11 / 卡 8）。
 
-    顺序反了会让 `serve_forever` 先退出、主线程走完而任务还在跑。解释器最后仍然会等池里
-    那几条线程（`concurrent.futures.thread` 注册的 `_python_exit` 把它们 join 掉，实测一个
-    卡死的下载把进程拖到 91.7 秒），所以代价不是「丢在途下载」，而是**停止序列在任务还没
-    写完的时候就已经往下走了**——包括把单实例锁删掉，见 `stop_and_release`（C1）。
-    卡 8 的调度线程是 daemon，只需在这里插一次 `scheduler.stop()`（置位 + Event 唤醒，不等
-    join），真正的「等任务跑完」由 `runner.shutdown()` 负责。
+    为什么调度器排在最前：`runner.shutdown()` 等的是「已经投进去的任务」收尾，它没法阻止
+    有人继续往里投。调度线程每轮都会投新任务，所以先 `scheduler.stop()`（置位 + Event
+    唤醒，**不等 join**，R11）才有确定的排空终点；`services/scheduler.Scheduler.tick()` 在
+    停止位之后是空操作，这一条把「停完还往队列里投」的路径整个堵掉。
+
+    然后**先**停止接收新任务并等在途任务收尾，**再**关 HTTP。顺序反了会让 `serve_forever`
+    先退出、主线程走完而任务还在跑。解释器最后仍然会等池里那几条线程
+    （`concurrent.futures.thread` 注册的 `_python_exit` 把它们 join 掉，实测一个卡死的下载
+    把进程拖到 91.7 秒），所以代价不是「丢在途下载」，而是**停止序列在任务还没写完的时候
+    就已经往下走了**——包括把单实例锁删掉，见 `stop_and_release`（C1）。
+    调度线程自己不吃这份等待：它不是池线程，`_python_exit` 也 join 不到它，但它在
+    `stop()` 之后不再投任何东西，而它**不往 `data/` 写任何一个字节**（权威内容的下载与落盘
+    全在 `mctask` 工作线程里）。这条线程唯一的文件系统动作是到期时**删除**临时区与派生缓存，
+    而两项各有各的判定：派生缓存按 mtime 年龄（只删 7 天前的），临时区按 meta 里的
+    `expires_at`，并且跳过「还没写出 `meta.json`」的半成品目录（那正是某次上传正在写的那一半）。
+    所以它被解释器直接抛下也不损伤权威数据，详见 `app/services/scheduler.py` 模块 docstring。
 
     `runner.shutdown()` 幂等（R10），所以 `_handle_signal` 与正常退出路径两处都调它、
-    信号连按两次都不会重复 join。
+    信号连按两次都不会重复 join。`scheduler.stop()` 同样幂等，且调度器还没建
+    （`get_scheduler()` 返回 None，例如 `MCServer` 构造失败的那条早退路径）时直接跳过。
 
     这一层只保证「HTTP 侧的停止有上限」：`runner.shutdown()` 超时会直接返回而工作线程
     还在写盘，所以**删单实例锁不归这里管**，见 `stop_and_release`（C1）。
@@ -51,6 +64,9 @@ def ordered_stop(
     `timeout=None` 时在**调用那一刻**读 `tasks.DEFAULT_SHUTDOWN_TIMEOUT`（§10.1 的 30 秒
     只有一个出处），这样用例能把它改短去模拟「排空预算到期」，不必真等 30 秒。
     """
+    scheduler = services_scheduler.get_scheduler()
+    if scheduler is not None:
+        scheduler.stop()
     runner.shutdown(tasks.DEFAULT_SHUTDOWN_TIMEOUT if timeout is None else timeout)
     server.shutdown()
 
@@ -150,6 +166,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("启动失败：无法监听 %s:%d（%s）" % (settings.host, settings.port, exc), file=sys.stderr)
         return 4
 
+    # 定时调度（卡 8 / §10.4）：**排在 server 建好之后**——`MCServer` 构造失败那条早退路径
+    # 于是仍然「一条工作线程都没起、可以直接删锁」，不必再回头停调度器。调度线程只投任务、
+    # 自己不下载不写盘，所以放在这里也已经开始按 `schedule.json` 排期。
+    scheduler = services_scheduler.init_scheduler(runner)
+
     def _handle_signal(signum, _frame):
         logger.info("收到信号 %s，正在停止…", signum)
         # serve_forever 跑在主线程，shutdown() 必须从别的线程调用。
@@ -170,7 +191,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         settings.data_dir,
         _count_profiles(),
         runner.max_workers,
-        "off",
+        "on" if scheduler.is_alive() else "off",
     )
 
     try:

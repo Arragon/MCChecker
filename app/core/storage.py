@@ -362,17 +362,16 @@ def remove_config_mapping(name: str) -> bool:
 
 
 def _sanitize_config_filename(name: str) -> str:
-    n = (name or "").strip()
-    if not n:
-        raise ValueError("文件名不能为空")
-    if any(sep in n for sep in ("/", "\\", ":", "\0")):
-        raise ValueError("文件名不合法")
-    if n in (".", ".."):
-        raise ValueError("文件名不合法")
-    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
-    if any(ch not in allowed for ch in n):
-        raise ValueError("文件名包含非法字符")
-    return n
+    """文件名校验**一律委托 `fsutil.validate_filename`**（§11.2、C26）。
+
+    M0-07 落这层时用的是本地实现的 `A-Za-z0-9-_.` ASCII 白名单，而「新建更新源」走的是
+    `fsutil`（允许中文），两套字符集让中文源「建得出来却永远改不了名」（N1 / INH-1912）。
+    收敛只统一字符集，不放松边界：`fsutil.ILLEGAL_CHARS`（路径分隔符与 Windows 非法字符）、
+    控制字符、`.` / `..`、保留设备名与超长名仍然非法，所以 `configs/` 与 `records/`
+    下的拼法照旧安全。不合法抛 `AppError(INVALID_INPUT)`（不再是裸 `ValueError`），
+    HTTP 层照旧翻 400。
+    """
+    return fsutil.validate_filename(name)
 
 
 def update_config_mapping(
@@ -1702,13 +1701,19 @@ def get_schedule_file(profile_id: Optional[str] = None) -> str:
     return _get_profile_json_file("schedule.json", pid)
 
 
+#: `schedule.json` 缺文件时的默认值（规范 §5 的 schema）。`last_run` 是 v2 新增的**可选**
+#: 字段，读不出来就是「从没跑过」（`None`），界面上显示「尚未执行」。写它的人是
+#: `services/updates.py::update_all`（在机型锁内读-改-写）。
+_SCHEDULE_DEFAULT = {"enabled": False, "interval_hours": 24, "last_run": None}
+
+
 def load_schedule() -> Dict[str, Any]:
-    """加载调度配置"""
+    """加载调度配置（缺文件/缺 `last_run` 都按默认值，见 `_SCHEDULE_DEFAULT`）。"""
     profile = get_active_profile()
     path = _get_profile_json_file("schedule.json", profile)
     if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_SCHEDULE_FILE):
-        return _load_json(LEGACY_SCHEDULE_FILE, {"enabled": False, "interval_hours": 24})
-    return _load_json(path, {"enabled": False, "interval_hours": 24})
+        return _load_json(LEGACY_SCHEDULE_FILE, dict(_SCHEDULE_DEFAULT))
+    return _load_json(path, dict(_SCHEDULE_DEFAULT))
 
 
 def save_schedule(schedule: Dict[str, Any]):

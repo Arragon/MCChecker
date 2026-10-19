@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from .. import __version__
 from ..config import Settings
 from ..core import device_models
-from ..services import auth
+from ..services import auth, scheduler as services_scheduler
 from ..services.context import RequestContext
 from .router import Response
 
@@ -56,8 +56,9 @@ def get_session(
             "server": {
                 "version": __version__,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                # 调度器状态：新架构调度在 M2-05 才接入，接入前恒为 False
-                "scheduler": False,
+                # 调度器状态（§7.2）：卡 8 起是真实读数——`run.py` 起了新调度线程才为 True。
+                # 没起（未走 run.py 的入口、测试、或已经 stop()）就是 False，不再恒假。
+                "scheduler": services_scheduler.is_running(),
             },
             "limits": {
                 "upload_max_bytes": settings.upload_max_bytes,

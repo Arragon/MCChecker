@@ -56,7 +56,8 @@ from .context import RequestContext
 
 logger = logging.getLogger(__name__)
 
-#: 任务类型清单（§7.10）。卡 8 提交 `update_all`、卡 9 填 `refresh_records` 主体。
+#: 任务类型清单（§7.10）。三类都已接入：卡 8 的调度器到点投 `update_all`，
+#: `refresh_records` 的主体由卡 9（M3-09 / INH-1894）在 `updates.py` 里填上。
 TASK_TYPES = ("update_source", "update_all", "refresh_records")
 #: 已结束任务在内存里的保留窗口（§7.10：1 小时 / 最近 200 条）。
 RETAIN_SECONDS = 3600
@@ -97,8 +98,17 @@ FINISHED_STATES = (SUCCEEDED, PARTIAL, FAILED)
 #: 失败口径一致（success/unchanged/skipped/not_found 都不算失败）。
 FAILED_ITEM_STATUSES = frozenset({"download_failed", "rejected", "too_large", "error"})
 
-#: 结束时按类型递增的修订分量（§10.1）。`refresh_records` 留给卡 9：记录属于文件域，
-#: 等它把主体实现填进来再决定是否补 `files`。
+#: 结束时按类型递增的修订分量（§10.1）。
+#:
+#: `refresh_records` **不进这张表**（卡 9 / M3-09 的裁定，理由与 `update_source` 同一条）：
+#: 这张表是「任务成功结束就无条件递增」，而 §10.3 的绝大多数拉取都是 `unchanged`（远端
+#: 没变），`files` 放进去就会在「一条记录都没新增」时把全部客户端的横幅点起来（R5 判过的
+#: 虚假通知）。真实的那一次递增在 service 层：`updates.refresh_records` 只在确实多写了
+#: 一份 `records/<name>/record_*` 文件时 `bump(pid, "files")` 一次。`tests/test_api_records.py`
+#: 里钉「表里没有 refresh_records 的 files」的那条只是**值比较**（改表的人会连着改它的期望），
+#: 真正走得到 `_finish` 的行为判据是 `TestRevisionAccounting::
+#: test_runner_finish_bumps_no_business_part_on_an_identical_pull`——别把它当重复用例删，
+#: 也别与值比较那条合并（M3-09 修复轮：往表里塞 `("files",)` 时全量 1098 条只红那一条值比较）。
 FINISH_PARTS: Dict[str, Tuple[str, ...]] = {
     "update_source": (),
     "update_all": ("settings",),
@@ -676,7 +686,10 @@ def _run_update_all(task: Task) -> None:
 
 
 def _run_refresh_records(task: Task) -> None:
-    # 主体属卡 9（INH-1894）：届时只换 `updates.refresh_records` 的实现，签名不变。
+    # §10.3 拉取修改记录（卡 9 / M3-09 已落地）：下载、与最新一条比 sha、落盘全在
+    # `updates.refresh_records` 里，本层只回填进度与结果（§7.10）。
+    # `files` 那一份**不**由 `_finish` 补（见 `FINISH_PARTS` 上方），由 service 层在
+    # 真的多写一份记录文件时递增。
     _publish_single(task, updates.refresh_records(task.profile, task.target or "", task.actor))
 
 

@@ -44,7 +44,12 @@
    * 第三轮 nit：这条声明必须排在下面注册的两个监听**之前**——监听在脚本求值期就可能调
    * report()，那时若常量还没赋值，红会写成「预期 undefined，实际注册 0」（仍然红，
    * 但不说人话）。 */
-  var EXPECTED_CASES = 40;
+  /* M3-09 合并轮实测：本行取的是**页面自己报出的注册数**，不是两边各自写的数字。
+   * 合并前 29719a1 写 43（本卡 +1）、0dd72b1 写 42（M4-02 +2 却没同步改这里），
+   * git 默认合并对这一行不报冲突（只有一侧动过它），于是 43 直接胜出、42 侧的
+   * 两条用例照样注册 ⇒ 语义冲突只能靠实测拆穿。HTTP keep-alive 形态下三轮都是
+   * 「预期 43，实际注册 45」，45 条全部真跑到且绿，唯一红的就是这条闸。 */
+  var EXPECTED_CASES = 45;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -217,6 +222,77 @@
     eq(MC.util.fileFormat("A.JSON"), "json");
   });
 
+  /* M4-02（§16.8 第 1、2 条的前端那一半）。
+   * 后端只保证「送出去的是数据」（tests/test_api_security.py），**「以文本显示、
+   * 不执行」只能在真实 DOM 上判**，所以这条在这里。执法点是 util.js 的 append()
+   * 走 createTextNode；把 append 换成 innerHTML 赋值，本条立刻红（nodeType 变 1、
+   * img 出现、onerror 触发 alert）。
+   * 必须在 HTTP 形态下跑（见文件顶部钉死的命令）：file:// 里外部脚本的
+   * unhandledrejection 根本不派发，这类失败会报绿。 */
+  test("注入串以文本节点渲染且不执行（§16.8 第 1 条）", function () {
+    var PAYLOAD = "<img src=x onerror=alert(1)>";
+    var alerted = 0;
+    var realAlert = window.alert;
+    window.alert = function () { alerted++; };
+    var host = document.createElement("div");
+    try {
+      // 1) 字符串子节点（所有视图渲染标签/值/备注/工具名的唯一通道）
+      var cell = MC.util.h("td", PAYLOAD);
+      eq(cell.childNodes.length, 1, "只应有一个子节点");
+      eq(cell.firstChild.nodeType, 3, "子节点必须是文本节点（TEXT_NODE）");
+      eq(cell.firstChild.textContent, PAYLOAD, "文本必须逐字等于注入串");
+      eq(cell.querySelector("img"), null, "绝不能生成 img 元素");
+      host.appendChild(cell);
+
+      // 2) 属性值（侧栏工具链接的 title 就是这条路径，shell.js:481）
+      var link = MC.util.h("a", { href: "#", title: PAYLOAD, "data-name": PAYLOAD });
+      eq(link.getAttribute("title"), PAYLOAD, "属性值必须原样");
+      eq(link.querySelector("img"), null, "属性里注入不出元素");
+      eq(link.childNodes.length, 0);
+      host.appendChild(link);
+
+      // 3) 搜索高亮（另一条会拼 DOM 的路径）
+      var frag = MC.util.highlight(PAYLOAD, "img");
+      var box = MC.util.h("span", {}, frag);
+      eq(box.querySelector("img"), null, "高亮片段里不能出现 img");
+      eq(box.textContent, PAYLOAD, "高亮后的可见文本仍是原串");
+      host.appendChild(box);
+
+      // 4) replace() 复用同一条 append 通道
+      var again = MC.util.replace(MC.util.h("div"), PAYLOAD);
+      eq(again.firstChild.nodeType, 3);
+      host.appendChild(again);
+
+      document.body.appendChild(host);
+      eq(document.body.querySelectorAll("img").length, 0, "全页都不该因注入串多出 img");
+      eq(alerted, 0, "alert 被调用过 ⇒ 内联事件真的执行了（XSS 成立）");
+    } finally {
+      window.alert = realAlert;
+      host.remove();
+    }
+  });
+
+  test("safeUrl：非 http(s) 协议一律拒绝（§16.8 第 2 条渲染侧）", function () {
+    [
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      " javascript:alert(1)",
+      "java\tscript:alert(1)",
+      "javascript:alert(1)//",
+      "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+      "vbscript:msgbox(1)",
+      "file:///etc/passwd",
+      "ftp://example.com/x",
+    ].forEach(function (bad) {
+      eq(MC.util.safeUrl(bad), null, "必须拒绝：" + JSON.stringify(bad));
+    });
+    ok(MC.util.safeUrl("http://10.0.0.9/a.xml"), "http 放行");
+    ok(MC.util.safeUrl("https://example.com/b.xml"), "https 放行");
+    // 相对地址会被解析成同源 http(s)：这是**允许**的（侧栏写 `/tools` 这类站内链接），
+    // 如实记下这条边界，别让它被误读成「safeUrl 会拦住一切非绝对地址」。
+    eq(String(MC.util.safeUrl("/inside/path")).indexOf(location.protocol), 0, "站内相对地址解析为同源");
+  });
+
   test("标签淘汰：打开第 16 个文件时关掉最久未用的干净标签，有草稿的留下", function () {
     var tabs = [{ key: "overview", pinned: true, opened: 0, lastUsed: 0 }];
     for (var i = 0; i < 16; i++) {
@@ -276,12 +352,14 @@
     ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["schedule", "dl", "tools"].forEach(function (k) {
+    ["dl", "tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
     /* M3-06：settings 页级键已放行——页面内部的分段由 D2 分段开关控制（见下面专门用例），
      * 未接入分段渲染只读横幅且不发请求，所以页级放行不再打空接口。 */
     ok(prod.settings, "settings 页级键在 M3-06 放行");
+    /* M3-08：`/schedule` 接口已落地 ⇒ 页级键同时放行（速览的定时块读它、设置页写它）。 */
+    ok(prod.schedule, "schedule 页级键在 M3-08 放行");
     /* 放行只改 WIRED：未接入文案必须留着，M4-08 删本机制前 view 仍靠它给禁用提示。 */
     ok(/M\d-\d\d/.test(MC.unwired.review), "review 的未接入说明要保留并点名卡号：" + MC.unwired.review);
     ok(/M\d-\d\d/.test(MC.unwired.settings), "settings 的未接入说明要保留并点名卡号：" + MC.unwired.settings);
@@ -324,10 +402,11 @@
     }
   });
 
-  test("M3-06 / D2：设置页分段白名单——只放行 sources，其余五项各有点名卡号的去向", function () {
+  test("M3-06 / D2：设置页分段白名单——放行 sources 与 schedule，其余四项各有点名卡号的去向", function () {
     /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS、
-     * 起点只有 sources、unwiredSettings 恰好覆盖未接入的五项且文案点名接入卡号。
-     * 后续 M3-08/13/14/15/16 各自把一项加进 WIRED_SETTINGS，本用例是它们的公共回归。 */
+     * 起点只有 sources（M3-06），M3-08 放行 schedule；unwiredSettings 恰好覆盖未接入的
+     * 四项且文案点名接入卡号。后续 M3-13/14/15/16 各自把一项加进 WIRED_SETTINGS，
+     * 本用例是它们的公共回归。 */
     eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
     ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
     ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
@@ -341,8 +420,9 @@
       MC.config.mock = true;
       ok(MC.settingsSegmentWired("people") && MC.settingsSegmentWired("sources"), "模板模式下分段全部可用");
       MC.config.mock = false;
-      ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（本卡）");
-      ok(!MC.settingsSegmentWired("schedule") && !MC.settingsSegmentWired("people") && !MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余五项未接入");
+      ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（M3-06）");
+      ok(MC.settingsSegmentWired("schedule"), "生产模式 schedule 已接入（M3-08）");
+      ok(!MC.settingsSegmentWired("people") && !MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余四项未接入");
       /* F8（卡 7 复审）：F 断言的是效果而不是切片自比——真的动手改暴露出的切片，
        * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。 */
       MC.wiredSettingsSegments.push("people");
@@ -513,12 +593,13 @@
     return r;
   }
 
-  test("M3-06 / D2：未接入的五个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
+  test("M3-06 / D2：未接入的四个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
     var t = productionRun();
     return t.run(function (r) {
       var spy = r.useApi({});
-      /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。 */
-      ["schedule", "people", "bindings", "tools", "profiles"].forEach(function (seg) {
+      /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。
+       * `schedule` 已在 M3-08 接入，移出本用例，改由下面的生产用例盯它。 */
+      ["people", "bindings", "tools", "profiles"].forEach(function (seg) {
         var inst = r.mount(settingsApp(true), seg);
         var main = inst.el.querySelector(".settings-main");
         ok(main.textContent.indexOf(MC.unwiredSettings[seg]) >= 0, seg + "：只读横幅必须给出接入去向「" + MC.unwiredSettings[seg] + "」");
@@ -530,7 +611,7 @@
         });
       });
       return tick().then(function () {
-        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /schedule、/admins、/bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
+        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /admins、/bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
       });
     });
   });
@@ -588,6 +669,118 @@
             eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "未接入时点击不发任务请求");
           });
         });
+    });
+  });
+
+  /* 读 `.settings-main` 里 `dl.kv` 的某一行（dt 文本 → dd 文本）。视图把字段名读错时
+   * 整页 textContent 仍然「像是对的」，逐行取值才抓得住「显示了另一个键」。 */
+  function kvValue(rootEl, label) {
+    var dts = [].slice.call(rootEl.querySelectorAll("dt"));
+    var hit = dts.filter(function (dt) { return dt.textContent === label; })[0];
+    if (!hit) return "<没有这一行>";
+    var dd = hit.nextElementSibling;
+    return dd ? dd.textContent : "<没有值>";
+  }
+
+  test("M3-08：schedule 分段在生产模式读写 /schedule——2 天存成 48、回显自动选单位、400 落在间隔字段（UC-33）", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var store = { enabled: true, interval_hours: 6, last_run: { at: "2026-10-18 10:00:00", success: 2, unchanged: 1, failed: 0, skipped: 0 }, next_run_at: "2026-10-18 16:00:00" };
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/schedule$/.test(path)) return Promise.resolve(JSON.parse(JSON.stringify(store)));
+          return Promise.resolve({ items: [] });
+        },
+        /* 与后端 `services/scheduler.validate_interval` 同一条校验：1–2160 的整数，否则 400
+         * 且 `detail.field = "interval"`（R19：mock 只是参考，这条是从 SPEC 抄来的）。 */
+        PUT: function (path, body) {
+          var n = body && body.interval_hours;
+          if (typeof n !== "number" || n !== Math.floor(n) || n < 1 || n > 2160) {
+            return Promise.reject(new MC.ApiError(400, "INVALID_INPUT", "间隔必须是 1-2160 之间的整数小时", { field: "interval" }));
+          }
+          store = { enabled: !!body.enabled, interval_hours: n, last_run: store.last_run, next_run_at: "2026-10-20 10:00:00" };
+          return Promise.resolve(JSON.parse(JSON.stringify(store)));
+        },
+      });
+      var inst = r.mount(settingsApp(true), "schedule");
+      var main, amount, unit, save;
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          eq(spy.calls, ["GET /p/default/schedule"], "D2 门控开了 ⇒ 进分段只发这一个请求（不再画只读横幅）");
+          amount = main.querySelector("input[type=number]");
+          unit = main.querySelector("select");
+          eq([amount.value, unit.value], ["6", "h"], "6 小时：单位自动选「小时」");
+          var deploySave = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          ok(!amount.disabled && !!deploySave && !deploySave.disabled, "部署者身份下控件与保存都可用（未接入时才禁用）");
+          ok(main.textContent.indexOf("已启用") >= 0, "状态取自真实 enabled");
+          eq(kvValue(main, "下次执行"), MC.util.formatTime(store.next_run_at), "「下次执行」显示调度器算出的 next_run_at（读错键就退化成空白或「—」）");
+          ok(kvValue(main, "下次执行") !== "—", "next_run_at 有值时不许画「—」");
+          ok(main.textContent.indexOf("2 个更新") >= 0 && main.textContent.indexOf("尚未执行") < 0, "「上次执行」显示 last_run 汇总");
+          /* UC-33：选「2 天」保存 ⇒ 落库必须是 48 小时 */
+          unit.value = "d";
+          amount.value = "2";
+          save = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save.click();
+          return tick();
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('PUT /p/default/schedule {"enabled":true,"interval_hours":48}') >= 0, "「天」必须换算成 24 的整数倍再 PUT：" + spy.calls.join(" | "));
+          /* 保存成功后视图重新 GET（renderSection(true)），回读 48 要自动按「2 天」显示。 */
+          var amount2 = main.querySelector("input[type=number]");
+          var unit2 = main.querySelector("select");
+          eq([amount2.value, unit2.value], ["2", "d"], "回读 48 小时：单位自动选「天」、数值显示 2（UC-33 的「页面显示 2 天」）");
+          /* 服务端 400 的落点：前端整数检查放行 3000，越界由后端拒——错误必须长在「执行间隔」字段上，
+           * 不是弹一个全局故障 toast（前后端字段名 interval 是契约，见 api_schedule 用例）。 */
+          unit2.value = "h";
+          amount2.value = "3000";
+          var save2 = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save2.click();
+          return tick();
+        })
+        .then(function () {
+          /* `MC.field` 把错误写在 `.field-error`（role=alert）上、把 is-invalid 加在 control
+           * （这里是装 input+select 的那只 `div.row`）上——两处都要核，只看 textContent 会把
+           * 「隐藏的错误节点」也读成通过。 */
+          var intervalField = [].slice.call(main.querySelectorAll(".field")).filter(function (f) {
+            var l = f.querySelector(".field-label");
+            return l && l.textContent.indexOf("执行间隔") >= 0;
+          })[0];
+          ok(intervalField, "要有「执行间隔」字段");
+          var msg = intervalField.querySelector(".field-error");
+          ok(!msg.classList.contains("hidden"), "400 必须把错误显出来（不是 hidden）");
+          ok(msg.textContent.indexOf("整数") >= 0, "错误文案要显示后端那句话，实际：" + msg.textContent);
+          ok(intervalField.querySelector(".row").classList.contains("is-invalid"), "间隔控件要标红");
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "字段级 400 不许退化成全局「服务器故障」toast：" + toasts.map(function (x) { return x.textContent; }).join(" | "));
+          eq(spy.calls.filter(function (c) { return c.indexOf("PUT") === 0; }).length, 2, "两次保存各一个 PUT，不重试");
+        });
+    });
+  });
+
+  test("M3-08：非部署者看定时分段是只读的——控件禁用、title 给原因，但仍然读得到状态", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/schedule$/.test(path)) return Promise.resolve({ enabled: false, interval_hours: 24, last_run: null, next_run_at: null });
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var inst = r.mount(settingsApp(false), "schedule");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        eq(spy.calls, ["GET /p/default/schedule"], "GET /schedule 是全部角色可读（§7.9），门控不许挡只读用户");
+        var controls = [].slice.call(main.querySelectorAll("button, input, select"));
+        ok(controls.length >= 4, "分段要有控件占位，实际 " + controls.length);
+        controls.forEach(function (c) {
+          ok(c.disabled, "非部署者 ⇒ 控件一律 disabled");
+          /* 开关的 title 长在外层 label 上（`MC.switchEl` 把 title 给 wrapper），
+           * 所以按「自己或被 titled 的祖先」取，别要求裸 input 自己带 title。 */
+          var why = c.getAttribute("title") || (c.closest("[title]") || {}).title || "";
+          ok(why.indexOf("部署者") >= 0, "禁用要点名原因（是权限，不是没接入），实际：" + JSON.stringify(why));
+        });
+      });
     });
   });
 
@@ -1151,6 +1344,89 @@
     var domRows = tree.el.querySelectorAll(".tr").length;
     ok(domRows > 0 && domRows <= 80, "可视区 DOM 行数与总节点数无关，实测 " + domRows);
     tree.destroy();
+  });
+
+  /* 卡 9 / M3-09（INH-1894）追加：mock 的修改记录契约必须与后端同口径。
+   * 旧 mock 每次「立即拉取」都无条件 `records.unshift(...)` 并回 `success/已拉取`，
+   * 于是 §10.3 与 C13 那条「内容与最新一条相同就不新建记录文件」在 mock 里根本演示不出来，
+   * 而 UC-30 的「再拉相同内容条数不变」正是这张卡的主验收。用例打在 `MC.mock.handle` 上，
+   * 断的是**可观察结果**（列表条数与文件名、任务条目状态、files 修订号），不是源码文字。 */
+  test("mock §10.3 / C13：相同内容的记录拉取不新建文件、不递增 files", function () {
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    /* mock 的模拟步骤是 setTimeout(900) 逐条推进：这里必须**轮询到任务结束**再断言，
+     * 但轮询本身有上限，超时是失败而不是跳过（浮空链一律 return，见文件头那条 C1）。 */
+    function waitFinished(id, tries) {
+      return call("GET", "/tasks/" + id).then(function (r) {
+        var t = r.body && r.body.task;
+        if (t && (t.state === "succeeded" || t.state === "partial" || t.state === "failed")) return t;
+        if (tries <= 0) throw new Error("mock 任务没有在轮询上限内结束：" + id);
+        return new Promise(function (resolve) {
+          setTimeout(resolve, 40);
+        }).then(function () {
+          return waitFinished(id, tries - 1);
+        });
+      });
+    }
+    function names(r) {
+      return r.body.items.map(function (x) { return x.filename; });
+    }
+    function later(fn) {
+      return new Promise(function (resolve) {
+        setTimeout(resolve, 40);
+      }).then(fn);
+    }
+    /* 前面的契约用例「并发下发」后Leave了一条在跑的 mock 任务（`setTimeout(900)` 逐条推进）。
+     * 按 §10.1 / 卡 6 复审 F2，`refresh_records` 与 `update_source`/`update_all` 在**同一机型内
+     * 两两互斥**，直接 POST 会撞 409——那是契约正确，不是本用例要测的东西，所以先等队列空。 */
+    function waitIdle(tries) {
+      return call("GET", "/p/default/tasks").then(function (r) {
+        var busy = (r.body.items || []).filter(function (t) {
+          return t.state === "queued" || t.state === "running";
+        });
+        if (!busy.length) return null;
+        if (tries <= 0) {
+          throw new Error("default 机型里始终有在跑的更新类任务，无法开始拉取：" + busy.map(function (t) { return t.type; }).join(","));
+        }
+        return later(function () {
+          return waitIdle(tries - 1);
+        });
+      });
+    }
+    var name = "scenario_a.xml"; // 默认映射里唯一带 record_url 的项，种子里已有两条记录
+    var beforeFiles = null;
+    var beforeNames = null;
+    return waitIdle(120)
+      .then(function () {
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (r) {
+        beforeFiles = r.body.parts.files;
+        return call("GET", "/p/default/files/" + encodeURIComponent(name) + "/records");
+      })
+      .then(function (r) {
+        beforeNames = names(r);
+        eq(beforeNames.length, 2, "种子里有两条修改记录");
+        return call("POST", "/p/default/tasks", { type: "refresh_records", name: name });
+      })
+      .then(function (r) {
+        eq(r.status, 202, "「立即拉取」只走 POST /tasks（页面不再自己定时拉）");
+        return waitFinished(r.body.task.id, 80);
+      })
+      .then(function (task) {
+        var item = task.result.items[0];
+        eq(item.status, "unchanged", "mock 的「远端内容」就是最新那一条 ⇒ C13 判重必须生效：" + item.status);
+        eq(item.label, "无变化", "文案与 `updates.LABELS` 同口径，不再是 mock 自造的「已拉取」");
+        return call("GET", "/p/default/files/" + encodeURIComponent(name) + "/records");
+      })
+      .then(function (r) {
+        eq(names(r), beforeNames, "相同内容不得新增记录文件：条数与名字都不许变");
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (r) {
+        eq(r.body.parts.files, beforeFiles, "unchanged 拉取不递增 files（R5：不叫醒别人）");
+      });
   });
 
   /* EXPECTED_CASES（钉死用例总数）已提到文件顶部两个监听之前（第三轮 nit）。 */

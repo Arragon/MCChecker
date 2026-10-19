@@ -1281,8 +1281,17 @@ class TestTasksApi:
         # 部分失败仍然算「写成功」：last_run 落盘了 ⇒ settings 递增（§10.1）
         assert _parts(pid)["settings"] == before["settings"] + 1
 
-    def test_refresh_records_task_runs_the_card_5_skeleton(self, pid):
-        _seed_mapping(pid, [{"name": NAME, "url": "", "record_url": "http://example.invalid/r.xml"}])
+    def test_refresh_records_task_downloads_and_reports_the_item(self, pid, servers):
+        """卡 9（M3-09）之后 `refresh_records` 任务真的会拉：202 → 工作线程下载 → 条目 `success`。
+
+        原名 `test_refresh_records_task_runs_the_card_5_skeleton`，断的是「条目 = skipped
+        且 reason 含 M3-09」——那正是本卡要替换掉的骨架行为，期望随之改变（去重与落盘的
+        完整用例见 `tests/test_api_records.py`，这里只钉任务链路：类型、状态、条目回填）。
+        """
+        from app.core import storage
+
+        srv = servers({"/r.xml": {"body": b"<changes><a>1</a></changes>"}})
+        _seed_mapping(pid, [{"name": NAME, "url": "", "record_url": srv.url("/r.xml")}])
         with make_server() as server:
             _, _, body = as_role(server, "deployer").json(
                 "POST", "/api/v1/p/%s/tasks" % pid, {"type": "refresh_records", "name": NAME}
@@ -1290,8 +1299,12 @@ class TestTasksApi:
             task = _wait_state(pid, body["task"]["id"])
 
         assert task["type"] == "refresh_records"
-        assert task["result"]["items"][0]["status"] == "skipped"
-        assert "M3-09" in task["result"]["items"][0]["reason"]
+        assert task["state"] == "succeeded"
+        assert task["result"]["items"][0]["status"] == "success"
+        assert task["progress"] == {"done": 1, "total": 1}
+        assert srv.requests == ["/r.xml"]
+        with storage.use_profile(pid):
+            assert len(storage.list_record_versions(NAME)) == 1
 
     def test_read_endpoints_do_not_bump_any_part(self, pid):
         _seed_mapping(pid, [])
