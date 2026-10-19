@@ -39,6 +39,16 @@ TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 BASE = datetime(2026, 10, 18, 12, 0, 0)
 #: `tasks.ACTIVE_STATES` 的同值别名（避免把「任务还没结束」写成对内部常量的依赖）。
 ACTIVE_STATES = ("queued", "running")
+#: 等旧调度线程真的收摊的**有界**预算（INH-1916 / `docs/MCChecker_BLOCKERS.md` B11）。
+#: 实测口径：`stop()` 被调到该线程从 `threading.enumerate()` 里消失的耗时，
+#: 12 核机器、每轮 400 次同形状重采样、共 22 轮 8800 次——p50 0.049–0.115 毫秒、
+#: p99 ≤ 8.7 毫秒，CPU 被纯 Python 死循环占满（负载均值 21）时最坏一次 47 毫秒；
+#: `join()` 返回后线程表还列着它的情况 0/8800（CPython 先 `_delete(ident)`
+#: 再放开 tstate 锁，所以等完就是看得见没了）。取 2 秒：是最大观测值的 40 倍以上，
+#: 又明显短于 `tests/conftest.py::isolated_scheduler` 拆卸时的
+#: `SCHEDULER_DRAIN_TIMEOUT`（5 秒），所以线程真的收不了摊时，是本用例先点名，
+#: 而不是夹具兜底。等不到就判失败——不许把预算越调越长。
+OLD_SCHEDULER_EXIT_TIMEOUT = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -1155,6 +1165,8 @@ class TestSingleton:
         `mcsched` 是手搓线程、没有任何安全网看得见它，所以「同一进程里同时只有一条调度线程」
         这条不变量只能由启动函数自己保证。顺序断法：在 `start()` 被调的那一刻回看旧单例的
         停止位——好实现里它已经置位，坏实现（先 start 再 stop）读到的是 False。
+        「旧线程已经消失」那一步靠**有界等待**兑现（`OLD_SCHEDULER_EXIT_TIMEOUT`）：它是异步
+        结果，瞬时断言会在机器忙的时候假红（B11 / INH-1916），等满预算仍然不退则是真坏。
         """
         from app.services import tasks
 
@@ -1171,6 +1183,19 @@ class TestSingleton:
         assert seen == [True], "新线程起来的时候旧线程还没停：%s" % (seen,)
         assert first.stopping is True
         assert scheduler_module.get_scheduler() is second
+        # 到这里为止的三条断言都是**同步**的，也正是本卡要保护的不变量（先停旧再起新）。
+        # 「旧线程已经从线程表里消失」不是同步事实：`stop()` 只置位并唤醒，线程要自己
+        # 从睡眠里醒过来才收摊（R11 刻意不等 join），机器一忙 OS 就来不及——B11 实测
+        # 3/20，本地 8800 次同形状采样里 67 次（0.76%，单轮最高 3.5%）在断言那一刻还看得见
+        # 两条线程。所以这里改成**有界等待**：等不到就是失败，绝不因为「再等等总会好的」
+        # 而放过，也不许把预算调到看起来永远够。
+        first.join(OLD_SCHEDULER_EXIT_TIMEOUT)
+        assert not first.is_alive(), (
+            "旧调度线程在 %.1f 秒内没有退出（当前线程表 %s）：先停再起这条顺序没有兑现，"
+            "或 stop()/循环不再让线程收摊。实测退出耗时 p50 ≈ 0.1 毫秒、最坏 47 毫秒，"
+            "等满预算说明它不是慢，是不退。"
+            % (OLD_SCHEDULER_EXIT_TIMEOUT, ", ".join(_sched_threads()) or "空")
+        )
         assert _sched_threads() == [scheduler_module.THREAD_NAME], "同一进程只许留一条调度线程"
 
     def test_reset_without_a_scheduler_is_harmless(self):
