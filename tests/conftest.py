@@ -97,7 +97,9 @@ def h3_data_guard():
     """会话结束重新快照真实 `data/` 并比对，任何差异都判失败（H3 的自动执法）。
 
     纯函数在 `tests/data_guard.py`（快照、分类比对、点名报告、执法状态公告），这里只
-    接线。排除根一级的 `.mcchecker.lock`（运行时产物）与目录；口径见该模块 docstring。
+    接线。排除根一级的 `.mcchecker.lock`（运行时产物）；**目录集合同样在比对范围内**
+    （B10.2：只哈希常规文件的 tripwire 看不见「读路径长出空目录」这一类改动）；
+    口径见该模块 docstring。
     本夹具**不**替代 `isolated_data_root` / `isolated_task_runner` 的事前隔离，是它们
     漏网之后的事后网；也不参与那两个夹具的装/拆序（那是卡 6 复审刻意钉住的）。
 

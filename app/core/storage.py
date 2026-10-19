@@ -198,7 +198,38 @@ def get_profile_data_dir(profile_id: Optional[str] = None) -> str:
 
 
 def _ensure_dirs():
-    """确保数据目录存在"""
+    """补出机型骨架目录（`profiles/`、`configs/`、`archive/`、`records/`、`cache/parse_tree/`）。
+
+    **v2 的读路径现在一条都不调它**（B10.2）：它做的是 `makedirs`，读的时候调它就是在
+    改用户的数据根。分工是——
+
+    * 机型根目录（`profiles/`、`profiles/default/`）由启动流程
+      `ensure_profile_layout()`（`run.py` 在启动时调用）与复制机型时的
+      `_copy_profile_data_locked()` 建；
+    * 业务子目录（`configs/`、`archive/`、`records/`、`cache/parse_tree/`）由
+      **第一次需要它们的写**建，也就是本模块里的四个调用点：改名迁移
+      （`_rename_config_entry_locked`）、存修改记录（`save_record_file`）、存配置
+      （`save_config_file_detailed`）、存审阅生成文件
+      （`save_review_generated_file`，它走 `_reserve_file` 的裸 `os.open(O_EXCL)`，
+      目录不在就先炸，属于「写确实需要」而不是防御性调用）。
+
+    `app/` 里剩下的唯一调用者是 `parse_cache._get_cache_dir()`（`app/core/parse_cache.py:15`）：
+    它同时被 v1 NiceGUI 页面（`app/pages/**`，M4-07 待删）的读和 `invalidate()` 的写用到，
+    `app/server/**` 够不到，所以这不构成「v2 读路径还得在这里补建」的理由（`scripts/bench_xml.py`
+    与 `tests/conftest.py` 各自显式调它做初始化，同理不算读副作用）。写请求倒是会把它撞出来：
+    `DELETE /api/v1/p/{pid}/files/{name}` 经 `recovery._invalidate()` → `parse_cache.invalidate()`
+    走到这里，把缺失的骨架目录重新长出来（实测：一棵只剩 `configs/` 的根上补出了
+    `archive/`、`records/`、`cache/`、`cache/parse_tree/`）。
+
+    v2 的读遇到目录缺失就是「还没有数据」，返回空结果即可（见 `list_config_files`）：
+    不许顺手把骨架长出来，也不许加「首次读取时补建」那种懒回退。**但别把这句读成「读接口
+    一律不碰数据根」**——派生缓存不归本函数管：`GET /files/{name}/document` 与 `GET /search`
+    经 `documents._disk_store()`、`GET /files/{name}/archives` 与 `GET /files/{name}/records`
+    经 `history._cache_write()`，都会在请求里建 `cache/doc_v2/`、`cache/diff_v2/` 并写缓存
+    文件，机制是 `fsutil.atomic_write_bytes()` 自己 `makedirs`（`app/core/fsutil.py:78`）。
+    实测口径与例外清单见 `docs/know-how.md` 的 B10.2 那条 + `tests/test_readonly_paths.py`；
+    「任何新目录都看得见」由 H3 守卫的目录集合快照执法，见 `tests/data_guard.py`。
+    """
     os.makedirs(PROFILES_DIR, exist_ok=True)
     os.makedirs(get_configs_dir(), exist_ok=True)
     os.makedirs(get_archive_root_dir(), exist_ok=True)
@@ -911,10 +942,18 @@ def load_config_file(name: str) -> Optional[bytes]:
 
 
 def list_config_files() -> List[str]:
-    """列出所有已存储的配置文件名"""
-    _ensure_dirs()
-    files = []
+    """列出所有已存储的配置文件名。
+
+    **只读**（B10.2）：不再调 `_ensure_dirs()`。`GET /api/v1/p/{pid}/files` 每请求
+    都会走到这里，原先它在真实数据根里长出 `archive/ records/ cache/ cache/parse_tree/`
+    四个目录——「用只读接口验证数据目录没被动过」于是变成机制上不可验证的事。
+    目录不存在就是还没有配置文件，返回空列表，而不是把树长出来。
+    目录的创建交给写路径与启动流程，理由见 `_ensure_dirs` 的 docstring。
+    """
     configs_dir = get_configs_dir()
+    if not os.path.isdir(configs_dir):
+        return []
+    files = []
     for f in os.listdir(configs_dir):
         if os.path.isfile(os.path.join(configs_dir, f)):
             files.append(f)
