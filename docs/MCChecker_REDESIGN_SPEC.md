@@ -678,7 +678,8 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 
 - 服务端在内存为每个机型维护 5 个单调递增计数；对应写操作成功后 +1；进程启动时从 1 开始（客户端只比较是否变化）。
 - 调度任务、其他用户的写入同样递增，因此前端 10 s 轮询即可得知“别人改了什么”（§8.5）。
-- 该接口必须极轻量（不读磁盘），P99 < 5 ms。
+- 该接口必须极轻量：**计数器本身不读磁盘**（`services/revision.py` 的状态只在内存锁下），P99 < 5 ms。
+  - 口径更正（B10.1 / M4-05 实测，2026-10-19）：旧写法「本接口不读磁盘」与 §13 与交付手册 R13「身份实时读、不加缓存」在**任何带 `{pid}` 的路由上不可能同时成立**——实测该端点每请求固定打开数据根内 3 个文件（`device_models.json` + 该机型 `ip_mapping.json` / `admin_users.json`，出处 `server/http.py:282`、`services/auth.py:110-116`）。收窄后两件事都保住：计数逻辑仍然零磁盘 I/O，身份仍然按 R13 实时读。
 
 ### 7.4 文件
 
