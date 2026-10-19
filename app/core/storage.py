@@ -198,7 +198,25 @@ def get_profile_data_dir(profile_id: Optional[str] = None) -> str:
 
 
 def _ensure_dirs():
-    """确保数据目录存在"""
+    """确保数据目录存在。
+
+    **只在写路径调用**（B10.2）：它做的是 `makedirs`，读路径调它就是在改用户的
+    数据根。现网的分工是——
+
+    * 机型根目录（`profiles/`、`profiles/default/`）由启动流程
+      `ensure_profile_layout()`（`run.py` 在启动时调用）与复制机型时的
+      `_copy_profile_data_locked()` 建；
+    * 业务子目录（`configs/`、`archive/`、`records/`、`cache/parse_tree/`）由
+      **第一次需要它们的写**建，也就是本函数的四个调用点：改名迁移
+      （`_rename_config_entry_locked`）、存修改记录（`save_record_file`）、存配置
+      （`save_config_file_detailed`）、存审阅生成文件
+      （`save_review_generated_file`，它走 `_reserve_file` 的裸 `os.open(O_EXCL)`，
+      目录不在就先炸，属于「写确实需要」而不是防御性调用）。
+
+    读路径一律不调它：目录缺失对读来说就是「还没有数据」，返回空结果即可
+    （见 `list_config_files`）。「只读接口不改数据目录」现在由 H3 守卫的目录集合
+    快照执法，见 `tests/data_guard.py`。
+    """
     os.makedirs(PROFILES_DIR, exist_ok=True)
     os.makedirs(get_configs_dir(), exist_ok=True)
     os.makedirs(get_archive_root_dir(), exist_ok=True)
@@ -911,10 +929,18 @@ def load_config_file(name: str) -> Optional[bytes]:
 
 
 def list_config_files() -> List[str]:
-    """列出所有已存储的配置文件名"""
-    _ensure_dirs()
-    files = []
+    """列出所有已存储的配置文件名。
+
+    **只读**（B10.2）：不再调 `_ensure_dirs()`。`GET /api/v1/p/{pid}/files` 每请求
+    都会走到这里，原先它在真实数据根里长出 `archive/ records/ cache/ cache/parse_tree/`
+    四个目录——「用只读接口验证数据目录没被动过」于是变成机制上不可验证的事。
+    目录不存在就是还没有配置文件，返回空列表，而不是把树长出来。
+    目录的创建交给写路径与启动流程，理由见 `_ensure_dirs` 的 docstring。
+    """
     configs_dir = get_configs_dir()
+    if not os.path.isdir(configs_dir):
+        return []
+    files = []
     for f in os.listdir(configs_dir):
         if os.path.isfile(os.path.join(configs_dir, f)):
             files.append(f)
