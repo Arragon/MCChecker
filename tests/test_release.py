@@ -24,16 +24,22 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import make_release as mr  # noqa: E402  （脚本不在包里，只能按路径导入）
 
 # 假源树里**应当**进入产物的成员，手写字面量：与 RELEASE_ENTRIES 的展开结果一一对应。
+# 名单上每一条惰性放行的路径都必须在这棵树里（`find_stale_inert_entries()` 会因为
+# 「条目指向的文件不在产物里」直接判红，僵尸条目不许攒着）。
 EXPECTED_MEMBERS = {
     "README.md",
     "app/__init__.py",
     "app/config.py",
     "app/core/__init__.py",
+    "app/core/downloader.py",
+    "app/core/reviewing.py",
     "app/core/storage.py",
     "app/static/favicon.svg",
     "app/web/assets/css/base.css",
     "app/web/assets/js/app.js",
     "app/web/assets/js/ui/icons.js",
+    "app/web/assets/js/views/importer.js",
+    "app/web/assets/js/views/settings.js",
     "app/web/index.html",
     "docs/manual.md",
     "main.py",
@@ -104,12 +110,28 @@ def source_tree(tmp_path: Path) -> Path:
         "app/config.py": "DEFAULT_PORT = 50002  # 端口说明里有 http://127.0.0.1:50002 例子\n",
         "app/core/__init__.py": "",
         "app/core/storage.py": "def load():\n    return {}\n",
+        # 名单上剩下四条惰性放行的宿主文件。形状照真实源码抄（反引号/引号收尾，
+        # token 才不会一路吞进后面的中文），这样假树也覆盖满 `INERT_URL_LITERALS`。
+        "app/core/downloader.py": (
+            '"""日志与消息只出现 `scheme://host/path`（§11.5），query 一律抹掉。\n'
+            '   脱敏目标是形如 `scheme://...` 的片段。\n"""\n'
+            'MASKED = "scheme://host/path"\n'
+        ),
+        "app/core/reviewing.py": (
+            "#  命名空间 URI 天然带 `/`（`{http://…}tag`），按 `/` 切会切错。\n"
+        ),
         "app/web/index.html": CLEAN_INDEX_HTML,
         "app/web/assets/css/base.css": "body { font-family: sans-serif; }\n",
         # 只有 `INERT_URL_LITERALS` 上逐条列过的 (路径, 地址) 才是惰性的；这台假树里放的
-        # 就是名单上的两条，未列过的一律由下面的负向用例证明会红。
+        # 就是名单上的全部条目，未列过的一律由下面的负向用例证明会红。
         "app/web/assets/js/app.js": 'h("input", {placeholder: "http://127.0.0.1:50002/cfg.xml"});\n',
         "app/web/assets/js/ui/icons.js": 'var NS = "http://www.w3.org/2000/svg";\n',
+        "app/web/assets/js/views/importer.js": (
+            'var urlInput = h("input.input", { type: "url", placeholder: "http://10.20.1.15/cfg/config.xml" });\n'
+        ),
+        "app/web/assets/js/views/settings.js": (
+            'var url = h("input.input", { type: "url", placeholder: "http://…" });\n'
+        ),
         "app/static/favicon.svg": (
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"></svg>\n"
         ),
@@ -354,6 +376,49 @@ def test_stale_inert_entry_fails_the_build(source_tree: Path, tmp_path: Path) ->
         build(source_tree, tmp_path / "out")
 
 
+def test_inert_entry_for_a_file_that_left_the_artifact_fails(source_tree: Path, tmp_path: Path) -> None:
+    """僵尸条目同样必须红：条目指的文件不再进产物，放行就悬在半空。
+
+    第二轮复审实测旧行为是**静默绿**（把宿主文件删掉，构建 exit 0），与「陈旧条目一定失败」
+    的说法正好相反；这里把另一个方向也钉上。
+    """
+    (source_tree / "app" / "static" / "favicon.svg").unlink()
+    out = tmp_path / "out"
+    zip_path = out / "MCChecker-2.0.0.zip"
+    with pytest.raises(mr.ReleaseError, match="已经不在产物里"):
+        mr.build_release(source_tree, zip_path)
+    assert not zip_path.exists(), "验收没过的包不许落地"
+
+
+def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
+    source_tree: Path, tmp_path: Path
+) -> None:
+    """精确性对照：两条新规则都不是「看见 `\\` 或 `//` 就杀」。
+
+    反斜杠规则照 WHATWG 只作用在会联网的那五个特殊 scheme（http/https/ftp/ws/wss）上，所以 Windows
+    路径与 `file:` 本机路径
+    照旧放行；Markdown 规则只认真引用语法（`](` / `]:` 后面紧跟 `//`），所以站内链接、
+    相对链接、锚点、整除与行注释都不受影响。这一条红了就说明闸门开始误杀正文了。
+    """
+    manual = source_tree / "docs" / "manual.md"
+    manual.write_text(
+        manual.read_text(encoding="utf-8")
+        + "\n".join(
+            [
+                r"配置放在 `C:\Users\mc\cfg.xml`，另有机型目录 `D:\data`。",
+                r"历史写法：`file:///d:/Project/数据/x.xml` 与 `file:\d:\Project\x.xml`。",
+                "内链：[说明](/manual/ch2)、![图标](images/a.png)、[锚点](#ch2)、[相对](../docs/a.md)、[空格](</manual/a b>)。",
+                "代码里的整除 `a // b`，行注释 `// 说明`，正则 `/^https?:\\/\\//i`。",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    zip_path = build(source_tree, tmp_path / "out")
+    names = set(content_members(zip_path))
+    assert "docs/manual.md" in names  # 真的带着这正文出了包，不是没打包所以绿
+
+
 @pytest.mark.parametrize(
     "rel, snippet, host",
     [
@@ -404,6 +469,23 @@ def test_stale_inert_entry_fails_the_build(source_tree: Path, tmp_path: Path) ->
         ("app/web/index.html", '<img src="http://[2001:db8::1]/x">', "2001:db8::1"),
         # 不是前端的文件也在射程内：Markdown 与 shell 里的地址一样红。
         ("start.sh", 'printf "see https://telemetry.example.com/x\\n"', "telemetry.example.com"),
+        # 第二轮复审 Important 1：反斜杠权威段。node 24 实测
+        # `new URL("https:\\evil.example.com\\a.js").host` 就是 `evil.example.com`
+        # ——浏览器真会去取，而旧扫描只找 `scheme://`，于是这条整绿着出了 zip。
+        ("app/web/index.html", r"<img src='https:\evil.example.com\a.js'>", "evil.example.com"),
+        ("app/web/index.html", r'<a href="https:\\evil.example.com\x.js">', "evil.example.com"),
+        # 同一族里 WHATWG 还认的两种写法（special authority ignore slashes）。
+        ("app/web/index.html", '<a href="https:/evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="https:///evil.example.com/x.js">', "evil.example.com"),
+        # 第二轮复审 Important 2：不带 scheme 又不在引号里的 Markdown 引用目标，
+        # 旧的两条捕网（scheme 前缀、引号后 `//`）都够不着，位置网又不认 `](`。
+        ("docs/manual.md", "[说明](//evil.example.com/manual)", "evil.example.com"),
+        ("docs/manual.md", "![截图](//evil.example.com/a.png)", "evil.example.com"),
+        ("docs/manual.md", "[说明](<//evil.example.com/a b>)", "evil.example.com"),
+        ("docs/manual.md", "[ref]: //evil.example.com/manual", "evil.example.com"),
+        ("README.md", "详细说明见 [手册](//evil.example.com/manual)。", "evil.example.com"),
+        # 反斜杠写法躲过的不只是 HTML：真放到前端脚本与文档字符串里同样红。
+        ("app/web/assets/js/app.js", r'var BASE = "https:\evil.example.com"; ', "evil.example.com"),
     ],
 )
 def test_planted_shapes_fail_the_build(
@@ -675,7 +757,7 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 15 个" in first.stdout, first.stdout
+    assert "成员 19 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
     assert "已放行 app/static/favicon.svg" in first.stdout, first.stdout

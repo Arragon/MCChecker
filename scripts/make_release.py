@@ -8,12 +8,21 @@
 2. 产物要**验收后才落地**：先写临时文件，`verify_release()` 通过后改名到位，
    磁盘上不会留下「没过验收的包」。
 3. 外链判定是**默认拒绝**（M4-06 复审 Important 1 之后倒过来的）：产物里**每一个**成员文件
-   （Python、Markdown、shell、bat、前端全在内）出现的每一个带主机的绝对地址字面量都是违规，
+   （Python、Markdown、shell、bat、前端全在内）出现的每一个带主机的地址字面量都是违规，
    除非主机是本机回环，除非这条 `(路径, 地址)` 被单独写进 `INERT_URL_LITERALS`。
    旧实现按「引用位置」放行，等于给绕过留了语法课：变量里的基地址、srcset 的第二个候选、
    `meta http-equiv=refresh`、`.py` 里的 `urlopen("https://…")`、Markdown 里的 `<img src>`
    都能躲开，而它们照样能让一台没外网的机器发出请求。名单本身也会腐坏，所以
-   `find_stale_inert_entries()` 反向检查：条目对应的文件在产物里却找不到那条地址，一样失败。
+   `find_stale_inert_entries()` 反向检查两件事：条目对应的文件在产物里却找不到那条地址 ⇒ 失败；
+   条目对应的文件**已经不在产物里**（僵尸条目）⇒ 同样失败。
+   地址的读法照 WHATWG URL 解析而不是字符串形状（第二轮复审 Important 1/2）：特殊 scheme 里
+   `\` 等同 `/`、单斜杠也进权威段（`https:\evil.example.com\a.js` 的浏览器目标就是
+   `evil.example.com`），Markdown 的 `[文字](//host/x)` 与 `[ref]: //host/x` 也是引用位置。
+
+**这个闸门的已知边界**（字面量扫描的定义边界，不是漏放行；详见 `docs/know-how.md` 第 2 节）：
+运行期拼出来的地址（`fetch("https://" + host + "/ping")`）、UTF-16 编码的成员（解码只有
+UTF-8/latin-1）、以及「条目为什么惰性」所依赖的运行期假设（`run.py` 的 `http://%s:%d` 的主机
+来自运行期配置，构建期看不见）——这三类它抓不到，别把绿读成「产物绝对出不去网」。
 
 确定性：同一棵源树 → 同一成员集合、同一逐文件 sha256；zip 条目时间戳固定为 1980-01-01，
 唯一每次不同的是 `MANIFEST.json` 里的 `built_at_utc`（它记录的就是「这次构建」）。
@@ -92,9 +101,11 @@ LOCAL_HOSTS = frozenset(
 
 #: 逐条核对过、确认**不是网络目标**的绝对地址字面量（§16.7 唯一的例外出口）。
 #: 键是 `(成员相对路径, 地址字面量)`：换文件、换地址都要另开一条，目录级的放行不存在。
-#: 加一条之前必须读懂那一处为什么发不出请求；`_check_inert_entries()` 会反过来查——
-#: 名单里的路径一旦进了产物却找不到这条字面量，验收照样失败，所以这份名单不会
-#: 一边失效一边继续放行（也不会攒着「反正绿着」的僵尸条目）。
+#: 加一条之前必须读懂那一处为什么发不出请求；`find_stale_inert_entries()` 会反过来查两件事——
+#: 名单里的路径一旦进了产物却找不到这条字面量 ⇒ 失败；路径已经离开产物（僵尸条目）⇒ 也失败。
+#: 所以这份名单不会一边失效一边继续放行。名单记的是**源文件里的原样字节**：
+#: `_read_url` 只在取主机时按 WHATWG 归一化反斜杠，报出来的 token 仍是源文本那一段，
+#: 所以「登记的字面量」与「找不找得到」两件事始终对得上。
 INERT_URL_LITERALS: Tuple[Tuple[str, str, str], ...] = (
     # XML 命名空间标识符：SVG 规范要求的固定 URI，解析器拿它做名字，不会去取。
     ("app/static/favicon.svg", "http://www.w3.org/2000/svg", "SVG XML 命名空间"),
@@ -123,17 +134,35 @@ _FEATURE_HEADING_RE = re.compile(r"""^###\s+(C\d+)\s+(.+?)\s*$""", re.M)
 #: 带 scheme 的绝对地址前缀（不限 http/https：`ftp://`、`gopher://`、自定义 scheme 都能被
 #: 浏览器或 urllib 拿去发请求，所以一律当网络目标看待）。
 _SCHEME_PREFIX_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*://""")
+#: WHATWG 的「特殊 scheme」里**会联网的那五个**（http/https/ftp/ws/wss）：`scheme:` 后面哪怕只跟一个 `/` 或 `\`，
+#: 浏览器照样解析出主机并发请求。node 24 实测（本卡据此改的判据，不是猜的字符串形状）：
+#: `new URL("https:\\evil.example.com\\a.js").host === "evil.example.com"`、
+#: `new URL("https:/evil.example/x").host === "evil.example"`、
+#: `new URL("https:///evil.example/x").host === "evil.example"`。
+#: 旧扫描只认 `scheme://`，所以 Important 1 那条反斜杠写法整绿着出了门。
+#: `file:` **不在**这个集合里：`file:\d:\Project\x`、`C:\Users\mc\cfg.xml` 这类 Windows 路径
+#: 跟着归一化就会把 `d:` 当成主机，那是误杀本机路径而不是拦住外网。
+_NETWORK_SPECIAL_SCHEMES = frozenset({"http", "https", "ftp", "ws", "wss"})
+_SPECIAL_SCHEME_AUTHORITY_RE = re.compile(r"""(?i)\b(?:https?|wss?|ftp):(?=[/\\])""")
 #: 引号后面直接跟 `//`：写进字符串常量的协议相对地址（运行期拼一下就是 `http://host/…`）。
 #: 限定「紧跟引号」是为了不把 JS/Python 的行注释 `// 说明` 和整除 `a // b` 当成地址。
 _QUOTED_RELATIVE_RE = re.compile(r"""(?<=["'`])//""")
+#: Markdown 行内链接/图片的目标：`[说明](//host/x)`、`![截图](//host/a.png)`、
+#: `](<//host/a b>)`（CommonMark 允许左括号后有空白、可用 `<…>` 包住带空格的目的地）。
+#: Important 2 出事的写法：不带 scheme 又不在引号里，旧的两条捕网（scheme 前缀、引号后 `//`）
+#: 都看不见它，位置网又不认 `](`。这里按**真引用语法**精确补，不是「Markdown 里不许出现 `//`」。
+_MD_LINK_TARGET_RE = re.compile(r"""\]\(\s*<?(//)""")
+#: Markdown 引用式链接的定义行：`[ref]: //host/x "标题"`（行首最多三个空格是 CommonMark 的缩进上限）。
+_MD_REF_DEF_RE = re.compile(r"""^[ \t]{0,3}\[[^\]\n]+\][ \t]*:[ \t]*(//)""", re.M)
 #: srcset 的值是「地址 描述符」的逗号列表，必须逐候选切；整条属性一起匹配只会看见第一个候选。
 _SRCSET_ATTR_RE = re.compile(r"""\bsrcset\s*=\s*["']([^"']*)["']""", re.I)
 #: `<meta http-equiv="refresh" content="0;url=…">`：跳转地址藏在 content 值里面，不是属性值开头。
 _META_REFRESH_RE = re.compile(
     r"""\bcontent\s*=\s*["'][^"']*\burl\s*=\s*((?:https?:)?//[^"'\s>]+)""", re.I
 )
-#: 「引用位置」模式：比上面三条多抓到的只有**既不带 scheme、也不在引号里**的写法
-#: （如 CSS `url(//host/a.png)`）。它们是追加的捕网，不再是放行与否的判据——
+#: 「引用位置」模式：比 scheme 前缀、特殊 scheme 单斜杠、引号后 `//` 三条多抓到的只有
+#: **既不带 scheme、也不在引号里**的写法（如 CSS `url(//host/a.png)`；Markdown 的 `](//host)`
+#: 见上面那两条专用模式）。它们是追加的捕网，不再是放行与否的判据——
 #: M4-06 复审 Important 1 已经证明「按位置放行」可以靠换一个写法整体绕过。
 _REFERENCE_PATTERNS: Tuple[str, ...] = (
     # HTML 属性：src/href/data/... 的值直接是绝对地址或协议相对地址（srcset 见 `_SRCSET_ATTR_RE`）
@@ -271,17 +300,31 @@ def _as_text(data: bytes) -> str:
 
 
 def _host_of(url: str) -> str:
-    """地址的权威段（主机）；`data:`、`file:///…`、`http://` 这种没有主机的返回 ""。
+    """地址的权威段（主机）；`data:`、`file:///…`、`http://`、Windows 路径这种没有主机的返回 ""。
 
+    特殊 scheme（`_NETWORK_SPECIAL_SCHEMES`）按 WHATWG 的读法先归一化再取主机：`\` 等同 `/`，
+    且一个斜杠就进权威段，多余的斜杠跳过——`https:\evil.example.com\a.js` 的浏览器目标就是
+    `evil.example.com`（node 24 实测），所以这里必须跟着归一化，而不是按 `://` 的形状猜。
     方括号里是 IPv6 字面量，整段取回：按 `:` 切会把 `[2001:db8::1]` 切成空串，
     那等于给一个外部 IPv6 目标放行。
     """
     if url.startswith("//"):
         body = url[2:]
-    elif "://" in url:
-        body = url.split("://", 1)[1]
     else:
-        return ""
+        scheme, colon, rest = url.partition(":")
+        if not colon:
+            return ""
+        if rest.startswith("//"):
+            body = rest[2:]
+            if scheme.lower() in _NETWORK_SPECIAL_SCHEMES:
+                # WHATWG 的 special authority ignore slashes：权威段前多余的 `/` 与 `\` 一律跳过
+                # （node 24 实测 `https:///evil.example/x` 的 host 也是 evil.example）。
+                # `file:` 不在其中，所以 `file:///d:/Project/x` 仍按本机路径处理，不算主机。
+                body = body.lstrip("/\\")
+        elif scheme.lower() in _NETWORK_SPECIAL_SCHEMES:
+            body = rest.replace("\\", "/").lstrip("/")
+        else:
+            return ""
     for sep in ("?", "#", "/"):
         body = body.split(sep, 1)[0]
     if body.startswith("["):
@@ -292,17 +335,30 @@ def _host_of(url: str) -> str:
 
 
 def _read_url(text: str, start: int) -> str:
-    """从 `start` 起读一个地址 token。
+    """从 `start` 起读一个地址 token（**保留源文件里的原样字节**，归一化只在 `_host_of` 里做，
+    这样违规消息与惰性名单记的始终是文件里那一串）。
 
     权威段（主机）里的 tab/换行/回车，浏览器会在解析前删掉，所以这里跟着删——
     `src="http://\\n evil.example/x"` 是真发得出去的。路径段就不跟着删了：删下去只会把
     后面整行吞进「地址」，而「联系哪台机器」在权威段结束时就定死了。
+    特殊 scheme 的 `\` 与 `/` 一样结束权威段（WHATWG authority state），所以它也要置
+    `past_authority`，否则 `https:\evil.example.com\n/x` 会把整行吞进来。
     """
+    special = False
     if text.startswith("//", start):
         body = start + 2
     else:
         scheme = _SCHEME_PREFIX_RE.match(text, start)
-        body = scheme.end() if scheme is not None else start
+        if scheme is not None:
+            body = scheme.end()
+            special = text[start:body].partition(":")[0].lower() in _NETWORK_SPECIAL_SCHEMES
+        else:
+            authority = _SPECIAL_SCHEME_AUTHORITY_RE.match(text, start)
+            if authority is None:
+                body = start  # srcset 候选等：可能只是个相对路径，交给 `_host_of` 判掉
+            else:
+                body = authority.end()
+                special = True
     chars: List[str] = list(text[start:body])
     index = body
     past_authority = False
@@ -315,7 +371,7 @@ def _read_url(text: str, start: int) -> str:
             continue
         if ch in _URL_STOP_CHARS:
             break
-        if ch == "/":
+        if ch == "/" or (special and ch == "\\"):
             past_authority = True
         chars.append(ch)
         index += 1
@@ -338,16 +394,19 @@ def _srcset_candidate_starts(value: str, base: int) -> List[int]:
 def url_literals(text: str) -> List[Tuple[int, str]]:
     """文本里所有「可能成为网络目标」的地址字面量：[(行号, 字面量)]，去重后按位置排序。
 
-    四条来源取并集，**判定不看它出现在哪个语法位置**（Important 1 的教训：位置判据可以
+    几条来源取并集，**判定不看它出现在哪个语法位置**（Important 1 的教训：位置判据可以
     整体绕过——变量里的地址、srcset 的第二个候选、meta 刷新、Python/Markdown 里的地址
-    都不在旧的位置模式里）：scheme 前缀、引号后的协议相对地址、引用位置模式、srcset 候选。
-    没有主机的写法（`http://`、`file:///d:/…`、`data:`）不在这里，它们指不了任何机器。
+    都不在旧的位置模式里）：scheme 前缀、特殊 scheme 后跟单个 `/` 或 `\`、引号后的协议相对
+    地址、Markdown 链接/图片目标与引用式定义、引用位置模式、srcset 候选。
+    没有主机的写法（`http://`、`file:///d:/…`、`data:`、Windows 路径）不在这里，它们指不了任何机器。
     """
     starts: List[int] = []
-    for regex in (_SCHEME_PREFIX_RE, _QUOTED_RELATIVE_RE):
+    for regex in (_SCHEME_PREFIX_RE, _QUOTED_RELATIVE_RE, _SPECIAL_SCHEME_AUTHORITY_RE):
         for match in regex.finditer(text):
             starts.append(match.start())
-    for regex in (_META_REFRESH_RE,) + tuple(_COMPILED_REFERENCE_PATTERNS):
+    for regex in (_META_REFRESH_RE, _MD_LINK_TARGET_RE, _MD_REF_DEF_RE) + tuple(
+        _COMPILED_REFERENCE_PATTERNS
+    ):
         for match in regex.finditer(text):
             starts.append(match.start(1))
     for match in _SRCSET_ATTR_RE.finditer(text):
@@ -396,11 +455,21 @@ def scan_artifact(members: Dict[str, bytes]) -> Tuple[List[str], Dict[str, List[
 
 
 def find_stale_inert_entries(members: Dict[str, bytes]) -> List[str]:
-    """放行名单里已经找不到对应文本的条目——名单一旦和产物脱节，它就在替未知地址放行。"""
+    """放行名单与产物脱节的两种形态，都算失败。
+
+    ① 条目对应的文件在产物里却找不到那条地址——名单一旦和产物脱节，它就在替未知地址放行；
+    ② 条目对应的文件**已经不在产物里**（僵尸条目）。第二轮复审实测过旧行为的洞，本轮在同一
+    棵树上复核：把 `app/static/favicon.svg` 从源树删掉，改之前的代码构建 **exit 0 且产物落地**，
+    那条放行还在原地「放行」一个已经不存在的文件——「陈旧条目一定失败」的说法只有方向 ① 成立。
+    """
     stale: List[str] = []
     for rel, url, why in INERT_URL_LITERALS:
         data = members.get(rel)
         if data is None:
+            stale.append(
+                "%s 的放行条目 %s（%s）指向的文件已经不在产物里，这条放行要删掉"
+                % (rel, url, why)
+            )
             continue
         if url not in _as_text(data):
             stale.append("%s 的放行条目 %s（%s）在产物里已经找不到" % (rel, url, why))
