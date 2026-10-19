@@ -79,6 +79,9 @@ def add_admin(
     body: Optional[bytes],
 ) -> Response:
     # POST /api/v1/p/{pid}/admins  {"name"} -> 201 {item}；重名 409 FILE_EXISTS
+    # 姓名含 `/` 或 `\` -> 400 `detail.field="name"`（`people._validated_admin_name`）：
+    # 这一档必须挡在创建端，因为同一个人只能由 `DELETE /admins/{name}` 撤——名字进路径段就
+    # 必被 §16.8 的编码分隔符守卫拦成一只不带字段的 400，人是「加得进来、删不出去」。
     # service 返回的就是**响应载荷**（`{"item": …}`，与 `list_*` 的 `{"items": …}` 同一口径），
     # 这里只补状态码，不再拆一遍重新拼（§7.1：201 = 创建）。
     authz.authorize(ctx, "settings_write")

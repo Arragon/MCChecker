@@ -20,6 +20,11 @@
   之间跑完的另一次写会被这里的旧副本覆盖（§5.4 的丢失更新，`docs/know-how.md` 第 2 节那条
   「锁外读 + 锁内写」的同族错法），最坏结果是表里同时留下新旧两条或旧条目丢失。
 * 「删了 0 条」不递增修订号，也不写一个字节（与 `updates.delete_source` 同口径）。
+* 管理员姓名**不许含 `/` 或反斜杠**（M3-13 / INH-1898 裁定）：§7.9 的删除把姓名放进路径段，
+  而 §16.8 第 3 条的全站守卫会把编码过的分隔符（`api.seg()` 必然产出的 `%2F` / `%5C`）拦成
+  一只不带 `detail.field` 的 400。放行到创建端就是「加得进来、删不出去」——一个永远撤不掉的
+  管理员。两个入口对字符集必须达成一致，所以限制落在**创建端**（400 + `detail.field="name"`，
+  见 `_validated_admin_name`），删除端保持宽松好让 v1 存量行仍有出路。
 * IP 识别不是强认证（§11.1）：只适用于可信内网。这条口径必须出现在设置页文案里，
   见 `app/web/assets/js/views/settings.js` 的人员分段。
 """
@@ -46,8 +51,17 @@ MAX_NAME_LENGTH = 100
 IP_FIELD = "ip"
 NAME_FIELD = "name"
 
+#: 管理员姓名里会让「删除」这条出路消失的字符（M3-13 / INH-1898 裁定：在**写入端**拒）。
+#: §7.9 把删除设计成 `DELETE /admins/{name}`，姓名进路径段就必被前端 `api.seg()`
+#: （= `encodeURIComponent`）编成 `%2F` / `%5C`，撞上 §16.8 第 3 条的全站守卫
+#: `http.py::_reject_encoded_separators`——那只 400 **不带** `detail.field`，人撤不掉、
+#: 界面还只能报全局错误。放行到创建端就是「加得进来、删不出去」的权限面死路。
+#: 这一只集合与守卫的 `_ENCODED_UNSAFE` 同源（`%00` 由 §11.2 的控制字符那档挡住）。
+_UNMANAGEABLE_ADMIN_NAME_CHARS = ("/", "\\")
+
 _BAD_IP_MESSAGE = "请输入合法的 IPv4/IPv6 地址"
 _BAD_NAME_MESSAGE = "姓名需为 1-%d 个字符，且不含控制字符" % MAX_NAME_LENGTH
+_BAD_ADMIN_NAME_MESSAGE = "管理员姓名不能包含 / 或 \\（这样的人员无法从名单里删除）"
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +98,8 @@ def put_ip_mapping(pid: str, path_ip: Any, payload: Optional[Dict[str, Any]]) ->
     载荷 `{"ip","name"}`：`ip` 缺省取路径那一个（只想改姓名时不必重复 IP），与 mock 同口径；
     显式给了非法值（空串、`999.1.1.1`、`10.0.0.1/24`）就是 400 `detail.field="ip"`，
     **在碰磁盘之前**抛出，文件字节不变。
+    这里的 `name` 只走 §11.2 的通用姓名校验，**不**带管理员那条分隔符限制——它不进路径段，
+    删除永远按 IP 走，收紧它属于凭空加规则。
     """
     body = payload if isinstance(payload, dict) else {}
     old_ip = _validated_ip(path_ip)
@@ -134,8 +150,10 @@ def add_admin(pid: str, name: Any) -> Dict[str, Any]:
     409 的错误码用 `FILE_EXISTS`（§7.1 表里唯一映射 409 的「同名已存在」，与
     `updates.create_source` 同一只码），不是 mock 原先的 `INVALID_INPUT`（那只码按 §7.1
     只能配 400）；本卡同 PR 把 mock 一起改过来。
+
+    姓名走 `_validated_admin_name`（含分隔符 → 400 `detail.field="name"`，**在碰磁盘之前**）。
     """
-    clean = _validated_name(name)
+    clean = _validated_admin_name(name)
     stamp = _now()
     with storage.use_profile(pid), storage.profile_write(pid):
         rows = storage.load_admin_users()
@@ -152,6 +170,10 @@ def remove_admin(pid: str, name: Any) -> Dict[str, Any]:
     """`DELETE /p/{pid}/admins/{name}` → `{"removed": bool}`。
 
     移除后此人**下一次**审阅请求即 403（身份实时解析，§4.1），不需要任何「踢下线」动作。
+
+    这里**故意只用** `_validated_name`、不加 `_UNMANAGEABLE_ADMIN_NAME_CHARS` 那一条：
+    新数据已经被创建端挡住，而 v1 直接写文件的旧名单里可能已经有含 `/` 的行。把限制也加到
+    删除端只会让那些存量行在本层再多一道拒绝，**缩小**而不是打开出路。
     """
     clean = _validated_name(name)
     with storage.use_profile(pid), storage.profile_write(pid):
@@ -195,6 +217,23 @@ def _validated_name(raw: Any) -> str:
         raise AppError(INVALID_INPUT, _BAD_NAME_MESSAGE, field=NAME_FIELD)
     if any(ord(char) < 32 or ord(char) == 127 for char in text):
         raise AppError(INVALID_INPUT, _BAD_NAME_MESSAGE, field=NAME_FIELD)
+    return text
+
+
+def _validated_admin_name(raw: Any) -> str:
+    """管理员姓名 = §11.2 的通用姓名校验 + 「删除路径必须走得通」这一条。
+
+    两个入口（`POST /admins` 与 `DELETE /admins/{name}`）对字符集必须**一致**，否则就是
+    「加得进来、删不出去」；这条边界以前只由 §16.8 的守卫在删除端单方面挡，现在挪到创建端，
+    于是 400 带得上 `detail.field="name"`，界面能指到输入框。
+
+    **只作用于管理员名单**：`ip_mapping` 的 `name` 不进路径段（删除按 IP 寻址），给它加同样
+    的限制就是凭空收紧；而 IP 那一半被 `ipaddress` 挡死——`normalize_ip("10.0.0.1/24")` 是
+    空串，含 `/` 的 IP 从来写不进表，所以那张表到不了这个状态。
+    """
+    text = _validated_name(raw)
+    if any(char in text for char in _UNMANAGEABLE_ADMIN_NAME_CHARS):
+        raise AppError(INVALID_INPUT, _BAD_ADMIN_NAME_MESSAGE, field=NAME_FIELD)
     return text
 
 

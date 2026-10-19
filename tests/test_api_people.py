@@ -7,6 +7,8 @@
    ——这一条是本卡的安全底线，所以每个角色 × 每个写接口各打一遍真 HTTP 请求。
 2. **非法输入在碰磁盘之前**（§7.9 / §11.2）：`999.1.1.1`、`abc`、空串、`10.0.0.1/24` →
    400 `INVALID_INPUT` + `detail.field="ip"`；姓名空/超长/含控制字符 → 400 `field="name"`；
+   管理员姓名含 `/` 或反斜杠 → 同样 400 `field="name"`（M3-13 裁定：这类名字进得了 `POST` 就
+   永远进不了 `DELETE /admins/{name}` 的路径段，两个入口必须达成一致）；
    重名管理员 → 409 `FILE_EXISTS`（**不是** 400，§7.1 的状态码表）。三类的字节与计数都不变。
 3. **改 IP = 同一次机型锁里先删后写**（§7.9）：`PUT /ip-mapping/10.0.0.1` + body `10.0.0.2`
    ⇒ 旧行消失、新行存在、总数不变。`TestNoLostUpdate` 用「竞争方必须是另一个线程」的既定
@@ -74,6 +76,26 @@ BAD_IPS = ["999.1.1.1", "abc", "", "10.0.0.1/24", "10.1.1", "1.2.3.4.5", "010.0.
 BAD_PATH_IPS = ["999.1.1.1", "abc", "010.0.0.1", "%20%20"]
 #: §11.2：姓名 = 去空白后 1–100 字符、无控制字符。
 BAD_NAMES = ["", "   ", "a" * 101, "张\x01三", "李\n四", "王\x7f"]
+#: M3-13 裁定（INH-1898）：管理员姓名进的是 `DELETE /admins/{name}` 那个**路径段**，
+#: `api.seg()` 必然把 `/`、`\` 编成 `%2F` / `%5C`，撞上 §16.8 第 3 条的全站守卫，于是
+#: 「加得进来、删不出去」。两个入口必须达成一致 ⇒ 这一族在**创建端**就 400。
+SEPARATOR_ADMIN_NAMES = ["王/强", "王\\强", "/打头", "结尾/", "a/b\\c"]
+#: 必须**放行**的合法姓名，用来钉「别把限制收紧过头」：中文、含空格、含标点/`%`/`#`/`+`
+#: 都不在守卫那三只 token（`%2f` / `%5c` / `%00`）里，所以加得进来就一定删得出去。
+ROUNDTRIP_ADMIN_NAMES = [
+    "李四",
+    "王 五",
+    "  赵六  ",
+    "陈·七",
+    "O'Brien",
+    "Smith, John",
+    "部署者 #7",
+    "100%达标",
+    "值班+备份",
+]
+#: 含 `/` 的 IP：`ipaddress` 一律解析失败，所以这张表**到不了**「加得进来删不出去」的状态
+#: （见 `test_a_cidr_style_ip_with_a_separator_never_reaches_the_table`）。
+SEPARATOR_IP_KEYS = ["10.0.0.1/24", "fd00::/8", "192.168.1.1/"]
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +412,31 @@ class TestPutIpMapping:
         assert _state(seeded) == before, "非法 IP 必须一个字节都不动"
         assert _parts(seeded) == before_parts, "失败写不递增修订号"
 
+    @pytest.mark.parametrize("bad", SEPARATOR_IP_KEYS)
+    def test_a_cidr_style_ip_with_a_separator_never_reaches_the_table(self, seeded, bad):
+        """IP 那一侧**到不了**「加得进来、删不出去」，所以 M3-13 的分隔符限制不许套到它头上。
+
+        裁定要求「只在同一个不可管理状态真的可达时才收紧」。这里不可达：键是 IP，
+        `auth.normalize_ip` 用的是 `ipaddress.ip_address`，`/` 不是地址字符 ⇒ 含 `/` 的键在
+        `_validated_ip` 就变成 400 `detail.field="ip"`，一个字节都不写，表里永远不会有这样一行。
+        路径一律用干净的 IP，好让这一只 400 明确来自 **IP 校验**（带字段）而不是 §16.8 的守卫。
+        """
+        before = _state(seeded)
+        before_parts = _parts(seeded)
+        with make_server() as server:
+            status, _, payload = as_role(server, "deployer").json(
+                "PUT",
+                _url(seeded, "/ip-mapping/%s" % _seg("10.0.0.1")),
+                {"ip": bad, "name": "网段不是地址"},
+            )
+        assert status == 400, "%r 必须 400，实际 %s：%r" % (bad, status, payload)
+        assert payload["error"]["detail"]["field"] == "ip", (
+            "拦它的必须是 IP 校验（带字段），不是路径守卫那只无字段的 400"
+        )
+        assert _state(seeded) == before
+        assert _parts(seeded) == before_parts
+        assert all(bad not in row["ip"] for row in _rows(seeded)), "含分隔符的键根本进不了表"
+
     @pytest.mark.parametrize("bad", BAD_PATH_IPS)
     def test_invalid_ip_in_the_path_is_400_too(self, seeded, bad):
         """路径段里的 IP 也要过同一道校验：坏 IP 不该被当成「一个不存在的旧 IP」而静默新增。"""
@@ -492,6 +539,32 @@ class TestDeleteIpMapping:
         assert payload["error"]["detail"]["field"] == "ip"
         assert _state(seeded) == before
 
+    def test_an_ip_mapping_name_may_contain_a_separator_because_the_key_is_the_ip(self, seeded):
+        """`ip_mapping` 的 `name` **不进路径段**，所以 M3-13 的分隔符限制不碰它——而且要能管得动。
+
+        这条是「别凭空收紧」的判据：同一串 `王/强` 当管理员姓名要 400（删除按名字寻址），
+        当 IP 行的姓名则是 200，并且那一行照常按 IP 删得掉。两个入口各自的字符集只受
+        **自己那条删除路径**约束，不是抄来的统一禁令。
+        """
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            status, _, added = caller.json(
+                "PUT",
+                _url(seeded, "/ip-mapping/%s" % _seg("10.0.0.9")),
+                {"ip": "10.0.0.9", "name": "王/强"},
+            )
+            assert status == 200, added
+            assert added["item"]["name"] == "王/强"
+            assert any(row["name"] == "王/强" for row in _rows(seeded))
+
+            status, _, removed = caller.json(
+                "DELETE", _url(seeded, "/ip-mapping/%s" % _seg("10.0.0.9"))
+            )
+            assert status == 200 and removed["removed"] is True, (
+                "删除按 IP 寻址，姓名里的 `/` 一点也挡不住它"
+            )
+        assert all(row["name"] != "王/强" for row in _rows(seeded))
+
     def test_deleting_the_last_row_leaves_an_empty_list_not_a_missing_file(self, pid):
         _seed(pid, mapping=[{"ip": "10.0.0.1", "name": "张三", "updated_at": "2026-10-17 09:00:00"}])
         with make_server() as server:
@@ -556,36 +629,82 @@ class TestAdmins:
         assert status == 200 and payload == {"removed": True}
         assert _rows(seeded, admins=True) == []
 
-    def test_an_admin_name_containing_a_separator_can_be_added_but_not_removed(self, seeded):
-        """**已知边界，本用例只钉现状不改行为**（留给控制方裁定，见卡报告）。
+    @pytest.mark.parametrize("name", SEPARATOR_ADMIN_NAMES)
+    def test_admin_name_containing_a_separator_is_rejected_at_creation(self, seeded, name):
+        """含 `/` 或反斜杠的管理员姓名在**创建端**就 400，带 `detail.field="name"`，不写一个字节。
 
-        §11.2 给姓名的规则是「去空白后 1–100 字符、无控制字符」，里面**没有**禁止 `/`；
-        而 §7.9 把删除设计成 `DELETE /admins/{name}`（名字在路径段里）。两条一撞就出现
-        「加得进来、删不出去」：`POST {"name":"王/强"}` 是 201，但 `api.seg()` 必然把它
-        编成 `%2F`，于是被 §16.8 第 3 条的编码分隔符守卫（`http.py::_reject_encoded_separators`，
-        全站共用、早于路由）拦成 400 —— 而且那只 400 **不带 `detail.field`**，前端只能显示成
-        全局错误而不是字段错误。后果是**权限面**的：这个管理员此后无法撤回。
+        前身用例钉的是「加得进来、删不出去」这个现状；控制方裁定让两个入口达成一致（对照
+        INH-1912 的「可创建但不可管理」同一修法），所以**期望随之改变**，不是放宽断言。
 
-        为什么本卡不动它：要么收紧 §11.2 的姓名字符集（改的是**规范**，且 M3-14 的 `{group}`、
-        M3-15 的 `{tool}` 是同一条路同一个形状，该由一次裁定统一三张卡），要么把删除改成
-        查询串/请求体（改 §7.9 的接口形状 + mock + 前端三处）。两张卡各自偷偷收紧一半，
-        只会让三张设置卡的姓名字符集互不相同。
+        拦它的必须是姓名校验而不是路径守卫：守卫那只 400（`http.py::_reject_encoded_separators`，
+        全站共用、早于路由）**不带** `detail.field`，前端只能显示成全局错误。同一只 URL 的
+        `DELETE` 仍然撞守卫——这条留在判据里，因为它就是「必须挡在创建端」的理由本身。
+        """
+        before = _state(seeded)
+        before_parts = _parts(seeded)
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            status, _, payload = caller.json("POST", _url(seeded, "/admins"), {"name": name})
+            assert status == 400, payload
+            assert payload["error"]["code"] == "INVALID_INPUT"
+            assert payload["error"]["detail"]["field"] == "name", (
+                "必须是姓名校验的 400（带字段，界面才指得到输入框）"
+            )
+            blocked = caller.json("DELETE", _url(seeded, "/admins/%s" % _seg(name)))
+            assert blocked[0] == 400 and not blocked[2]["error"]["detail"].get("field"), (
+                "删除这一侧仍然只能撞到路径守卫（无字段）——正是创建端必须收紧的原因"
+            )
+        assert _state(seeded) == before, "拒绝必须发生在碰磁盘之前"
+        assert _parts(seeded) == before_parts, "失败的写不许递增修订号"
+        assert all(row["name"] != name for row in _rows(seeded, admins=True)), (
+            "名单里不该出现一个撤不掉的条目"
+        )
+
+    def test_the_removal_side_stays_permissive_for_a_legacy_row(self, seeded):
+        """限制**只加在创建端**：v1 是直接写文件的，存量名单里可能有含 `/` 的行。
+
+        把同一档校验也压到 `remove_admin` 上，只会让那些行在本层多一道拒绝（HTTP 层本来就到
+        不了它们），等于缩小出路而不是打开出路。这一条同时钉住「被拒的是不可管理的**入口组合**，
+        不是 `/` 这个字符本身」。
+        """
+        legacy = "王/强"
+        _seed(
+            seeded,
+            admins=[
+                {"name": "张三", "updated_at": "2026-10-17 09:00:00"},
+                {"name": legacy, "updated_at": "2026-10-17 09:00:00"},
+            ],
+        )
+        assert any(row["name"] == legacy for row in _rows(seeded, admins=True))
+        assert people.remove_admin(seeded, legacy) == {"removed": True}
+        assert all(row["name"] != legacy for row in _rows(seeded, admins=True))
+
+    @pytest.mark.parametrize("name", ROUNDTRIP_ADMIN_NAMES)
+    def test_a_legitimate_name_adds_and_still_deletes_through_the_same_pair(self, seeded, name):
+        """两个入口一致 = 也**不许多拦**：中文、带空格、带标点的姓名都要走完 POST→GET→DELETE。
+
+        这个项目已经被「两个入口对字符集各执一词」咬过一回（`docs/know-how.md` 第 2 节
+        文件名字符集那条，N1 / INH-1912：新建允许中文、改名永远 400），所以这一组既是放行
+        判据，也是新校验的**过宽**哨兵。删除用的是 `POST` 回显的名字（已去空白），把
+        「写入端存的写法」和「删除端寻址的写法」也钉成同一个。
         """
         with make_server() as server:
             caller = as_role(server, "deployer")
-            status, _, payload = caller.json("POST", _url(seeded, "/admins"), {"name": "王/强"})
-            assert status == 201, "§11.2 没禁止 `/`，所以写入端现在放行"
-            assert payload["item"]["name"] == "王/强"
-            assert any(row["name"] == "王/强" for row in _rows(seeded, admins=True))
+            status, _, added = caller.json("POST", _url(seeded, "/admins"), {"name": name})
+            assert status == 201, added
+            stored = added["item"]["name"]
+            assert any(row["name"] == stored for row in _rows(seeded, admins=True)), stored
 
-            blocked = caller.json("DELETE", _url(seeded, "/admins/%s" % _seg("王/强")))
-            assert blocked[0] == 400, blocked
-            assert "detail" in blocked[2]["error"] and not blocked[2]["error"]["detail"].get("field"), (
-                "拦它的必须是路径守卫（无字段），不是姓名校验"
+            status, _, listed = caller.json("GET", _url(seeded, "/admins"))
+            assert status == 200 and stored in [item["name"] for item in listed["items"]]
+
+            status, _, removed = caller.json(
+                "DELETE", _url(seeded, "/admins/%s" % _seg(stored))
             )
-            assert any(row["name"] == "王/强" for row in _rows(seeded, admins=True)), (
-                "这一条 400 撤不掉人——正是本用例要钉住的已知边界"
+            assert status == 200 and removed["removed"] is True, (
+                "加得进来就必须删得出去——这条 200 就是本次裁定的全部内容"
             )
+        assert all(row["name"] != stored for row in _rows(seeded, admins=True))
 
     def test_removing_an_absent_admin_reports_false_and_writes_nothing(self, seeded):
         before = _state(seeded)
