@@ -3,10 +3,11 @@
 上一版的「接线已生效」只有一次性手工实验（往真实 `data/` 写一个探针再删），
 仓库里没有任何东西保证它一直成立：把 `h3_data_guard` 改成 `print`，交付的
 纯函数用例仍然全绿。这里改用 pytest 自带的 `pytester` 夹具 +
-`runpytest_subprocess`，在**独立进程**里跑一次真正的 pytest 会话，四类差异
-（新建 / 删除 / 内容变更 / 改名）各自必须拿到「退出码 1 + 会话末 teardown ERROR +
-相对路径点名」，另加两条口径：干净树必须绿且公告「执法中」，数据根缺失必须绿但
-公告**未执法**（C1：「没数据可保护」和「保护完且干净」不许长成同一个观测结果）。
+`runpytest_subprocess`，在**独立进程**里跑一次真正的 pytest 会话，每一类差异
+（新建 / 删除 / 内容变更 / 改名，外加 B10.2 之后目录的新建与删除）各自必须拿到
+「退出码 1 + 会话末 teardown ERROR + 相对路径点名」，另加两条口径：干净树必须绿且
+公告「执法中」，数据根缺失必须绿但公告**未执法**（C1：「没数据可保护」和「保护完且
+干净」不许长成同一个观测结果）。
 
 硬约束：**全程不碰仓库真实的 `data/`**。内部会话的数据根是 `tmp_path` 下临时造的树，
 真实 conftest 的 `REAL_DATA_DIR` 只在**子进程**里被改指到那棵树，主进程一行不动。
@@ -37,6 +38,11 @@ BASELINE_FILES: Dict[str, str] = {
     "profiles/default/bindings.json": '{"v": 1}\n',
     "records/gone.json": '{"gone": true}\n',
 }
+
+#: 基线里**空的**目录：让「删掉一个目录」这一类破坏有东西可删。
+#: 硬写在这里而不是从 `BASELINE_FILES` 的父目录推导——推导出来的期望集会跟着种子一起变，
+#: 目录那半边快照一旦被写回「不进快照」，这条对照就自己失效了（同 docs/know-how.md 的白名单教训）。
+BASELINE_DIRS = ("archive",)
 
 #: 公告的判据子串（正文在 `data_guard.py`，这里只认前缀，别把文案钉死两遍）。
 NOT_ENFORCING_MARK = "H3 守卫未执法："
@@ -93,7 +99,10 @@ def test_{verb}() -> None:
 {body}
 '''
 
-#: 四类差异各自的破坏动作与判据：报告里的中文标签、必须被点名的相对路径。
+#: 各类差异各自的破坏动作与判据：报告里的中文标签、必须被点名的相对路径。
+#: `dir_created` / `dir_removed` 是 B10.2 新加的两条——它们**一个字节都不写**，
+#: 旧快照（只哈希常规文件）对此完全沉默，所以只有这两条能让「读路径长出空目录」
+#: 这类缺陷永远红得起来。
 CATEGORIES: Dict[str, Dict[str, str]] = {
     "created": {
         "body": '    with open(os.path.join(DATA_ROOT, "profiles", "default", "zz_created.tmp"), "w", encoding="utf-8") as fh:\n'
@@ -117,14 +126,29 @@ CATEGORIES: Dict[str, Dict[str, str]] = {
         "needle": "profiles/default/bindings.json",
     },
     "renamed": {
+        # 目标目录一律用基线里就存在的（`profiles/default/`）：新建目录本身现在是一类
+        # 破坏，借在这里就等于给这条用例塞进第二条差异，「只报改名」的形状就验不出来了。
         "body": '    src = os.path.join(DATA_ROOT, "records", "gone.json")\n'
-        '    dst = os.path.join(DATA_ROOT, "archive", "moved.json")\n'
-        "    os.makedirs(os.path.dirname(dst), exist_ok=True)  # 目录不进快照，只留改名这一条差异\n"
+        '    dst = os.path.join(DATA_ROOT, "profiles", "default", "moved.json")\n'
         "    os.replace(src, dst)\n"
         "    assert os.path.isfile(dst) and not os.path.exists(src)",
         "label": "改名 (renamed)",
         # 一整段「旧路径 -> 新路径」都要出现：只点名一边就等于没说清是谁动的手。
-        "needle": "records/gone.json -> archive/moved.json",
+        "needle": "records/gone.json -> profiles/default/moved.json",
+    },
+    "dir_created": {
+        # 与 B10.2 实测的形态一致：只读路径把 `cache/` 与 `cache/parse_tree/` 长出来，
+        # 一个文件都不写。
+        "body": '    os.makedirs(os.path.join(DATA_ROOT, "cache", "parse_tree"), exist_ok=True)\n'
+        "    assert os.path.isdir(os.path.join(DATA_ROOT, 'cache', 'parse_tree'))",
+        "label": "新建 (created)",
+        "needle": "cache/parse_tree/",
+    },
+    "dir_removed": {
+        "body": '    os.rmdir(os.path.join(DATA_ROOT, "archive"))\n'
+        "    assert not os.path.exists(os.path.join(DATA_ROOT, 'archive'))",
+        "label": "删除 (deleted)",
+        "needle": "archive/",
     },
 }
 
@@ -137,12 +161,18 @@ CREATE_FROM_NOTHING_BODY = (
 
 
 def _make_tree(root: str, files: Dict[str, str]) -> None:
-    """在 `root` 下按 `{相对路径: 内容}` 造一棵树（内部会话开始前的世界）。"""
+    """在 `root` 下按 `{相对路径: 内容}` 造一棵树，外加 `BASELINE_DIRS` 里的空目录。
+
+    这是内部会话开始前的世界。空目录要单独建：文件父目录长出来的那几个都是**非空**的，
+    「删掉一个目录」那一类破坏需要一个空的当靶子。
+    """
     for rel, content in files.items():
         path = os.path.join(root, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(content)
+    for name in BASELINE_DIRS:
+        os.makedirs(os.path.join(root, name), exist_ok=True)
 
 
 def _text(result) -> str:
@@ -208,13 +238,13 @@ def _run_guard_session(
 
 
 # ---------------------------------------------------------------------------
-# 四类差异：各自都要「退出码 1 + teardown ERROR + 点名相对路径」
+# 每一类差异：各自都要「退出码 1 + teardown ERROR + 点名相对路径」
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("category", sorted(CATEGORIES))
 def test_each_damage_category_fails_the_session(pytester, tmp_path, monkeypatch, category) -> None:
-    """执法路径的四类各证一遍：不是只证 `created`，也不是只证纯函数会分类。"""
+    """执法路径的每一类各证一遍：不是只证 `created`，也不是只证纯函数会分类。"""
     spec = CATEGORIES[category]
     result = _run_guard_session(pytester, monkeypatch, str(tmp_path / "h3_root"), body=spec["body"])
     out = _text(result)
@@ -240,7 +270,10 @@ def test_untouched_temp_root_is_green_and_announces_enforcing(pytester, tmp_path
     assert "ERROR at teardown" not in out, out
     assert ENFORCING_MARK in out, out
     assert NOT_ENFORCING_MARK not in out, out
+    # 文件数与目录数分开报（B10.2）：种子树是 2 个文件、4 个目录
+    # （`profiles/`、`profiles/default/`、`records/` 由文件父目录长出来，`archive/` 是空靶子）。
     assert "基线快照 {} 个文件".format(len(BASELINE_FILES)) in out, out
+    assert "基线快照 2 个文件、4 个目录" in out, out
 
 
 def test_non_enforcement_changes_the_summary_line_not_only_the_prose(
@@ -355,7 +388,7 @@ def test_missing_data_root_is_green_but_announces_non_enforcement(
 
 
 def test_root_appearing_from_nothing_still_fails(pytester, tmp_path, monkeypatch) -> None:
-    """未执法**不等于放行**：基线为空（根不存在）时长出来的文件照样点名判红。"""
+    """未执法**不等于放行**：基线为空（根不存在）时长出来的文件与目录照样点名判红。"""
     absent_root = str(tmp_path / "data_absent")
 
     result = _run_guard_session(
@@ -367,3 +400,6 @@ def test_root_appearing_from_nothing_still_fails(pytester, tmp_path, monkeypatch
     assert "ERROR at teardown" in out, out
     assert CATEGORIES["created"]["label"] in out, out
     assert "profiles/zz_born.tmp" in out, out
+    # 长出来的**目录**也要单独被点名：条目排序是 `profiles/` 在 `profiles/zz_born.tmp`
+    # 之前，所以这一句同时钉住「目录条目带结尾 `/`」和「它没被文件那条淹没」。
+    assert "profiles/, profiles/zz_born.tmp" in out, out

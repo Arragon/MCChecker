@@ -10,14 +10,25 @@
   历史上 `data` / `./data` / `data/` 三种拼法各自算出不同的聚合哈希，抄数字的
   人无从发现漂移；归一化让同一棵树无论根路径怎么写都得到同一份快照。
 - `.mcchecker.lock` 是运行时产物、不是数据，**数据根一级**的那个不计入快照（深层同名
-  文件照算，理由见 `EXCLUDED_ROOT_FILENAMES`）；空目录的增删也不算数据变化
-  （只哈希常规文件内容）。
+  文件照算，理由见 `EXCLUDED_ROOT_FILENAMES`）。
+- **目录集合也在快照里**（B10.2）：键是目录的归一化相对路径**再加一个结尾 `/`**，值固定
+  是 `DIRECTORY_ENTRY_MARKER`。加这一条是因为「只读接口不改数据目录」这句话原先是假的
+  ——实测 `GET /files` 会在真实数据根里长出 `archive/`、`records/`、`cache/`、
+  `cache/parse_tree/`，而只哈希常规文件的 tripwire 对空目录完全看不见，于是一类安全
+  主张无法验证。结尾 `/` 沿用 `SnapshotStats.unhashed` 早就在用的标记，不新开差异类别；
+  符号链接（无论指向文件还是目录）一律不进快照，与「不跟随符号链接、非常规文件不哈希
+  内容」同口径。
 - 守卫只在**会话两端各拍一次快照**，因此「绿」的含义是末态一致，不是期间无人写入
   （两个已证明的盲区见 `GREEN_SEMANTICS_NOTE`，全部来历见 `docs/know-how.md`）。
 
 看不见的东西（刻意口径，别当 bug 修）：只比内容哈希，**权限位、mtime、属主的单独
 变化一律不可见**——H3 保护的是数据字节；一次 `chmod`/`touch` 不会让守卫红，
 一次「改权限同时改内容」只会以内容变更的名义红。
+
+反过来，目录进快照之后**响动会变多**：这台机器上 `run.py` 的服务若在会话中途建目录
+（最典型是 `data/temporary/<token>/`，一次上传一个），守卫会红。那不是机制坏了，处置
+仍然是 `RUN_PROCESS_TRIAGE` 那一句（先停服务再重跑，能稳定复现才说明是测试写穿了数据
+根），别为了让它安静就把目录再退回快照之外。
 
 两条会话级开关/通道（INH-1914 复审 I1 + 三项 Minor）：
 - **警告通道**：`session_notice_warnings()` 把「本轮没有执法」和「有字节根本没比较」
@@ -39,12 +50,34 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Type
 
-#: 快照 = {归一化相对路径: 内容 sha256 十六进制}。
+#: 快照 = {归一化相对路径: 内容 sha256 十六进制}；目录条目见 `DIRECTORY_ENTRY_MARKER`。
 Snapshot = Dict[str, str]
 
+#: 目录进快照时充当「值」的固定标记。它刻意不是 64 位十六进制，所以不可能与某个
+#: sha256 撞上（`tests/test_data_guard.py::_assert_key_shape` 就按这两类分别认）。
+#: 目录条目本身长这样：`"archive/"` —— 归一化相对路径 + 结尾 `/`。
+#: 为什么用「键的结尾斜杠」而不是新开一个差异类别：类别键只有手写的一份
+#: （`DIFF_LABELS`），新建/删除本来就要点名目录，加第五类只会让报告与判定三处各多写一遍。
+DIRECTORY_ENTRY_MARKER = "dir"
+
+
+def is_directory_entry(key: str) -> bool:
+    """快照的键是不是目录条目（结尾 `/`；口径见 `DIRECTORY_ENTRY_MARKER`）。"""
+    return key.endswith("/")
+
+
+def split_entries(snapshot: Optional[Snapshot]) -> Tuple[List[str], List[str]]:
+    """把快照拆成 `(文件键, 目录键)` 两个有序列表。公告与比对都从这里取，不各写一遍。"""
+    items = sorted((snapshot or {}).items())
+    files = [key for key, _value in items if not is_directory_entry(key)]
+    dirs = [key for key, _value in items if is_directory_entry(key)]
+    return files, dirs
+
+
 #: 差异类别**唯一手写的一份**：键就是 `compare_snapshots` 的键，值是给人看的名。
-#: 每类元素形状：created/deleted 是路径；content_changed 是 (路径, 旧哈希, 新哈希)；
-#: renamed 是 (旧路径, 新路径, 哈希)。
+#: 每类元素形状：created/deleted 是路径（目录条目带结尾 `/`，见 `DIRECTORY_ENTRY_MARKER`）；
+#: content_changed 是 (路径, 旧哈希, 新哈希)；renamed 是 (旧路径, 新路径, 哈希)。
+#: 目录只走 created/deleted 两类：它没有内容哈希，不参与改名配对（见 `compare_snapshots`）。
 DIFF_LABELS: Dict[str, str] = {
     "created": "新建 (created)",
     "deleted": "删除 (deleted)",
@@ -153,7 +186,13 @@ RUN_PROCESS_TRIAGE = (
 
 
 def is_enforcing(baseline: Optional[Snapshot]) -> bool:
-    """守卫这次到底有没有东西可比。空快照（根不存在/树里没文件）就是没有。"""
+    """守卫这次到底有没有东西可比。空快照就是没有。
+
+    「空」的含义随快照口径一起变了（B10.2）：目录也进快照之后，**只有**根不存在、
+    或根存在但里面一个文件一个目录都没有，才是空快照。一棵只装着空目录的树现在算
+    「有东西可比」——它确实可比，而且公告那行会把「几个文件几个目录」分开说，
+    不会把它读成「有 N 个文件」。
+    """
     return bool(baseline)
 
 
@@ -196,10 +235,14 @@ def session_notice_lines(
             cost_segment = "，本会话两轮快照共 {} 字节、耗时 {:.2f} 秒".format(
                 cost.total_bytes, cost.seconds
             )
+        # 文件数与目录数分开报（B10.2）：目录进快照之后 `len(baseline)` 不再是文件数，
+        # 把它当文件数印出去就是撒谎——一树空目录能报成「N 个文件」。
+        files, dirs = split_entries(baseline)
+        dir_segment = "、{} 个目录".format(len(dirs)) if dirs else ""
         lines = [
-            "H3 守卫执法中：真实 data/ 基线快照 {} 个文件，会话末逐文件比对{}；"
+            "H3 守卫执法中：真实 data/ 基线快照 {} 个文件{}，会话末逐文件与目录比对{}；"
             "绿=首末快照一致，不证明期间无人写入（盲区见 docs/know-how.md）".format(
-                len(baseline), cost_segment
+                len(files), dir_segment, cost_segment
             )
         ]
     return lines + unhashed_notice_lines(cost)
@@ -224,15 +267,21 @@ def session_notice_warnings(
 
 
 def snapshot_data_tree(root: str, stats: Optional[SnapshotStats] = None) -> Snapshot:
-    """对 `root` 下每个常规文件做 {归一化相对路径: sha256} 快照。
+    """对 `root` 做 {归一化相对路径: 内容 sha256} 快照，常规文件与**目录**都进。
+
+    文件键 → 64 位十六进制 sha256；目录键 → 结尾带 `/` 且值为 `DIRECTORY_ENTRY_MARKER`
+    （为什么这么表示、以及数据根一级 `.mcchecker.lock` 的豁免，见模块 docstring）。
 
     同一棵树无论 `root` 写成 `data`、`./data` 还是 `data/`，返回值必须一致
-    （键已归一化）。目录不进快照；`root` 不存在时返回空快照——会话结束仍会
+    （键已归一化）。`root` 不存在时返回空快照——会话结束仍会
     比对，凭空出现一棵树同样是变化。快照为空**不代表安全**，只代表没东西可保护，
     执法状态由 `is_enforcing` / `session_notice_lines` 明确说出口。
 
+    快照期间目录条目本身不会失败：一个读不进去的子目录照样出现在父目录的列表里
+    （列它只需要读父目录），于是它的键进快照、它**里面**的东西走 `unhashed` 点名。
     `stats` 传进来就顺便记账：哈希过的文件数、字节数、耗时，以及**没读到手**的条目
-    （见 `SnapshotStats`）。单个文件读失败绝不许裸抛 traceback 出到 teardown——那会把
+    （见 `SnapshotStats`；目录不计入 `files`/`total_bytes`，那两项是哈希的价格）。
+    单个文件读失败绝不许裸抛 traceback 出到 teardown——那会把
     「这台机器的 data/ 正在被 churn / 权限不对」渲染成「守卫自己炸了」，反而更没法信；
     但也绝不许当成「没变化」。分类口径见函数体里那三段注释。
     """
@@ -256,8 +305,18 @@ def snapshot_data_tree(root: str, stats: Optional[SnapshotStats] = None) -> Snap
                 )
             )
 
-        for dirpath, _dirnames, filenames in os.walk(base, onerror=_walk_error):
+        for dirpath, dirnames, filenames in os.walk(base, onerror=_walk_error):
             at_root = dirpath == base
+            # 目录先进快照，再处理文件：空目录的增删同样是「数据根被改过」（B10.2）。
+            # 数据根自己不算条目（它是比对的范围，不是范围里的东西）；符号链接目录不算
+            # 目录条目——os.walk 默认也不进去，进了快照反而是一半可见一半隐形。
+            for name in sorted(dirnames):
+                path = os.path.join(dirpath, name)
+                if os.path.islink(path) or not os.path.isdir(path):
+                    continue
+                snapshot[os.path.relpath(path, base).replace(os.sep, "/") + "/"] = (
+                    DIRECTORY_ENTRY_MARKER
+                )
             for name in sorted(filenames):
                 path = os.path.join(dirpath, name)
                 # 磁盘锁只豁免根一级（理由见 EXCLUDED_ROOT_FILENAMES）。
@@ -305,6 +364,11 @@ def snapshot_data_tree(root: str, stats: Optional[SnapshotStats] = None) -> Snap
 def compare_snapshots(before: Snapshot, after: Snapshot) -> DiffResult:
     """两份快照进，分类差异出；完全一致时四类都是空列表。
 
+    目录条目（结尾 `/`，见 `DIRECTORY_ENTRY_MARKER`）只走 新建/删除 两类：它没有内容
+    哈希，值恒等于那个标记，混进改名配对就会把「删掉一个空目录 + 建了另一个空目录」
+    读成一次改名。文件与目录就此分开算，两类路径最后合到同一个 created/deleted 列表里
+    （结尾 `/` 就是区分），不新开差异类别。
+
     改名判定：同一 sha256 同时出现在「只在 before」与「只在 after」的路径集合里。
     一个哈希对应多对候选时按路径字典序一一配对，配不上的残余仍如实报告为
     新建/删除——宁可多报，不漏报。
@@ -313,10 +377,17 @@ def compare_snapshots(before: Snapshot, after: Snapshot) -> DiffResult:
     sha256**，所以「删掉一个空文件 + 新建另一个空文件」会被归成 `改名` 而不是
     `删除 + 新建`。它照样红，只是别按「谁改名了」去查，先看是不是两个空文件。
     """
-    created_paths = sorted(p for p in after if p not in before)
-    deleted_paths = sorted(p for p in before if p not in after)
+    before_dirs = {p for p in before if is_directory_entry(p)}
+    after_dirs = {p for p in after if is_directory_entry(p)}
+    file_before = {p: sha for p, sha in before.items() if not is_directory_entry(p)}
+    file_after = {p: sha for p, sha in after.items() if not is_directory_entry(p)}
+
+    created_paths = sorted(p for p in file_after if p not in file_before)
+    deleted_paths = sorted(p for p in file_before if p not in file_after)
     content_changed = sorted(
-        (p, before[p], after[p]) for p in after if p in before and before[p] != after[p]
+        (p, file_before[p], file_after[p])
+        for p in file_after
+        if p in file_before and file_before[p] != file_after[p]
     )
 
     deleted_by_sha: Dict[str, List[str]] = {}
@@ -335,9 +406,11 @@ def compare_snapshots(before: Snapshot, after: Snapshot) -> DiffResult:
     paired_old = {old for old, _new, _sha in renamed}
     paired_new = {new for _old, new, _sha in renamed}
 
+    dir_created = sorted(after_dirs - before_dirs)
+    dir_deleted = sorted(before_dirs - after_dirs)
     found: DiffResult = {
-        "created": [p for p in created_paths if p not in paired_new],
-        "deleted": [p for p in deleted_paths if p not in paired_old],
+        "created": sorted([p for p in created_paths if p not in paired_new] + dir_created),
+        "deleted": sorted([p for p in deleted_paths if p not in paired_old] + dir_deleted),
         "content_changed": content_changed,
         "renamed": renamed,
     }
@@ -360,11 +433,18 @@ def _describe_entry(category: str, item: Any) -> str:
 
 
 def format_diff_report(diffs: DiffResult) -> str:
-    """把分类差异排成失败消息——必须逐文件点名，不许只报一句「哈希不匹配」。"""
+    """把分类差异排成失败消息——必须逐文件点名，不许只报一句「哈希不匹配」。
+
+    目录条目在 新建/删除 里长这样：`archive/`（结尾一个 `/`，见 `DIRECTORY_ENTRY_MARKER`）。
+    这一条要写在文案里，因为 B10.2 实测到的形状恰好是「新建 4 项，4 项全是**空目录**，
+    一个字节都没碰」——只看文件哈希的报告会把它读成「没变化」，读了文案的人才会知道
+    自己正在看的是目录被改动，不是数据被写坏。
+    """
     lines = [
         "H3 数据守卫：仓库真实的 data/ 树在本次 pytest 会话期间发生了变化。"
         "测试一律不许碰真实数据根（永久对照：`tests/test_data_guard_enforcement.py` "
-        "在独立进程里对临时数据根各造一次四类破坏，本消息一律红）。"
+        "在独立进程里对临时数据根各造一次破坏——含目录的新建与删除——本消息一律红）。"
+        "结尾带 `/` 的条目是目录。"
     ]
     for category in DIFF_CATEGORIES:
         items = diffs[category]
