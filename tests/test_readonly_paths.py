@@ -41,8 +41,9 @@
 `list_record_versions` / `list_archived_versions` / `load_archived_file` 只挂在旧
 NiceGUI 页面链路（`app/pages/**`，M4-07 要删的那批）上。`app/server/**` 的读接口
 一律绕开了这两个创建型 helper——`app/services/history.py` 与
-`app/services/documents.py` 里各有一句「读列表不该在数据目录里留下新目录」的注释
-和 `isdir` 判据，那是本仓库早就认下的口径，本文件只是把它第一次变成可判红的证据。
+`app/services/documents.py` 里各带一句「读列表不创建目录」的注释加 `isdir` 判据
+（两处原话措辞略不同：`history.py:83` 与 `documents.py::_count_files`），那是本仓库早就
+认下的口径，本文件只是把它第一次变成可判红的证据。
 同一条创建在**写**请求上仍然会发生（实测、非本文件断言对象）：`DELETE /api/v1/p/{pid}/files/{name}`
 会经 `recovery._invalidate()` → `parse_cache` → `storage._ensure_dirs()`（`app/core/parse_cache.py:15`）
 把缺失的骨架目录重新长出来——一棵只剩 `configs/` 的根上补出了 `archive/`、`records/`、`cache/`、
