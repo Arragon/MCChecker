@@ -1176,10 +1176,32 @@
    *   本卡按后端对齐。
    * - 非法 IP / 非法姓名一律 400 并带 `detail.field`（`ip` / `name`，与 `views/settings.js`
    *   的字段名同一契约，§7.1）；失败写不 bump（全局约束 / 决策 16）。
+   * - 管理员姓名另有一档「删除路径走不通」，**只压创建端**（下面 `BAD_ADMIN_NAME_MESSAGE`
+   *   那一整段注释就是它，与 `people._validated_admin_name` 同一裁定）。
    * - 「删了 0 条」不 bump、不改数组。
    */
   var BAD_IP_MESSAGE = "请输入合法的 IPv4/IPv6 地址";
   var BAD_NAME_MESSAGE = "姓名需为 1-100 个字符，且不含控制字符";
+  var BAD_ADMIN_NAME_MESSAGE =
+    "管理员姓名不能包含 / 、\\ 或 %2f / %5c / %00 这类编码分隔符（这样的人员无法从名单里删除）";
+  /* 「加得进来、删不出去」那一条死路（M3-13 / INH-1898 两轮裁定，与后端
+   * `people._UNMANAGEABLE_PATH_CHARS` / `_UNMANAGEABLE_PATH_TOKENS` / `_BAD_ADMIN_NAME_MESSAGE`
+   * 逐字同源；比对由 `tests/test_api_people.py::TestMockPeopleContract` 逐值执法，它**执行**
+   * 本文件而不是 grep 本文件）：管理员姓名进的是 `DELETE /admins/{name}` 那个路径段，
+   * `api.seg()` = `encodeURIComponent`，于是
+   * ① 含 `/`、`\\` ⇒ 编成 `%2F` / `%5C`，撞后端 §16.8 第 3 条的全站守卫；
+   * ② 含**字面** `%2f` / `%5c` / `%00`（任意大小写）⇒ `%` 先被编成 `%25` 躲过 raw 那一份，
+   *    解码后又重新长出这三只 token，而守卫把 raw 与解码后两份一起看，照样撞。
+   * 两种都只能得到一只**不带 `detail.field`** 的 400 ⇒ 人撤不掉、界面也报不成字段错误。
+   * mock 里没有路径守卫（模板模式不发真 HTTP），所以这一档只能由创建端自己复现，否则
+   * 「模板里加得进来、真后端拒」就是 mock 发明了后端没有的行为（R19）。
+   * **只用于 `POST /admins`**：`DELETE /admins/{name}` 与 `ip_mapping` 的 `name` 照旧宽松——
+   * 后端也是同一份不对称（v1 直接写文件留下的存量行必须有出路），别在这里「统一」掉它。
+   * IP 键那一档（后端 `_validated_ip_key`）在本文件里打不到：`normalizeIp` 拒绝**一切**带 `%`
+   * 的写法（know-how 第 2 节裁定的「mock 只比后端严、不补 IPv6 scope 语法」），所以带编码
+   * 分隔符的键在这边更早一步就是 400 `field="ip"`，判向相同、理由更粗，不另加死代码。 */
+  var UNMANAGEABLE_PATH_CHARS = ["/", "\\"];
+  var UNMANAGEABLE_PATH_TOKENS = ["%2f", "%5c", "%00"];
 
   function octets(text) {
     var parts = String(text).split(".");
@@ -1282,6 +1304,19 @@
     return !!name && name.length <= 100 && !/[\x00-\x1f\x7f]/.test(name);
   }
 
+  /** 与后端 `people._unmanageable_path_segment` 同口径：返回第一串让删除路径走不通的子串。 */
+  function unmanageablePathSegment(text) {
+    var i;
+    for (i = 0; i < UNMANAGEABLE_PATH_CHARS.length; i++) {
+      if (text.indexOf(UNMANAGEABLE_PATH_CHARS[i]) >= 0) return UNMANAGEABLE_PATH_CHARS[i];
+    }
+    var lowered = text.toLowerCase();
+    for (i = 0; i < UNMANAGEABLE_PATH_TOKENS.length; i++) {
+      if (lowered.indexOf(UNMANAGEABLE_PATH_TOKENS[i]) >= 0) return UNMANAGEABLE_PATH_TOKENS[i];
+    }
+    return null;
+  }
+
   route("GET", "/p/{pid}/ip-mapping", function (a, req, P) {
     return ok({ items: clone(P.people) });
   });
@@ -1332,6 +1367,9 @@
     if (deny) return deny;
     var name = String(req.body.name === null || req.body.name === undefined ? "" : req.body.name).trim();
     if (!validPersonName(name)) return fail(400, "INVALID_INPUT", BAD_NAME_MESSAGE, { field: "name" });
+    // 顺序与后端 `_validated_admin_name` 一致：先 §11.2 的通用档（空 / 超长 / 控制字符报
+    // `BAD_NAME_MESSAGE`），再「删除路径走不通」这一档报 `BAD_ADMIN_NAME_MESSAGE`。
+    if (unmanageablePathSegment(name)) return fail(400, "INVALID_INPUT", BAD_ADMIN_NAME_MESSAGE, { field: "name" });
     // 重名 409 用 `FILE_EXISTS`：§7.1 把 `INVALID_INPUT` 定成 400，409 的「同名已存在」是这一只
     // （与后端 `people.add_admin` 和上面 `POST /sources` 同码）。
     if (P.admins.some(function (x) { return String(x.name || "").trim() === name; })) {
@@ -1347,6 +1385,11 @@
     var deny = needDeployer(id);
     if (deny) return deny;
     var name = String(a.name || "").trim();
+    // **故意只用** `validPersonName`（不含上面那一档）：后端 `people.remove_admin` 就是这样
+    // 不对称的——限制只压创建端，删除端留给出存量行（v1 直接写文件的名单里可能有含 `/` 或
+    // 字面 `%2f` 的人）。mock 里 `dispatch` 已经 `decodeURIComponent` 过路径段，所以这里真的
+    // 撤得掉；后端那一侧由 §16.8 的守卫拦着，这是「存量行只能靠服务层/运维出路」的既成事实，
+    // 不是本文件要修的东西。别把它「统一」成创建端那一档。
     if (!validPersonName(name)) return fail(400, "INVALID_INPUT", BAD_NAME_MESSAGE, { field: "name" });
     var before = P.admins.length;
     P.admins = P.admins.filter(function (x) { return String(x.name || "").trim() !== name; });

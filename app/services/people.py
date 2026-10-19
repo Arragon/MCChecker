@@ -20,11 +20,14 @@
   之间跑完的另一次写会被这里的旧副本覆盖（§5.4 的丢失更新，`docs/know-how.md` 第 2 节那条
   「锁外读 + 锁内写」的同族错法），最坏结果是表里同时留下新旧两条或旧条目丢失。
 * 「删了 0 条」不递增修订号，也不写一个字节（与 `updates.delete_source` 同口径）。
-* 管理员姓名**不许含 `/` 或反斜杠**（M3-13 / INH-1898 裁定）：§7.9 的删除把姓名放进路径段，
-  而 §16.8 第 3 条的全站守卫会把编码过的分隔符（`api.seg()` 必然产出的 `%2F` / `%5C`）拦成
-  一只不带 `detail.field` 的 400。放行到创建端就是「加得进来、删不出去」——一个永远撤不掉的
-  管理员。两个入口对字符集必须达成一致，所以限制落在**创建端**（400 + `detail.field="name"`，
-  见 `_validated_admin_name`），删除端保持宽松好让 v1 存量行仍有出路。
+* 管理员姓名与 IP 键**都不许含让「删除路径」走不通的东西**（M3-13 / INH-1898 两轮裁定）：
+  §7.9 的删除把姓名 / IP 放进路径段，而 §16.8 第 3 条的全站守卫会把编码过的分隔符拦成一只
+  不带 `detail.field` 的 400——`api.seg()`（= `encodeURIComponent`）必然产出的 `%2F` / `%5C`
+  是第一层，值里**字面**写着 `%2f` / `%5c` / `%00` 的是第二层（`%` 先被编成 `%25` 躲过 raw
+  检查，解码后又重新长出这三只 token，而守卫把 raw 与解码后两份一起看）。放行到创建端就是
+  「加得进来、删不出去」——一个永远撤不掉的权限条目。两个入口必须达成一致，所以限制落在
+  **创建端**（400 + `detail.field`，见 `_validated_admin_name` / `_validated_ip_key`），
+  删除端**故意**保持宽松，好让 v1 直接写文件留下的存量行仍有出路（见那两条 docstring）。
 * IP 识别不是强认证（§11.1）：只适用于可信内网。这条口径必须出现在设置页文案里，
   见 `app/web/assets/js/views/settings.js` 的人员分段。
 """
@@ -51,17 +54,37 @@ MAX_NAME_LENGTH = 100
 IP_FIELD = "ip"
 NAME_FIELD = "name"
 
-#: 管理员姓名里会让「删除」这条出路消失的字符（M3-13 / INH-1898 裁定：在**写入端**拒）。
-#: §7.9 把删除设计成 `DELETE /admins/{name}`，姓名进路径段就必被前端 `api.seg()`
-#: （= `encodeURIComponent`）编成 `%2F` / `%5C`，撞上 §16.8 第 3 条的全站守卫
-#: `http.py::_reject_encoded_separators`——那只 400 **不带** `detail.field`，人撤不掉、
-#: 界面还只能报全局错误。放行到创建端就是「加得进来、删不出去」的权限面死路。
-#: 这一只集合与守卫的 `_ENCODED_UNSAFE` 同源（`%00` 由 §11.2 的控制字符那档挡住）。
-_UNMANAGEABLE_ADMIN_NAME_CHARS = ("/", "\\")
+#: 值进 URL 路径段之后会让「删除」这条出路消失的**字面字符**（M3-13 / INH-1898 第一轮裁定：
+#: 在写入端拒）。`DELETE /admins/{name}` 与 `DELETE /ip-mapping/{ip}` 都要把值塞进路径段，
+#: `api.seg()`（= `encodeURIComponent`）必然把它们编成 `%2F` / `%5C`，撞上 §16.8 第 3 条的
+#: 全站守卫 `http.py::_reject_encoded_separators`——那只 400 **不带** `detail.field`，
+#: 人撤不掉、界面还只能报全局错误。放行到创建端就是「加得进来、删不出去」的权限面死路。
+_UNMANAGEABLE_PATH_CHARS = ("/", "\\")
+
+#: 同一条死路的**第二层**（M3-13 / INH-1898 第二轮裁定）：值里**字面**写着这三只 token（大小写
+#: 任一）。这一族咬人的方式和上面那条不一样——`api.seg()` 会先把 `%` 自己编成 `%25`，于是
+#: `王%2f强` 的路径段是 `王%252f强`，躲过守卫的 raw 那一份，却在**解码后**那一份里重新长出
+#: `%2f`；而 `_reject_encoded_separators` 把两份一起看（`haystacks`），结果还是删不出去。
+#: 这三只 token 与守卫的 `_ENCODED_UNSAFE` 同源；此处手抄而不 import，是因为 §3.3 不许
+#: `services` 反向依赖 `server` 层。两枚常量不许各走各的，由
+#: `tests/test_api_people.py::TestUnmanageableValue::test_the_creation_rule_tracks_the_guard_token_list`
+#: 逐值核住（真打 HTTP：被这条拒掉的每一串，删除端确实 400 且不带字段）。
+#: 注意真正的 NUL 字符到不了这里——§11.2 的控制字符那一档先拒；这三只 token 挡的是**字面写法**。
+_UNMANAGEABLE_PATH_TOKENS = ("%2f", "%5c", "%00")
 
 _BAD_IP_MESSAGE = "请输入合法的 IPv4/IPv6 地址"
 _BAD_NAME_MESSAGE = "姓名需为 1-%d 个字符，且不含控制字符" % MAX_NAME_LENGTH
-_BAD_ADMIN_NAME_MESSAGE = "管理员姓名不能包含 / 或 \\（这样的人员无法从名单里删除）"
+#: 文案与 mock 的 `BAD_ADMIN_NAME_MESSAGE`（`app/web/assets/js/mock/mock-api.js`）**逐字一致**，
+#: 由 `TestMockPeopleContract` 逐值比对——模板模式许出一条后端会拒的姓名，就是「mock 发明了
+#: 后端没有的行为」（R19）。IP 那一档不需要一份对应文案：mock 的 `normalizeIp` 拒绝**一切**带
+#: `%` 的写法（know-how 第 2 节已裁定「mock 只比后端严、不补 IPv6 scope 语法」），所以在 mock
+#: 里这一族早就在 `_BAD_IP_MESSAGE` 那一步返回了，同向、更早。
+_BAD_ADMIN_NAME_MESSAGE = (
+    "管理员姓名不能包含 / 、\\ 或 %2f / %5c / %00 这类编码分隔符（这样的人员无法从名单里删除）"
+)
+_UNMANAGEABLE_IP_MESSAGE = (
+    "IP 地址不能包含 / 、\\ 或 %2f / %5c / %00 这类编码分隔符（这样的条目无法从对应表里删除）"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,12 +121,15 @@ def put_ip_mapping(pid: str, path_ip: Any, payload: Optional[Dict[str, Any]]) ->
     载荷 `{"ip","name"}`：`ip` 缺省取路径那一个（只想改姓名时不必重复 IP），与 mock 同口径；
     显式给了非法值（空串、`999.1.1.1`、`10.0.0.1/24`）就是 400 `detail.field="ip"`，
     **在碰磁盘之前**抛出，文件字节不变。
+    要落盘的那个键另外还要过 `_validated_ip_key`（含编码分隔符 ⇒ 同样 400 `field="ip"`）。
+    **路径上的旧键不过这一档**：它是「被删掉的那一半」，与 `delete_ip_mapping` 同口径保持宽松，
+    否则 v1 直接写文件留下的存量行会连「改成干净 IP」这条出路也被堵死。
     这里的 `name` 只走 §11.2 的通用姓名校验，**不**带管理员那条分隔符限制——它不进路径段，
     删除永远按 IP 走，收紧它属于凭空加规则。
     """
     body = payload if isinstance(payload, dict) else {}
     old_ip = _validated_ip(path_ip)
-    new_ip = _validated_ip(body.get(IP_FIELD, path_ip))
+    new_ip = _validated_ip_key(_validated_ip(body.get(IP_FIELD, path_ip)))
     name = _validated_name(body.get(NAME_FIELD))
     stamp = _now()
     # 一次锁内完成「删旧 + 写新」：`save_ip_mapping` 内部再取同一把 per-pid RLock 只是重入。
@@ -130,6 +156,10 @@ def delete_ip_mapping(pid: str, ip: Any) -> Dict[str, Any]:
     （`app/server/api_sources.py:86`），不沿用 mock 那几个「路由还不存在」的
     `{deleted: true}`（`docs/know-how.md` 第 2 节把它记为**未定契约**）。
     没有这一行 ⇒ `removed: false`、一个字节都不写、修订号不动。
+
+    这里**故意不做** `_validated_ip_key` 那一档：存量行（v1 的界面没做过 IP 校验，直接把文件
+    写出去过）可能长着编码分隔符，把创建端的限制也压到删除端只会**缩小**出路。别把它当疏漏
+    「顺手统一掉」——两个入口不对称是裁定，不是漂移。
     """
     target = _validated_ip(ip)
     with storage.use_profile(pid), storage.profile_write(pid):
@@ -151,7 +181,8 @@ def add_admin(pid: str, name: Any) -> Dict[str, Any]:
     `updates.create_source` 同一只码），不是 mock 原先的 `INVALID_INPUT`（那只码按 §7.1
     只能配 400）；本卡同 PR 把 mock 一起改过来。
 
-    姓名走 `_validated_admin_name`（含分隔符 → 400 `detail.field="name"`，**在碰磁盘之前**）。
+    姓名走 `_validated_admin_name`（含 `/`、`\`，或字面的 `%2f` / `%5c` / `%00` ⇒ 400
+    `detail.field="name"`，**在碰磁盘之前**）。
     """
     clean = _validated_admin_name(name)
     stamp = _now()
@@ -171,9 +202,12 @@ def remove_admin(pid: str, name: Any) -> Dict[str, Any]:
 
     移除后此人**下一次**审阅请求即 403（身份实时解析，§4.1），不需要任何「踢下线」动作。
 
-    这里**故意只用** `_validated_name`、不加 `_UNMANAGEABLE_ADMIN_NAME_CHARS` 那一条：
-    新数据已经被创建端挡住，而 v1 直接写文件的旧名单里可能已经有含 `/` 的行。把限制也加到
-    删除端只会让那些存量行在本层再多一道拒绝，**缩小**而不是打开出路。
+    这里**故意只用** `_validated_name`、不加 `_validated_admin_name` 那两层限制：新数据已经被
+    创建端挡住，而 v1 直接写文件的旧名单里可能已经有含 `/`、`\` 或字面 `%2f` / `%5c` / `%00`
+    的行。把限制也加到删除端只会让那些存量行在本层再多一道拒绝，**缩小**而不是打开出路。
+    这一条不是「还没清理干净的不对称」，是裁定：看到它想「统一一下两个入口」的人请先读
+    `tests/test_api_people.py::TestAdmins::test_the_removal_side_stays_permissive_for_a_legacy_row`
+    与本轮的两条 `*_legacy_*` 用例。
     """
     clean = _validated_name(name)
     with storage.use_profile(pid), storage.profile_write(pid):
@@ -220,6 +254,50 @@ def _validated_name(raw: Any) -> str:
     return text
 
 
+def _unmanageable_path_segment(text: str) -> Optional[str]:
+    """这个值将来要当 URL 路径段用；返回第一串让它「删不出去」的子串，`None` 表示走得通。
+
+    判据不是字符集洁癖，而是「写入端与删除端必须对同一个值达成一致」：`api.seg()` 就是
+    `encodeURIComponent`，所以
+    ① 含 `/` 或 `\\` ⇒ 路径段里出现 `%2F` / `%5C`，撞守卫的 raw 那一份；
+    ② 含字面 `%2f` / `%5c` / `%00`（任意大小写）⇒ `%` 先被编成 `%25`（raw 里没有这三只 token），
+       但解码后又重新长出它们，撞守卫的 decoded 那一份。
+    两种都是 400 且**不带** `detail.field`（守卫全站共用、早于路由，永远别指望它给你带字段），
+    于是记录加得进来、撤不出去。反例（放行是对的）：`100%达标`、`完成度%252f`——`%` 后面跟的
+    不是这三只 token，两份检查都干净，删除端 200。
+    """
+    for char in _UNMANAGEABLE_PATH_CHARS:
+        if char in text:
+            return char
+    lowered = text.lower()
+    for token in _UNMANAGEABLE_PATH_TOKENS:
+        if token in lowered:
+            return token
+    return None
+
+
+def _validated_ip_key(canonical: str) -> str:
+    """**只在写入端**给 IP 键加这一档（M3-13 / INH-1898 第二轮裁定）。
+
+    IP 这一侧的可达性和管理员姓名不一样，两条都要记住：
+    * 裸 `/`、`\\` 到不了表里——`auth.normalize_ip` 用 `ipaddress.ip_address`，含斜杠的写法
+      一律解析失败（`10.0.0.1/24` 是空串 ⇒ 400 `field="ip"`）。这一档由
+      `test_a_cidr_style_ip_with_a_separator_never_reaches_the_table` 钉着。
+    * 但 `%2f` / `%5c` / `%00` **到得了**：3.9 的 `ipaddress` 认 IPv6 scope id，而 scope 段
+      只限字符集不限含义，所以 `fe80::1%2feth0` 会被原样规范化并原样落盘（实测
+      `normalize_ip` 把它逐字回显）。键一旦长这样，`DELETE /ip-mapping/{ip}` 的路径段就必然
+      解码回 `%2f` ⇒ 撞守卫 ⇒ 那一行永远撤不掉。所以这张表也**必须**在创建端挡，
+      判据与管理员姓名同一条（可达性自己证，见
+      `test_an_encoded_separator_inside_an_ipv6_scope_id_reaches_the_unmanageable_state`）。
+
+    入参必须是**已规范化**的那个值（要落盘的键），不是原始输入：落盘的是什么，删除端就要寻什么。
+    """
+    blocked = _unmanageable_path_segment(canonical)
+    if blocked is not None:
+        raise AppError(INVALID_INPUT, _UNMANAGEABLE_IP_MESSAGE, field=IP_FIELD)
+    return canonical
+
+
 def _validated_admin_name(raw: Any) -> str:
     """管理员姓名 = §11.2 的通用姓名校验 + 「删除路径必须走得通」这一条。
 
@@ -228,11 +306,10 @@ def _validated_admin_name(raw: Any) -> str:
     于是 400 带得上 `detail.field="name"`，界面能指到输入框。
 
     **只作用于管理员名单**：`ip_mapping` 的 `name` 不进路径段（删除按 IP 寻址），给它加同样
-    的限制就是凭空收紧；而 IP 那一半被 `ipaddress` 挡死——`normalize_ip("10.0.0.1/24")` 是
-    空串，含 `/` 的 IP 从来写不进表，所以那张表到不了这个状态。
+    的限制就是凭空收紧。
     """
     text = _validated_name(raw)
-    if any(char in text for char in _UNMANAGEABLE_ADMIN_NAME_CHARS):
+    if _unmanageable_path_segment(text) is not None:
         raise AppError(INVALID_INPUT, _BAD_ADMIN_NAME_MESSAGE, field=NAME_FIELD)
     return text
 
