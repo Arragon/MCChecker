@@ -611,7 +611,7 @@
       var spy = r.useApi({});
       /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。
        * `schedule` 已在 M3-08 接入、`people` 已在 M3-13 接入，都移出本用例，
-       * 各由自己的生产用例盯（people 见下面 M3-13 那三条）。 */
+       * 各由自己的生产用例盯（people 见下面 M3-13 的那四条视图用例与一条 mock 契约用例）。 */
       ["bindings", "tools", "profiles"].forEach(function (seg) {
         var inst = r.mount(settingsApp(true), seg);
         var main = inst.el.querySelector(".settings-main");

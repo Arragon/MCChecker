@@ -556,6 +556,37 @@ class TestAdmins:
         assert status == 200 and payload == {"removed": True}
         assert _rows(seeded, admins=True) == []
 
+    def test_an_admin_name_containing_a_separator_can_be_added_but_not_removed(self, seeded):
+        """**已知边界，本用例只钉现状不改行为**（留给控制方裁定，见卡报告）。
+
+        §11.2 给姓名的规则是「去空白后 1–100 字符、无控制字符」，里面**没有**禁止 `/`；
+        而 §7.9 把删除设计成 `DELETE /admins/{name}`（名字在路径段里）。两条一撞就出现
+        「加得进来、删不出去」：`POST {"name":"王/强"}` 是 201，但 `api.seg()` 必然把它
+        编成 `%2F`，于是被 §16.8 第 3 条的编码分隔符守卫（`http.py::_reject_encoded_separators`，
+        全站共用、早于路由）拦成 400 —— 而且那只 400 **不带 `detail.field`**，前端只能显示成
+        全局错误而不是字段错误。后果是**权限面**的：这个管理员此后无法撤回。
+
+        为什么本卡不动它：要么收紧 §11.2 的姓名字符集（改的是**规范**，且 M3-14 的 `{group}`、
+        M3-15 的 `{tool}` 是同一条路同一个形状，该由一次裁定统一三张卡），要么把删除改成
+        查询串/请求体（改 §7.9 的接口形状 + mock + 前端三处）。两张卡各自偷偷收紧一半，
+        只会让三张设置卡的姓名字符集互不相同。
+        """
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            status, _, payload = caller.json("POST", _url(seeded, "/admins"), {"name": "王/强"})
+            assert status == 201, "§11.2 没禁止 `/`，所以写入端现在放行"
+            assert payload["item"]["name"] == "王/强"
+            assert any(row["name"] == "王/强" for row in _rows(seeded, admins=True))
+
+            blocked = caller.json("DELETE", _url(seeded, "/admins/%s" % _seg("王/强")))
+            assert blocked[0] == 400, blocked
+            assert "detail" in blocked[2]["error"] and not blocked[2]["error"]["detail"].get("field"), (
+                "拦它的必须是路径守卫（无字段），不是姓名校验"
+            )
+            assert any(row["name"] == "王/强" for row in _rows(seeded, admins=True)), (
+                "这一条 400 撤不掉人——正是本用例要钉住的已知边界"
+            )
+
     def test_removing_an_absent_admin_reports_false_and_writes_nothing(self, seeded):
         before = _state(seeded)
         before_parts = _parts(seeded)

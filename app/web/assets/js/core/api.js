@@ -208,9 +208,10 @@
 
   /* ===================== 设置页分段开关（D2 / 决策 14，M3-06 建） ===================== */
   /*
-   * settings 是页级键，但设置页有六个各自依赖不同后端接口的分段。整键放行会点亮四个
-   * 还没接口的分段（M3-13/14/15/16 才有 /admins、/bindings、/tools、/profiles），
-   * 违反「未接入不发请求」。所以分段级白名单在这里：views/settings.js 的 renderSection
+   * settings 是页级键，但设置页有六个各自依赖不同后端接口的分段。整键放行会点亮当时还没有
+   * 接口的分段（/schedule、/ip-mapping 与 /admins、/bindings、/tools、/profiles 分别由
+   * M3-08、M3-13、M3-14、M3-15、M3-16 落地），违反「未接入不发请求」。
+   * 所以分段级白名单在这里：views/settings.js 的 renderSection
    * 是**唯一**插入点（R14）——未接入的分段在调用发请求的 fn **之前**就渲染只读横幅并返回。
    * 每张后续设置卡只把自己那一项加进 WIRED_SETTINGS（M3-08 schedule、M3-13 people、
    * M3-14 bindings、M3-15 tools、M3-16 profiles）。必须是 SETTINGS_SEGMENTS 的子集
