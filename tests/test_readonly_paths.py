@@ -1,4 +1,4 @@
-"""只读路径不许在数据根里创建任何东西（B10.2 / chore 卡）。
+"""只读路径不许在数据根里用 `_ensure_dirs()` 长骨架目录；派生缓存写另计（B10.2 / chore 卡）。
 
 来历是实测，不是推测：`storage.list_config_files()` 原先每次调用都先跑一遍
 `_ensure_dirs()`，于是 `GET /api/v1/p/{pid}/files` 这条**只读**请求链会在真实
@@ -17,16 +17,24 @@
    `save_config_file` / `save_record_file` 之后目录一定在——这是防「读不再建目录，
    顺手把写也弄坏了」的那一半。
 
-`GET /document` 不在本文件的断言范围内：它按设计会往 `cache/doc_v2/` 落派生缓存
-（`app/services/documents.py` 的磁盘缓存；规范把派生数据排除在权威字节之外，那是
-另一条裁定，不归 B10.2 这张卡管）。本文件只断「只读请求不改变数据根的目录集合与
-既有文件的字节」。
+断言范围之外的豁免（2026-10-18 按端点实测：`run.py --data-dir` 起真服务打一次性 `/tmp`
+根，17 条 GET 路由一条一棵 pristine 树、`cache/` 不预建，前后差交给守卫自己的
+`snapshot_data_tree`）——**4 条 GET 确实会在数据根里创建条目**，机制都不是 `_ensure_dirs()`，
+而是派生缓存写走的 `fsutil.atomic_write_bytes()`（`app/core/fsutil.py` 里它给自己的目标目录
+`makedirs`）：
 
-同一族的例外还有版本差异请求：它经 `history._cache_write()`（`app/services/history.py`）
-写 `cache/diff_v2/`，机制与 `doc_v2` 那条一模一样——`fsutil.atomic_write_bytes()` 在
-`app/core/fsutil.py` 里自己 `makedirs`。这两处都是**设计内**的派生缓存写，本文件按上面的
-口径把它们排除在断言之外；别把它们当成「读路径还有洞没修」，也别顺手把断言范围扩到它们身上
-（那需要另一张卡先裁定派生缓存到底该不该在请求里落盘）。
+* `GET /files/{name}/document`、`GET /search?q=…` 经 `app/services/documents.py::_disk_store`
+  建 `cache/` + `cache/doc_v2/` 并写缓存文件；
+* `GET /files/{name}/archives`、`GET /files/{name}/records` 经 `app/services/history.py::_cache_write`
+  建 `cache/` + `cache/diff_v2/` 并写缓存文件。
+
+这 4 条同一轮里权威字节逐条哈希不变，「读一次就把派生缓存建起来」是设计如此（规范 §5.1
+把这两个缓存目录标成可丢弃的派生数据，§6.5 第 3 步与 §6.6 就写着未命中要计算并落盘），
+收不收是另一张卡的裁定，不归 B10.2 这张卡管。所以本文件断的是**它自己真正打到的那些读
+接口**（`GET /files`、`GET /raw`）不改变数据根的目录集合与既有文件的字节；别把断言范围
+顺手扩到上面 4 条上——那会立刻红在设计内行为上。守卫一侧不跟着豁免：H3 的目录集合快照对
+派生与权威一视同仁，这 4 条在真实 `data/` 上跑一轮就会以「新建目录 / 新增文件」报红，
+看得见它们正是本卡要的执法效果。
 
 已知的残留（**不在本卡范围**，别把本文件误读成「全仓库读路径都不建目录」）：
 `storage.get_record_dir()` 与 `get_archive_dir()` 仍带 `makedirs`，而读它们的
@@ -35,6 +43,10 @@ NiceGUI 页面链路（`app/pages/**`，M4-07 要删的那批）上。`app/serve
 一律绕开了这两个创建型 helper——`app/services/history.py` 与
 `app/services/documents.py` 里各有一句「读列表不该在数据目录里留下新目录」的注释
 和 `isdir` 判据，那是本仓库早就认下的口径，本文件只是把它第一次变成可判红的证据。
+同一条创建在**写**请求上仍然会发生（实测、非本文件断言对象）：`DELETE /api/v1/p/{pid}/files/{name}`
+会经 `recovery._invalidate()` → `parse_cache` → `storage._ensure_dirs()`（`app/core/parse_cache.py:15`）
+把缺失的骨架目录重新长出来——一棵只剩 `configs/` 的根上补出了 `archive/`、`records/`、`cache/`、
+`cache/parse_tree/`。
 """
 
 from __future__ import annotations

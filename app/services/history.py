@@ -231,9 +231,16 @@ def _cache_write(profile_id: str, key: str, payload: Dict[str, Any]) -> None:
 def _list_versions(directory: str) -> List[Dict[str, Any]]:
     """按修改时间倒序列出目录里的版本文件。
 
-    只用 `get_archive_root_dir` / `get_record_dir` 拼路径再判断 `isdir`：`storage.get_archive_dir()`
-    会 `makedirs`，读一次历史列表不该在数据目录里留下新目录或新归档（仓库自身口径，执法见
-    `tests/test_readonly_paths.py`；规范 §5.4 讲的是 `core/fsutil.py` 的写入可靠性，不是这一条，别引它）。
+    两个列表端点只把 `get_archive_root_dir` / `get_records_root_dir` 拼出来的路径传进来，这里
+    判 `isdir`：`storage.get_archive_dir()` 与 `storage.get_record_dir()` 都会 `makedirs`，
+    读一次历史列表不该在数据目录里留下新目录或新归档。这是**仓库口径，不是规范条款**——
+    规范 §5.4 讲的是 `core/fsutil.py` 的写入可靠性，没有这一条，别引它。执法面是 H3 守卫的
+    目录集合快照（`tests/data_guard.py`，B10.2 起目录也算条目），加上
+    `tests/test_api_history.py::test_listing_does_not_create_archive_directories` 这条盯着
+    归档路由的用例。同一份列表会按 §6.6 往 `cache/diff_v2/` 写派生摘要（`_cache_write` →
+    `fsutil.atomic_write_bytes` 自己 `makedirs`），那是设计内的缓存落盘，由
+    `test_diff_summary_cached_under_diff_v2_and_no_legacy_file_written` 钉着——「不建骨架目录」
+    管不到它。
     """
     if not os.path.isdir(directory):
         return []
