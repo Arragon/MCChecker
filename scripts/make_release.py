@@ -132,6 +132,12 @@ INERT_URL_LITERALS: Tuple[Tuple[str, str, str], ...] = (
     # 文档字符串/格式串：地址部分是占位词或运行期参数，构建期没有主机可解析。
     ("app/core/downloader.py", "scheme://host/path", "docstring 里的地址格式示意"),
     ("app/core/downloader.py", "scheme://...", "docstring 里的地址格式示意"),
+    # 并主线后转红的就是这一条（控制方实测，2026-10-19）：`upload.py` 那句注释在讲「下载器已经把
+    # URL 脱敏成 `scheme://host/path`」，而 `_SCHEME_PREFIX_RE` 按语法认 `scheme` 是个合法 scheme，
+    # 于是从占位串里提取出主机 `host` 并拦下来。放行依据与上面 downloader 那两条**同一条**：
+    # 这是给人看的格式示意，不是交给任何解析器的字节。判据没有放宽——同族里的真主机
+    # （`https://evil.example.com/x`）照旧红。
+    ("app/services/upload.py", "scheme://host/path", "注释里的脱敏格式示意，与 downloader 那两条同源"),
     ("run.py", "http://%s:%d", "启动日志打印访问地址的格式串（主机端口运行期才知道）"),
     # 「引号后紧跟两个分隔符」这一族里**被 WHATWG 读成主机、但从来没人交给 URL 解析器**的两处：
     # 反斜杠开头两个分隔符现在也进权威段（本轮 Important 1），于是正则字符类与 BOM 注释里的

@@ -35,6 +35,7 @@ EXPECTED_MEMBERS = {
     "app/core/reviewing.py",
     "app/core/storage.py",
     "app/services/search.py",
+    "app/services/upload.py",
     "app/static/favicon.svg",
     "app/web/assets/css/base.css",
     "app/web/assets/js/app.js",
@@ -128,6 +129,13 @@ def source_tree(tmp_path: Path) -> Path:
         # `\` + 十六进制转义会被切成主机 `x00-`，逐条核对过它不是网络目标（见 make_release 的注释）。
         "app/services/search.py": (
             "import re\n" + r"""_JSON_ESCAPED = re.compile(r'["\\\x00-\x1f]')""" + "\n"
+        ),
+        # `INERT_URL_LITERALS` 里 `app/services/upload.py` 那条的宿主文件：注释里的脱敏格式示意
+        # 会被 `_SCHEME_PREFIX_RE` 当成 `scheme://` 这个合法 scheme，从而从占位串里提出主机 `host`。
+        # 放行依据与 `app/core/downloader.py` 那两条同源（给人看的格式示意，不进任何解析器），
+        # 假树必须装着它，否则名单与产物双向核对会红（这是名单每条都要付的代价）。
+        "app/services/upload.py": (
+            "# 下载失败原因只进日志，且下载器已经把 URL 脱敏成 `scheme://host/path`（§11.5）。\n"
         ),
         "app/web/index.html": CLEAN_INDEX_HTML,
         "app/web/assets/css/base.css": "body { font-family: sans-serif; }\n",
@@ -887,7 +895,7 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 20 个" in first.stdout, first.stdout
+    assert "成员 21 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
     assert "已放行 app/static/favicon.svg" in first.stdout, first.stdout
