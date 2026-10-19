@@ -66,9 +66,12 @@ _UNMANAGEABLE_PATH_CHARS = ("/", "\\")
 #: `王%2f强` 的路径段是 `王%252f强`，躲过守卫的 raw 那一份，却在**解码后**那一份里重新长出
 #: `%2f`；而 `_reject_encoded_separators` 把两份一起看（`haystacks`），结果还是删不出去。
 #: 这三只 token 与守卫的 `_ENCODED_UNSAFE` 同源；此处手抄而不 import，是因为 §3.3 不许
-#: `services` 反向依赖 `server` 层。两枚常量不许各走各的，由
+#: `services` 反向依赖 `server` 层。两枚常量不许各走各的：常量集合相等由
 #: `tests/test_api_people.py::TestUnmanageableValue::test_the_creation_rule_tracks_the_guard_token_list`
-#: 逐值核住（真打 HTTP：被这条拒掉的每一串，删除端确实 400 且不带字段）。
+#: 钉，「被这一档拒掉的每一串在删除端确实只得到一只不带字段的 400」由
+#: `TestAdmins::test_admin_name_with_a_literal_encoded_separator_is_rejected_at_creation`
+#: 与 `TestUnmanageableValue::test_an_encoded_separator_inside_an_ipv6_scope_id_reaches_the_unmanageable_state`
+#: 打真 HTTP 钉。
 #: 注意真正的 NUL 字符到不了这里——§11.2 的控制字符那一档先拒；这三只 token 挡的是**字面写法**。
 _UNMANAGEABLE_PATH_TOKENS = ("%2f", "%5c", "%00")
 
@@ -181,7 +184,7 @@ def add_admin(pid: str, name: Any) -> Dict[str, Any]:
     `updates.create_source` 同一只码），不是 mock 原先的 `INVALID_INPUT`（那只码按 §7.1
     只能配 400）；本卡同 PR 把 mock 一起改过来。
 
-    姓名走 `_validated_admin_name`（含 `/`、`\`，或字面的 `%2f` / `%5c` / `%00` ⇒ 400
+    姓名走 `_validated_admin_name`（含 `/`、`\\`，或字面的 `%2f` / `%5c` / `%00` ⇒ 400
     `detail.field="name"`，**在碰磁盘之前**）。
     """
     clean = _validated_admin_name(name)
@@ -203,11 +206,14 @@ def remove_admin(pid: str, name: Any) -> Dict[str, Any]:
     移除后此人**下一次**审阅请求即 403（身份实时解析，§4.1），不需要任何「踢下线」动作。
 
     这里**故意只用** `_validated_name`、不加 `_validated_admin_name` 那两层限制：新数据已经被
-    创建端挡住，而 v1 直接写文件的旧名单里可能已经有含 `/`、`\` 或字面 `%2f` / `%5c` / `%00`
+    创建端挡住，而 v1 直接写文件的旧名单里可能已经有含 `/`、`\\` 或字面 `%2f` / `%5c` / `%00`
     的行。把限制也加到删除端只会让那些存量行在本层再多一道拒绝，**缩小**而不是打开出路。
-    这一条不是「还没清理干净的不对称」，是裁定：看到它想「统一一下两个入口」的人请先读
-    `tests/test_api_people.py::TestAdmins::test_the_removal_side_stays_permissive_for_a_legacy_row`
-    与本轮的两条 `*_legacy_*` 用例。
+    这一条不是「还没清理干净的不对称」，是裁定，执法者是这三条用例：
+    `TestAdmins::test_the_removal_side_stays_permissive_for_a_legacy_row`、
+    `TestAdmins::test_the_removal_side_stays_permissive_for_a_legacy_encoded_separator_row`、
+    `TestUnmanageableValue::test_an_encoded_separator_inside_an_ipv6_scope_id_reaches_the_unmanageable_state`
+    （最后那条同时钉住「HTTP 那一侧到不了它们」，所以服务层是唯一还留着出路的入口）。
+    看到这段想「统一两个入口」的人，请先让这三条红一遍再决定。
     """
     clean = _validated_name(name)
     with storage.use_profile(pid), storage.profile_write(pid):
@@ -263,8 +269,13 @@ def _unmanageable_path_segment(text: str) -> Optional[str]:
     ② 含字面 `%2f` / `%5c` / `%00`（任意大小写）⇒ `%` 先被编成 `%25`（raw 里没有这三只 token），
        但解码后又重新长出它们，撞守卫的 decoded 那一份。
     两种都是 400 且**不带** `detail.field`（守卫全站共用、早于路由，永远别指望它给你带字段），
-    于是记录加得进来、撤不出去。反例（放行是对的）：`100%达标`、`完成度%252f`——`%` 后面跟的
-    不是这三只 token，两份检查都干净，删除端 200。
+    于是记录加得进来、撤不出去。真正的 NUL 字符到不了这里——§11.2 的控制字符那一档先拒。
+
+    这一档**盖不住**整族问题：路径其实被解码了两次（`http.py:273` 一次、`router.py:91` 又一次），
+    所以任何字面 `%XX`（X 为十六进制）的名字都会在到达删除端之前被再解一次，
+    于是 200 + `removed: false` 的空操作（甚至误删另一行）。那一族不属于本轮裁定，
+    现状与后果由 `tests/test_api_people.py::TestUnmanageableValue::test_a_name_with_a_literal_percent_escape_is_double_decoded`
+    钉着；`100%达标` 这类 `%` 后面不是十六进制的名字才是本档的放行判据。
     """
     for char in _UNMANAGEABLE_PATH_CHARS:
         if char in text:
