@@ -55,7 +55,7 @@ SAMPLE_RESULT = {
     "at": "2026-10-18 10:00:00",
     "archived": "config_20261018.xml",
 }
-#: 中文更新源名（C26 允许「建」，M0-07 的改名迁移仍拒绝——两条哨兵用例都围绕它）。
+#: 中文更新源名（C26 允许「建」，N1 起改名与它同一字符集——围绕它的用例都钉这一条）。
 CN = "机型配置.xml"
 #: §10.2 与卡面契约允许的 status 取值。
 ALLOWED_STATUSES = {
@@ -674,9 +674,13 @@ class TestUpdateAll:
 
         assert [item["name"] for item in summary["items"]] == ["a.xml", "a.xml"]
         assert summary["items"][0]["status"] == "success"
-        assert summary["items"][1]["status"] == "skipped"
-        # 本卡不下载修改记录：服务器只记到配置那一条
-        assert srv.requests == ["/a.xml"]
+        # 卡 9（M3-09）把 `refresh_records` 的骨架换成了真拉取：本卡这条用例的
+        # 「第二项 = skipped（未实现）」与「服务器只记到配置那一条」两句期望随之改变，
+        # 现在记录那一项是 `success`，而服务器必须记下**两次**下载。
+        # 「只有带 record_url 才跑记录拉取」这一半仍然由下面的 requests 证明：
+        # 没有第二个映射项，就没有第三条请求。
+        assert summary["items"][1]["status"] == "success"
+        assert srv.requests == ["/a.xml", "/records.xml"]
 
     def test_task_progress_and_items_are_filled(self, pid, servers):
         from app.services import updates
@@ -786,7 +790,16 @@ class TestReadModifyWriteLocks:
         assert set(_status_file(pid)) == {"a.xml", "b.xml"}
 
 
-class TestRefreshRecordsSkeleton:
+class TestRefreshRecordsGuards:
+    """§10.3 的两道**前置守卫**与「不写 update_status」这条数据边界（拉取本体见 `tests/test_api_records.py`）。
+
+    类名原为 `TestRefreshRecordsSkeleton`（卡 5 只搭了签名与判定，不下载、不落盘）。
+    卡 9（M3-09 / INH-1894）把主体填上了：那条
+    `test_with_record_url_is_skipped_and_downloads_nothing`（断言「一条字节都不下载」）
+    断的正是**已被本卡替换掉的行为**，它的正面版本（真下载、真落盘、相同内容不新建）在
+    `tests/test_api_records.py`，这里只留「守卫不过就不碰网络」的两条。
+    """
+
     def test_missing_mapping_is_not_found(self, pid):
         from app.services import updates
 
@@ -805,8 +818,15 @@ class TestRefreshRecordsSkeleton:
         assert result["status"] == "skipped"
         assert result["reason"] == "未配置修改记录链接"
 
-    def test_with_record_url_is_skipped_and_downloads_nothing(self, pid, servers):
-        """主体属卡 9：签名与骨架先就位，但一条字节都不下载。"""
+    def test_does_not_write_update_status(self, pid, servers):
+        """`update_status.json` 装的是「更新源最近结果」，记录拉取不往里写。
+
+        卡 5 时这条用例走的是「什么都没做」的骨架，所以它当时是空的成立；卡 9 落地后
+        必须让它**真的拉成功一份记录**再来断言——`update_all` 会按同一个映射名先跑配置
+        更新再跑记录拉取，记录要是也往这个键写，配置那半的「最近结果」每次都会被覆盖
+        （UC-31 的状态列当场失真）。
+        """
+        from app.core import storage
         from app.services import updates
 
         srv = servers({"/records.xml": {"body": RECORD_BODY}})
@@ -814,18 +834,10 @@ class TestRefreshRecordsSkeleton:
 
         result = updates.refresh_records(pid, NAME, "deployer")
 
-        assert result["status"] == "skipped"
-        assert "M3-09" in result["reason"]
-        assert srv.requests == []
-
-    def test_does_not_write_update_status(self, pid):
-        """`update_status.json` 装的是「更新源最近结果」，记录拉取不往里写。"""
-        from app.services import updates
-
-        _seed(pid, url="", record_url="http://127.0.0.1:1/records.xml")
-
-        updates.refresh_records(pid, NAME, "deployer")
-
+        assert result["status"] == "success"  # 真的写了一份记录，不是空跑
+        assert srv.requests == ["/records.xml"]
+        with storage.use_profile(pid):
+            assert storage.load_update_status() == {}
         assert _status_of(pid) is None
 
 
@@ -1298,36 +1310,65 @@ class TestSourcesApi:
         assert status == 400
         assert body["error"]["detail"]["field"] == "url"
 
-    def test_rename_target_chinese_is_400_not_500(self):
-        """已知边界：M0-07 的改名迁移仍走 ASCII 白名单（`_sanitize_config_filename`）。
+    def test_rename_a_chinese_named_source_to_another_chinese_name(self):
+        """N1 / INH-1912：中文源建得出来也必须改得了名（§11.2「文件名一律 `validate_filename`」）。
 
-        卡面明令共用该函数，本卡不改它；但裸 `ValueError` 会变成 500，所以服务层必须
-        翻成 400 `INVALID_INPUT`（详见卡报告的顾虑）。
+        改名两侧的名字都过同一把 `fsutil.validate_filename`，与 `create_source` 同一字符集；
+        中文不是特例：映射项、本地产物、`update_status.json` 的键都要跟着搬。
         """
+        target = seed_roles("p1")
+        renamed = "机型配置新名.xml"
+        _seed(target, name=CN, url="http://example.invalid/a.xml")
+        from app.core import storage
+
+        with storage.use_profile(target):
+            storage.save_update_status({CN: SAMPLE_RESULT})
+        before = _parts(target)
+        with make_server() as server:
+            status, _, body = as_role(server, "deployer").json(
+                "PATCH",
+                _source_path(target, CN),
+                {
+                    "name": renamed,
+                    "url": "http://example.invalid/new.xml",
+                    "record_url": "",
+                },
+            )
+        assert status == 200, body
+        assert body["item"]["name"] == renamed
+        with storage.use_profile(target):
+            assert [m["name"] for m in storage.load_config_mapping()] == [renamed]
+        # 本地产物跟着名字走（缺省 `migrate_files=True`）
+        assert _current(target, CN) is None
+        assert _current(target, renamed) == XML_V1
+        # 状态键同样跟着搬，否则改名那一刻 `last_result` 恒 null
+        assert _status_file(target) == {renamed: SAMPLE_RESULT}
+        assert _parts(target)["settings"] == before["settings"] + 1
+
+    def test_ascii_source_can_be_renamed_to_a_chinese_name(self):
+        """改名两侧都过 `fsutil.validate_filename`（N1 收敛 C26），ASCII 源可改成中文名。"""
         target = seed_roles("p1")
         _seed(target, url="http://example.invalid/a.xml")
         with make_server() as server:
             status, _, body = as_role(server, "deployer").json(
                 "PATCH",
                 "/api/v1/p/%s/sources/%s" % (target, NAME),
-                {"name": "机型配置.xml", "url": "http://example.invalid/x.xml"},
+                {"name": CN, "url": "http://example.invalid/x.xml"},
             )
-        assert status == 400
-        assert body["error"]["code"] == "INVALID_INPUT"
-        assert body["error"]["detail"]["field"] == "name"
+        assert status == 200, body
+        assert body["item"]["name"] == CN
+        assert _current(target, CN) == XML_V1
+        assert _current(target) is None
 
-    def test_rename_of_a_chinese_named_source_is_400_not_500(self):
-        """已知边界的**更严重的一半**（评审补测）：源名本身是中文时 PATCH 也 400。
+    def test_rename_a_chinese_named_source_keeps_the_url_only_case_working(self):
+        """中文源「名字不动、只改 url」同样是 200（N1 收敛后 M0-07 那半条边界的翻转）。
 
-        `storage.update_config_mapping` 对**新旧两个名字**都要过 `_sanitize_config_filename`
-        （M0-07 的 ASCII 白名单），所以已经建好的中文源连「名字不动、只改 url」都做不到。
-        上面那条只钉住了「目标名是中文」，这一半没有回归保护。
-        N1 把白名单收敛到 `fsutil.validate_filename` 时，这条的期望值要改成 200。
+        旧实现里 `update_config_mapping` 对**新旧两个名字**都过 ASCII 白名单，所以这条路也 400；
+        上面两条只钉住了「目标名是中文」与「源名是中文」，这里补上真正改名的对照：
+        名字没变时映射项与修订号照常更新，本地文件仍留在原名上。
         """
         target = seed_roles("p1")
         _seed(target, name=CN, url="http://example.invalid/a.xml")
-        path = _mapping_file(target)
-        sha_before = _file_sha(path)
         before = _parts(target)
         with make_server() as server:
             status, _, body = as_role(server, "deployer").json(
@@ -1335,33 +1376,67 @@ class TestSourcesApi:
                 _source_path(target, CN),
                 {"name": CN, "url": "http://example.invalid/new.xml", "record_url": ""},
             )
+        assert status == 200, body
+        assert body["item"]["url"] == "http://example.invalid/new.xml"
+        from app.core import storage
+
+        with storage.use_profile(target):
+            assert [m["name"] for m in storage.load_config_mapping()] == [CN]
+        assert _current(target, CN) == XML_V1
+        assert _parts(target)["settings"] == before["settings"] + 1
+
+    def test_rename_target_with_path_separator_is_still_400(self):
+        """收敛只统一字符集，**不放松边界**：带路径分隔符的目标名照旧 400 且不写任何东西。
+
+        中文放行后必须还有人守着「`configs/` 之外拼不出路径」这一条，否则下一次放宽
+        就是无声的越界。
+        """
+        target = seed_roles("p1")
+        _seed(target, url="http://example.invalid/a.xml")
+        path = _mapping_file(target)
+        sha_before = _file_sha(path)
+        before = _parts(target)
+        with make_server() as server:
+            status, _, body = as_role(server, "deployer").json(
+                "PATCH",
+                _source_path(target, NAME),
+                {"name": "sub/a.xml", "url": "http://example.invalid/x.xml"},
+            )
         assert status == 400
         assert body["error"]["code"] == "INVALID_INPUT"
         assert body["error"]["detail"]["field"] == "name"
-        # 400 发生在任何写入之前：映射与文件一个字节都没动，修订号也不递增
         assert _file_sha(path) == sha_before
         assert _parts(target) == before
 
-    def test_rename_value_error_translation_leaves_a_warning(self, caplog):
-        """小项：把裸 `ValueError` 翻成 400 时得带上原消息并留一条 WARNING。
+    def test_rename_value_error_translation_leaves_a_warning(self, caplog, monkeypatch):
+        """小项：`storage` 冒出的裸 `ValueError` 仍要翻成 400，并带上原消息留一条 WARNING。
 
         `except ValueError` 包的是整个 `update_config_mapping` 调用；没有这条日志，净化内部
         真出别的 `ValueError` 也会被一路掩成「用户文件名写错了」，bug 就没痕迹了。
+        N1 把净化收敛到 `fsutil` 之后（中文名不再抛 `ValueError`），这里改用桩触发那条
+        仍然存在的裸 `ValueError`（`update_config_mapping` 的「下载链接不能为空」），
+        钉的是**翻译与日志**，不是旧白名单。
         """
+        from app.core import storage
         from app.core.errors import AppError, INVALID_INPUT
         from app.services import updates
 
         target = seed_roles("p1")
         _seed(target, url="http://example.invalid/a.xml")
 
+        def boom(*args, **kwargs):
+            raise ValueError("下载链接不能为空")
+
+        monkeypatch.setattr(storage, "update_config_mapping", boom)
         with caplog.at_level(logging.WARNING, logger="app.services.updates"):
             with pytest.raises(AppError) as info:
                 updates.rename_source(target, NAME, CN, "http://example.invalid/x.xml", "")
 
         assert info.value.code == INVALID_INPUT
         # 原消息带着走（不改写成一句笼统的「文件名不合法」）
-        assert info.value.message == "文件名包含非法字符"
-        assert "文件名包含非法字符" in caplog.text
+        assert info.value.message == "下载链接不能为空"
+        assert info.value.detail.get("field") == "name"
+        assert "下载链接不能为空" in caplog.text
         assert CN in caplog.text  # 日志记到改名两侧的名字，事后能定位是哪一次调用
 
     def test_chinese_named_source_can_still_be_updated_and_deleted(self, servers):

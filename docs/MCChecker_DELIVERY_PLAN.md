@@ -128,7 +128,7 @@ PR: <url> · 提交 `<sha>`
 
 ## 6. 卡序与依赖（原 54 卡全表）
 
-> 执行中新立的三张不在下表里：**INH-1912**（更新源改名字符集与创建不一致，中文源名能创建但永远改不了）、**INH-1913**（访客临时导入未打开回环拦截，SSRF 面未闭合）、**INH-1914**（H3 会话级 `data/` 完整性守卫，已完成）。以 Linear 为准。
+> 执行中新立的三张不在下表里：**INH-1912**（更新源改名字符集与创建不一致，中文源名能创建但永远改不了，**进行中**，工树 `mcc-n1`）、**INH-1913**（访客临时导入未打开回环拦截，SSRF 面未闭合，**已完成**：PR #53，合并 commit `5ca9611`，评审 0 Critical / 0 Important）、**INH-1914**（H3 会话级 `data/` 完整性守卫，已完成）。以 Linear 为准。
 
 > 状态快照于 2026-10-17。**In Progress = 前端界面已在模板中完成、后端/接口未做**（历史上 18 张卡如此标记，注释里写了「已完成/还没做/接着做」）。后端完成后才能置 Done。
 
@@ -175,7 +175,7 @@ PR: <url> · 提交 `<sha>`
 | M2-11 | INH-1884 | Done | 导入对话框与临时文件标签（`WIRED` 放行 `import`/`temp`） |
 | M2-12 | INH-1885 | Done | 删除文件进入恢复区（`services/recovery.py` + `DELETE /files/{name}`，`WIRED` 放行 `delete`） |
 
-### M3 审阅、更新、DL 与设置（6/17，截至 2026-10-18）
+### M3 审阅、更新、DL 与设置（7/17，截至 2026-10-18 18:16 UTC）
 
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
@@ -184,11 +184,11 @@ PR: <url> · 提交 `<sha>`
 | M3-03 | INH-1888 | Done | 审阅页与本地草稿 |
 | M3-04 | INH-1889 | Done | 安全下载器 |
 | M3-05 | INH-1890 | Done | 更新源校验提交与映射接口（含 PR #41 的锁范围补修） |
-| M3-06 | INH-1891 | Todo | 更新源设置页（**下一张**；含 D2 分段门控基础设施，并接手卡 6 改派来的 `progress.total` 与 409 文案） |
+| M3-06 | INH-1891 | Done | 更新源设置页 + D2 分段门控（PR #48；四轮评审/三轮修复，前端测试页 29 → 40，`MC.settingsSegmentWired(seg)` 可供 M3-13…16 直接加分段） |
 | M3-07 | INH-1892 | Done | 后台任务队列与任务接口（PR #43；历经 4 轮评审，第 1 轮作废、合并前修掉一条会损坏用户数据的缺陷） |
-| M3-08 | INH-1893 | Todo | 标准库调度器与定时设置 |
+| M3-08 | INH-1893 | In Progress | 标准库调度器与定时设置（`05c8dd0` 已提交：全量 1015 passed、`check_py39.sh` exit 0、该工树无 `data/` 故无 H3 证据；独立评审在跑。它动了 `router.py`/`storage.py`/`api.js`/`conftest.py`，**M3-09 与 M3-13…16 必须等它合并**） |
 | M3-09 | INH-1894 | Todo | 修改记录拉取与文件内查看 |
-| M3-10 | INH-1895 | Todo | DL 求根与正向反向计算 |
+| M3-10 | INH-1895 | In Progress | DL 求根与正向反向计算（`1b55e7f` 评审 Approved for merge / 0 Critical / 2 Important / 3 Minor；修复轮在跑：1e-10 取整的 JS 语义缺边界用例、`trans_coeff=0` 会让 `reverse`/`multi_check` 裸崩而 `validate` 放行、前后端等价性证明只在 `/tmp` 里） |
 | M3-11 | INH-1896 | Todo | DL 试算、提取预览与条件保存 |
 | M3-12 | INH-1897 | Todo | DL 计算页 |
 | M3-13 | INH-1898 | Todo | IP 对应表与管理员名单 |
@@ -204,11 +204,11 @@ PR: <url> · 提交 `<sha>`
 | 卡 | Linear | 状态 | 内容 |
 |---|---|---|---|
 | M4-01 | INH-1903 | Todo | 旧下载与记录链接兼容 |
-| M4-02 | INH-1904 | Todo | 安全响应头与跨站写保护 |
+| M4-02 | INH-1904 | In Progress | 安全响应头与跨站写保护（工树 `mcc-sec`。**已知瑕疵**：派发词与 commit 消息里写成 `INH-1906`，真实编号是 `INH-1904`；不改写历史，PR 正文更正） |
 | M4-03 | INH-1905 | Todo | 访问日志与业务日志 |
 | M4-04 | INH-1906 | Todo | 旧布局复制校验迁移 |
 | M4-05 | INH-1907 | Todo | 性能基准脚本 |
-| M4-06 | INH-1908 | Todo | 离线发布包 |
+| M4-06 | INH-1908 | In Progress | 离线发布包（工树 `mc-rel`：`scripts/make_release.py` + `start.sh`/`start.bat`。验收边界：§16.7 的「断网浏览器实测」**不得**由本卡报绿，只能报「产物里不存在外部主机引用」，且要带负向对照——种一条 `https://cdn…` 必须让构建失败） |
 | M4-07 | INH-1909 | Todo | 移除 NiceGUI 并同步文档（含 `.nicegui/` 取消跟踪、`docs/know-how.md` 更新） |
 | M4-08 | INH-1910 | Todo | §16 全量验收门禁 |
 | M4-09 | INH-1911 | Todo | 恢复区干跑说明（可选，不做界面） |
@@ -274,7 +274,7 @@ PR: <url> · 提交 `<sha>`
 13. **未做的housekeeping**：Linear 卡之间尚未补齐 `blockedBy` 关系（当前以本文件第 6 节的顺序为准）；`.nicegui/` 的 5 个已跟踪文件按 §15 T-30 留到 M4-07。
 14. **`MC.caps` 能力开关（M1-05 起，前端逐卡必须遵守）**：`app/web/assets/js/core/api.js` 里的 `MC.caps` 是「哪些后端接口已接入」的唯一事实源，由 `MC.config.mock` 推导（模板全开、生产默认全关），`MC.unwired` 存每项能力的接入去向文案。未接入的入口一律 `disabled` + `title`，并且**不发请求**（不要靠后端假接口消除 404）。每张前端卡在自己的 PR 里把对应键加进 `api.js` 的 `WIRED`（必须是 `CAP_KEYS` 的子集，测试页有断言）：M2-02 `favorites`+`revision`、M2-04 `remarks`、M2-06 `search`、M2-09 `history`/`compare`/`records`、M2-11 `import`/`temp`、M3 各卡 `review`/`dl`/`settings`/`tools`。新增能力键时 `CAP_KEYS` 与 `MC.unwired` 必须同步（前端测试页有断言会红）。M4-08 全绿后该机制连同条件分支一起删除。
 15. **同名兄弟的实时值取「先序最后一个」**：`favorite["path"]` 是旧节点 ID，同名兄弟共享它，因此实时值必须按 §7.7 取先序**最后一个**（与 v1 `favorites_live._build_id_index` 的后写覆盖结果一致）。`mock-api.js` 的 `resolveLive` 原先取第一个，已在 M2-01 按决策 4 与后端一起改正，并留了断言测试（`test_live_value_uses_last_sibling_in_preorder`）。今后这类双轨语义调整，都要 mock + 后端 + SPEC 同 PR 改。
-16. **修订号提前到 M2-01 落地**：`services/revision.py` + `GET /api/v1/p/{pid}/revision` 已在 M2-01 建好（原表排在 M3-17），因为 §7.1 要求「所有写接口在成功后递增对应修订计数」——没有计数器，每张写卡都无法满足该条。规则：只在 service 写成功后 `revision.bump(pid, part)`，handler 不碰计数；读接口、失败写（400/403/404/409）与「删了 0 条」都不递增（有守卫测试）。M3-17 只剩多用户横幅 UX 与 `settings`/`tasks` 计数的接入。
+16. **修订号提前到 M2-01 落地**：`services/revision.py` + `GET /api/v1/p/{pid}/revision` 已在 M2-01 建好（原表排在 M3-17），因为 §7.1 要求「所有写接口在成功后递增对应修订计数」——没有计数器，每张写卡都无法满足该条。规则：只在 service 写成功后 `revision.bump(pid, part)`，handler 不碰计数；读接口、失败写（400/403/404/409）与「删了 0 条」都不递增（有守卫测试）。M3-17 只剩多用户横幅 UX 与 `settings`/`tasks` 计数的接入。 **验收断法已按 B10.1 更正**：原先写的「把 `storage` 的读函数打桩成抛异常、接口仍成功 ⇒ 证明不读磁盘」在现状下**必然红**（身份解析确实要读那 3 个文件）。正确断法是**只把与计数相关的读路径打桩**（即 `services/revision.py` 一侧不许有文件 I/O），或运行期数一数以**归因**为准：请求前后各采一次打开次数，断言增量全部落在身份解析那三个已知路径上、`revision` 自身贡献 0 次。M3-17 按这条做，不要再沿用旧配方。
 17. **全局搜索的预算瓶颈在文档缓存条目数，不在扫描（M2-05 实测）**：`scripts/bench_search.py` 在 Apple Silicon / 3.9.11 上量到单节点均摊约 **0.33 µs**，所以扫描本身不是问题。真正的超预算来自 `services/documents.MEMORY_CACHE_MAX_ENTRIES = 24`：机型里超过 24 个文件时，一次全量搜索会把 LRU 打满循环逐出（每次重取都要 gunzip → `json.loads` → `json.dumps`）。实测同一台机器：
     - 12 文件 × 5 000 节点（6 万节点，现实规模）：预热 **19.6 ms**，无命中 **4.6 ms**。
     - 20 文件 × 30 000 节点（60 万，未超条目数）：预热 **198.6 ms**，无命中 **35.0 ms** ✔ §12 的 500 ms。

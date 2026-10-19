@@ -34,6 +34,7 @@ import data_guard
 from data_guard import (
     DIFF_CATEGORIES,
     DIFF_LABELS,
+    DIRECTORY_ENTRY_MARKER,
     H3NonEnforcementWarning,
     H3UncomparedWarning,
     NOT_ENFORCING_NOTICE,
@@ -44,11 +45,13 @@ from data_guard import (
     format_diff_report,
     h3_enforcement_required,
     has_differences,
+    is_directory_entry,
     is_enforcing,
     requirement_failure_notice,
     session_notice_lines,
     session_notice_warnings,
     snapshot_data_tree,
+    split_entries,
     unhashed_notice_lines,
 )
 
@@ -104,13 +107,25 @@ def _snapshot_a(tmp_path) -> Dict[str, str]:
 
 
 def _assert_key_shape(snapshot: Dict[str, str]) -> None:
-    """快照的键值形状：64 位十六进制 sha256 + 相对数据根的归一化 posix 路径。"""
-    for rel, sha in snapshot.items():
-        assert _HEX64.match(sha), "值不是 64 位十六进制 sha256: {!r}".format(sha)
+    """快照的键值形状（文件与目录两类条目分开认）。
+
+    - 文件：值是 64 位十六进制 sha256。
+    - 目录（键以 `/` 结尾，B10.2 起进快照）：值恒等于 `DIRECTORY_ENTRY_MARKER`，
+      而且**不可能**是 sha256——这条同时钉住「两类条目不会互相冒充」。
+    - 两者：都是相对数据根的归一化 posix 路径。
+    """
+    for rel, value in snapshot.items():
+        if is_directory_entry(rel):
+            assert value == DIRECTORY_ENTRY_MARKER, "目录条目的值不是标记: {!r}".format(rel)
+            assert _HEX64.match(value) is None, rel
+            core = rel[:-1]
+        else:
+            assert _HEX64.match(value), "值不是 64 位十六进制 sha256: {!r}".format(value)
+            core = rel
         assert not rel.startswith("./"), rel
         assert not os.path.isabs(rel), rel
         assert not rel.startswith("data/"), rel
-        assert "\\" not in rel and rel == os.path.normpath(rel), rel
+        assert "\\" not in rel and core == os.path.normpath(core), rel
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +240,9 @@ def test_snapshot_of_a_controlled_tree_is_non_empty_and_normalized(tmp_path) -> 
     意味着没执法。换法不是放弃反空快照，而是把「非空」建在**我能控制的树**上
     （键形状 + 逐文件独立重算 sha256 一条没减），真实树的执法与否交给守卫自己
     公告（`test_session_notice_...` 与 `tests/test_data_guard_enforcement.py`）。
+
+    期望的目录条目**逐个硬写**，不从 `files` 推导：推导出来的期望集会跟着实现一起
+    放宽（同一个仓库里已经踩过两次这个味道，见 docs/know-how.md 的 M3-08 那条）。
     """
     root = tmp_path / "tree"
     files = {
@@ -233,6 +251,14 @@ def test_snapshot_of_a_controlled_tree_is_non_empty_and_normalized(tmp_path) -> 
         "profiles/default/configs/probe.xml": "<a>1</a>",
         "records/deep/nested/leaf.json": "{}",
     }
+    expected_dirs = {
+        "profiles/",
+        "profiles/default/",
+        "profiles/default/configs/",
+        "records/",
+        "records/deep/",
+        "records/deep/nested/",
+    }
     for rel, content in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,12 +266,12 @@ def test_snapshot_of_a_controlled_tree_is_non_empty_and_normalized(tmp_path) -> 
 
     snapshot = snapshot_data_tree(str(root))
     assert snapshot, "我自己造的树不许快照为空"
-    assert set(snapshot) == set(files)
+    assert set(snapshot) == set(files) | expected_dirs, sorted(snapshot)
     _assert_key_shape(snapshot)
     # 防「假哈希」：逐文件独立重算一遍 sha256，必须与快照一致。
-    for rel, sha in snapshot.items():
+    for rel in files:
         on_disk = (root / rel).read_bytes()
-        assert sha == _sha256_of(on_disk), rel
+        assert snapshot[rel] == _sha256_of(on_disk), rel
     assert snapshot["top.txt"] == _sha256_of(b"top\n")
 
 
@@ -309,7 +335,8 @@ def test_snapshot_skips_lock_file_at_root_only(tmp_path) -> None:
     磁盘锁的唯一出处是 `app/server/http.py::SingleInstanceLock`，它只写在数据根，
     所以豁免收窄不会误伤合法产物；反过来说 `data/profiles/default/.mcchecker.lock`
     这种文件以前按 basename 全树豁免是**看不见的洞**（复审 Minor）。
-    空目录不是数据，与锁文件一起都不许进快照。
+    目录不再和锁文件一起豁免：B10.2 之后目录是**要**进快照的，那条单独由
+    `test_snapshot_records_created_and_removed_directories` 钉住。
     """
     root = tmp_path / "tree"
     (root / "profiles" / "default").mkdir(parents=True)
@@ -317,13 +344,106 @@ def test_snapshot_skips_lock_file_at_root_only(tmp_path) -> None:
     before = snapshot_data_tree(str(root))
 
     (root / ".mcchecker.lock").write_text("pid", encoding="utf-8")
-    (root / "profiles" / "newdir").mkdir()
     after = snapshot_data_tree(str(root))
-    assert before == after, "根一级的锁与空目录都不算数据变化"
+    assert before == after, "根一级的锁不算数据变化"
 
     (root / "profiles" / "default" / ".mcchecker.lock").write_text("pid", encoding="utf-8")
     nested = snapshot_data_tree(str(root))
     assert "profiles/default/.mcchecker.lock" in nested, sorted(nested)
+
+
+def test_snapshot_records_created_and_removed_directories(tmp_path) -> None:
+    """B10.2 的正面证明：**空目录**的新建与删除本身就是一种可检出的变化。
+
+    这条存在的原因是实测过的：`GET /files` 一路由读路径 `_ensure_dirs()` 长出
+    `archive/`、`records/`、`cache/`、`cache/parse_tree/`，权威文件哈希逐条未变，
+    于是旧守卫（只哈希常规文件）对此完全沉默——「只读接口没改数据」这句话
+    在机制上无法验证。目录进快照之后它变成了可验证、可判红的命题。
+    """
+    root = tmp_path / "tree"
+    (root / "profiles").mkdir(parents=True)
+    (root / "a.txt").write_text("a", encoding="utf-8")
+    before = snapshot_data_tree(str(root))
+    assert set(before) == {"a.txt", "profiles/"}, sorted(before)
+
+    # 新建一个空目录：一个字节都没写，但数据根确实被改了。
+    (root / "archive").mkdir()
+    created = compare_snapshots(before, snapshot_data_tree(str(root)))
+    assert created["created"] == ["archive/"], created
+    assert created["deleted"] == [] and has_differences(created) is True
+
+    # 删掉它（目录本身没了，文件一个没动）：同样必须红。
+    (root / "archive").rmdir()
+    removed = compare_snapshots(before, snapshot_data_tree(str(root)))
+    assert removed["created"] == [] and removed["deleted"] == []
+
+    os.rmdir(os.path.join(str(root), "profiles"))
+    gone = compare_snapshots(before, snapshot_data_tree(str(root)))
+    assert gone["deleted"] == ["profiles/"], gone
+    assert gone["created"] == [] and has_differences(gone) is True
+
+
+def test_empty_directory_churn_is_created_plus_deleted_never_renamed(tmp_path) -> None:
+    """删一个空目录 + 建另一个空目录 必须报成 新建+删除，不许配对成「改名」。
+
+    目录条目的值是同一个常量标记，一旦混进改名的 sha256 配对，任何「读路径长出
+    新目录、同时旧目录没了」都会被写成一句假的「archive/ -> records/（改名）」，
+    把方向说反（这正是 `compare_snapshots` docstring 里那条空文件精度上限的形状，
+    目录不能也踩一遍）。
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "archive").mkdir()
+    (root / "a.txt").write_text("a", encoding="utf-8")
+    before = snapshot_data_tree(str(root))
+
+    (root / "records").mkdir()
+    (root / "archive").rmdir()
+    diffs = compare_snapshots(before, snapshot_data_tree(str(root)))
+    assert diffs["renamed"] == [], diffs
+    assert diffs["created"] == ["records/"], diffs
+    assert diffs["deleted"] == ["archive/"], diffs
+
+
+def test_existing_empty_root_is_still_not_enforcing(tmp_path) -> None:
+    """「快照为空 ≠ 安全」这条诚实话在目录进快照之后必须还成立。
+
+    根存在但里面什么都没有（干净检出刚 `mkdir` 出一个空 data/，或服务只建了根）
+    依旧是非执法态，公告与警告两条通道都要说破，不许读成「保护完且干净」。
+    """
+    empty_root = tmp_path / "tree"
+    empty_root.mkdir()
+    snapshot = snapshot_data_tree(str(empty_root))
+    assert snapshot == {}
+    assert is_enforcing(snapshot) is False
+    lines = "\n".join(session_notice_lines(snapshot))
+    assert "H3 守卫未执法" in lines and "H3 守卫执法中" not in lines, lines
+    assert [cat for _msg, cat in session_notice_warnings(snapshot, None)] == [
+        H3NonEnforcementWarning
+    ]
+
+
+def test_enforcing_notice_reports_files_and_dirs_separately(tmp_path) -> None:
+    """公告里的「N 个文件」只能是文件数：目录进快照后拿 `len(baseline)` 当文件数就是撒谎。
+
+    一树空目录（`data/` 被某个读路径长出来的那种形状）必须报成「0 个文件、4 个目录」
+    而不是「4 个文件」，否则读的人会把「没哈希到任何字节」当成「保护了 4 个东西」。
+    """
+    root = tmp_path / "tree"
+    for name in ("archive", "records", "cache", "cache/parse_tree"):
+        os.makedirs(os.path.join(str(root), *name.split("/")))
+    snapshot = snapshot_data_tree(str(root))
+    files, dirs = split_entries(snapshot)
+    assert files == [] and dirs == ["archive/", "cache/", "cache/parse_tree/", "records/"], snapshot
+
+    lines = "\n".join(session_notice_lines(snapshot))
+    assert "基线快照 0 个文件、4 个目录" in lines, lines
+    assert "1 个文件" not in lines, lines
+    assert "H3 守卫执法中" in lines, lines
+
+    (root / "a.txt").write_text("a", encoding="utf-8")
+    mixed = "\n".join(session_notice_lines(snapshot_data_tree(str(root))))
+    assert "基线快照 1 个文件、4 个目录" in mixed, mixed
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +454,12 @@ def test_snapshot_skips_lock_file_at_root_only(tmp_path) -> None:
 def test_snapshot_and_compare_end_to_end_on_temp_tree(tmp_path) -> None:
     """快照 + 比对对一棵小临时树端到端可用（不依赖 pytest 生命周期）。"""
     snap = _snapshot_a(tmp_path)
-    assert set(snap) == {"top.txt", "profiles/default/bindings.json"}
+    assert set(snap) == {
+        "top.txt",
+        "profiles/",
+        "profiles/default/",
+        "profiles/default/bindings.json",
+    }, sorted(snap)
     root = tmp_path / "tree"
     (root / "zz.tmp").write_text("leak", encoding="utf-8")
     diffs = compare_snapshots(snap, snapshot_data_tree(str(root)))
@@ -435,7 +560,8 @@ def test_snapshot_stats_accumulate_the_price_of_both_passes(tmp_path) -> None:
 
     stats = SnapshotStats()
     first = snapshot_data_tree(str(root), stats)
-    assert set(first) == {"a.txt", "sub/big.bin"}, sorted(first)
+    # 目录条目进快照，但**不**计入 `files`/`total_bytes`——那两项是「哈希了多少字节」的价格。
+    assert set(first) == {"a.txt", "sub/", "sub/big.bin"}, sorted(first)
     assert (stats.files, stats.total_bytes) == (2, 3 + payload), stats
     assert stats.seconds > 0.0, "耗时必须真的测出来，不是写死的 0"
     assert stats.unhashed == []
@@ -501,7 +627,9 @@ def test_unreadable_directory_is_named_instead_of_silently_vanishing(tmp_path) -
     finally:
         locked.chmod(0o755)
 
-    assert set(snapshot) == {"ok.txt"}, sorted(snapshot)
+    assert set(snapshot) == {"ok.txt", "locked/"}, sorted(snapshot)
+    # `locked/` 本身进快照是事实（列这个条目只需要读父目录），读不进去的是它**里面**
+    # 的东西——那部分才是不许沉默的部分，所以它进 `unhashed` 而不是消失。
     assert [rel for rel, _reason in stats.unhashed] == ["locked/"], stats.unhashed
     assert "目录无法遍历 PermissionError" in stats.unhashed[0][1], stats.unhashed
     assert [cat for _msg, cat in session_notice_warnings(snapshot, stats)] == [H3UncomparedWarning]
