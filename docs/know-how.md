@@ -44,6 +44,10 @@
 - `tests/test_api_tasks.py::TestLayeringAndContract::test_mock_task_contract_matches_the_backend` 是按「从 `function runTask(` 起 **2600** 个字符」的窗口读 `mock-api.js` 的（R45 反对的那类源码断言，**现存**的，别顺手放宽窗口）：往 `runTask` 里加代码会把窗口尾的 `return ok({ task: t }, 202)` 挤出窗口，红的是断言的容量而不是契约。正确做法是把新增逻辑抽成 `runTask` **之前**的函数（`taskItemsFor` 就是这么放的），注释也放外面。**并且注释里不许逐字写出这两个被 grep 的串**——`source.index(marker)` 取的是**第一次**出现的位置，把它们写进注释会让窗口从注释处开始，用例立刻读不到 `runTask` 本体。
 - `MC.mock` 的任务是 `setTimeout(900)` 逐条推进的**串行队列**，而 `refresh_records` 与 `update_source`/`update_all` 在同一机型内两两互斥（`_CONFLICTING_TYPES` 不看 target）：前端测试页里任何要「等 mock 任务跑完再断言结果」的新用例，必须**先轮询到队列里没有 queued/running 任务**再 POST，否则会被前一条用例留下的在跑任务撞成 409——那是契约正确，不是回归（卡 6 的互斥契约用例反过来必须**并发**下发才能避开完成时刻的随机红，两个方向的坑是同一枚硬币）。
 
+- **合并/发布前的验收必须覆盖它自己声明的那一层：改了 `app/web/**` 就要跑前端，光跑 Python 全量等于没验（控制方自己犯过一次，2026-10-18，PR #69）。** 事实：安全卡合并点 `0dd72b1` 的 `app/web/tests/tests.js:47` 写着 `var EXPECTED_CASES = 42;`，而该点实际注册 44 条 ⇒ 前端验收页当时在**主线上是红的**（`1 FAILED / 45`，失败行原文「用例注册数不符：预期 42，实际注册 44」），而控制方合并前只跑了 Python 全量（1236 passed，全绿）。这条闸不会自己出现在 pytest 里——它是浏览器页面的断言，Python 侧零覆盖。后续 M3-09 的合并把该值按实测改成 45，主线才转绿（控制方在 `03a61ac` 上按仓库钉的命令复跑三次：`ALL PASSED (45)` ×3）。
+  规矩：**任何改动 `app/web/**` 的卡在开 PR 前，必须按 DELIVERY_PLAN §3 的 HTTP 形态命令实跑前端验收**（从 `/tmp` 副本起 keep-alive 多线程静态服务 + 无头 Chrome，读 `<title>`），控制方自己合卡时同样适用；`file://` 形态已作废（外部脚本产生的 Promise 拒绝在那里永不派发，会给出假的绿）。合并涉及多张卡共同改这一行时，**取实测而不是取任何一边**：这一行只有一侧改过时 git 不报冲突，会静默保留过期数字（本轮 42/43 都错、真值 45 就是这一形状）。
+
+
 ## 3. Development Notes
 - NiceGUI 的 `app.storage.user` 基于浏览器会话
 - 若需要 `app.storage.user` 在刷新后仍可用，需要在 `ui.run()` 里设置 `storage_secret`（本项目默认自动生成）
