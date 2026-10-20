@@ -50,9 +50,9 @@
    * 两条用例照样注册 ⇒ 语义冲突只能靠实测拆穿。HTTP keep-alive 形态下三轮都是
    * 「预期 43，实际注册 45」，45 条全部真跑到且绿，唯一红的就是这条闸。
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
-   * 51 是 M3-13 当时的读数，已被本卡的 +1 用例更新。改了 `app/web/**` 或并过主线
+   * M3-14 新增 bindings 生产用例后按页面自报数重读为 53。改了 `app/web/**` 或并过主线
    * 之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 52;
+  var EXPECTED_CASES = 53;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -405,11 +405,11 @@
     }
   });
 
-  test("M3-06 / D2：设置页分段白名单——放行 sources、schedule 与 people，其余三项各有点名卡号的去向", function () {
+  test("M3-06 / D2：设置页分段白名单——放行 sources、schedule、people 与 bindings，其余两项各有点名卡号的去向", function () {
     /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS、
-     * 起点只有 sources（M3-06），M3-08 放行 schedule，M3-13 放行 people；
-     * unwiredSettings 恰好覆盖未接入的那三项且文案点名接入卡号。
-     * 后续 M3-14/15/16 各自把一项加进 WIRED_SETTINGS，本用例是它们的公共回归。 */
+     * 起点只有 sources（M3-06），M3-08 放行 schedule，M3-13 放行 people，
+     * M3-14 放行 bindings；unwiredSettings 恰好覆盖未接入的两项且文案点名接入卡号。
+     * 后续 M3-15/16 各自把一项加进 WIRED_SETTINGS，本用例是它们的公共回归。 */
     eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
     ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
     ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
@@ -426,12 +426,13 @@
       ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（M3-06）");
       ok(MC.settingsSegmentWired("schedule"), "生产模式 schedule 已接入（M3-08）");
       ok(MC.settingsSegmentWired("people"), "生产模式 people 已接入（M3-13：/ip-mapping 与 /admins 已有后端）");
-      ok(!MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余三项未接入");
+      ok(MC.settingsSegmentWired("bindings"), "生产模式 bindings 已接入（M3-14：/bindings 已有后端）");
+      ok(!MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余两项未接入");
       /* F8（卡 7 复审）：F 断言的是效果而不是切片自比——真的动手改暴露出的切片，
        * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。
        * 变异对象必须挑**未接入**的那一项：往切片里 push 一个已经放行的分段测不出任何东西。 */
-      MC.wiredSettingsSegments.push("bindings");
-      ok(!MC.settingsSegmentWired("bindings"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
+      MC.wiredSettingsSegments.push("tools");
+      ok(!MC.settingsSegmentWired("tools"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
       /* 第二变异：先裁回原长再验一次（这一句是**变异步骤**，不是恢复——恢复在 finally）。 */
       MC.wiredSettingsSegments.splice(origWired.length);
       ok(MC.settingsSegmentWired("sources") && !MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向打开/关闭门控");
@@ -605,14 +606,14 @@
     return r;
   }
 
-  test("M3-06 / D2：未接入的三个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
+  test("M3-06 / D2：未接入的两个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
     var t = productionRun();
     return t.run(function (r) {
       var spy = r.useApi({});
       /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。
-       * `schedule` 已在 M3-08 接入、`people` 已在 M3-13 接入，都移出本用例，
-       * 各由自己的生产用例盯（people 见下面 M3-13 的那四条视图用例与一条 mock 契约用例）。 */
-      ["bindings", "tools", "profiles"].forEach(function (seg) {
+       * `schedule`（M3-08）、`people`（M3-13）、`bindings`（M3-14）都已接入，移出本用例，
+       * 各由自己的生产用例盯。 */
+      ["tools", "profiles"].forEach(function (seg) {
         var inst = r.mount(settingsApp(true), seg);
         var main = inst.el.querySelector(".settings-main");
         ok(main.textContent.indexOf(MC.unwiredSettings[seg]) >= 0, seg + "：只读横幅必须给出接入去向「" + MC.unwiredSettings[seg] + "」");
@@ -624,7 +625,47 @@
         });
       });
       return tick().then(function () {
-        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
+        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /tools、/profiles），实际：" + spy.calls.join(" | "));
+      });
+    });
+  });
+
+  test("M3-14：bindings 分段在生产模式打 /bindings，行内显示紫色组名与绑定路径，成员只读", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/bindings$/.test(path)) return Promise.resolve({
+            items: [
+              {
+                group_name: "超时组",
+                variables: [
+                  { file: "a.xml", path: "a.xml/R/params/timeout" },
+                  { file: "b.xml", path: "b.xml/R/params/timeout" },
+                ],
+              },
+            ],
+          });
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var inst = r.mount(settingsApp(true), "bindings");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        eq(spy.calls, ["GET /p/default/bindings"], "进入已接入的 bindings 只发这一个请求");
+        var badge = main.querySelector(".badge.badge-bind");
+        ok(badge && badge.textContent === "超时组", "组名要用紫色绑定徽标显示：" + (badge ? badge.textContent : "<没有徽标>"));
+        ok(main.textContent.indexOf("a.xml/R/params/timeout") >= 0, "变量 1 的绑定路径要显示");
+        ok(main.textContent.indexOf("b.xml/R/params/timeout") >= 0, "变量 2 的绑定路径要显示");
+        var edit = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent === "编辑"; })[0];
+        ok(edit && !edit.disabled, "部署者可以编辑绑定组");
+        var inst2 = r.mount(settingsApp(false), "bindings");
+        return tick().then(function () {
+          var main2 = inst2.el.querySelector(".settings-main");
+          var edit2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "编辑"; })[0];
+          ok(edit2 && edit2.disabled, "非部署者的编辑按钮必须禁用");
+          ok(/部署者/.test(edit2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (edit2 ? edit2.getAttribute("title") : "<没有按钮>"));
+        });
       });
     });
   });

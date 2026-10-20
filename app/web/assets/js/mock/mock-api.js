@@ -1401,33 +1401,73 @@
     return ok({ removed: removed });
   });
 
+  /* ---------- 变量绑定：与后端 `app/services/bindings.py` 同口径（M3-14 / INH-1899） ----------
+   * - 至少 2 个有效变量（`P.files` 里存在且 path 非空），无效行丢弃；剩不足 2 个 → 400
+   *   `detail.field="variables"`。
+   * - 组名进 DELETE 的路径段：`/`、`\`、控制字符与任何字面 `%XX` 在创建端拒（`api.seg()`
+   *   会把 `%` 编成 `%25`，删除时撞守卫），删除端保持宽松。
+   * - 改名撞已有组 → 409 `FILE_EXISTS`；成功返回 `{item}`，DELETE 返回 `{removed: bool}`
+   *   （R46：原先 mock 的 `{deleted:true}` 是未定契约）。
+   * - 成功才 bump；删 0 条不 bump、不改数组。
+   */
+  var BAD_BINDING_GROUP_MESSAGE = "绑定组名称需为 1-100 个字符，且不能包含 /、\\ 或任何 %XX 编码写法（这样的组无法删除）";
+  var BAD_BINDING_VARIABLES_MESSAGE = "绑定组至少需要 2 个有效变量（文件存在且路径非空）";
+  var DUPLICATE_BINDING_GROUP_MESSAGE = "已存在同名绑定组";
+  var BINDING_GROUP_MAX = 100;
+
+  function bindingGroupName(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw).trim();
+    if (!text || text.length > BINDING_GROUP_MAX) return null;
+    if (/[\/\\]/.test(text) || /%[0-9A-Fa-f]{2}/.test(text) || /[\u0000-\u001f\u007f]/.test(text)) return null;
+    return text;
+  }
+
+  function bindingView(b) {
+    return {
+      group_name: String(b.group_name || ""),
+      variables: (b.variables || []).filter(function (v) { return v && typeof v === "object"; }).map(function (v) {
+        return { file: String(v.file || ""), path: String(v.path || "") };
+      }),
+    };
+  }
+
   route("GET", "/p/{pid}/bindings", function (a, req, P) {
-    return ok({ items: clone(P.bindings) });
+    return ok({ items: P.bindings.map(bindingView) });
   });
 
   route("PUT", "/p/{pid}/bindings/{group}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    var name = String(req.body.group_name || "").trim();
-    var vars = (req.body.variables || []).filter(function (v) { return v.file && String(v.path || "").trim(); });
-    if (!name) return fail(400, "INVALID_INPUT", "请输入绑定组名称", { field: "group_name" });
-    if (vars.length < 2) return fail(400, "INVALID_INPUT", "绑定组至少需要 2 个变量", { field: "variables" });
-    if (name !== a.group && P.bindings.some(function (b) { return b.group_name === name; })) return fail(409, "INVALID_INPUT", "已存在同名绑定组", { field: "group_name" });
+    var name = bindingGroupName(req.body.group_name);
+    if (!name) return fail(400, "INVALID_INPUT", BAD_BINDING_GROUP_MESSAGE, { field: "group_name" });
+    var raw = Array.isArray(req.body.variables) ? req.body.variables : [];
+    var vars = raw.filter(function (v) {
+      if (!v || typeof v !== "object") return false;
+      var file = String(v.file || "").trim();
+      var path = String(v.path || "").trim();
+      return !!file && !!path && !!P.files[file];
+    }).map(function (v) { return { file: String(v.file).trim(), path: String(v.path).trim() }; });
+    if (vars.length < 2) return fail(400, "INVALID_INPUT", BAD_BINDING_VARIABLES_MESSAGE, { field: "variables" });
+    if (name !== a.group && P.bindings.some(function (b) { return b.group_name === name; })) return fail(409, "FILE_EXISTS", DUPLICATE_BINDING_GROUP_MESSAGE, { field: "group_name" });
     var cur = P.bindings.filter(function (b) { return b.group_name === a.group; })[0];
     if (cur) {
       cur.group_name = name;
       cur.variables = vars;
     } else P.bindings.push({ group_name: name, variables: vars });
     bump(a.pid, "settings");
-    return ok({ ok: true });
+    return ok({ item: bindingView(cur || P.bindings[P.bindings.length - 1]) });
   });
 
   route("DELETE", "/p/{pid}/bindings/{group}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    P.bindings = P.bindings.filter(function (b) { return b.group_name !== a.group; });
-    bump(a.pid, "settings");
-    return ok({ deleted: true });
+    var kept = P.bindings.filter(function (b) { return b.group_name !== a.group; });
+    var removed = kept.length < P.bindings.length;
+    if (removed) {
+      P.bindings = kept;
+      bump(a.pid, "settings");
+    }
+    return ok({ removed: removed });
   });
 
   route("GET", "/p/{pid}/tools", function (a, req, P) {

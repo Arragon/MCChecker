@@ -110,12 +110,15 @@ WRITE_ROUTE_ACTIONS = {
     ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
     ("POST", "/api/v1/p/{pid}/admins"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/admins/{name}"): "settings_write",
+    # M3-14（INH-1899）：变量绑定写接口只有部署者（§8.3）。
+    ("PUT", "/api/v1/p/{pid}/bindings/{group}"): "settings_write",
+    ("DELETE", "/api/v1/p/{pid}/bindings/{group}"): "settings_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
 }
 
 ROUTE_VALUES = {
     "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
-    "item": "pp_energy",
+    "item": "pp_energy", "group": "g1",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。
@@ -914,6 +917,10 @@ WRITE_FAMILIES = [
     ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}", "deployer", None, False),
     ("POST", "/api/v1/p/{pid}/admins", "deployer", {"name": "跨站加的人"}, False),
     ("DELETE", "/api/v1/p/{pid}/admins/{name}", "deployer", None, False),
+    # M3-14（INH-1899）：变量绑定。body 故意给出两个有效变量，让带头的对照请求越过
+    # CSRF 后落到业务校验（文件不存在也只会是 400，不是 403）。
+    ("PUT", "/api/v1/p/{pid}/bindings/{group}", "deployer", {"group_name": "跨站组", "variables": [{"file": FILE_A, "path": FILE_A + "/R"}, {"file": FILE_A, "path": FILE_A + "/R/params"}]}, False),
+    ("DELETE", "/api/v1/p/{pid}/bindings/{group}", "deployer", None, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
     # M3-11（INH-1896）：DL 条件保存。body 留空也能证明 CSRF 闸门在 handler 之前
