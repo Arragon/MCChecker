@@ -1162,6 +1162,163 @@
     return ok(scheduleView(P, new Date()));
   });
 
+  /* ---------- 人员与权限：与后端 `app/services/people.py` 同口径（M3-13 / INH-1898） ----------
+   * SPEC 与后端是准（R19），mock 只是把同一条契约在模板模式下再演一遍：
+   * - **IP 必须规范化后才落盘**。后端复用 `services/auth.normalize_ip`（也就是身份解析
+   *   用来比对客户端地址的那一只）：IPv4 四段 0–255 且拒绝前导零、IPv6 小写 + 压缩最长零段、
+   *   `::ffff:a.b.c.d` 折成点分 IPv4、两端方括号去掉。JS 没有 `ipaddress`，所以这三条规则
+   *   在下面 `normalizeIp` 里按同口径实现。不归一的后果不是难看，是**静默失效**：客户端地址
+   *   是规范化过的，而 `resolve_person_by_ip` 逐字比较，于是「登记了 IP、也加了管理员，
+   *   身份却不是管理员」。
+   * - **响应形状取后端先例**（`api_sources.py`）：PUT/POST ⇒ `{item}`（POST 是 201）、
+   *   DELETE ⇒ `{removed: bool}`，重名 409 `FILE_EXISTS`。原先这几条路由写的
+   *   `{ok:true}` / `{deleted:true}` / 409 `INVALID_INPUT` 是**未定契约**（R46：路由当时还不存在），
+   *   本卡按后端对齐。
+   * - 非法 IP / 非法姓名一律 400 并带 `detail.field`（`ip` / `name`，与 `views/settings.js`
+   *   的字段名同一契约，§7.1）；失败写不 bump（全局约束 / 决策 16）。
+   * - 管理员姓名另有一档「删除路径走不通」，**只压创建端**（下面 `BAD_ADMIN_NAME_MESSAGE`
+   *   那一整段注释就是它，与 `people._validated_admin_name` 同一裁定）。
+   * - 「删了 0 条」不 bump、不改数组。
+   */
+  var BAD_IP_MESSAGE = "请输入合法的 IPv4/IPv6 地址";
+  var BAD_NAME_MESSAGE = "姓名需为 1-100 个字符，且不含控制字符";
+  var BAD_ADMIN_NAME_MESSAGE =
+    "管理员姓名不能包含 / 、\\ 或任何 %XX 编码写法（这样的人员无法从名单里删除）";
+  /* 「加得进来、删不出去」甚至「撤错人」那条死路（M3-13 / INH-1898 三轮裁定，与后端
+   * `people._UNMANAGEABLE_PATH_CHARS` / `_UNMANAGEABLE_PATH_TOKENS` / `_PERCENT_ESCAPE_RE` /
+   * `_BAD_ADMIN_NAME_MESSAGE` 同源；比对由 `tests/test_api_people.py::TestMockPeopleContract`
+   * 逐值执法，它**执行**本文件而不是 grep 本文件）：管理员姓名进的是
+   * `DELETE /admins/{name}` 那个路径段，`api.seg()` = `encodeURIComponent`，于是
+   * ① 含 `/`、`\\` ⇒ 编成 `%2F` / `%5C`，撞后端 §16.8 第 3 条的全站守卫；
+   * ② 含**字面** `%2f` / `%5c` / `%00`（任意大小写）⇒ `%` 先被编成 `%25` 躲过 raw 那一份，
+   *    解码后又重新长出这三只 token，而守卫把 raw 与解码后两份一起看，照样撞；
+   * ③ 含**任何**字面 `%XX` ⇒ 路径被解码两次，删除端会拿到另一个名字（`测试%20甲` 会撤掉
+   *    `测试 甲`）；后端创建端一律 400，分发层再把二次编码路径整段拒掉。
+   * mock 里没有路径守卫（模板模式不发真 HTTP），所以这三档只能由创建端自己复现，否则
+   * 「模板里加得进来、真后端拒」就是 mock 发明了后端没有的行为（R19）。
+   * **只用于 `POST /admins`**：`DELETE /admins/{name}` 与 `ip_mapping` 的 `name` 照旧宽松——
+   * 后端服务层也是同一份不对称（v1 直接写文件留下的存量行必须有出路），别在这里「统一」掉它。
+   * IP 键那一档（后端 `_validated_ip_key`）在本文件里打不到：`normalizeIp` 拒绝**一切**带 `%`
+   * 的写法（know-how 第 2 节裁定的「mock 只比后端严、不补 IPv6 scope 语法」），所以带编码
+   * 分隔符的键在这边更早一步就是 400 `field="ip"`，判向相同、理由更粗，不另加死代码。 */
+  var UNMANAGEABLE_PATH_CHARS = ["/", "\\"];
+  var UNMANAGEABLE_PATH_TOKENS = ["%2f", "%5c", "%00"];
+  var PERCENT_ESCAPE_RE = /%[0-9A-Fa-f]{2}/;
+
+  function octets(text) {
+    var parts = String(text).split(".");
+    var out = [];
+    if (parts.length !== 4) return null;
+    for (var i = 0; i < 4; i++) {
+      // 前导零与 Python 3.9 的 `ipaddress` 一样拒绝（"010.0.0.1" 不是合法 IPv4 文本）。
+      if (!/^(0|[1-9]\d{0,2})$/.test(parts[i])) return null;
+      var v = Number(parts[i]);
+      if (v > 255) return null;
+      out.push(v);
+    }
+    return out;
+  }
+
+  function hexGroups(list, allowEmbeddedV4) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var g = list[i];
+      if (g.indexOf(".") >= 0) {
+        // 末尾的点分 IPv4 顶替两组，且只能出现在**最后一组**（`1:2:3:4:5:6:1.2.3.4`）。
+        if (!allowEmbeddedV4 || i !== list.length - 1) return null;
+        var o = octets(g);
+        if (!o) return null;
+        out.push((o[0] << 8) | o[1], (o[2] << 8) | o[3]);
+        continue;
+      }
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+      out.push(parseInt(g, 16));
+    }
+    return out;
+  }
+
+  function ipv6Groups(text) {
+    if (text.indexOf(":") < 0) return null;
+    var compress = text.indexOf("::") >= 0;
+    var head, tail;
+    if (compress) {
+      if (text.indexOf("::", text.indexOf("::") + 1) >= 0) return null; // 只许一个 "::"
+      var halves = text.split("::");
+      head = halves[0] === "" ? [] : halves[0].split(":");
+      tail = !halves[1] || halves[1] === "" ? [] : halves[1].split(":");
+      if (head.length + tail.length > 7) return null; // "::" 至少要替一组 0
+    } else {
+      head = text.split(":");
+      tail = [];
+    }
+    var hg = hexGroups(head, !compress);
+    if (!hg) return null;
+    var tg = hexGroups(tail, true);
+    if (!tg) return null;
+    if (compress) {
+      var zeros = [];
+      for (var i = hg.length + tg.length; i < 8; i++) zeros.push(0);
+      return hg.concat(zeros, tg);
+    }
+    return hg.length + tg.length === 8 ? hg.concat(tg) : null;
+  }
+
+  function canonicalIpv6(groups) {
+    // IPv4 映射地址折成点分写法（与 `auth.normalize_ip` 的 `ipv4_mapped` 一致）。
+    var mapped = groups[5] === 0xffff;
+    for (var i = 0; i < 5; i++) if (groups[i] !== 0) mapped = false;
+    if (mapped) {
+      return [groups[6] >> 8, groups[6] & 255, groups[7] >> 8, groups[7] & 255].join(".");
+    }
+    // 压缩**最长**的连续零段（长度 ≥2 才压，并列取靠前者——与 `ipaddress` 同规则）。
+    var best = { start: -1, len: 0 }, run = { start: -1, len: 0 };
+    for (var j = 0; j < 8; j++) {
+      if (groups[j] === 0) {
+        if (run.len === 0) run.start = j;
+        run.len += 1;
+        if (run.len > best.len) best = { start: run.start, len: run.len };
+      } else {
+        run.len = 0;
+      }
+    }
+    var hex = groups.map(function (g) { return g.toString(16); });
+    if (best.len < 2) return hex.join(":");
+    return hex.slice(0, best.start).join(":") + "::" + hex.slice(best.start + best.len).join(":");
+  }
+
+  /** 与后端 `auth.normalize_ip` 同口径：非法即空串（调用方据此判 400）。 */
+  function normalizeIp(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw)
+      .trim()
+      .replace(/^\[+/, "")
+      .replace(/\]+$/, "");
+    if (!text) return "";
+    if (text.indexOf(":") < 0) {
+      var o = octets(text);
+      return o ? o.join(".") : "";
+    }
+    var g = ipv6Groups(text);
+    return g ? canonicalIpv6(g) : "";
+  }
+
+  /** §11.2：姓名 = 去空白后 1–100 字符、无控制字符（两端空白由调用方先 trim）。 */
+  function validPersonName(name) {
+    return !!name && name.length <= 100 && !/[\x00-\x1f\x7f]/.test(name);
+  }
+
+  /** 与后端 `people._unmanageable_path_segment` 同口径：返回第一串让删除路径走不通的子串。 */
+  function unmanageablePathSegment(text) {
+    var i;
+    for (i = 0; i < UNMANAGEABLE_PATH_CHARS.length; i++) {
+      if (text.indexOf(UNMANAGEABLE_PATH_CHARS[i]) >= 0) return UNMANAGEABLE_PATH_CHARS[i];
+    }
+    var lowered = text.toLowerCase();
+    for (i = 0; i < UNMANAGEABLE_PATH_TOKENS.length; i++) {
+      if (lowered.indexOf(UNMANAGEABLE_PATH_TOKENS[i]) >= 0) return UNMANAGEABLE_PATH_TOKENS[i];
+    }
+    return null;
+  }
+
   route("GET", "/p/{pid}/ip-mapping", function (a, req, P) {
     return ok({ items: clone(P.people) });
   });
@@ -1169,24 +1326,38 @@
   route("PUT", "/p/{pid}/ip-mapping/{ip}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    var ip = String(req.body.ip || a.ip).trim();
-    var name = String(req.body.name || "").trim();
-    if (!/^(\d{1,3}\.){3}\d{1,3}$|^[0-9a-f:]+$/i.test(ip)) return fail(400, "INVALID_INPUT", "IP 地址格式不正确", { field: "ip" });
-    if (!name) return fail(400, "INVALID_INPUT", "请输入人员姓名", { field: "name" });
-    if (ip !== a.ip) P.people = P.people.filter(function (x) { return x.ip !== a.ip; });
-    var cur = P.people.filter(function (x) { return x.ip === ip; })[0];
-    if (cur) Object.assign(cur, { name: name, updated_at: util.nowString() });
-    else P.people.push({ ip: ip, name: name, updated_at: util.nowString() });
+    var oldIp = normalizeIp(a.ip);
+    if (!oldIp) return fail(400, "INVALID_INPUT", BAD_IP_MESSAGE, { field: "ip" });
+    // `ip` 缺省取路径那一个（只改姓名时不必重复 IP），与后端 `people.put_ip_mapping` 同口径。
+    var ip = normalizeIp(req.body.ip === undefined ? a.ip : req.body.ip);
+    if (!ip) return fail(400, "INVALID_INPUT", BAD_IP_MESSAGE, { field: "ip" });
+    var name = String(req.body.name === null || req.body.name === undefined ? "" : req.body.name).trim();
+    if (!validPersonName(name)) return fail(400, "INVALID_INPUT", BAD_NAME_MESSAGE, { field: "name" });
+    var rows = P.people.slice();
+    // 路径 IP ≠ body IP = 改 IP：**先删旧再写新**（后端把这两步扣在同一次机型锁里）。
+    if (ip !== oldIp) rows = rows.filter(function (x) { return normalizeIp(x.ip) !== oldIp; });
+    var found = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (normalizeIp(rows[i].ip) === ip) { found = i; break; }
+    }
+    var item = { ip: ip, name: name, updated_at: util.nowString() };
+    if (found >= 0) rows[found] = item;
+    else rows.push(item);
+    P.people = rows;
     bump(a.pid, "settings");
-    return ok({ ok: true });
+    return ok({ item: clone(item) });
   });
 
   route("DELETE", "/p/{pid}/ip-mapping/{ip}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    P.people = P.people.filter(function (x) { return x.ip !== a.ip; });
-    bump(a.pid, "settings");
-    return ok({ deleted: true });
+    var target = normalizeIp(a.ip);
+    if (!target) return fail(400, "INVALID_INPUT", BAD_IP_MESSAGE, { field: "ip" });
+    var before = P.people.length;
+    P.people = P.people.filter(function (x) { return normalizeIp(x.ip) !== target; });
+    var removed = P.people.length !== before;
+    if (removed) bump(a.pid, "settings"); // 删了 0 条不递增（决策 16，与 DELETE /sources 同形）
+    return ok({ removed: removed });
   });
 
   route("GET", "/p/{pid}/admins", function (a, req, P) {
@@ -1196,20 +1367,38 @@
   route("POST", "/p/{pid}/admins", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    var name = String(req.body.name || "").trim();
-    if (!name) return fail(400, "INVALID_INPUT", "请输入管理员姓名", { field: "name" });
-    if (P.admins.some(function (x) { return x.name === name; })) return fail(409, "INVALID_INPUT", "该管理员已存在", { field: "name" });
-    P.admins.push({ name: name, updated_at: util.nowString() });
+    var name = String(req.body.name === null || req.body.name === undefined ? "" : req.body.name).trim();
+    if (!validPersonName(name)) return fail(400, "INVALID_INPUT", BAD_NAME_MESSAGE, { field: "name" });
+    // 顺序与后端 `_validated_admin_name` 一致：先 §11.2 的通用档（空 / 超长 / 控制字符报
+    // `BAD_NAME_MESSAGE`），再「删除路径走不通」这一档报 `BAD_ADMIN_NAME_MESSAGE`。
+    if (PERCENT_ESCAPE_RE.test(name)) return fail(400, "INVALID_INPUT", BAD_ADMIN_NAME_MESSAGE, { field: "name" });
+    if (unmanageablePathSegment(name)) return fail(400, "INVALID_INPUT", BAD_ADMIN_NAME_MESSAGE, { field: "name" });
+    // 重名 409 用 `FILE_EXISTS`：§7.1 把 `INVALID_INPUT` 定成 400，409 的「同名已存在」是这一只
+    // （与后端 `people.add_admin` 和上面 `POST /sources` 同码）。
+    if (P.admins.some(function (x) { return String(x.name || "").trim() === name; })) {
+      return fail(409, "FILE_EXISTS", "该管理员已存在", { name: name, field: "name" });
+    }
+    var item = { name: name, updated_at: util.nowString() };
+    P.admins.push(item);
     bump(a.pid, "settings");
-    return ok({ ok: true }, 201);
+    return ok({ item: clone(item) }, 201);
   });
 
   route("DELETE", "/p/{pid}/admins/{name}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    P.admins = P.admins.filter(function (x) { return x.name !== a.name; });
-    bump(a.pid, "settings");
-    return ok({ deleted: true });
+    var name = String(a.name || "").trim();
+    // **故意只用** `validPersonName`（不含上面那一档）：后端 `people.remove_admin` 就是这样
+    // 不对称的——限制只压创建端，删除端留给出存量行（v1 直接写文件的名单里可能有含 `/` 或
+    // 字面 `%2f` 的人）。mock 里 `dispatch` 已经 `decodeURIComponent` 过路径段，所以这里真的
+    // 撤得掉；后端那一侧由 §16.8 的守卫拦着，这是「存量行只能靠服务层/运维出路」的既成事实，
+    // 不是本文件要修的东西。别把它「统一」成创建端那一档。
+    if (!validPersonName(name)) return fail(400, "INVALID_INPUT", BAD_NAME_MESSAGE, { field: "name" });
+    var before = P.admins.length;
+    P.admins = P.admins.filter(function (x) { return String(x.name || "").trim() !== name; });
+    var removed = P.admins.length !== before;
+    if (removed) bump(a.pid, "settings"); // 同上：删了 0 条不 bump
+    return ok({ removed: removed });
   });
 
   route("GET", "/p/{pid}/bindings", function (a, req, P) {
@@ -1387,6 +1576,10 @@
     handle: handle,
     download: download,
     identities: IDENTITIES,
+    /** [用例专用] 取某机型的内存数据**引用**。mock 的用例串行跑在同一个 `S` 上，
+     * 任何直接改写它的用例都必须自己还原（见 `app/web/tests/tests.js` 的 M3-13 R19 用例），
+     * 否则脏数据会留给后面的用例——那是卡 3 那类「桩恢复得太晚」的另一种形态。 */
+    profileState: function (pid) { return profile(pid); },
     identityKey: function () { return identityKey; },
     setIdentity: function (key) {
       identityKey = key;

@@ -48,8 +48,11 @@
    * 合并前 29719a1 写 43（本卡 +1）、0dd72b1 写 42（M4-02 +2 却没同步改这里），
    * git 默认合并对这一行不报冲突（只有一侧动过它），于是 43 直接胜出、42 侧的
    * 两条用例照样注册 ⇒ 语义冲突只能靠实测拆穿。HTTP keep-alive 形态下三轮都是
-   * 「预期 43，实际注册 45」，45 条全部真跑到且绿，唯一红的就是这条闸。 */
-  var EXPECTED_CASES = 45;
+   * 「预期 43，实际注册 45」，45 条全部真跑到且绿，唯一红的就是这条闸。
+   * M3-13（INH-1898）：51 这个值由评审/验收在本树用 HTTP 形态重读确认（页面自报
+   * `ALL PASSED (51)`），不是从任何一侧的数字推断出来的；改了 `app/web/**` 或并过
+   * 主线之后必须再重读一次，不能沿用本值。 */
+  var EXPECTED_CASES = 51;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -402,18 +405,18 @@
     }
   });
 
-  test("M3-06 / D2：设置页分段白名单——放行 sources 与 schedule，其余四项各有点名卡号的去向", function () {
+  test("M3-06 / D2：设置页分段白名单——放行 sources、schedule 与 people，其余三项各有点名卡号的去向", function () {
     /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS、
-     * 起点只有 sources（M3-06），M3-08 放行 schedule；unwiredSettings 恰好覆盖未接入的
-     * 四项且文案点名接入卡号。后续 M3-13/14/15/16 各自把一项加进 WIRED_SETTINGS，
-     * 本用例是它们的公共回归。 */
+     * 起点只有 sources（M3-06），M3-08 放行 schedule，M3-13 放行 people；
+     * unwiredSettings 恰好覆盖未接入的那三项且文案点名接入卡号。
+     * 后续 M3-14/15/16 各自把一项加进 WIRED_SETTINGS，本用例是它们的公共回归。 */
     eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
     ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
     ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
     var unwired = MC.settingsSegments.filter(function (s) { return MC.wiredSettingsSegments.indexOf(s) < 0; });
     eq(Object.keys(MC.unwiredSettings).sort(), unwired.slice().sort(), "未接入分段都要有去向文案，且不多给已接入分段");
     ok(unwired.every(function (s) { return /M\d-\d\d/.test(MC.unwiredSettings[s]); }), "去向文案要点名接入卡号");
-    /* 模板模式全开（预览不受门控）；生产模式只有 sources。 */
+    /* 模板模式全开（预览不受门控）；生产模式只有已接入的三项。 */
     var wasMock = MC.config.mock;
     var origWired = MC.wiredSettingsSegments.slice();
     try {
@@ -422,17 +425,19 @@
       MC.config.mock = false;
       ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（M3-06）");
       ok(MC.settingsSegmentWired("schedule"), "生产模式 schedule 已接入（M3-08）");
-      ok(!MC.settingsSegmentWired("people") && !MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余四项未接入");
+      ok(MC.settingsSegmentWired("people"), "生产模式 people 已接入（M3-13：/ip-mapping 与 /admins 已有后端）");
+      ok(!MC.settingsSegmentWired("bindings") && !MC.settingsSegmentWired("tools") && !MC.settingsSegmentWired("profiles"), "生产模式其余三项未接入");
       /* F8（卡 7 复审）：F 断言的是效果而不是切片自比——真的动手改暴露出的切片，
-       * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。 */
-      MC.wiredSettingsSegments.push("people");
-      ok(!MC.settingsSegmentWired("people"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
+       * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。
+       * 变异对象必须挑**未接入**的那一项：往切片里 push 一个已经放行的分段测不出任何东西。 */
+      MC.wiredSettingsSegments.push("bindings");
+      ok(!MC.settingsSegmentWired("bindings"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
       /* 第二变异：先裁回原长再验一次（这一句是**变异步骤**，不是恢复——恢复在 finally）。 */
       MC.wiredSettingsSegments.splice(origWired.length);
       ok(MC.settingsSegmentWired("sources") && !MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向打开/关闭门控");
     } finally {
       /* 第三轮 nit：变异必须自清理，跟本文件其它 fixture 一样。原先只有成功路径上那句
-       * splice 会把 push 进去的 "people" 摘掉，所以上面任一 ok 抛错时「people」就留在
+       * splice 会把 push 进去的 "bindings" 摘掉，所以上面任一 ok 抛错时它就留在
        * 对外切片里带到跑完，后续读到它的用例会拿到脏值。finally 这一句在成功路径上是
        * 幂等 no-op（已经裁到 origWired.length），只在失败路径上才真正复原。 */
       MC.wiredSettingsSegments.splice(origWired.length);
@@ -452,7 +457,12 @@
     });
   }
   function settingsApp(canDeployer) {
+    /* `paints` 是 UC-34 的观察点：视图在身份变化后必须重画顶栏与侧栏，而且**不整页刷新**
+     * （`go` 计数为 0、挂载的 DOM 节点还在原地）。真实的 `App` 把这两个 render 挂在
+     * prototype 上（views/shell.js），这里用计数器替身，断言的是「被调用了几次」。 */
+    var paints = { header: 0, nav: 0, go: 0 };
     return {
+      paints: paints,
       pid: "default",
       identity: { ip: "10.12.3.21", name: canDeployer ? "部署者甲" : "李娜", registered: true, is_deployer: !!canDeployer, is_admin: !!canDeployer, role_label: canDeployer ? "部署者" : "成员" },
       can: function (kind) { return kind === "deployer" && !!canDeployer; },
@@ -461,7 +471,9 @@
       activeTasks: [],
       taskSlot: MC.util.h("div"),
       p: function (rest) { return "/p/default" + rest; },
-      go: function () {},
+      go: function () { paints.go++; },
+      renderHeader: function () { paints.header++; },
+      renderNav: function () { paints.nav++; },
       openFile: function () {},
       switchProfile: function () {},
       reloadSession: function () { return Promise.resolve(); },
@@ -593,13 +605,14 @@
     return r;
   }
 
-  test("M3-06 / D2：未接入的四个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
+  test("M3-06 / D2：未接入的三个分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
     var t = productionRun();
     return t.run(function (r) {
       var spy = r.useApi({});
       /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。
-       * `schedule` 已在 M3-08 接入，移出本用例，改由下面的生产用例盯它。 */
-      ["people", "bindings", "tools", "profiles"].forEach(function (seg) {
+       * `schedule` 已在 M3-08 接入、`people` 已在 M3-13 接入，都移出本用例，
+       * 各由自己的生产用例盯（people 见下面 M3-13 的那四条视图用例与一条 mock 契约用例）。 */
+      ["bindings", "tools", "profiles"].forEach(function (seg) {
         var inst = r.mount(settingsApp(true), seg);
         var main = inst.el.querySelector(".settings-main");
         ok(main.textContent.indexOf(MC.unwiredSettings[seg]) >= 0, seg + "：只读横幅必须给出接入去向「" + MC.unwiredSettings[seg] + "」");
@@ -611,7 +624,7 @@
         });
       });
       return tick().then(function () {
-        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /admins、/bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
+        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /bindings、/tools、/profiles），实际：" + spy.calls.join(" | "));
       });
     });
   });
@@ -782,6 +795,379 @@
         });
       });
     });
+  });
+
+  /* ---------- M3-13：人员与权限（IP 对应表 + 管理员名单） ----------
+   * 数据故意摆成三种形状：当前访问者自己（要标「你」）、已登记且是管理员的（角色列要显示
+   * 「管理员」）、只在管理员名单里但没有 IP 行的（要显示「未登记 IP，暂不生效」）。 */
+  var IP_ROWS = [
+    { ip: "10.12.3.21", name: "部署者甲", updated_at: "2026-10-18 09:00:00" },
+    { ip: "10.12.3.22", name: "王强", updated_at: "2026-10-17 15:00:00" },
+  ];
+  var ADMIN_ROWS = [
+    { name: "王强", updated_at: "2026-10-17 15:00:00" },
+    { name: "没登记 IP 的人", updated_at: "2026-10-16 10:00:00" },
+  ];
+  function peopleHandlers(extra) {
+    var h = {
+      GET: function (path) {
+        if (/\/ip-mapping$/.test(path)) return Promise.resolve({ items: JSON.parse(JSON.stringify(IP_ROWS)) });
+        if (/\/admins$/.test(path)) return Promise.resolve({ items: JSON.parse(JSON.stringify(ADMIN_ROWS)) });
+        return Promise.resolve({ items: [] });
+      },
+    };
+    Object.keys(extra || {}).forEach(function (k) { h[k] = extra[k]; });
+    return h;
+  }
+  /** 找到弹层里某个 label 对应的输入框，并返回「点保存」的触发器。 */
+  function modalField(labelText) {
+    var fields = [].slice.call(document.querySelectorAll(".modal .field")).filter(function (f) {
+      var l = f.querySelector(".field-label");
+      return l && l.textContent.indexOf(labelText) >= 0;
+    })[0];
+    if (!fields) return null;
+    var control = fields.querySelector("input, select, textarea");
+    return {
+      field: fields,
+      control: control,
+      error: fields.querySelector(".field-error"),
+      button: function () {
+        var btns = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) {
+          return b.textContent.indexOf("保存") >= 0 || b.textContent.indexOf("添加") >= 0;
+        });
+        return btns[0];
+      },
+    };
+  }
+
+  test("M3-13：people 分段在生产模式读 /ip-mapping 与 /admins，表出「你」、角色与未登记 IP，并带出 §11.1 的可信内网提示", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(peopleHandlers());
+      var inst = r.mount(settingsApp(true), "people");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        eq(spy.calls, ["GET /p/default/ip-mapping", "GET /p/default/admins"], "门控开了 ⇒ 进 people 只发这两个请求，实际：" + spy.calls.join(" | "));
+        ok(main.textContent.indexOf("人员与权限将在 M3-13 接入") < 0, "已接入的分段不许再挂未接入文案");
+        /* §9.8.10 的三列语义：当前访问者标「你」、有 IP 行且不在名单的是「成员」、
+         * 只在管理员名单里没 IP 行的显示「未登记 IP，暂不生效」。 */
+        eq([].slice.call(main.querySelectorAll("tbody tr")).length, 4, "IP 表 2 行 + 管理员表 2 行");
+        ok(main.textContent.indexOf("你") >= 0, "当前访问者的 IP 行要标「你」");
+        ok(main.textContent.indexOf("未登记 IP，暂不生效") >= 0, "没有 IP 行的管理员要说明「暂不生效」");
+        /* §11.1：这句提示必须在界面上，不许只写在文档里（本卡把它从「未接入横幅」后面救出来）。 */
+        ok(main.textContent.indexOf("可信内网") >= 0, "§11.1 的「仅适用于可信内网」必须出现在分段文案里");
+        ok(main.textContent.indexOf("强认证") >= 0, "要说清 IP 识别不是强认证");
+        ok(main.textContent.indexOf("反向代理") >= 0, "经代理部署会全员同一个地址，这句也得看得见");
+      });
+    });
+  });
+
+  test("M3-13 / UC-34：登记当前 IP 并加为管理员后重新 GET /session、就地重画顶栏与侧栏（不整页刷新）", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var app = settingsApp(true); /* 部署者才有登记入口（非部署者的写控件是禁用的） */
+      var sessionCalls = [];
+      var spy = r.useApi(peopleHandlers({
+        PUT: function (path, body) { return Promise.resolve({ item: { ip: body.ip, name: body.name, updated_at: "2026-10-18 10:00:00" } }); },
+        POST: function (path, body) { return Promise.resolve({ item: { name: body.name, updated_at: "2026-10-18 10:00:00" } }); },
+        GET: function (path, query) {
+          if (path === "/session") {
+            sessionCalls.push(JSON.stringify(query || {}));
+            return Promise.resolve({
+              identity: { ip: "10.12.3.21", name: "部署者甲", registered: true, is_deployer: true, is_admin: true, role_label: "部署者 · 管理员" },
+              profile: { id: "default", name: "默认机型" },
+              profiles: [{ id: "default", name: "默认机型" }],
+              server: { version: "v2", time: "2026-10-18 10:00:00", scheduler: false },
+              limits: { upload_max_bytes: 1, tab_limit: 15, temp_ttl_hours: 6 },
+            });
+          }
+          if (/\/ip-mapping$/.test(path)) return Promise.resolve({ items: JSON.parse(JSON.stringify(IP_ROWS)) });
+          if (/\/admins$/.test(path)) return Promise.resolve({ items: JSON.parse(JSON.stringify(ADMIN_ROWS)) });
+          return Promise.resolve({ items: [] });
+        },
+      }));
+      var inst = r.mount(app, "people");
+      var main;
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          var addP = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("登记人员") >= 0; })[0];
+          ok(addP, "要有「登记人员」入口");
+          addP.click();
+          var ipField = modalField("IP 地址");
+          ok(ipField && ipField.control, "弹层里要有 IP 地址字段");
+          ipField.control.value = "10.12.3.21";
+          var nameField = modalField("姓名");
+          nameField.control.value = "部署者甲";
+          ipField.button().click();
+          return tick().then(tick);
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('PUT /p/default/ip-mapping/10.12.3.21 {"ip":"10.12.3.21","name":"部署者甲"}') >= 0, "登记走 PUT，路径与 body 同一个 IP：" + spy.calls.join(" | "));
+          /* UC-34 的关键一步：保存成功后必须重新 GET /session 才能刷新身份。
+           * 少了这一步，界面上的角色徽标与侧栏「审阅修改」都会停在旧身份上。 */
+          eq(sessionCalls.length, 1, "PUT 之后重新拉一次 /session，实际：" + sessionCalls.length);
+          eq(sessionCalls[0], '{"profile":"default"}', "/session 要带当前机型");
+          eq([app.paints.header, app.paints.nav], [1, 1], "顶栏与侧栏各重画一次");
+          eq(app.paints.go, 0, "不整页刷新：一次导航/重载都不许发生");
+          ok(document.body.contains(inst.el), "视图实例还在文档里（没有被整页重载替掉）");
+          /* 刷新身份之后分段自己重读了一次（`renderSection(true)`），两张表都要在。 */
+          eq(spy.calls.filter(function (c) { return c.indexOf("GET /p/default/ip-mapping") === 0; }).length, 2, "保存后局部刷新列表：初始一次 + 保存后一次");
+          app.paints.header = 0;
+          app.paints.nav = 0;
+          var addA = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("添加管理员") >= 0; })[0];
+          addA.click();
+          var nameF = modalField("管理员姓名");
+          nameF.control.value = "部署者甲";
+          nameF.button().click();
+          return tick().then(tick);
+        })
+        .then(function () {
+          ok(spy.calls.indexOf('POST /p/default/admins {"name":"部署者甲"}') >= 0, "加管理员走 POST /admins：" + spy.calls.join(" | "));
+          eq([app.paints.header, app.paints.nav], [1, 1], "第二次保存同样只重画，不整页刷新");
+          eq(app.session.identity.role_label, "部署者 · 管理员", "顶栏身份取自重新拉到的 /session");
+        });
+    });
+  });
+
+  test("M3-13：非法 IP 的 400 落在 IP 输入框、重名的 409 落在姓名上，都不退化成全局错误 toast", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      /* 后端契约（`services/people.py`）：IP 非法 ⇒ 400 INVALID_INPUT + detail.field="ip"；
+       * 管理员重名 ⇒ 409 FILE_EXISTS + detail.field="name"。`detail.field` 就是前后端的字段契约。 */
+      var spy = r.useApi(peopleHandlers({
+        PUT: function () { return Promise.reject(new MC.ApiError(400, "INVALID_INPUT", "请输入合法的 IPv4/IPv6 地址", { field: "ip" })); },
+        POST: function () { return Promise.reject(new MC.ApiError(409, "FILE_EXISTS", "该管理员已存在", { field: "name", name: "王强" })); },
+      }));
+      var inst = r.mount(settingsApp(true), "people");
+      var main, ipField, nameField;
+      return tick()
+        .then(function () {
+          main = inst.el.querySelector(".settings-main");
+          [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("登记人员") >= 0; })[0].click();
+          ipField = modalField("IP 地址");
+          ipField.control.value = "999.1.1.1";
+          modalField("姓名").control.value = "张三";
+          ipField.button().click();
+          return tick().then(tick);
+        })
+        .then(function () {
+          ok(!ipField.error.classList.contains("hidden"), "400 必须把错误显示在 IP 字段下方");
+          ok(ipField.error.textContent.indexOf("IPv4") >= 0, "要显示后端那句话，实际：" + ipField.error.textContent);
+          ok(ipField.control.classList.contains("is-invalid"), "IP 输入框要标红");
+          ok(ipField.control.getAttribute("aria-invalid") === "true", "读屏要听得到无效（§9.9）");
+          [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("取消") >= 0; })[0].click();
+          [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("添加管理员") >= 0; })[0].click();
+          nameField = modalField("管理员姓名");
+          nameField.control.value = "王强";
+          nameField.button().click();
+          return tick().then(tick);
+        })
+        .then(function () {
+          ok(!nameField.error.classList.contains("hidden"), "409 必须显示在姓名下方而不是弹全局 toast");
+          ok(nameField.error.textContent.indexOf("已存在") >= 0, nameField.error.textContent);
+          var toasts = [].slice.call(document.querySelectorAll(".toast"));
+          ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "字段级错误不许退化成「服务器故障」toast：" + toasts.map(function (x) { return x.textContent; }).join(" | "));
+          eq(spy.calls.filter(function (c) { return c.indexOf("PUT") === 0; }).length, 1, "400 不自动重试");
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 1, "409 不自动重试");
+        });
+    });
+  });
+
+  test("M3-13：非部署者读得到两张表，但写控件全部禁用且 title 说是权限而不是「尚未接入」", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi(peopleHandlers());
+      var inst = r.mount(settingsApp(false), "people");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        eq(spy.calls, ["GET /p/default/ip-mapping", "GET /p/default/admins"], "§7.9 读=全部角色，门控不许挡只读用户");
+        var controls = [].slice.call(main.querySelectorAll("button, input, select"));
+        ok(controls.length >= 4, "两张表都要有操作按钮，实际 " + controls.length);
+        controls.forEach(function (c) {
+          ok(c.disabled, "非部署者 ⇒ 写控件一律 disabled");
+          var why = c.getAttribute("title") || (c.closest("[title]") || {}).title || "";
+          ok(why.indexOf("部署者") >= 0, "禁用要点名原因（是权限，不是没接入），实际：" + JSON.stringify(why));
+          ok(why.indexOf("M3-") < 0, "分段已接入，不许再挂「将在 M3-xx 接入」的去向文案：" + why);
+        });
+        ok(main.textContent.indexOf("可信内网") >= 0, "只读身份同样要看得见 §11.1 的提示");
+      });
+    });
+  });
+
+  test("M3-13 / R19：mock 的人员接口与后端同契约——IP 规范化落盘、`{item}`/`{removed}`、409 FILE_EXISTS、非法值 400", function () {
+    /* 模板模式的绿不算后端接对的证据（R19），但 mock 必须与后端同口径。这条直接打
+     * MC.mock.handle，钉本卡改掉的四处漂移（原先是 `{ok:true}` / `{deleted:true}` /
+     * 409 `INVALID_INPUT` / 一个连 `abc` 都放过的 IP 正则）：
+     * ① 非法 IP（`999.1.1.1`、`abc`、空串）与空姓名 ⇒ 400 + `detail.field`；
+     * ② 合法但写法五花八门 ⇒ 存成 `ipaddress` 的规范形式（`::ffff:10.1.2.3` 折成 IPv4、
+     *    大写折成小写）——不归一就是「登记了也不生效」的静默失败；
+     * ③ 成功写 ⇒ PUT `{item}`、POST 201 `{item}`、DELETE `{removed: bool}`（后端先例）；
+     * ④ 重名 ⇒ 409 `FILE_EXISTS`；「删了 0 条」不 bump settings（决策 16）。
+     *
+     * **必须一条一条串起来等**，不许 `Promise.all` 并发下发：`handle()` 每次的延迟是
+     * `140 + Math.random()*120` 毫秒（`mock-api.js`），并发时**谁先落盘不确定**，
+     * 于是「第二次 POST 该 409」会随机变成「第一次就 409」、「DELETE 了 0 条之后读到的
+     * settings」会读到别人 bump 之后的值（本卡实测两轮各红一处，就是这个形状）。
+     * 串行之后的顺序才是用例声明的顺序，也与后端「同一机型一把锁串行写」一致。 */
+    var P = MC.mock.profileState("default");
+    var keep = {
+      people: JSON.parse(JSON.stringify(P.people)),
+      admins: JSON.parse(JSON.stringify(P.admins)),
+      identity: MC.mock.identityKey(),
+    };
+    var base = null;
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    /* 写接口要有部署者身份：当前身份可能被前面的用例切走过（shell 的身份切换器写
+     * `mc.demo.identity`），这里当场钉成 deployer-admin，结束时还原。 */
+    MC.mock.setIdentity("deployer-admin");
+    return call("PUT", "/p/default/ip-mapping/999.1.1.1", { ip: "999.1.1.1", name: "张三" })
+      .then(function (res) {
+        eq(res.status, 400, "契约 ①：`999.1.1.1` 必须 400（旧正则每段只限 1-3 位、不限值域，所以它放过 999）");
+        eq(res.body.error.code, "INVALID_INPUT");
+        eq(res.body.error.detail.field, "ip");
+        return call("PUT", "/p/default/ip-mapping/1.2.3.4", { ip: "abc", name: "张三" });
+      })
+      .then(function (res) {
+        eq(res.status, 400, "契约 ①：`abc` 必须 400（旧正则的 IPv6 那一支把纯字母当合法十六进制段放过）");
+        eq(res.body.error.detail.field, "ip");
+        return call("PUT", "/p/default/ip-mapping/1.2.3.4", { ip: "", name: "张三" });
+      })
+      .then(function (res) {
+        eq(res.status, 400, "契约 ①：空 IP 400");
+        eq(res.body.error.detail.field, "ip");
+        return call("PUT", "/p/default/ip-mapping/1.2.3.4", { ip: "1.2.3.4", name: "   " });
+      })
+      .then(function (res) {
+        eq(res.status, 400, "§11.2：去空白后为空的姓名 400");
+        eq(res.body.error.detail.field, "name");
+        eq(P.people.length, keep.people.length, "四条全被拒 ⇒ 一张表都不该多出行来（失败写不落盘）");
+        eq(P.admins.length, keep.admins.length, "同上，管理员名单也不许动");
+        return call("PUT", "/p/default/ip-mapping/::ffff:10.1.2.3", { ip: "::ffff:10.1.2.3", name: "映射甲" });
+      })
+      .then(function (res) {
+        eq(res.status, 200, "契约 ②：`::ffff:a.b.c.d` 合法");
+        eq(res.body.item.ip, "10.1.2.3", "契约 ②：落盘折成点分 IPv4（与 `auth.normalize_ip` 同口径，而 `resolve_person_by_ip` 是逐字比较）");
+        eq(P.people.filter(function (x) { return x.ip === "10.1.2.3"; }).length, 1, "规范化后按新写法存一行");
+        return call("PUT", "/p/default/ip-mapping/FE80::1", { ip: "FE80::1", name: "大写乙" });
+      })
+      .then(function (res) {
+        eq(res.status, 200, "契约 ②：大写 IPv6 合法");
+        eq(res.body.item.ip, "fe80::1", "契约 ②：大写落成小写规范形式");
+        return call("POST", "/p/default/admins", { name: "新管理员" });
+      })
+      .then(function (res) {
+        eq(res.status, 201, "契约 ③：POST /admins 是 201（§7.1「201=创建」）");
+        eq(Object.keys(res.body).sort(), ["item"], "契约 ③：响应是 `{item}`，不是 `{ok:true}`");
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (res) {
+        /* 基准取在**唯一一次成功的写之后**：再往后的每一步都只该被「真删掉一条」推动。
+         * 基准若取在 POST 之前，201 自己那一次 bump 会算进账里，「删了 0 条不 bump」
+         * 就永远核不出来（本卡第一版就踩在这里，实测随机红）。 */
+        base = res.body.parts.settings;
+        return call("POST", "/p/default/admins", { name: "新管理员" });
+      })
+      .then(function (res) {
+        eq(res.status, 409, "契约 ④：重名 409");
+        eq(res.body.error.code, "FILE_EXISTS", "契约 ④：409 的错误码是 `FILE_EXISTS`，不是 `INVALID_INPUT`（§7.1 把后者定成 400）");
+        eq(res.body.error.detail.field, "name");
+        return call("DELETE", "/p/default/ip-mapping/10.9.9.9");
+      })
+      .then(function (res) {
+        eq(res.body, { removed: false }, "契约 ③/④：DELETE ⇒ `{removed: bool}`（后端 `DELETE /sources` 的先例，不是 `{deleted:true}`）");
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (res) {
+        eq(res.body.parts.settings, base, "契约 ④：删了 0 条不 bump settings（决策 16）");
+        return call("DELETE", "/p/default/admins/新管理员");
+      })
+      .then(function (res) {
+        eq(res.body, { removed: true }, "真删掉一条 ⇒ removed:true");
+        return call("GET", "/p/default/revision");
+      })
+      .then(function (res) {
+        eq(res.body.parts.settings, base + 1, "真删掉一条才 bump 一次");
+      })
+      .finally(function () {
+        /* 本用例改写的是**共享的** default 机型状态与全局身份（mock 是模板模式的活数据）。
+         * 还原只放在异步链的 `.finally` 里；外层再套同步 `try/finally` 是**错的**：那会在
+         * Promise 刚返回的那一刻就还回去，等于没还原（串行只保证「settle 之后」，不保证内容）。 */
+        P.people = keep.people;
+        P.admins = keep.admins;
+        MC.mock.setIdentity(keep.identity);
+      });
+  });
+
+  test("M3-13：mock 与后端同口径拒掉「加得进来、删不出去」的管理员姓名；删除侧 mock 比后端 HTTP 宽是已知差异", function () {
+    /* 后端把姓名这一档挡在创建端（`people._validated_admin_name`），mock 必须跟着动：
+     * 模板模式里加得进来、真后端 400 拒掉的名字，就是本项目禁的「mock 发明了后端没有的行为」
+     * （R19 / know-how 第 2 节那条未定契约）。
+     *   ① 创建端——裸 `/`、`\\`、字面 `%2f`/`%5c`/`%00`，以及**任何** `%XX`；
+     *      两侧同判向、同文案由 `TestMockPeopleContract` **执行** mock 真身逐值核住。
+     *   ② 删除端的已知差异：后端 **HTTP 边界**并不宽松（`/` 与 `%XX` 名字都会撞 400，
+     *      只有服务层/运维能删存量行）；mock 只解一次路径，所以它的 DELETE 比后端 HTTP 宽。
+     *      这是模板预览的已知差异，不是「后端 HTTP 也宽松」的证据；本用例只核 mock 的判决。
+     * 与上面那条 R19 用例同一个理由：**一条一条串行 await**，不许 `Promise.all`——
+     * mock 每次延迟 140+random(120) 毫秒且并发落盘顺序不定，会把断言刷成随机红。 */
+    var P = MC.mock.profileState("default");
+    var keep = {
+      people: JSON.parse(JSON.stringify(P.people)),
+      admins: JSON.parse(JSON.stringify(P.admins)),
+      identity: MC.mock.identityKey(),
+    };
+    function call(method, path, body) {
+      return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
+    }
+    /* 「含 `%XX`（X 为十六进制）」的名字故意**不**出现在这里的放行名单：后端 HTTP 今天
+     * 也删不出它们（二次解码，见
+     * `test_a_literal_percent_escape_is_rejected_at_creation_and_a_legacy_row_is_service_only`），
+     * mock 只解一次，所以在 mock 里「删得出去」不能当成后端删得出去的证据。 */
+    var rejected = ["王/强", "王%2F强"];
+    MC.mock.setIdentity("deployer-admin");
+    P.admins = [{ name: "李/强", updated_at: "2026-10-18 09:00:00" }]; // v1 式存量行
+    function expectRejected(name) {
+      return call("POST", "/p/default/admins", { name: name }).then(function (res) {
+        eq(res.status, 400, "不可管理的管理员姓名必须 400，实际 " + res.status + "：" + name);
+        eq(res.body.error.code, "INVALID_INPUT", name);
+        eq(res.body.error.detail.field, "name", "必须带字段（守卫那只 400 不带，所以只在创建端做得到）：" + name);
+      });
+    }
+    /* 只打 5 次 `handle`：mock 每次延迟 140+random(120) 毫秒，而 `--virtual-time-budget=8000`
+     * 是整页的硬截止（know-how 第 4 节 F2.4）。本卡实测这条加到 13 次调用时，页面在 8000 下
+     * **确定地**停在「运行中…」（既不是绿也不是红，也不是那两种抖动——重跑多少次都一样），
+     * 6 次调用时也只能在 7000 与 8000 之间勉强收线；原来的 50 条 suite 在 6000 下还是绿的。
+     * ⇒ 覆盖面交给 `tests/test_api_people.py::TestMockPeopleContract`（它**执行** mock 真身、
+     * 逐值核全部名单，不花页面的预算），这里只留「不对称」那两半各一条最小判据。 */
+    return expectRejected(rejected[0])
+      .then(function () { return expectRejected(rejected[1]); })
+      .then(function () {
+        eq(P.admins.length, 1, "两条被拒的姓名一条都不该进名单（失败写不落盘）");
+        return call("PUT", "/p/default/ip-mapping/10.4.4.4", { ip: "10.4.4.4", name: "王/强" });
+      })
+      .then(function (res) {
+        eq(res.status, 200, "IP 行的姓名不吃管理员那一档（它不进路径段）：" + JSON.stringify(res.body));
+        eq(res.body.item.name, "王/强", "同一串 `王/强` 当姓名必须登记得进来");
+        eq(P.people.filter(function (x) { return x.ip === "10.4.4.4"; }).length, 1,
+          "那一行按 IP 落进了表（清理靠 `.finally` 还原，不多打一次请求——预算账见上面注释）");
+        return call("POST", "/p/default/admins", { name: "100%达标" });
+      })
+      .then(function (res) {
+        eq(res.status, 201, "`%` 后面不是那三只 token 的名字不许被连坐拒掉：" + JSON.stringify(res.body));
+        return call("DELETE", "/p/default/admins/" + encodeURIComponent("李/强"));
+      })
+      .then(function (res) {
+        eq(res.body, { removed: true }, "删除端不许跟着创建端收紧——v1 存量行全靠这一条出路");
+        eq(P.admins.map(function (x) { return x.name; }), ["100%达标"],
+          "撤掉的是存量行那一条；放行侧那一条还在，被拒的两条从来没进过名单");
+      })
+      .finally(function () {
+        P.people = keep.people;
+        P.admins = keep.admins;
+        MC.mock.setIdentity(keep.identity);
+      });
   });
 
   test("M3-06：409 BUSY 不是服务器故障——解释互斥、不重试、给跳到 detail.task_id 的入口；404 按业务错误显示", function () {

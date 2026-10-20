@@ -757,7 +757,9 @@ class TestSchedulerWritesNothingAuthoritative:
         stale = os.path.join(doc, "f" * 64 + ".json.gz")
         with open(stale, "wb") as fh:
             fh.write(b"x")
-        old = time.time() - scheduler_module.CACHE_TTL_SECONDS - 60
+        # 按注入的假钟老化：调度器只认 `now_fn`，用真实 time.time() 会让文件 mtime 落在
+        # 假钟之后，反而被当成「未来」的新鲜文件。
+        old = clock.now().timestamp() - scheduler_module.CACHE_TTL_SECONDS - 60
         os.utime(stale, (old, old))
 
         cfg_dir = storage.get_configs_dir(pid)
