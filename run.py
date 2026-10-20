@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
+import os
 import signal
 import sys
 import threading
@@ -25,11 +27,44 @@ from app.services import tasks
 
 logger = logging.getLogger("mcchecker")
 
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"
 
 
-def configure_logging(level: str) -> None:
-    logging.basicConfig(level=getattr(logging, level, logging.INFO), format=LOG_FORMAT)
+def configure_logging(level: str, data_dir: Optional[str] = None) -> None:
+    """控制台 + `data/logs/mcchecker.log`（10 MB × 5，§13）。"""
+    from app.core.log_context import RequestIdFilter
+
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+    root.setLevel(getattr(logging, level, logging.INFO))
+    formatter = logging.Formatter(LOG_FORMAT)
+    filters = [RequestIdFilter()]
+
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+    for item in filters:
+        console.addFilter(item)
+    root.addHandler(console)
+
+    if not data_dir:
+        return
+    log_dir = os.path.join(data_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    rotating = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, "mcchecker.log"),
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    rotating.setFormatter(formatter)
+    for item in filters:
+        rotating.addFilter(item)
+    root.addHandler(rotating)
 
 
 def ordered_stop(
@@ -136,7 +171,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 数据根必须在导入「导入期派生路径」的模块之前切换（例如 dltool.DLTOOL_FILE），
     # 因此 HTTP 层在下面按需导入。
     storage.configure_data_dir(settings.data_dir)
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.data_dir)
 
     from app.server.http import MCServer, SingleInstanceLock
     from app.server.router import build_router

@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import urllib.parse
 from dataclasses import replace
 from typing import Any, Dict, NamedTuple, Optional
 
-from ..core import downloader, fsutil, parser, storage
+from ..core import downloader, fsutil, log_context, parser, storage
 from ..core.errors import (
     DOWNLOAD_FAILED,
     FILE_EXISTS,
@@ -50,6 +51,7 @@ def save_bytes(
     profile_id: str, name: str, data: bytes, overwrite: bool, max_bytes: int
 ) -> SaveOutcome:
     """`PUT /p/{pid}/files/{name}?overwrite=1`。"""
+    started = time.perf_counter()
     clean_name = fsutil.validate_filename(name)
     _check_size(data, max_bytes)
     _must_parse(data, clean_name)
@@ -61,6 +63,13 @@ def save_bytes(
         result = storage.save_config_file_detailed(clean_name, data)
         if not result.unchanged:
             revision.bump(profile_id, PART)
+    log_context.business(
+        "file_save",
+        profile=profile_id,
+        target=clean_name,
+        result="unchanged" if result.unchanged else ("created" if not exists else "updated"),
+        duration_ms=(time.perf_counter() - started) * 1000,
+    )
     payload = {
         "file": {"name": clean_name},
         "archived": result.archived,
