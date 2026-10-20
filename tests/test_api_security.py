@@ -113,6 +113,9 @@ WRITE_ROUTE_ACTIONS = {
     # M3-14（INH-1899）：变量绑定写接口只有部署者（§8.3）。
     ("PUT", "/api/v1/p/{pid}/bindings/{group}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/bindings/{group}"): "settings_write",
+    # M3-15（INH-1900）：外部工具写接口只有部署者（§8.3）。
+    ("PUT", "/api/v1/p/{pid}/tools/{name}"): "settings_write",
+    ("DELETE", "/api/v1/p/{pid}/tools/{name}"): "settings_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
 }
 
@@ -625,12 +628,22 @@ class TestUrlSchemeRejectedAtSave:
             )
             assert status == 400, payload
 
-    def test_tools_write_endpoint_is_still_absent(self):
-        """基线事实（供报告引用）：`cecb58a` 上没有 `/tools` 写接口，属 M3-15 交付。
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "ftp://example.com/x",
+            "",
+            "example.com/x",
+            "http://",
+        ],
+    )
+    def test_tools_url_scheme_is_rejected_at_save(self, bad):
+        """§16.8 第 2 条：外部工具的保存点拒绝非 http/https 与无主机 URL。
 
-        这条**不是** §16.8 第 2 条的保存侧覆盖，而是它的哨兵：接口一出现（不再 404）
-        本用例立刻红，逼着接手者去确认保存侧有没有 `javascript:` 校验，然后把它删掉、
-        换成真正的保存侧拒绝用例。
+        这条取代了 M3-15 之前的「写接口还不存在」哨兵（接口已落地，哨兵按计划删除）。
         """
         pid = seed_roles("sec2")
         with make_server() as server:
@@ -638,12 +651,12 @@ class TestUrlSchemeRejectedAtSave:
             status, _h, payload = caller.json(
                 "PUT",
                 "/api/v1/p/%s/tools/x" % pid,
-                body={"name": "x", "description": "", "url": "javascript:alert(1)"},
+                body={"name": "x", "description": "", "url": bad},
             )
-            assert status == 404, (
-                "/tools 写接口已出现：§16.8 第 2 条要求在保存点拒绝 javascript:/data: 等协议，"
-                "请确认 M3-15 已在服务层执法并补用例，然后删除本哨兵。实际响应：%s" % payload
-            )
+            assert status == 400, (bad, payload)
+            assert payload["error"]["code"] == "INVALID_INPUT", (bad, payload)
+            assert payload["error"]["detail"]["field"] == "url", (bad, payload)
+        assert not os.path.exists(storage.get_tools_file(pid)), "拒绝的 URL 不得落盘"
 
 
 # ======================================================================
@@ -921,6 +934,9 @@ WRITE_FAMILIES = [
     # CSRF 后落到业务校验（文件不存在也只会是 400，不是 403）。
     ("PUT", "/api/v1/p/{pid}/bindings/{group}", "deployer", {"group_name": "跨站组", "variables": [{"file": FILE_A, "path": FILE_A + "/R"}, {"file": FILE_A, "path": FILE_A + "/R/params"}]}, False),
     ("DELETE", "/api/v1/p/{pid}/bindings/{group}", "deployer", None, False),
+    # M3-15（INH-1900）：外部工具。body 的 URL 合法，带头的对照请求会越过 CSRF 落到业务层。
+    ("PUT", "/api/v1/p/{pid}/tools/{name}", "deployer", {"name": "跨站工具", "description": "", "url": "https://example.com/x"}, False),
+    ("DELETE", "/api/v1/p/{pid}/tools/{name}", "deployer", None, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
     # M3-11（INH-1896）：DL 条件保存。body 留空也能证明 CSRF 闸门在 handler 之前
