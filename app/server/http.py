@@ -12,6 +12,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
 from datetime import datetime
@@ -85,6 +86,12 @@ SECURITY_HEADERS = {
 #: 也一致。代价：文件名里真含字面 `%2f`/`%5c`/`%00` 的配置无法经 URL 寻址（`api.seg()`
 #: 用 `encodeURIComponent`，正常路径不会走到这一步）。
 _ENCODED_UNSAFE = ("%2f", "%5c", "%00")
+
+#: `router.match` 会对捕获段**再解一次**，所以 `%25XX`（二次编码的 `%XX`）会让删除端拿到
+#: 另一个名字：`测试%20甲` 的路径段是 `测试%2520甲`，解两层后变成 `测试 甲`，可能误删同名单
+#: 里的另一个人（M3-13 评审 F1）。分发前把原始路径里的 `%25XX` 整段拒掉 ⇒ 400、不带字段；
+#: 存量脏行只能走服务层/运维，不再经过 HTTP 的二次解码。
+_DOUBLE_ENCODED_UNSAFE_RE = re.compile(r"%25[0-9A-Fa-f]{2}", re.IGNORECASE)
 
 #: §8.9 第 2 条要求的确切内容。
 CONFIG_JS = "window.MC=window.MC||{};window.MC.config={mock:false};"
@@ -486,7 +493,13 @@ def _content_type(path: str) -> str:
 
 
 def _reject_encoded_separators(raw_path: str, decoded_path: str) -> None:
-    """§16.8 第 3 条：编码的分隔符/空字节一律 400，不让它退化成「404 接口不存在」。"""
+    """§16.8 第 3 条：编码的分隔符/空字节一律 400，不让它退化成「404 接口不存在」。
+
+    另外拦住原始路径里的二次编码 `%25XX`：`router.match` 会再解一次，放过去就会让写进
+    名单的名字在删除端变成另一个名字（M3-13 评审 F1）。
+    """
+    if _DOUBLE_ENCODED_UNSAFE_RE.search(raw_path):
+        raise AppError(INVALID_INPUT, "请求路径含二次编码的字符")
     haystacks = (raw_path.lower(), decoded_path.lower())
     for token in _ENCODED_UNSAFE:
         if any(token in hay for hay in haystacks):

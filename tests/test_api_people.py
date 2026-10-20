@@ -91,8 +91,8 @@ SEPARATOR_ADMIN_NAMES = ["王/强", "王\\强", "/打头", "结尾/", "a/b\\c"]
 #: 都不在守卫那三只 token（`%2f` / `%5c` / `%00`）里，所以加得进来就一定删得出去。
 #: 最后两条是本轮加的**过宽哨兵**：`100%达标` 的 `%` 后面不是十六进制、`值班 50%` 干脆以
 #: `%` 结尾，两份解码都干净 ⇒ 必须照旧放行并且真的删得掉（删除走真 HTTP，不是断言）。
-#: **不要**往这一族里加「含 `%XX`（X 为十六进制）」的名字——那种名字今天删不出去，
-#: 原因与实测见 `TestUnmanageableValue::test_a_name_with_a_literal_percent_escape_is_double_decoded`。
+#: **不要**往这一族里加「含 `%XX`（X 为十六进制）」的名字——那种名字在创建端已经
+#: 400（`PERCENT_ESCAPE_ADMIN_NAMES`）；这里只放 `%` 后不是两位十六进制的合法写法。
 ROUNDTRIP_ADMIN_NAMES = [
     "李四",
     "王 五",
@@ -104,6 +104,8 @@ ROUNDTRIP_ADMIN_NAMES = [
     "100%达标",
     "值班+备份",
     "值班 50%",
+    "完成度%zz",
+    "50%",
 ]
 #: 第二轮裁定（同一条死路的第二层）：姓名里**字面**写着守卫那三只 token（任意大小写）。
 #: `api.seg()` 会把 `%` 自己编成 `%25`，路径段于是长成 `%252f` —— 躲过守卫的 raw 那一份，
@@ -117,6 +119,18 @@ ENCODED_SEPARATOR_ADMIN_NAMES = [
     "王%00强",
     "%2f打头",
     "结尾%5c",
+]
+#: 第三族（评审 F1）：姓名里任何字面「% + 两位十六进制」都拒。路径被解码两次
+#: （`http.py` 一次、`router.py` 又一次），存进去的名字在删除端会变成另一个名字；
+#: `测试%20甲` 甚至会把名单里的 `测试 甲` 撤掉。`%` 后面不是两位十六进制的写法
+#: （`100%达标`、`完成度%zz`、裸 `%`）不在这一族，必须继续放行。
+PERCENT_ESCAPE_ADMIN_NAMES = [
+    "测试%20甲",
+    "测试%2e甲",
+    "测试%2f甲",
+    "测试%252f甲",
+    "测试%2F甲",
+    "备份#%5d",
 ]
 #: 含 `/` 的 IP：`ipaddress` 一律解析失败，所以这张表**到不了**「加得进来删不出去」的状态
 #: （见 `test_a_cidr_style_ip_with_a_separator_never_reaches_the_table`）。
@@ -703,8 +717,9 @@ class TestAdmins:
         `_reject_encoded_separators` 看的是这两份，于是删除照样 400（下面那半条断言就是它）。
         可达性一样、后果一样 ⇒ 判据一样：400 + `detail.field="name"`、字节不动、修订号不动。
 
-        这一族**不是**「含 `%` 就拒」：`100%达标`、`完成度%252f` 这些仍在
-        `ROUNDTRIP_ADMIN_NAMES` 里走完 POST→GET→DELETE，是这条规则的过宽哨兵。
+        这一族**不是**「含 `%` 就拒」：`100%达标`、`完成度%zz` 这些 `%` 后不是两位
+        十六进制的写法仍在 `ROUNDTRIP_ADMIN_NAMES` 里走完 POST→GET→DELETE，是这条
+        规则的过宽哨兵；`%XX` 那一族由 `PERCENT_ESCAPE_ADMIN_NAMES` 另行钉住。
         """
         before = _state(seeded)
         before_parts = _parts(seeded)
@@ -726,6 +741,78 @@ class TestAdmins:
         assert _state(seeded) == before, "拒绝必须发生在碰磁盘之前"
         assert _parts(seeded) == before_parts, "失败的写不许递增修订号"
         assert all(row["name"] != name for row in _rows(seeded, admins=True))
+
+    @pytest.mark.parametrize("name", PERCENT_ESCAPE_ADMIN_NAMES)
+    def test_admin_name_with_any_literal_percent_escape_is_rejected_at_creation(self, seeded, name):
+        """第三族（评审 F1）：任何字面 `%XX` 都在创建端 400，字节与修订号不动。
+
+        机制是路径被解码两次；只挡 `%2f/%5c/%00` 不够，`%20` 这种会把删除端解成另一个
+        名字。`%` 后不是两位十六进制的写法仍走 `ROUNDTRIP_ADMIN_NAMES`。
+        """
+        before = _state(seeded)
+        before_parts = _parts(seeded)
+        with make_server() as server:
+            status, _, payload = as_role(server, "deployer").json(
+                "POST", _url(seeded, "/admins"), {"name": name}
+            )
+        assert status == 400, payload
+        assert payload["error"]["code"] == "INVALID_INPUT"
+        assert payload["error"]["detail"]["field"] == "name"
+        assert payload["error"]["message"] == people._BAD_ADMIN_NAME_MESSAGE, (
+            "报的是「不可管理」这一档，不是 §11.2 的通用姓名档"
+        )
+        assert _state(seeded) == before, "拒绝必须发生在碰磁盘之前"
+        assert _parts(seeded) == before_parts, "失败的写不许递增修订号"
+        assert all(row["name"] != name for row in _rows(seeded, admins=True))
+
+    def test_rejecting_a_percent_escape_does_not_touch_its_unescaped_lookalike(self, seeded):
+        """正反用例：先有 `测试 甲`，再建 `测试%20甲` 必须 400；删 `测试 甲` 只删它自己。
+
+        这条钉住「创建端拒绝不会误伤同名的合法管理员」；真正会撤错人的存量行场景在
+        下一条用例。
+        """
+        legitimate = "测试 甲"
+        colliding = "测试%20甲"
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            status, _, added = caller.json("POST", _url(seeded, "/admins"), {"name": legitimate})
+            assert status == 201, added
+            status, _, payload = caller.json("POST", _url(seeded, "/admins"), {"name": colliding})
+            assert status == 400, payload
+            status, _, removed = caller.json(
+                "DELETE", _url(seeded, "/admins/%s" % _seg(legitimate))
+            )
+            assert status == 200 and removed == {"removed": True}
+        names = [row["name"] for row in _rows(seeded, admins=True)]
+        assert legitimate not in names and colliding not in names
+
+    def test_http_delete_of_a_legacy_percent_escape_row_cannot_revoke_another_admin(self, seeded):
+        """存量行场景：名单里同时有 `测试 甲` 与 `测试%20甲`，HTTP 删后者不许动前者。
+
+        新数据在创建端已经被挡住；v1 直接写文件留下的存量行仍可能在表里。HTTP 边界
+        必须把这种二次编码路径整段拒掉（400，不带字段），只留服务层/运维这条出路。
+        """
+        legitimate = "测试 甲"
+        colliding = "测试%20甲"
+        _seed(
+            seeded,
+            admins=[
+                {"name": legitimate, "updated_at": "2026-10-17 09:00:00"},
+                {"name": colliding, "updated_at": "2026-10-17 09:00:00"},
+            ],
+        )
+        before = _state(seeded)
+        before_parts = _parts(seeded)
+        with make_server() as server:
+            status, _, payload = as_role(server, "deployer").json(
+                "DELETE", _url(seeded, "/admins/%s" % _seg(colliding))
+            )
+        assert status == 400, payload
+        assert not payload["error"]["detail"].get("field"), "守卫那只 400 不带字段"
+        assert _state(seeded) == before and _parts(seeded) == before_parts
+        assert [row["name"] for row in _rows(seeded, admins=True)] == [legitimate, colliding]
+        assert people.remove_admin(seeded, colliding) == {"removed": True}
+        assert [row["name"] for row in _rows(seeded, admins=True)] == [legitimate]
 
     def test_the_removal_side_stays_permissive_for_a_legacy_row(self, seeded):
         """限制**只加在创建端**：v1 是直接写文件的，存量名单里可能有含 `/` 的行。
@@ -1047,8 +1134,9 @@ class TestUnmanageableValue:
 
     可复用的规则不是「姓名字符集」，而是：凡是「写进来的值日后要当作 URL 路径段去寻址」的
     接口，创建端必须一次满足删除端那条路径的全部约束；而**只在同一个不可管理状态真的可达时
-    才收紧**（这是裁定原文）。下面两条把「可达」与「不可达」各钉一半，另一头的过宽哨兵是
-    `ROUNDTRIP_ADMIN_NAMES`（含 `%` 但不是那三只 token 的姓名照样走完 POST→GET→DELETE）。
+    才收紧**（这是裁定原文）。下面几条把「可达」与「不可达」各钉一半，另一头的过宽哨兵是
+    `ROUNDTRIP_ADMIN_NAMES`（`%` 后不是两位十六进制的姓名照样走完 POST→GET→DELETE；
+    `%XX` 那一族已在创建端拒绝，见 `PERCENT_ESCAPE_ADMIN_NAMES`）。
     """
 
     def test_the_creation_rule_tracks_the_guard_token_list(self):
@@ -1151,52 +1239,49 @@ class TestUnmanageableValue:
             "旧键被搬走、没留残行，其余行不受影响"
         )
 
-    def test_a_name_with_a_literal_percent_escape_is_double_decoded(self, seeded):
-        """**本轮实测出的第三个实例（只钉现状、不改行为；不在本卡裁定范围内）**。
+    def test_a_literal_percent_escape_is_rejected_at_creation_and_a_legacy_row_is_service_only(
+        self, seeded
+    ):
+        """第三族的收口：新数据创建端 400；存量行 HTTP 删不动，但服务层仍有出路。
 
-        守卫那三只 token 只是「字面 `%XX`」这一族里恰好被 §16.8 拦住的一小撮。真正咬人的
-        机制在别处：请求路径被**解码了两次**——`http.py::_dispatch` 先 `unquote(split.path)`
-        （`app/server/http.py:273`），`router.match` 又对每个捕获段 `unquote` 一遍
-        （`app/server/router.py:91`）。于是姓名里任何 `%` + 两个十六进制位都会在到达
-        `remove_admin` 之前被再解一次：存进去 `备份#%5d`，删除端拿到的是 `备份#]`。
-
-        两个后果，这一条用例把两边都钉住：
-        ① 那一行按自己的名字**删不掉**——200 + `removed: false`，一次静默无操作，
-           比守卫那只 400 更难被发现（400 至少响亮）；
-        ② 表里若恰好有 `备份#]` 这一行，它会被**误删**——撤掉的是另一个人的管理员身份。
-        `docs/know-how.md` 里那条「管理员姓名里的 `/`」写的正是第一层；本轮按裁定补的是第二层
-        （守卫会拦的那三只 token）。**第三层不在裁定里**，因为它不是「创建端多拒几个字符」能
-        干净了事的：要么改路径段这个寻址方式本身（§7.9 + mock + 前端三处一起动，还牵动
-        M3-14 的 `{group}`、M3-15 的 `{tool}` 与所有 `{name}`/`{file}` 路由），要么由控制方
-        裁定创建端禁掉一切 `%XX`（那会连 `备份#%5d` 这种与分隔符无关的名字一起拒掉）。
-        修法定了之后这条用例要跟着改写——它现在钉的是「今天删不出去」，不是「就该删不出去」。
+        旧版本这条用例钉的是「200 + removed:false，甚至撤错人」的现状；评审 F1
+        把它升级为阻断项后，期望值随裁定改变：`备份#%5d` 不能再创建；若它已经在
+        v1 的存量名单里，HTTP 的二次编码路径必须被整段 400 拒掉（不带字段），
+        只有服务层/运维能把它撤掉，而且只撤它自己。
         """
         unaddressable = "备份#%5d"
         collision = "备份#]"
         with make_server() as server:
             caller = as_role(server, "deployer")
-            # 第一半：表里只有它自己 ⇒ 按名字删是一次 200 的空操作，行还在。
-            status, _, _ = caller.json("POST", _url(seeded, "/admins"), {"name": unaddressable})
-            assert status == 201, "本轮裁定的那一档拦不住它（`%5d` 不是守卫那三只 token）"
-            status, _, removed = caller.json(
-                "DELETE", _url(seeded, "/admins/%s" % _seg(unaddressable))
+            status, _, payload = caller.json(
+                "POST", _url(seeded, "/admins"), {"name": unaddressable}
             )
-            assert status == 200 and removed == {"removed": False}, (
-                "200 但一条没删掉：删除端解出来的名字已经不是存进去的那一个"
-            )
-            assert [row["name"] for row in _rows(seeded, admins=True)] == ["张三", unaddressable]
+            assert status == 400, payload
+            assert payload["error"]["detail"]["field"] == "name"
 
-            # 第二半：把那个「被误解出来的名字」也放进表 ⇒ 删前者会把后者抹掉（撤错人）。
-            status, _, _ = caller.json("POST", _url(seeded, "/admins"), {"name": collision})
-            assert status == 201, collision
-            status, _, removed = caller.json(
+        _seed(
+            seeded,
+            admins=[
+                {"name": collision, "updated_at": "2026-10-17 09:00:00"},
+                {"name": unaddressable, "updated_at": "2026-10-17 09:00:00"},
+            ],
+        )
+        before = _state(seeded)
+        before_parts = _parts(seeded)
+        with make_server() as server:
+            status, _, payload = as_role(server, "deployer").json(
                 "DELETE", _url(seeded, "/admins/%s" % _seg(unaddressable))
             )
-            assert status == 200 and removed == {"removed": True}, (
-                "这一次它删掉的是**另一行**——不是权限面收紧，是撤销撤到了别人身上"
-            )
-        assert [row["name"] for row in _rows(seeded, admins=True)] == ["张三", unaddressable], (
-            "`%5d` 那一行原样留着，被撤的是 `%5d` 解码出来的那个名字（张三不受影响）"
+        assert status == 400, payload
+        assert not payload["error"]["detail"].get("field"), "守卫那只 400 不带字段"
+        assert _state(seeded) == before and _parts(seeded) == before_parts
+        assert [row["name"] for row in _rows(seeded, admins=True)] == [collision, unaddressable], (
+            "HTTP 删除既不能删掉自己，更不能误删解出来的 `备份#]`"
+        )
+
+        assert people.remove_admin(seeded, unaddressable) == {"removed": True}
+        assert [row["name"] for row in _rows(seeded, admins=True)] == [collision], (
+            "服务层只能撤掉点名的那一行；`备份#]` 原样保留"
         )
 
     def test_the_ip_mapping_name_is_not_tightened_by_the_ip_key_rule(self, seeded):
@@ -1273,6 +1358,7 @@ class TestMockPeopleContract:
         candidates = (
             SEPARATOR_ADMIN_NAMES
             + ENCODED_SEPARATOR_ADMIN_NAMES
+            + PERCENT_ESCAPE_ADMIN_NAMES
             + ROUNDTRIP_ADMIN_NAMES
             + ["新管理员", "张三"]  # 末位是重名 409：它不是「被拒」，两侧都必须算放行
         )
@@ -1354,8 +1440,8 @@ class TestMockPeopleContract:
 
         姓名这一族两侧字符集完全同源，所以这一侧可以按精确相等核——它挡的是
         「有人把守卫那三只 token 记成 `%2` 之类的前缀」（那会连 `100%达标` 一起拒掉）。
-        名单取 `ROUNDTRIP_ADMIN_NAMES`，也就是**今天真的删得出去**的那些；含 `%XX` 十六进制
-        的名字不在这里，原因见下面 `test_a_name_with_a_literal_percent_escape_is_double_decoded`。
+        名单取 `ROUNDTRIP_ADMIN_NAMES`，也就是 **`%` 后不是两位十六进制**、今天真的删得出去
+        的那些；含 `%XX` 的名字在 `PERCENT_ESCAPE_ADMIN_NAMES` 里，创建端两侧都必须拒。
         """
         candidates = list(ROUNDTRIP_ADMIN_NAMES)
         mock = self._mock([{"kind": "admin", "value": name} for name in candidates])

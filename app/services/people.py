@@ -20,14 +20,16 @@
   之间跑完的另一次写会被这里的旧副本覆盖（§5.4 的丢失更新，`docs/know-how.md` 第 2 节那条
   「锁外读 + 锁内写」的同族错法），最坏结果是表里同时留下新旧两条或旧条目丢失。
 * 「删了 0 条」不递增修订号，也不写一个字节（与 `updates.delete_source` 同口径）。
-* 管理员姓名与 IP 键**都不许含让「删除路径」走不通的东西**（M3-13 / INH-1898 两轮裁定）：
+* 管理员姓名与 IP 键**都不许含让「删除路径」走不通的东西**（M3-13 / INH-1898 三轮裁定）：
   §7.9 的删除把姓名 / IP 放进路径段，而 §16.8 第 3 条的全站守卫会把编码过的分隔符拦成一只
   不带 `detail.field` 的 400——`api.seg()`（= `encodeURIComponent`）必然产出的 `%2F` / `%5C`
-  是第一层，值里**字面**写着 `%2f` / `%5c` / `%00` 的是第二层（`%` 先被编成 `%25` 躲过 raw
-  检查，解码后又重新长出这三只 token，而守卫把 raw 与解码后两份一起看）。放行到创建端就是
-  「加得进来、删不出去」——一个永远撤不掉的权限条目。两个入口必须达成一致，所以限制落在
-  **创建端**（400 + `detail.field`，见 `_validated_admin_name` / `_validated_ip_key`），
-  删除端**故意**保持宽松，好让 v1 直接写文件留下的存量行仍有出路（见那两条 docstring）。
+  是第一层，值里**字面**写着 `%2f` / `%5c` / `%00` 的是第二层，而**任何**字面 `%XX` 会在
+  删除端被二次解码成另一个名字（第三层，评审 F1；`测试%20甲` 会撤掉 `测试 甲`）。放行到
+  创建端就是「加得进来、删不出去」甚至「撤错人」。两个入口必须达成一致，所以限制落在
+  **创建端**（400 + `detail.field`）：管理员姓名走 `_validated_admin_name` 的
+  `_PERCENT_ESCAPE_RE`；IP 键仍只走 `_validated_ip_key` 的三只 token，其他 `%XX` 的可达性
+  尚未裁定。删除端在服务层保持宽松，HTTP 边界则由守卫把二次编码路径整段拒掉
+  （存量行只能走服务层/运维）。
 * IP 识别不是强认证（§11.1）：只适用于可信内网。这条口径必须出现在设置页文案里，
   见 `app/web/assets/js/views/settings.js` 的人员分段。
 """
@@ -35,6 +37,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -75,6 +78,11 @@ _UNMANAGEABLE_PATH_CHARS = ("/", "\\")
 #: 注意真正的 NUL 字符到不了这里——§11.2 的控制字符那一档先拒；这三只 token 挡的是**字面写法**。
 _UNMANAGEABLE_PATH_TOKENS = ("%2f", "%5c", "%00")
 
+#: 第三族（评审 F1）：任何字面 `%` + 两位十六进制。路径被解码两次，存进去的名字在删除端
+#: 会变成另一个名字（`测试%20甲` 会撤掉 `测试 甲`）；创建端一律拒。`%` 后不是两位十六进制的
+#: 写法（`100%达标`、`完成度%zz`、裸 `%`）不在这一族，必须继续放行。
+_PERCENT_ESCAPE_RE = re.compile(r"%[0-9A-Fa-f]{2}")
+
 _BAD_IP_MESSAGE = "请输入合法的 IPv4/IPv6 地址"
 _BAD_NAME_MESSAGE = "姓名需为 1-%d 个字符，且不含控制字符" % MAX_NAME_LENGTH
 #: 文案与 mock 的 `BAD_ADMIN_NAME_MESSAGE`（`app/web/assets/js/mock/mock-api.js`）**逐字一致**，
@@ -83,7 +91,7 @@ _BAD_NAME_MESSAGE = "姓名需为 1-%d 个字符，且不含控制字符" % MAX_
 #: `%` 的写法（know-how 第 2 节已裁定「mock 只比后端严、不补 IPv6 scope 语法」），所以在 mock
 #: 里这一族早就在 `_BAD_IP_MESSAGE` 那一步返回了，同向、更早。
 _BAD_ADMIN_NAME_MESSAGE = (
-    "管理员姓名不能包含 / 、\\ 或 %2f / %5c / %00 这类编码分隔符（这样的人员无法从名单里删除）"
+    "管理员姓名不能包含 / 、\\ 或任何 %XX 编码写法（这样的人员无法从名单里删除）"
 )
 _UNMANAGEABLE_IP_MESSAGE = (
     "IP 地址不能包含 / 、\\ 或 %2f / %5c / %00 这类编码分隔符（这样的条目无法从对应表里删除）"
@@ -271,11 +279,9 @@ def _unmanageable_path_segment(text: str) -> Optional[str]:
     两种都是 400 且**不带** `detail.field`（守卫全站共用、早于路由，永远别指望它给你带字段），
     于是记录加得进来、撤不出去。真正的 NUL 字符到不了这里——§11.2 的控制字符那一档先拒。
 
-    这一档**盖不住**整族问题：路径其实被解码了两次（`http.py:273` 一次、`router.py:91` 又一次），
-    所以任何字面 `%XX`（X 为十六进制）的名字都会在到达删除端之前被再解一次，
-    于是 200 + `removed: false` 的空操作（甚至误删另一行）。那一族不属于本轮裁定，
-    现状与后果由 `tests/test_api_people.py::TestUnmanageableValue::test_a_name_with_a_literal_percent_escape_is_double_decoded`
-    钉着；`100%达标` 这类 `%` 后面不是十六进制的名字才是本档的放行判据。
+    这一档只负责斜杠、反斜杠与守卫那三只 token；**整族**的字面 `%XX`（`%20`、`%5d` 等）
+    由 `_validated_admin_name` 的 `_PERCENT_ESCAPE_RE` 在管理员姓名入口统一拒绝。
+    IP 键仍只用本函数：`ipaddress` 对 `%20` 之类 scope id 的可达性尚未裁定，保持现状。
     """
     for char in _UNMANAGEABLE_PATH_CHARS:
         if char in text:
@@ -320,6 +326,8 @@ def _validated_admin_name(raw: Any) -> str:
     的限制就是凭空收紧。
     """
     text = _validated_name(raw)
+    if _PERCENT_ESCAPE_RE.search(text) is not None:
+        raise AppError(INVALID_INPUT, _BAD_ADMIN_NAME_MESSAGE, field=NAME_FIELD)
     if _unmanageable_path_segment(text) is not None:
         raise AppError(INVALID_INPUT, _BAD_ADMIN_NAME_MESSAGE, field=NAME_FIELD)
     return text
