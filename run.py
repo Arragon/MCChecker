@@ -137,7 +137,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 因此 HTTP 层在下面按需导入。
     storage.configure_data_dir(settings.data_dir)
     configure_logging(settings.log_level)
-    storage.ensure_profile_layout()
 
     from app.server.http import MCServer, SingleInstanceLock
     from app.server.router import build_router
@@ -149,6 +148,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("%s", exc)
         print("启动失败：%s" % exc, file=sys.stderr)
         return 3
+
+    # 迁移必须在单实例锁之后：两个实例同时启动时，第二个不能把第一个已校验的目标
+    # 当成「可覆盖的副本」，更不能删掉它（M4-04 评审 I1）。
+    storage.ensure_profile_layout()
 
     # 后台任务队列（卡 6 / §10.1）：worker 数来自 Settings.max_workers，注入进程内单例，
     # `/tasks` 的 handler 与卡 8 的调度器都通过 `tasks.get_runner()` 拿同一个 runner。

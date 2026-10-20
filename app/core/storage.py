@@ -417,20 +417,41 @@ def _migrate_legacy_layout_locked(default_base: str) -> None:
     ]
     if not pairs:
         return
+    _migrate_legacy_pairs_locked(pairs)
+
+
+def _migrate_legacy_pairs_locked(pairs: List[Tuple[str, str]]) -> None:
     moment = datetime.now()
     entry_path: Optional[str] = None
     moved: List[Dict[str, Any]] = []
     for legacy, target in pairs:
+        # 先复制到**临时目标**，校验通过后再原子改名。这样进程在复制中被杀只会留下
+        # `.migrating` 残片（下次启动清掉），不会让「目标已存在」掩盖一个半份副本；
+        # 也绝不删除本次运行之外已经存在的 target（M4-04 评审 I1/M2）。
+        staging = target + ".migrating"
+        _remove_partial_target(staging)
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
             if os.path.isdir(legacy):
-                shutil.copytree(legacy, target)
+                shutil.copytree(legacy, staging)
             else:
-                shutil.copy2(legacy, target)
-            if _entry_hashes(legacy) != _entry_hashes(target):
+                shutil.copy2(legacy, staging)
+            hashes = (
+                {os.path.basename(legacy): _sha256_file(staging)}
+                if os.path.isfile(legacy)
+                else _entry_hashes(staging)
+            )
+            if _entry_hashes(legacy) != (
+                {os.path.basename(legacy): _sha256_file(staging)}
+                if os.path.isfile(legacy)
+                else _entry_hashes(staging)
+            ):
                 raise RuntimeError("副本与原条目的文件数或 sha256 不一致")
+            if os.path.exists(target):
+                raise FileExistsError("目标已存在（另一个实例已完成迁移）")
+            os.rename(staging, target)
         except Exception as exc:
-            _remove_partial_target(target)
+            _remove_partial_target(staging)
             logger.error("旧布局迁移失败，保留旧条目 %s：%s", legacy, exc)
             continue
 
@@ -445,7 +466,7 @@ def _migrate_legacy_layout_locked(default_base: str) -> None:
                 {
                     "from": os.path.relpath(legacy, DATA_DIR),
                     "to": os.path.basename(legacy),
-                    "files": _entry_hashes(target),
+                    "files": hashes,
                 }
             )
         except Exception as exc:
@@ -455,7 +476,12 @@ def _migrate_legacy_layout_locked(default_base: str) -> None:
     if entry_path is None:
         return
     if not moved:
-        shutil.rmtree(entry_path, ignore_errors=True)
+        # 只清**空**条目；里面若有搬了一半的文件，保留给运维按路径处理。
+        try:
+            if not os.listdir(entry_path):
+                shutil.rmtree(entry_path, ignore_errors=True)
+        except OSError:
+            pass
         return
     manifest = {
         "op": "legacy_layout",

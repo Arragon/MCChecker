@@ -99,6 +99,38 @@ class TestMigration(Base):
                 recovered = os.path.join(base, rel) if os.path.isdir(base) else base
                 assert _sha(recovered) == digest, (item, rel)
 
+    def test_existing_target_appearing_after_snapshot_is_never_deleted(self, monkeypatch):
+        """M4-04 评审 I1：第二个实例不得把第一个已校验的目标当副本删掉。"""
+        with open(self.legacy("config_mapping.json"), "w", encoding="utf-8") as handle:
+            handle.write('["old"]')
+        os.makedirs(self.base, exist_ok=True)
+        with open(self.target("config_mapping.json"), "w", encoding="utf-8") as handle:
+            handle.write('["keep"]')
+        monkeypatch.setattr(
+            storage,
+            "_legacy_layout_pairs",
+            lambda _base: [(self.legacy("config_mapping.json"), self.target("config_mapping.json"))],
+        )
+        # 直接打「快照之后 target 才出现」的竞态：绕过入口的「target 不存在」过滤。
+        storage._migrate_legacy_pairs_locked(
+            [(self.legacy("config_mapping.json"), self.target("config_mapping.json"))]
+        )
+        with open(self.target("config_mapping.json"), encoding="utf-8") as handle:
+            assert handle.read() == '["keep"]', "已存在的目标绝不能被删/覆盖"
+        assert os.path.exists(self.legacy("config_mapping.json")), "旧条目保留"
+        assert self.recovery_entries() == []
+
+    def test_staging_leftover_is_cleaned(self):
+        with open(self.legacy("config_mapping.json"), "w", encoding="utf-8") as handle:
+            handle.write("[]")
+        self.reset_targets("config_mapping.json")
+        staging = self.target("config_mapping.json") + ".migrating"
+        with open(staging, "w", encoding="utf-8") as handle:
+            handle.write("half")
+        storage.ensure_profile_layout()
+        assert not os.path.exists(staging), "上次进程被杀留下的 staging 必须清掉"
+        assert os.path.isfile(self.target("config_mapping.json"))
+
     def test_second_run_is_idempotent(self):
         with open(self.legacy("config_mapping.json"), "w", encoding="utf-8") as handle:
             handle.write("[]")
