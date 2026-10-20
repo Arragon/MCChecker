@@ -1500,6 +1500,10 @@
   function toolUrl(raw) {
     var text = String(raw === null || raw === undefined ? "" : raw).trim();
     if (!text || /[\u0000-\u0020\u007f\\]/.test(text)) return null;
+    var m = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/?#]+)/.exec(text);
+    if (!m) return null;
+    var authority = m[2];
+    if (authority.indexOf("%") >= 0 || authority.indexOf("@") >= 0) return null;
     try {
       var parsed = new URL(text);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;

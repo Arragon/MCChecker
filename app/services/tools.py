@@ -146,6 +146,7 @@ def _validated_url(raw: Any) -> str:
     try:
         parsed = urlparse(text)
         hostname = parsed.hostname
+        parsed.port  # 端口越界（>65535）会抛 ValueError，必须在写入前拒绝
         userinfo = parsed.username is not None or parsed.password is not None
     except ValueError:
         raise AppError(INVALID_INPUT, BAD_URL_MESSAGE, field=URL_FIELD)
@@ -153,6 +154,7 @@ def _validated_url(raw: Any) -> str:
         parsed.scheme.lower() not in ("http", "https")
         or not hostname
         or userinfo
+        or "%" in parsed.netloc
     ):
         raise AppError(INVALID_INPUT, BAD_URL_MESSAGE, field=URL_FIELD)
     return text

@@ -57,6 +57,9 @@ BAD_URLS = [
     "http://example.com/\npath",
     "java\nscript:alert(1)",
     "http://example.com/\x01",
+    "http://example.com:99999",
+    "http://exa%6dple.com",
+    "http://user@example.com/x",
 ]
 
 
