@@ -40,6 +40,7 @@ def save_file(
         body or b"",
         overwrite,
         settings.upload_max_bytes,
+        actor=getattr(ctx.actor, "name", "") or "",
     )
     return Response(status=outcome.status, payload=outcome.payload)
 
@@ -65,5 +66,6 @@ def import_url(
             persist,
             bool(payload.get("overwrite")),
             settings,
+            actor=getattr(ctx.actor, "name", "") or "",
         )
     )

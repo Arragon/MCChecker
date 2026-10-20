@@ -48,7 +48,8 @@ class SaveOutcome(NamedTuple):
 
 
 def save_bytes(
-    profile_id: str, name: str, data: bytes, overwrite: bool, max_bytes: int
+    profile_id: str, name: str, data: bytes, overwrite: bool, max_bytes: int,
+    actor: str = "",
 ) -> SaveOutcome:
     """`PUT /p/{pid}/files/{name}?overwrite=1`。"""
     started = time.perf_counter()
@@ -66,6 +67,7 @@ def save_bytes(
     log_context.business(
         "file_save",
         profile=profile_id,
+        actor=actor,
         target=clean_name,
         result="unchanged" if result.unchanged else ("created" if not exists else "updated"),
         duration_ms=(time.perf_counter() - started) * 1000,
@@ -87,6 +89,7 @@ def import_url(
     persist: bool,
     overwrite: bool,
     settings,
+    actor: str = "",
 ) -> Dict[str, Any]:
     """`POST /p/{pid}/import-url`：下载到内存后按 `persist` 落盘或进临时区。"""
     target = str(url or "").strip()
@@ -98,7 +101,9 @@ def import_url(
     _check_size(data, settings.upload_max_bytes)
 
     if persist:
-        outcome = save_bytes(profile_id, clean_name, data, overwrite, settings.upload_max_bytes)
+        outcome = save_bytes(
+            profile_id, clean_name, data, overwrite, settings.upload_max_bytes, actor=actor
+        )
         result = {"persisted": True}
         result.update(outcome.payload)
         return result

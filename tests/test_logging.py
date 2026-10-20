@@ -103,7 +103,7 @@ class TestAccessLog(Base):
         assert "ip=" in text and "pid=%s" % pid in text, text
 
     def test_file_save_emits_business_log(self):
-        pid = seed_roles("logs2")
+        pid = seed_roles("logs2", local_admin=True)
         with make_server() as server:
             status, _h, body = as_role(server, "deployer").request(
                 "PUT",
@@ -115,6 +115,7 @@ class TestAccessLog(Base):
         assert "event=file_save" in text, text
         assert "profile=%s" % pid in text and "target=%s" % FILE_A in text, text
         assert "result=created" in text and "duration_ms=" in text, text
+        assert "actor=本机管理员" in text, text
 
 
 class TestUnknownException(Base):
