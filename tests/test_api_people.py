@@ -135,12 +135,9 @@ PERCENT_ESCAPE_ADMIN_NAMES = [
 #: 含 `/` 的 IP：`ipaddress` 一律解析失败，所以这张表**到不了**「加得进来删不出去」的状态
 #: （见 `test_a_cidr_style_ip_with_a_separator_never_reaches_the_table`）。
 SEPARATOR_IP_KEYS = ["10.0.0.1/24", "fd00::/8", "192.168.1.1/"]
-#: 含**字面**编码分隔符的 IP 键：与姓名那一族不同，`ipaddress` **挡不住**它们。3.9 认 IPv6
-#: scope id，而 scope 段只限字符集、不限含义，所以 `fe80::1%2feth0` 会被逐字回显并原样落盘
-#: ⇒ 不可管理状态**确实可达**（可达性本身由
-#: `TestUnmanageableValue::test_an_encoded_separator_inside_an_ipv6_scope_id_reaches_the_unmanageable_state`
-#: 实测钉住），因此创建端也要挡（`people._validated_ip_key`，400 `detail.field="ip"`）。
-ENCODED_SEPARATOR_IP_KEYS = ["fe80::1%2feth0", "fe80::1%2F", "fe80::1%5c", "fe80::1%00"]
+#: 含**字面**编码写法的 IP 键：`%2f`/`%5c`/`%00` 以及任意 `%XX`（`fe80::1%20` 是 UI
+#: 编辑流程可达的 scope id；`ipaddress` 会逐字回显）。全部在创建端 400 `field="ip"`。
+ENCODED_SEPARATOR_IP_KEYS = ["fe80::1%2feth0", "fe80::1%2F", "fe80::1%5c", "fe80::1%00", "fe80::1%20"]
 #: 上面这一族里**真正落盘**的一个样本，用来摆 v1 式存量行（删除侧必须仍然宽松）。
 LEGACY_ENCODED_IP_KEY = "fe80::1%2feth0"
 
@@ -803,14 +800,27 @@ class TestAdmins:
         )
         before = _state(seeded)
         before_parts = _parts(seeded)
+        encoded_forms = [
+            _seg(colliding),
+            _seg(colliding).replace("%2520", "%25%32%30"),
+            _seg(colliding).replace("%2520", "%25%32%35%32%30"),
+        ]
         with make_server() as server:
-            status, _, payload = as_role(server, "deployer").json(
-                "DELETE", _url(seeded, "/admins/%s" % _seg(colliding))
-            )
-        assert status == 400, payload
-        assert not payload["error"]["detail"].get("field"), "守卫那只 400 不带字段"
-        assert _state(seeded) == before and _parts(seeded) == before_parts
-        assert [row["name"] for row in _rows(seeded, admins=True)] == [legitimate, colliding]
+            caller = as_role(server, "deployer")
+            for encoded in encoded_forms:
+                status, _, payload = caller.json(
+                    "DELETE", _url(seeded, "/admins/%s" % encoded)
+                )
+                assert status == 400, (encoded, payload)
+                assert not payload["error"]["detail"].get("field"), (
+                    encoded,
+                    "守卫那只 400 不带字段",
+                )
+                assert _state(seeded) == before and _parts(seeded) == before_parts, encoded
+                assert [row["name"] for row in _rows(seeded, admins=True)] == [
+                    legitimate,
+                    colliding,
+                ], encoded
         assert people.remove_admin(seeded, colliding) == {"removed": True}
         assert [row["name"] for row in _rows(seeded, admins=True)] == [legitimate]
 
@@ -1158,7 +1168,7 @@ class TestUnmanageableValue:
 
     @pytest.mark.parametrize("bad", ENCODED_SEPARATOR_IP_KEYS)
     def test_ip_key_with_a_literal_encoded_separator_is_rejected_at_creation(self, seeded, bad):
-        """IP 键也要挡（裁定要求先自证可达性，实测结论是**到得了**，见下面那条）。
+        """IP 键也要挡（含 UI 编辑流程：路径是旧 IP、body 是新 IP）。
 
         路径给干净 IP、候选值放 body，好让这只 400 明确来自校验而不是守卫。
         `detail.field="ip"` 而且报的是**专门那一档**（不是 `ipaddress` 的「请输入合法的
@@ -1181,6 +1191,23 @@ class TestUnmanageableValue:
         assert _state(seeded) == before, "非法键必须一个字节都不动"
         assert _parts(seeded) == before_parts, "失败写不递增修订号"
         assert all(bad.lower() not in str(row["ip"]).lower() for row in _rows(seeded))
+
+    def test_editing_an_existing_ip_to_a_scope_id_with_percent_escape_is_rejected(self, seeded):
+        """UI 编辑已有行：路径=旧 IP、body=新 IP；`fe80::1%20` 可达，必须 400 且不搬走旧行。"""
+        before = _state(seeded)
+        before_parts = _parts(seeded)
+        with make_server() as server:
+            status, _, payload = as_role(server, "deployer").json(
+                "PUT",
+                _url(seeded, "/ip-mapping/%s" % _seg("10.0.0.1")),
+                {"ip": "fe80::1%20", "name": "坏键"},
+            )
+        assert status == 400, payload
+        assert payload["error"]["code"] == "INVALID_INPUT"
+        assert payload["error"]["detail"]["field"] == "ip"
+        assert payload["error"]["message"] == people._UNMANAGEABLE_IP_MESSAGE
+        assert _state(seeded) == before and _parts(seeded) == before_parts
+        assert all(row["ip"] != "fe80::1%20" for row in _rows(seeded))
 
     def test_an_encoded_separator_inside_an_ipv6_scope_id_reaches_the_unmanageable_state(
         self, seeded

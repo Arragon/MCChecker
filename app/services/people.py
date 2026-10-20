@@ -27,9 +27,9 @@
   删除端被二次解码成另一个名字（第三层，评审 F1；`测试%20甲` 会撤掉 `测试 甲`）。放行到
   创建端就是「加得进来、删不出去」甚至「撤错人」。两个入口必须达成一致，所以限制落在
   **创建端**（400 + `detail.field`）：管理员姓名走 `_validated_admin_name` 的
-  `_PERCENT_ESCAPE_RE`；IP 键仍只走 `_validated_ip_key` 的三只 token，其他 `%XX` 的可达性
-  尚未裁定。删除端在服务层保持宽松，HTTP 边界则由守卫把二次编码路径整段拒掉
-  （存量行只能走服务层/运维）。
+  `_PERCENT_ESCAPE_RE`；IP 键走 `_validated_ip_key` 的同一只正则（`fe80::1%20` 这类 scope id
+  可达，实测 `ipaddress` 会逐字回显）。删除端在服务层保持宽松，HTTP 边界则由守卫把
+  二次编码路径整段拒掉（存量行只能走服务层/运维）。
 * IP 识别不是强认证（§11.1）：只适用于可信内网。这条口径必须出现在设置页文案里，
   见 `app/web/assets/js/views/settings.js` 的人员分段。
 """
@@ -94,7 +94,7 @@ _BAD_ADMIN_NAME_MESSAGE = (
     "管理员姓名不能包含 / 、\\ 或任何 %XX 编码写法（这样的人员无法从名单里删除）"
 )
 _UNMANAGEABLE_IP_MESSAGE = (
-    "IP 地址不能包含 / 、\\ 或 %2f / %5c / %00 这类编码分隔符（这样的条目无法从对应表里删除）"
+    "IP 地址不能包含 / 、\\ 或任何 %XX 编码写法（这样的条目无法从对应表里删除）"
 )
 
 
@@ -280,8 +280,9 @@ def _unmanageable_path_segment(text: str) -> Optional[str]:
     于是记录加得进来、撤不出去。真正的 NUL 字符到不了这里——§11.2 的控制字符那一档先拒。
 
     这一档只负责斜杠、反斜杠与守卫那三只 token；**整族**的字面 `%XX`（`%20`、`%5d` 等）
-    由 `_validated_admin_name` 的 `_PERCENT_ESCAPE_RE` 在管理员姓名入口统一拒绝。
-    IP 键仍只用本函数：`ipaddress` 对 `%20` 之类 scope id 的可达性尚未裁定，保持现状。
+    由 `_validated_admin_name` 与 `_validated_ip_key` 的 `_PERCENT_ESCAPE_RE` 在创建端统一
+    拒绝。IP 键的 `fe80::1%20` 是 UI 编辑流程可达的（实测 `ipaddress` 会逐字回显），
+    已在 `_validated_ip_key` 里一并挡住。
     """
     for char in _UNMANAGEABLE_PATH_CHARS:
         if char in text:
@@ -309,6 +310,8 @@ def _validated_ip_key(canonical: str) -> str:
 
     入参必须是**已规范化**的那个值（要落盘的键），不是原始输入：落盘的是什么，删除端就要寻什么。
     """
+    if _PERCENT_ESCAPE_RE.search(canonical) is not None:
+        raise AppError(INVALID_INPUT, _UNMANAGEABLE_IP_MESSAGE, field=IP_FIELD)
     blocked = _unmanageable_path_segment(canonical)
     if blocked is not None:
         raise AppError(INVALID_INPUT, _UNMANAGEABLE_IP_MESSAGE, field=IP_FIELD)

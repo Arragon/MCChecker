@@ -1101,19 +1101,15 @@
       });
   });
 
-  test("M3-13：mock 与后端同口径拒掉「加得进来、删不出去」的管理员姓名，同时照旧放行 IP 行姓名与存量行删除", function () {
-    /* 后端把这一档只挡在创建端（`people._validated_admin_name` / `_validated_ip_key`），
-     * mock 必须跟着动：模板模式里加得进来、真后端 400 拒掉的名字，就是本项目禁的
-     * 「mock 发明了后端没有的行为」（R19 / know-how 第 2 节那条未定契约）。
-     * 判据有两半，缺一半都算假绿：
-     *   ① 创建端拒——裸 `/`、`\\`（`api.seg()` 编成 `%2F`/`%5C` 撞 §16.8 守卫）与
-     *      **字面** `%2f` / `%5c` / `%00`（`%` 先编成 `%25`、解码后又长出这三只 token，
-     *      守卫看的是 raw 与解码后两份）；两侧同判向、同文案由
-     *      `tests/test_api_people.py::TestMockPeopleContract` **执行** mock 真身逐值核住，
-     *      所以这里不重复比文案，只核 mock 自己的判决。
-     *   ② 放行侧不许跟着收紧——`ip_mapping` 的 `name` 不吃这一档（删除按 IP 寻址），
-     *      `DELETE /admins/{name}` 也**不吃**（v1 直接写文件留下的存量行必须有出路），
-     *      `%` 后面不是那三只 token 的名字照旧收。这一半才是「不对称是裁定、不是疏漏」的执法者。
+  test("M3-13：mock 与后端同口径拒掉「加得进来、删不出去」的管理员姓名；删除侧 mock 比后端 HTTP 宽是已知差异", function () {
+    /* 后端把姓名这一档挡在创建端（`people._validated_admin_name`），mock 必须跟着动：
+     * 模板模式里加得进来、真后端 400 拒掉的名字，就是本项目禁的「mock 发明了后端没有的行为」
+     * （R19 / know-how 第 2 节那条未定契约）。
+     *   ① 创建端——裸 `/`、`\\`、字面 `%2f`/`%5c`/`%00`，以及**任何** `%XX`；
+     *      两侧同判向、同文案由 `TestMockPeopleContract` **执行** mock 真身逐值核住。
+     *   ② 删除端的已知差异：后端 **HTTP 边界**并不宽松（`/` 与 `%XX` 名字都会撞 400，
+     *      只有服务层/运维能删存量行）；mock 只解一次路径，所以它的 DELETE 比后端 HTTP 宽。
+     *      这是模板预览的已知差异，不是「后端 HTTP 也宽松」的证据；本用例只核 mock 的判决。
      * 与上面那条 R19 用例同一个理由：**一条一条串行 await**，不许 `Promise.all`——
      * mock 每次延迟 140+random(120) 毫秒且并发落盘顺序不定，会把断言刷成随机红。 */
     var P = MC.mock.profileState("default");
@@ -1125,8 +1121,9 @@
     function call(method, path, body) {
       return MC.mock.handle({ method: method, path: path, query: {}, body: body, headers: {} });
     }
-    /* 「含 `%XX`（X 为十六进制）」的名字故意**不**出现在这里的放行名单：后端今天也删不出
-     * 它们（路径被解码了两次，见 `test_a_name_with_a_literal_percent_escape_is_double_decoded`），
+    /* 「含 `%XX`（X 为十六进制）」的名字故意**不**出现在这里的放行名单：后端 HTTP 今天
+     * 也删不出它们（二次解码，见
+     * `test_a_literal_percent_escape_is_rejected_at_creation_and_a_legacy_row_is_service_only`），
      * mock 只解一次，所以在 mock 里「删得出去」不能当成后端删得出去的证据。 */
     var rejected = ["王/强", "王%2F强"];
     MC.mock.setIdentity("deployer-admin");
