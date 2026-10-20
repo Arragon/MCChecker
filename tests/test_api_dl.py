@@ -5,6 +5,7 @@
 1. **GET /dl**：全部角色；`rev` = `dltool_config.json` 的 sha1 前 12 位（文件不存在时
    对默认配置的规范字节取哈希），三个计算项齐全；`editing` 读到后忽略；**读路径不建文件、
    不递增修订号**（`tests/data_guard.py` 另有会话级守卫，这里钉的是单次请求）。
+   `rev` 与 `items` 在同一次机型锁内读：并发保存不能把它们撕裂成「旧 items + 新 rev」。
 2. **compute / extract**：全部角色、纯计算/预览。三种 mode 的响应形状逐字按 §7.11
    表格（forward 只有 `results`，reverse 带 `exhaustive: false`，multi_check 只有
    `has_multi`/`cases`）；不写文件、五个修订分量一个都不动（R20/R21 的同口径）。
@@ -14,10 +15,13 @@
    `REVISION_CONFLICT`，不是 400/428；`views/dltool.js:84` 永远带该头、`:94` 只处理
    `REVISION_CONFLICT`）；过期/并发 → 409 且文件一个字节不动；成功 → `{rev, item}`、
    `editing` 写 `false`、范围空值保留 `null`、字段集合不变、`settings` 只 bump 一次。
+   body 按 §7.11 是完整 item（四个范围键缺一个 → 400，不再静默清空磁盘值）。
 5. **`trans_coeff=0`**（M3-10 遗留的「validate 合法但 reverse/multi_check 会 ÷0」）：
    按裁定 (a) 在服务层拦成 400 `INVALID_INPUT`——三种 mode 与 save 都要 400，且在
    写盘之前；裸 `ZeroDivisionError` 不许漏到 HTTP。
-6. **四条路由已注册**：路由表自省，不靠「404 长得不像 500」猜。
+6. **极端但有限的数值**：`float()` 自身溢出的 400 位 JSON 整数、以及计算中途溢出成
+   `inf`/`nan` 的 `1e308`/`1e-308` 都不许变成 500；后者用独立文案，不复用除零那条。
+7. **四条路由已注册**：路由表自省，不靠「404 长得不像 500」猜。
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from authz_fixtures import as_role, make_server, seed_roles, write_target
 from app.config import Settings
 from app.core import dltool, storage
 from app.server.router import build_router
-from app.services import revision
+from app.services import dl, revision
 
 ITEMS = ("pp_energy", "rp_energy", "rp_width")
 ROLES = ("visitor", "member", "admin", "deployer")
@@ -212,6 +216,59 @@ class TestGetState:
             assert body["rev"] == second
             assert body["items"]["rp_width"]["coeffs"]["k2"] == 3.5
 
+    def test_get_state_never_pairs_old_items_with_a_new_rev(self, monkeypatch):
+        """I1：`rev` 与 `items` 必须来自同一版本（不允许被中间一次保存撕裂）。
+
+        注入点在「`load_config` 读完、`_current_rev_in_profile` 还没读」之间：另一个
+        线程走与 PUT 完全相同的 `dl.save_item`（同一把机型锁）保存一次。修复前 GET
+        不持锁，保存跑完 → rev 是新的、items 是旧的；客户端拿新 rev 再 PUT 就会把
+        对方刚保存的内容覆盖掉。修复后 GET 持锁，保存被挡在锁外，rev/items 同属旧版
+        本，GET 返回后保存照样成功。
+
+        等待注入线程用**超时**而不是「等到它完成」：修复后它必然被锁挡住，只能靠
+        超时放行；修复前它会在超时前跑完，于是 body 里出现新 rev（用例转红）。
+        """
+        pid = seed_roles("dlgetrace")
+        old_rev = _seed_config(
+            pid, mutate=lambda cfg: cfg["items"]["rp_energy"]["coeffs"].update({"k1": 4.0})
+        )
+        payload = _valid_payload(pid, k1=42.0)
+        real_rev = dl._current_rev_in_profile
+        started = threading.Event()
+        injected = threading.Event()
+        saved = {}
+
+        def writer():
+            try:
+                saved["result"] = dl.save_item(pid, "rp_energy", payload, old_rev)
+            finally:
+                injected.set()
+
+        def racing_rev():
+            if not started.is_set():
+                started.set()
+                threading.Thread(
+                    target=writer, name="dl-get-race", daemon=True
+                ).start()
+                injected.wait(timeout=1.5)
+            return real_rev()
+
+        monkeypatch.setattr(dl, "_current_rev_in_profile", racing_rev)
+        try:
+            with make_server() as server:
+                status, _h, body = as_role(server, "visitor").json("GET", DL_URL % pid)
+        finally:
+            # 断言中途红也要等注入线程散掉，否则它会在 monkeypatch 撤销后继续跑。
+            injected.wait(timeout=10)
+
+        assert status == 200, body
+        assert body["rev"] == old_rev, "GET 的 rev 已经被注入的保存带到了新版本"
+        assert body["items"]["rp_energy"]["coeffs"]["k1"] == 4.0, (
+            "GET 的 items 与 rev 不属于同一版本（旧 items + 新 rev 的撕裂）"
+        )
+        assert saved.get("result", {}).get("rev") not in (None, old_rev), saved
+        assert _load_item(pid)["coeffs"]["k1"] == 42.0, "注入的保存最终必须成功落盘"
+
 
 # ---------------------------------------------------------------------------
 # POST /dl/{item}/compute
@@ -320,8 +377,15 @@ class TestCompute:
             {"mode": "forward", "values": [None], "params": _item(coeffs={"k1": 1.0})},
             {"mode": "forward", "values": [True], "params": _item(coeffs={"k1": 1.0})},
             {"mode": "forward", "values": [float("nan")], "params": _item(coeffs={"k1": 1.0})},
+            # R19：mock 原本用 `isFinite(Number(v))`，会放行 `[]`/`[5]`/`"0x10"`；
+            # 后端 `float()` 对这三种分别是 TypeError/TypeError/ValueError → 400。
+            {"mode": "forward", "values": [[]], "params": _item(coeffs={"k1": 1.0})},
+            {"mode": "forward", "values": [[5]], "params": _item(coeffs={"k1": 1.0})},
+            {"mode": "forward", "values": ["0x10"], "params": _item(coeffs={"k1": 1.0})},
             {"mode": "forward", "values": [1], "params": {"coeffs": {"k1": 1.0}}},
             {"mode": "forward", "values": [1], "params": {"coeffs": {"k1": None}}},
+            {"mode": "forward", "values": [1], "params": {"coeffs": {"k1": []}}},
+            {"mode": "forward", "values": [1], "params": {"coeffs": {"k1": "0x10"}}},
             {"mode": "forward", "values": [1], "params": _item(coeffs={"k1": 1.0}, x_min="abc")},
         ],
     )
@@ -431,6 +495,93 @@ class TestExtract:
         statuses = {f["field"]: f["status"] for f in body["fields"]}
         assert statuses == {"m1": "ok", "m2": "invalid"}
 
+    def test_all_four_roles_may_extract(self):
+        pid = seed_roles("dlextract6")
+        self._seed(pid)
+        binding = {
+            "source_file": SOURCE,
+            "variable_path": SOURCE_VAR,
+            "field_map": {"m1": "k1"},
+        }
+        with make_server() as server:
+            for role in ROLES:
+                status, _h, body = as_role(server, role).json(
+                    "POST", EXTRACT_URL % (pid, "rp_energy"), {"binding": binding}
+                )
+                assert status == 200, (role, body)
+                assert body["coeffs"] == {"k1": 2.0}, (role, body)
+
+    def test_blank_and_hex_strings_are_invalid_and_never_become_zero(self):
+        """C15 / R19：`""`、空白串与 `"0x10"` 是 invalid，不是 0 / 16。
+
+        `float("")` / `float(" ")` / `float("0x10")` 在后端都是 ValueError，
+        `missing`/`invalid` 都不进 `coeffs`——mock 用 `Number()` 会把它们变成
+        0 / 0 / 16，这里先把后端判决钉死（mock 一侧见 `tests/test_mock_dl_contract.py`）。
+        """
+        pid = seed_roles("dlextract7")
+        write_target(
+            pid,
+            "dl_values.json",
+            json.dumps({"dev": {"m1": "2.5", "m2": "", "m3": " ", "m4": "0x10"}}).encode(
+                "utf-8"
+            ),
+        )
+        binding = {
+            "source_file": "dl_values.json",
+            "variable_path": "root.dev",
+            "field_map": {"m1": "k1", "m2": "k2", "m3": "k3", "m4": "k4"},
+        }
+        with make_server() as server:
+            status, _h, body = as_role(server, "admin").json(
+                "POST", EXTRACT_URL % (pid, "rp_width"), {"binding": binding}
+            )
+        assert status == 200, body
+        assert body["coeffs"] == {"k1": 2.5}, body["coeffs"]
+        fields = {f["field"]: f for f in body["fields"]}
+        for field, raw in (("m2", ""), ("m3", " "), ("m4", "0x10")):
+            assert fields[field] == {
+                "field": field,
+                "coeff": {"m2": "k2", "m3": "k3", "m4": "k4"}[field],
+                "status": "invalid",
+                "raw": raw,
+            }, fields[field]
+
+    @pytest.mark.parametrize(
+        "binding",
+        [None, "not-an-object", [], 3],
+    )
+    def test_binding_must_be_a_json_object(self, binding):
+        """后端对缺失/null/非对象的 `binding` 都是 400，不是回落 `{}` 再 404。"""
+        pid = seed_roles("dlextract8")
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json(
+                "POST",
+                EXTRACT_URL % (pid, "rp_width"),
+                {} if binding is None else {"binding": binding},
+            )
+        assert status == 400, body
+        assert body["error"]["code"] == "INVALID_INPUT"
+        assert body["error"]["message"] == "binding 必须是对象"
+        assert body["error"]["detail"]["field"] == "binding"
+
+    @pytest.mark.parametrize("field_map", [[], "m1=k1", 5])
+    def test_field_map_must_be_a_json_object(self, field_map):
+        pid = seed_roles("dlextract9")
+        write_target(pid, SOURCE, SOURCE_DOC)
+        binding = {
+            "source_file": SOURCE,
+            "variable_path": SOURCE_VAR,
+            "field_map": field_map,
+        }
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json(
+                "POST", EXTRACT_URL % (pid, "rp_width"), {"binding": binding}
+            )
+        assert status == 400, body
+        assert body["error"]["code"] == "INVALID_INPUT"
+        assert body["error"]["message"] == "field_map 必须是对象"
+        assert body["error"]["detail"]["field"] == "binding"
+
     def test_missing_source_file_is_404(self):
         pid = seed_roles("dlextract3")
         binding = {
@@ -518,6 +669,42 @@ class TestSaveItem:
                 assert status == 409, (headers, body)
                 assert body["error"]["code"] == "REVISION_CONFLICT", body
                 assert body["error"]["detail"]["header"] == "If-Match", body
+        assert _file_state(pid) == before_file
+        assert _parts(pid) == before_parts
+
+    def test_missing_if_match_wins_over_an_invalid_body(self):
+        """顺序与后端一致：先看头（缺失 → 409），再校验 body。
+
+        前端 `dltool.js:94` 只处理 `REVISION_CONFLICT`；把顺序倒过来会让「没带头 +
+        body 非法」变成 400，前端不会弹「重新加载」，mock 也因此必须同序。
+        """
+        pid = seed_roles("dlsave10")
+        _seed_config(pid)
+        payload = _valid_payload(pid, k1="abc")
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT", ITEM_URL % (pid, "rp_energy"), payload
+            )
+        assert status == 409, body
+        assert body["error"]["code"] == "REVISION_CONFLICT"
+        assert body["error"]["detail"]["header"] == "If-Match"
+
+    def test_invalid_body_is_400_before_the_stale_rev_is_compared(self):
+        """rev 过期 + body 非法 → 400（不是 409）：校验先于 rev 比较、先于落盘。"""
+        pid = seed_roles("dlsave11")
+        _seed_config(pid)
+        before_file = _file_state(pid)
+        before_parts = _parts(pid)
+        payload = _valid_payload(pid, k1="abc")
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_energy"),
+                payload,
+                headers={"If-Match": "000000000000"},
+            )
+        assert status == 400, body
+        assert body["error"]["code"] == "INVALID_INPUT"
         assert _file_state(pid) == before_file
         assert _parts(pid) == before_parts
 
@@ -610,6 +797,70 @@ class TestSaveItem:
         raw = json.loads(open(_config_path(pid), "r", encoding="utf-8").read())
         assert raw["items"]["rp_energy"]["x_min"] is None
         assert raw["items"]["rp_energy"]["x_max"] is None
+
+    @pytest.mark.parametrize("missing", ["x_min", "x_max", "y_min", "y_max"])
+    def test_missing_range_keys_are_400_instead_of_silently_cleared(self, missing):
+        """裁定 (a)：PUT body 是完整 item，四个范围键缺一个就是 400。
+
+        `_validated_params` 把「缺失」与「显式 null」都归一成 None；若放行缺失键，
+        部分 body 会静默清空磁盘上的范围，而 name/binding 缺失却保留磁盘值——
+        两种语义混用最容易丢数据。要清空请显式传 `null`（上一用例已钉住）。
+        """
+        pid = seed_roles("dlsave12")
+        rev = _seed_config(
+            pid,
+            mutate=lambda cfg: cfg["items"]["rp_energy"].update(
+                {"x_min": 1.0, "x_max": 2.0, "y_min": 3.0, "y_max": 4.0}
+            ),
+        )
+        before_file = _file_state(pid)
+        before_parts = _parts(pid)
+        payload = _valid_payload(pid, k1=5.0)
+        del payload[missing]
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_energy"),
+                payload,
+                headers={"If-Match": rev},
+            )
+        assert status == 400, (missing, body)
+        assert body["error"]["code"] == "INVALID_INPUT"
+        assert body["error"]["detail"]["field"] == missing
+        assert _file_state(pid) == before_file, "400 之后范围一字节都不许动"
+        assert _parts(pid) == before_parts
+        kept = _load_item(pid)
+        assert (kept["x_min"], kept["x_max"], kept["y_min"], kept["y_max"]) == (
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+        )
+
+    def test_first_save_on_an_empty_config_accepts_the_rev_from_get(self):
+        """空配置首 PUT：文件还不存在时 GET 返回默认配置的稳定 rev，
+        拿它当 `If-Match` 必须能保存成功，且保存后的 rev 就是文件哈希。"""
+        pid = seed_roles("dlsave13")
+        assert _file_state(pid) is None
+        payload = _load_item(pid)
+        payload["coeffs"]["k1"] = 7.0
+        with make_server() as server:
+            status, _h, state = as_role(server, "deployer").json("GET", DL_URL % pid)
+            assert status == 200, state
+            assert state["rev"] == _default_rev()
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_energy"),
+                payload,
+                headers={"If-Match": state["rev"]},
+            )
+            assert status == 200, body
+            assert body["rev"] == _rev_of_file(pid)
+            status, _h, after = as_role(server, "visitor").json("GET", DL_URL % pid)
+            assert status == 200
+        assert after["rev"] == body["rev"]
+        assert after["items"]["rp_energy"] == body["item"]
+        assert after["items"]["rp_energy"]["coeffs"]["k1"] == 7.0
 
     def test_unknown_keys_are_not_persisted(self):
         pid = seed_roles("dlsave5")
@@ -791,6 +1042,107 @@ class TestTransCoeffZero:
         assert body["error"]["message"] == TRANS_ZERO
         assert _file_state(pid) == before_file
         assert _parts(pid) == before_parts
+
+
+# ---------------------------------------------------------------------------
+# 极端但有限的数值：不许变成 500（I3）
+# ---------------------------------------------------------------------------
+
+
+class TestExtremeValues:
+    """首轮评审 I3：有限输入在 `float()` 或计算中途溢出时一律 400，独立文案，且不落盘。
+
+    * 400 位 JSON 整数：`float()` 自己就抛 OverflowError（compute 与 save 都走校验）；
+    * `k1=1e308, x=10` / `trans_coeff=1e-308, y=10`：参数合法，但 `dltool` 的中间量
+      溢出成 `inf`，`_round` 的 `math.floor(inf)` 抛 OverflowError。这两组是**纯计算**
+      场景（save 对同样的系数/换算系数是合法值，不该 400），所以只打 compute。
+    """
+
+    HUGE = int("9" * 400)
+
+    def test_400_digit_json_integer_is_400_for_compute_and_save(self):
+        pid = seed_roles("dlextreme1")
+        before_parts = _parts(pid)
+        rev = _default_rev()
+        with make_server() as server:
+            # values 里的超大整数：float(values[i]) 同样溢出。
+            status, _h, body = as_role(server, "visitor").json(
+                "POST",
+                COMPUTE_URL % (pid, "rp_width"),
+                {
+                    "mode": "forward",
+                    "values": [self.HUGE],
+                    "params": _item(coeffs={"k1": 1.0}),
+                },
+            )
+            assert status == 400, body
+            assert body["error"]["code"] == "INVALID_INPUT", body
+            assert body["error"]["message"] == "输入值必须是有限数值"
+
+            # 系数里的超大整数：compute 与 save 都要 400 且不碰磁盘。
+            params = _item(coeffs={"k1": self.HUGE})
+            status, _h, body = as_role(server, "visitor").json(
+                "POST",
+                COMPUTE_URL % (pid, "rp_width"),
+                {"mode": "forward", "values": [1], "params": params},
+            )
+            assert status == 400, body
+            assert body["error"]["code"] == "INVALID_INPUT", body
+            assert body["error"]["message"] == "系数必须是有限数值"
+
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_width"),
+                params,
+                headers={"If-Match": rev},
+            )
+            assert status == 400, body
+            assert body["error"]["code"] == "INVALID_INPUT", body
+            assert body["error"]["message"] == "系数必须是有限数值"
+            assert "Traceback" not in json.dumps(body)
+        assert _file_state(pid) is None, "400 之后不许落下 dltool_config.json"
+        assert _parts(pid) == before_parts
+
+    def test_forward_intermediate_overflow_is_400_not_500(self):
+        pid = seed_roles("dlextreme2")
+        before_parts = _parts(pid)
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json(
+                "POST",
+                COMPUTE_URL % (pid, "rp_width"),
+                {
+                    "mode": "forward",
+                    "values": [10],
+                    "params": _item(coeffs={"k1": 1e308}),
+                },
+            )
+        assert status == 400, body
+        assert body["error"]["code"] == "INVALID_INPUT", body
+        assert body["error"]["message"] == "数值超出可计算范围"
+        assert body["error"]["message"] != TRANS_ZERO, "溢出与除零必须是两条独立文案"
+        assert "Traceback" not in json.dumps(body)
+        assert _parts(pid) == before_parts
+        assert _file_state(pid) is None
+
+    def test_reverse_tiny_trans_coeff_overflow_is_400_not_500(self):
+        pid = seed_roles("dlextreme3")
+        before_parts = _parts(pid)
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json(
+                "POST",
+                COMPUTE_URL % (pid, "pp_energy"),
+                {
+                    "mode": "reverse",
+                    "values": [10],
+                    "params": _item(kind="pp_energy", trans=1e-308, power=1.0),
+                },
+            )
+        assert status == 400, body
+        assert body["error"]["code"] == "INVALID_INPUT", body
+        assert body["error"]["message"] == "数值超出可计算范围"
+        assert "Traceback" not in json.dumps(body)
+        assert _parts(pid) == before_parts
+        assert _file_state(pid) is None
 
 
 # ---------------------------------------------------------------------------

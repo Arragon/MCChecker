@@ -23,7 +23,12 @@
   并发第二个写者只能拿到 409，文件只会被先保存者改一次。
 * 保存时 `editing` 写 `false`；范围空值保留 `null`（不并成 0 / ""）；非法数值 400 且
   不落盘；`dltool_config.json` 的字段集合不变——新 item 从**磁盘上现有的 item** 深拷贝，
-  只覆盖已知键，payload 里的未知键（含 `coeffs.k9`）一律忽略。
+  只覆盖已知键，payload 里的未知键（含 `coeffs.k9`）一律忽略。PUT 的 body 按 §7.11 是
+  **完整 item**：四个范围键缺失 → 400（不再静默清空磁盘值；要清空请显式传 `null`）。
+* **极端但有限的数值**：`float()` 自身就溢出的超大整数（如 400 位 JSON 整数）在参数
+  校验里直接 400；`1e308` 这类**能通过校验**的值在计算中途溢出成 `inf`/`nan` 时，
+  `compute` 把 `OverflowError`/`ValueError` 翻成 400（独立文案，不复用除零那条），
+  不改 `app/core/dltool.py`。
 * **`trans_coeff=0`（M3-10 的 Important 2）**：`dltool.validate` 只拒绝
   `power_conv_coeff=0`，而 `reverse` / `multi_check` 会 `÷ s`（s=0）抛
   `ZeroDivisionError`。按卡面裁定 **(a)** 在本层拦成 400 `INVALID_INPUT`：三种 mode
@@ -59,6 +64,8 @@ _RANGE_FIELDS = ("x_min", "x_max", "y_min", "y_max")
 
 #: 文案与 `mock-api.js` 的 `TRANS_ZERO_MESSAGE` 逐字一致（R19：mock 不发明后端没有的行为）。
 TRANS_ZERO_MESSAGE = "传输系数不能为 0"
+#: 有限输入在计算中途溢出（`inf`/`NaN`）时的独立文案：不复用除零那条，前端能区分。
+OVERFLOW_MESSAGE = "数值超出可计算范围"
 
 _IF_MATCH = "If-Match"
 
@@ -84,14 +91,18 @@ def get_state(pid: str) -> Dict[str, Any]:
 
     `dltool_config.json` 里的 `editing`（v1 的共享编辑态）**读到后忽略**：v2 不做共享
     编辑态（C15），草稿只存在于浏览器内存。
+
+    `cfg` 与 `rev` 必须在**同一把机型锁**内读：`ThreadingHTTPServer` 下 GET 与 PUT
+    并发，若两次读之间插进一次保存，就会返回「旧 items + 新 rev」，客户端拿新 rev
+    再 PUT 会把对方的保存覆盖掉。锁与 `save_item` 的 `profile_write` 是同一把
+    （`storage.profile_lock`，无需另造一套）。
     """
     with storage.use_profile(pid):
-        cfg = dltool.load_config()
-        state = {
-            "rev": _current_rev_in_profile(),
-            "items": {item: deepcopy(cfg["items"][item]) for item in ITEMS},
-        }
-    return state
+        with storage.profile_lock(pid):
+            cfg = dltool.load_config()
+            rev = _current_rev_in_profile()
+            items = {item: deepcopy(cfg["items"][item]) for item in ITEMS}
+    return {"rev": rev, "items": items}
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +144,11 @@ def compute(
         # 防御层：_validated_params 已在碰磁盘之前拒绝 trans_coeff=0；这里只兜住
         # 任何残留的 ÷0（例如将来 core 新增的除法路径），不让它变成 500。
         raise AppError(INVALID_INPUT, TRANS_ZERO_MESSAGE, field="trans_coeff")
+    except (OverflowError, ValueError):
+        # 输入本身有限（1e308 之类），但中间量溢出成 inf / nan：`dltool._round` 的
+        # `math.floor(inf)` 抛 OverflowError、`math.floor(nan)` 抛 ValueError。
+        # 不改 `core/dltool.py`（那里按 JS 语义冻结），服务层统一翻成 400。
+        raise AppError(INVALID_INPUT, OVERFLOW_MESSAGE)
 
 
 # ---------------------------------------------------------------------------
@@ -223,9 +239,9 @@ def save_item(
 ) -> Dict[str, Any]:
     """`PUT /p/{pid}/dl/{item}` → `{"rev", "item"}`。
 
-    `If-Match` 缺失/空 → 409 `REVISION_CONFLICT`（R17）。载荷的数值校验在**碰磁盘
-    之前**完成；`rev` 比较、读配置、写配置都在同一次 `profile_write` 内，所以并发
-    第二个写者只能 409，文件只会被先保存者改一次。
+    `If-Match` 缺失/空 → 409 `REVISION_CONFLICT`（R17）。载荷的数值校验（含四个范围
+    键的齐全性）在**碰磁盘之前**完成；`rev` 比较、读配置、写配置都在同一次
+    `profile_write` 内，所以并发第二个写者只能 409，文件只会被先保存者改一次。
     """
     _require_item(item)
     header = str(if_match or "").strip()
@@ -238,6 +254,19 @@ def save_item(
         )
     if not isinstance(payload, dict):
         raise AppError(INVALID_INPUT, "请求体必须是完整 item 对象")
+
+    # 范围键必须齐全（§7.11：body 为完整 item）：`_validated_params` 把「缺失」与
+    # 「显式 null」都归一成 None，若放行缺失键，部分 body 会**静默清空**磁盘上的四个
+    # 范围；而 name/binding 缺失是保留磁盘值——两种语义混在一起最容易丢数据。
+    # 要清空请显式传 null。
+    missing_ranges = [field for field in _RANGE_FIELDS if field not in payload]
+    if missing_ranges:
+        raise AppError(
+            INVALID_INPUT,
+            "保存时必须提供完整的范围字段（缺少：%s）；不需要限制时请显式传 null"
+            % "、".join(missing_ranges),
+            field=missing_ranges[0],
+        )
 
     # 数值校验先于任何磁盘访问（trans_coeff=0 / 非法值都必须在落盘前 400）。
     clean = _validated_params(payload, item)
@@ -344,7 +373,8 @@ def _as_finite_number(value: Any, *, field: str, message: str) -> float:
         raise AppError(INVALID_INPUT, message, field=field)
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError：JSON 里的超大整数（如 400 位）`float()` 直接溢出。
         raise AppError(INVALID_INPUT, message, field=field)
     if not math.isfinite(number):
         raise AppError(INVALID_INPUT, message, field=field)
@@ -373,7 +403,8 @@ def _validated_values(raw: Any) -> List[float]:
             )
         try:
             number = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError 同 `_as_finite_number`：超大 JSON 整数不许漏成 500。
             raise AppError(
                 INVALID_INPUT, "输入值必须是有限数值", field="values[%d]" % index
             )

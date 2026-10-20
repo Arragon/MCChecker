@@ -1461,10 +1461,23 @@
   var DL_MODES = ["forward", "reverse", "multi_check"];
   var DL_TRANS_ZERO_MESSAGE = "传输系数不能为 0";
 
-  function dlIsFiniteNumber(v) {
-    if (v === null || v === undefined || typeof v === "boolean") return false;
-    if (typeof v === "string" && v.trim() === "") return false;
-    return isFinite(Number(v));
+  /* Python `float()` 的十进制语法（允许下划线分隔与首尾空白）。**不要**换回裸
+   * `Number(v)`：`Number("") === 0`、`Number(" ") === 0`、`Number([]) === 0`、
+   * `Number([5]) === 5`、`Number("0x10") === 16`，这五条后端分别是 invalid/400
+   * （C15 / R19）。hex/binary/octal、数组、布尔、null 一律不认；字符串形式的
+   * `inf`/`nan` 过不了正则，number 的 `Infinity`/`NaN` 由 isFinite 拒绝，与后端
+   * `float()` + `math.isfinite` 同判。 */
+  var DL_PY_FLOAT_RE = /^[+-]?(?:(?:\d(?:_?\d)*\.(?:\d(?:_?\d)*)?|\.\d(?:_?\d)*)(?:[eE][+-]?\d(?:_?\d)*)?|\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?)$/;
+
+  /** 按 Python float 的语法转成有限 number；不合法返回 null。
+   *  请求参数（compute/save）与 extract 提取值**都**走这里。 */
+  function dlNumber(v) {
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    var text = v.trim();
+    if (!text || !DL_PY_FLOAT_RE.test(text)) return null;
+    var num = Number(text.replace(/_/g, ""));
+    return isFinite(num) ? num : null;
   }
 
   /** 与 services/dl.py::_validated_params 同口径：{item} 或 {error}。
@@ -1477,31 +1490,35 @@
     var coeffs = {};
     for (var i = 1; i <= 8; i++) {
       var key = "k" + i;
-      if (!dlIsFiniteNumber(raw.coeffs[key])) return { error: "系数必须是有限数值" };
-      coeffs[key] = Number(raw.coeffs[key]);
+      var value = dlNumber(raw.coeffs[key]);
+      if (value === null) return { error: "系数必须是有限数值" };
+      coeffs[key] = value;
     }
-    if (!dlIsFiniteNumber(raw.coeffs.b)) return { error: "系数必须是有限数值" };
-    coeffs.b = Number(raw.coeffs.b);
+    var b = dlNumber(raw.coeffs.b);
+    if (b === null) return { error: "系数必须是有限数值" };
+    coeffs.b = b;
 
     var out = { coeffs: coeffs };
     var ranges = ["x_min", "x_max", "y_min", "y_max"];
     for (var j = 0; j < ranges.length; j++) {
       var field = ranges[j];
-      var value = raw[field];
-      if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) {
+      var range = raw[field];
+      if (range === null || range === undefined || (typeof range === "string" && range.trim() === "")) {
         out[field] = null;
-      } else if (!dlIsFiniteNumber(value)) {
-        return { error: "范围必须是有限数值", field: field };
       } else {
-        out[field] = Number(value);
+        var rangeNum = dlNumber(range);
+        if (rangeNum === null) return { error: "范围必须是有限数值", field: field };
+        out[field] = rangeNum;
       }
     }
     if (kind === "pp_energy") {
-      if (!dlIsFiniteNumber(raw.trans_coeff) || !dlIsFiniteNumber(raw.power_conv_coeff)) {
+      var trans = dlNumber(raw.trans_coeff);
+      var power = dlNumber(raw.power_conv_coeff);
+      if (trans === null || power === null) {
         return { error: "传输系数与功率转换系数必须是有限数值" };
       }
-      out.trans_coeff = Number(raw.trans_coeff);
-      out.power_conv_coeff = Number(raw.power_conv_coeff);
+      out.trans_coeff = trans;
+      out.power_conv_coeff = power;
       if (out.power_conv_coeff === 0) return { error: "功率转换系数不能为 0" };
       if (out.trans_coeff === 0) return { error: DL_TRANS_ZERO_MESSAGE };
     }
@@ -1519,8 +1536,9 @@
     if (!Array.isArray(raw)) return { error: "输入值必须是数组" };
     var values = [];
     for (var i = 0; i < raw.length; i++) {
-      if (!dlIsFiniteNumber(raw[i])) return { error: "输入值必须是有限数值" };
-      values.push(Number(raw[i]));
+      var num = dlNumber(raw[i]);
+      if (num === null) return { error: "输入值必须是有限数值" };
+      values.push(num);
     }
     return { values: values };
   }
@@ -1598,18 +1616,38 @@
     var deny = needDeployer(id);
     if (deny) return deny;
     var cfg = dlConfig(P);
-    if (!cfg.items[a.item]) return fail(404, "NOT_FOUND", "计算项不存在");
-    // R17：If-Match 必须存在；缺失与不符同是 409 REVISION_CONFLICT（views/dltool.js:94 只处理这个码）。
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    // 与后端 `services/dl.py::save_item` 同序：① 头缺失 409；② body 形状与数值校验
+    // 400；③ 最后才比 rev 409。否则「rev 过期 + body 非法」时 mock 会报 409，
+    // 后端报 400（R19：模板模式不许比后端更早放行或更早拒绝）。
     var header = req.headers["If-Match"] || req.headers["if-match"];
-    if (!header || header !== dlRev(P)) {
-      return fail(409, "REVISION_CONFLICT", "计算参数已被他人修改，请刷新后再保存");
+    if (!header) {
+      return fail(409, "REVISION_CONFLICT", "缺少 If-Match 头：请先 GET /dl 取得当前 rev", { header: "If-Match" });
     }
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+      return fail(400, "INVALID_INPUT", "请求体必须是完整 item 对象");
+    }
+    var missing = ["x_min", "x_max", "y_min", "y_max"].filter(function (k) {
+      return !Object.prototype.hasOwnProperty.call(req.body, k);
+    });
+    if (missing.length) {
+      return fail(
+        400,
+        "INVALID_INPUT",
+        "保存时必须提供完整的范围字段（缺少：" + missing.join("、") + "）；不需要限制时请显式传 null",
+        { field: missing[0] }
+      );
+    }
+    var norm = normalizeDlParams(req.body, a.item);
+    if (norm.error) return fail(400, "INVALID_INPUT", norm.error);
     var nameErr = validateDlName(req.body);
     if (nameErr) return fail(400, "INVALID_INPUT", nameErr, { field: "name" });
     var bindingErr = validateDlBinding(req.body);
     if (bindingErr) return fail(400, "INVALID_INPUT", bindingErr, { field: "binding" });
-    var norm = normalizeDlParams(req.body, a.item);
-    if (norm.error) return fail(400, "INVALID_INPUT", norm.error);
+    if (header !== dlRev(P)) {
+      return fail(409, "REVISION_CONFLICT", "计算参数已被他人修改，请刷新后再保存");
+    }
+    if (!cfg.items[a.item]) return fail(404, "NOT_FOUND", "计算项不存在");
     cfg.editing = false;
     cfg.items[a.item] = mergeDlItem(cfg.items[a.item], req.body, norm.item, a.item);
     bump(a.pid, "settings");
@@ -1618,22 +1656,37 @@
 
   route("POST", "/p/{pid}/dl/{item}/extract", function (a, req, P) {
     if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
-    var bnd = req.body.binding || {};
-    if (typeof bnd !== "object" || Array.isArray(bnd)) return fail(400, "INVALID_INPUT", "binding 必须是对象");
-    var ix = currentIndex(P, bnd.source_file);
-    if (!ix) return fail(404, "NOT_FOUND", "绑定的配置文件不存在");
-    var ids = ix.byId[bnd.variable_path];
-    if (!ids) return fail(404, "NOT_FOUND", "在 " + bnd.source_file + " 中未找到 " + bnd.variable_path, { field: "variable_path" });
+    // 与后端同序：binding 不是对象 → 400（不是回落 {} 后 404）；source_file 缺 → 404；
+    // 节点找不到 → 404；field_map 非对象 → 400。缺 binding 的请求在 mock 里原先会
+    // 走下一条 `P.files[undefined]` 的 404，与后端的 400 漂移（R19）。
+    var bnd = req.body.binding;
+    if (!bnd || typeof bnd !== "object" || Array.isArray(bnd)) {
+      return fail(400, "INVALID_INPUT", "binding 必须是对象", { field: "binding" });
+    }
+    var sourceFile = bnd.source_file === undefined || bnd.source_file === null ? "" : String(bnd.source_file).trim();
+    if (!sourceFile) return fail(404, "NOT_FOUND", "绑定的配置文件不存在", { field: "source_file" });
+    var variablePath = bnd.variable_path === undefined || bnd.variable_path === null ? "" : String(bnd.variable_path).trim();
+    var ix = currentIndex(P, sourceFile);
+    if (!ix) return fail(404, "NOT_FOUND", "绑定的配置文件不存在", { field: "source_file" });
+    var ids = ix.byId[variablePath];
+    if (!ids) return fail(404, "NOT_FOUND", "在 " + sourceFile + " 中未找到 " + variablePath, { field: "variable_path" });
+    var fieldMap = bnd.field_map;
+    if (fieldMap === undefined || fieldMap === null) fieldMap = {};
+    else if (typeof fieldMap !== "object" || Array.isArray(fieldMap)) {
+      return fail(400, "INVALID_INPUT", "field_map 必须是对象", { field: "binding" });
+    }
     var N = ix.N;
     var i = ids[0];
     var children = {};
     for (var c = i + 1; c < N.p.length; c++) if (N.p[c] === i) children[N.l[c]] = N.v[c];
-    var fields = Object.keys(bnd.field_map || {}).map(function (fld) {
-      var coeff = bnd.field_map[fld];
+    var fields = Object.keys(fieldMap).map(function (fld) {
+      var coeff = fieldMap[fld];
       // 无值节点（XML 空元素）与缺失同判 missing；缺失/非数值都不进 coeffs、至少不返回 0（C15）。
       if (!(fld in children) || children[fld] === null) return { field: fld, coeff: coeff, status: "missing" };
-      var num = Number(children[fld]);
-      return isFinite(num) ? { field: fld, coeff: coeff, status: "ok", value: num } : { field: fld, coeff: coeff, status: "invalid", raw: children[fld] };
+      var num = dlNumber(children[fld]);
+      return num === null
+        ? { field: fld, coeff: coeff, status: "invalid", raw: children[fld] }
+        : { field: fld, coeff: coeff, status: "ok", value: num };
     });
     var coeffs = {};
     fields.forEach(function (f) { if (f.status === "ok") coeffs[f.coeff] = f.value; });
