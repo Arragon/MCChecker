@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import urllib.parse
 
 from authz_fixtures import as_role, make_server, seed_roles, write_target
@@ -117,6 +119,20 @@ class TestDownloadBytes(Base):
         assert status == 200, body
         assert body == XML_V1
         assert archive in headers["Content-Disposition"], headers
+
+    def test_archive_probe_does_not_create_directories(self):
+        """M4-01 评审 Important：读接口不得经 `get_archive_dir()` 长出归档目录。"""
+        storage.set_active_profile(self.pid)
+        archive_root = storage.get_archive_root_dir()
+        if os.path.isdir(archive_root):
+            shutil.rmtree(archive_root)
+        with make_server() as server:
+            status, _h, raw = _probe(
+                as_role(server, "visitor"), self.pid,
+                kind="archive", filename=FILE_A, archive_filename="missing.xml",
+            )
+        assert status == 404, raw
+        assert not os.path.exists(archive_root), "probe 不得创建 archive 目录"
 
     def test_traversal_is_rejected(self):
         with make_server() as server:

@@ -19,7 +19,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from ..core import device_models, storage
+from ..core import device_models, fsutil, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, AppError
 from .router import Response, Router, query_param
 
@@ -76,7 +76,12 @@ def resolve_download_target(
 
     with storage.use_profile(profile_id):
         if safe_kind == DOWNLOAD_KIND_CURRENT:
-            path = storage.get_config_path(safe_filename)
+            try:
+                path = fsutil.resolve_within(
+                    storage.get_configs_dir(), safe_filename
+                )
+            except AppError as exc:
+                raise DownloadResolutionError("文件名不合法", status_code=400) from exc
             if not os.path.isfile(path):
                 raise DownloadResolutionError("当前文件不存在，无法下载", status_code=404)
             return DownloadTarget(
@@ -90,7 +95,16 @@ def resolve_download_target(
             safe_archive = _sanitize_segment(
                 archive_filename or "", label="历史版本标识"
             )
-            path = storage.get_archived_path(safe_filename, safe_archive)
+            # 不用 `get_archived_path`：它经 `get_archive_dir` 会 `makedirs`，而这是读接口
+            # （M4-01 评审 Important：pristine 数据根上 probe 一个不存在的归档会长出
+            # `archive/<name>/`）。符号链接防御交给 `resolve_within`。
+            archive_dir = os.path.join(
+                storage.get_archive_root_dir(), safe_filename
+            )
+            try:
+                path = fsutil.resolve_within(archive_dir, safe_archive)
+            except AppError as exc:
+                raise DownloadResolutionError("历史版本标识不合法", status_code=400) from exc
             if not os.path.isfile(path):
                 raise DownloadResolutionError("历史版本资源不存在，无法下载", status_code=404)
             return DownloadTarget(
