@@ -12,7 +12,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-服务默认在 `0.0.0.0:50001` 启动，内网其他机器可通过 `http://<服务器IP>:50001` 访问；可通过环境变量 `MCHECKER_PORT` 指定端口。
+服务默认在 `0.0.0.0:50002` 启动，内网其他机器可通过 `http://<服务器IP>:50002` 访问；可通过环境变量 `MCHECKER_PORT` 指定端口。
 
 ## 功能列表
 
@@ -43,7 +43,7 @@ pytest tests/ -v
 
 ## 技术栈
 
-- Python 3.9.11（发布包自带运行时）
+- Python 3.9.11（本机安装，或按手册使用发布包可选运行时）
 - 标准库 `http.server` + JSON API
 - 原生 JavaScript 前端（`app/web/`），零运行时第三方依赖
 - 标准库进行 XML/JSON 解析、下载、定时调度与文件存储

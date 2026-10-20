@@ -1,5 +1,7 @@
 # Project Know-How
 
+> v2 已移除 `MC.caps`/`WIRED`/`WIRED_SETTINGS`/`MC.unwired*` 与 NiceGUI；下文提到这些机制或旧页面的条目仅作历史参考，不要照旧流程改代码。
+
 ## 1. Common Problems
 - NiceGUI 的 `ui.tree` 组件需要特定的数据格式，需将解析结果转换为 `{id, label, children}` 结构
 - XML 属性需在树形视图中特殊处理，作为 `@attr_name` 子节点展示

@@ -39,8 +39,6 @@
     return t.progress && t.progress.total ? t.progress.done + "/" + t.progress.total : "准备中";
   }
 
-  /** true 为 false 时对外展示的接入去向，与 CAP_KEYS 一一对应（见 core/api.js）。 */
-  
   function App(root) {
     this.root = root;
     this.session = null;
@@ -108,10 +106,6 @@
     var id = this.identity;
     if (cap === "deployer") return !!id.is_deployer;
     if (cap === "admin") return !!id.is_admin;
-    return true;
-  };
-
-  App.prototype.capOfKind = function () {
     return true;
   };
 
@@ -585,7 +579,6 @@
       Object.keys(this.instances).forEach(function (k) { self.destroyInstance(k); });
       return this.loadSession(r.pid).then(function () { self.onRoute(r); });
     }
-    if (!this.capOfKind(r.kind)) return this.showUnwired(r);
     var key = keyOf(r);
     var tab = this.tabs.filter(function (t) { return t.key === key; })[0];
     var routeData = { kind: r.kind, arg: r.arg, query: r.query };
@@ -598,10 +591,6 @@
     this.activate(key, r);
   };
 
-  /**
-   * 尚未接入真实后端的页面（来自粘贴的分享链接或浏览器前进后退）：
-   * 说明什么时候接入，且不建立标签——避免把占位页当成真实页面持久化。
-   */
   App.prototype.showUnwired = function (r) {
     var self = this;
     Object.keys(this.instances).forEach(function (k) {

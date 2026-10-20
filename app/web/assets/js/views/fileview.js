@@ -191,14 +191,13 @@
         h("button.btn", { type: "button", onclick: function () { isTemp ? downloadTemp() : app.downloadFile(S.name, S.version); } }, icon("download"), S.version === "current" || isTemp ? "下载" : "下载此版本"),
         moreButton()
       );
-      var segOff = function () { return {}; };
       var views = isTemp
-        ? [{ value: "tree", label: "结构", icon: "list" }, Object.assign({ value: "compare", label: "对比", icon: "compare" }, segOff("compare"))]
+        ? [{ value: "tree", label: "结构", icon: "list" }, { value: "compare", label: "对比", icon: "compare" }]
         : [
             { value: "tree", label: "结构", icon: "list" },
-            Object.assign({ value: "history", label: "历史版本", icon: "history", count: f ? f.archive_count : null }, segOff("history")),
-            Object.assign({ value: "compare", label: "对比", icon: "compare" }, segOff("compare")),
-            Object.assign({ value: "records", label: "修改记录", icon: "records", count: f ? f.record_count : null }, segOff("records")),
+            { value: "history", label: "历史版本", icon: "history", count: f ? f.archive_count : null },
+            { value: "compare", label: "对比", icon: "compare" },
+            { value: "records", label: "修改记录", icon: "records", count: f ? f.record_count : null },
           ];
       var seg = MC.segmented(views, S.view, function (v) {
         var q = { view: v };

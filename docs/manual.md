@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-默认监听：`0.0.0.0:50001`
+默认监听：`0.0.0.0:50002`
 
 停止：
 

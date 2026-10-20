@@ -32,7 +32,7 @@ MCChecker 是一个基于 Python 标准库 HTTP 服务与原生前端的内网�
 
 ```text
 app/
-├── core/       # parser, storage, scheduler, differ, downloader, dltool 等核心逻辑
+├── core/       # parser, storage, differ, downloader, dltool 等核心逻辑
 ├── server/     # HTTP 分发、路由、legacy 兼容、api_*.py
 ├── services/   # 业务服务（含 scheduler）
 └── web/        # 原生前端（index.html + assets/js）
