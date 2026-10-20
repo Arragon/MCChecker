@@ -722,7 +722,9 @@ def test_ipv6_loopback_still_local(source_tree: Path, tmp_path: Path) -> None:
     """回环放行不含 IPv6 之外的口子：`[::1]` 是本机，仍然可以出现。"""
     index = source_tree / "app" / "web" / "index.html"
     index.write_text(
-        index.read_text(encoding="utf-8") + '<img src="http://[::1]:50002/x.png">\n',
+        index.read_text(encoding="utf-8")
+        + '<img src="http://[::1]:50002/x.png">\n'
+        + '<img src="http://[0:0:0:0:0:0:0:1]:50002/x.png">\n',
         encoding="utf-8",
     )
     assert build(source_tree, tmp_path / "out").is_file()

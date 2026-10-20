@@ -34,9 +34,8 @@ r"""MCChecker 离线发布包构建（规范 §14.3；卡片 M4-06 / INH-1908）
 ① 运行期拼出来的地址（`fetch("https://" + host + "/ping")`）；② UTF-16 等非 UTF-8/latin-1 编码的
 成员（解码只有这两条路）；③「条目为什么惰性」所依赖的运行期假设（`run.py` 的 `http://%s:%d` 的
 主机来自运行期配置，构建期看不见）；④ `<` 后紧跟空格的 Markdown 目的地（`](<  //host a>)`；CommonMark 允许目的地里有空白，
-但渲染后是 `%20//…` 相对路径，不是网络目标）；⑤ 把控制符插进 scheme 字母之间
-（`h<LF>ttps://…`）——起点正则不跨 scheme 字符（scheme 与分隔符之间的 TAB/LF/CR 已覆盖）。
-①②③④⑤ 它抓不到，别把绿读成「产物绝对出不去网」。
+但渲染后是 `%20//…` 相对路径，不是网络目标）。
+①②③④ 它抓不到，别把绿读成「产物绝对出不去网」。
 
 确定性：同一棵源树 → 同一成员集合、同一逐文件 sha256；zip 条目时间戳固定为 1980-01-01，
 唯一每次不同的是 `MANIFEST.json` 里的 `built_at_utc`（它记录的就是「这次构建」）。
@@ -180,7 +179,7 @@ _NETWORK_SPECIAL_SCHEMES = frozenset({"http", "https", "ftp", "ws", "wss"})
 #: 可以有多余前导零），HTML 的 legacy 规则允许**省略结尾分号**，所以 `;` 是可选项。
 #: 两个否定预查是必需的而不是保守：`&#470;` 解出 `ǖ`、`&#X2FEvil` 解出 `˾`（node 24 实测），
 #: 把它们当成 `/` 等于闸门自己拼出一个源文件里不存在的地址。
-#: 命名引用（`&sol;`）与百分号编码（`%2F`）**不在**射程内，见模块文档字符串的边界说明。
+#: 百分号编码（`%2F`）**不在**射程内；命名引用（`&sol;`/`&bsol;`）由 `html.unescape` 覆盖。
 _NUMERIC_SLASH_REF_SRC = r"""&(?:#0*47(?![0-9])|#[xX]0*2[fF](?![0-9a-fA-F]));?"""
 _NUMERIC_SLASH_REF_RE = re.compile(_NUMERIC_SLASH_REF_SRC)
 #: `&#92;` / `&#x5c;`：解出来是反斜杠；对特殊 scheme 它与 `/` 一样是权威分隔符。
@@ -245,8 +244,6 @@ _MD_LINK_TARGET_RE = re.compile(r"""\]\(\s*<?(""" + _RELATIVE_AUTHORITY_SRC + r"
 _MD_REF_DEF_RE = re.compile(
     r"""^[ \t]{0,3}\[[^\]\n]+\][ \t]*:[ \t]*<?(""" + _RELATIVE_AUTHORITY_SRC + r""")""", re.M
 )
-#: srcset 的值是「地址 描述符」的逗号列表，必须逐候选切；整条属性一起匹配只会看见第一个候选。
-_SRCSET_UNQUOTED_RE = re.compile(r"""\bsrcset\s*=\s*([^\s"'<>][^\s<>]*)""", re.I)
 #: `<meta http-equiv="refresh" content="0;url=…">`：跳转地址藏在 content 值里面，不是属性值开头。
 _META_REFRESH_RE = re.compile(
     r"""\bcontent\s*=\s*["'][^"']*\burl\s*=\s*((?:https?:)?%s[^"'\s>]+)""" % _RELATIVE_AUTHORITY_SRC,
@@ -280,7 +277,8 @@ _URL_STOP_CHARS = frozenset(" '\"()<>,;`]")
 #: 还在权威段里时，`;`、`(`、`)`、反引号、`]` 都可能属于 userinfo 或 IPv6；但只有当
 #: 它们后面还有 `@` 时才放行，否则会把正文里的反引号/反斜杠散文吞成主机。
 #: 第四轮复审判例：`//;@evil…`、`//(@evil…`、`` //`@evil… ``、`//[::1]@evil…`。
-#: 残余代价：代码 span 里的 `` `//`,@tag `` 仍可能被读成主机 `tag`；当前真树没有这种写法。
+#: 残余代价：代码 span 里的 `` `//`,@tag `` 与 `"// TODO @alice"` 仍可能被读成主机；
+#: 当前真树没有这种写法，出现时优先改正文或另立更精确的 userinfo 判据。
 _AUTHORITY_SOFT_STOPS = frozenset(" ;()`],")
 #: 权威段里的硬终止符：空白、引号、尖括号；`/`、`?`、`#` 也结束权威段。
 _URL_STOP_CHARS_AUTHORITY = frozenset(" '\"<>")
