@@ -328,7 +328,7 @@ def _ensure_profile_layout_locked(migrate_legacy: bool) -> None:
     _migrate_legacy_layout_locked(default_base)
 
 
-#: 旧布局迁移的条目名（§5.5）。`nicegui_storage_secret.txt` **不在**这里——它不是配置数据，
+#: 旧布局迁移的条目名（§5.5）。旧版会话密钥文件（`storage-secret`）**不在**这里——它不是配置数据，
 #: 迁移不许删/搬它；日志目录也不在（M4-03 才引入）。
 _LEGACY_LAYOUT_NAMES = (
     "config_mapping.json",

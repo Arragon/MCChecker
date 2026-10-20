@@ -1,6 +1,6 @@
 # MCChecker - 配置文件解析检查工具
 
-基于 Python + NiceGUI 的内网配置文件解析检查工具，支持 XML/JSON 格式配置的在线解析、查看、搜索、对比和版本管理。
+基于 Python 标准库 HTTP 服务的离线内网配置文件解析检查工具，支持 XML/JSON 格式配置的在线解析、查看、搜索、对比和版本管理。
 
 ## 快速启动
 
@@ -43,11 +43,11 @@ pytest tests/ -v
 
 ## 技术栈
 
-- Python 3.9/3.11/3.12
-- NiceGUI (Web 框架)
-- APScheduler (定时任务)
-- 仅使用标准库进行 XML/JSON 解析和文件下载
+- Python 3.9.11（发布包自带运行时）
+- 标准库 `http.server` + JSON API
+- 原生 JavaScript 前端（`app/web/`），零运行时第三方依赖
+- 标准库进行 XML/JSON 解析、下载、定时调度与文件存储
 
 ## 配置说明
 
-- `NICEGUI_STORAGE_SECRET`（可选）：用于启用/加固基于 Cookie 的用户级持久化（用于记住当前机型选择等）。未设置时，会自动生成并保存到 `data/nicegui_storage_secret.txt`。
+- 默认端口 50002；`python run.py --port <端口> --data-dir <目录>` 可覆盖。

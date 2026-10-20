@@ -72,6 +72,8 @@
 
 
 ## 3. Development Notes
+
+> v1 的 NiceGUI / APScheduler 开发笔记保留在下方仅作历史参考；M4-07 已删除 `app/pages/`、`app/static/`、`app/utils/auth.py`、`app/core/scheduler.py`、`app/core/tabs_state.py` 与 `.nicegui/` 跟踪，运行时代码不再 import 这些包。
 - NiceGUI 的 `app.storage.user` 基于浏览器会话
 - 若需要 `app.storage.user` 在刷新后仍可用，需要在 `ui.run()` 里设置 `storage_secret`（本项目默认自动生成）
 - NiceGUI 的 `app.storage.general` 用于全局持久化

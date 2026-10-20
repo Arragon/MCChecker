@@ -61,28 +61,9 @@
     function renderSection(silent) {
       renderNav();
       var sec = SECTIONS.filter(function (s) { return s.id === S.section; })[0] || SECTIONS[0];
-      /* D2（决策 14 / R14）：这是**唯一**插入点——未接入的分段在调用 fn（下一行的
-       * 发请求处）**之前**就渲染只读横幅并返回，保证一个请求都不发。后续设置卡
-       * （M3-08/13/14/15/16）只把各自分段加进 core/api.js 的 WIRED_SETTINGS，
-       * 不需要再动这里。 */
-      if (!MC.settingsSegmentWired(sec.id)) {
-        util.replace(main, h("div.container", unwiredSection(sec)));
-        return;
-      }
       if (!silent) util.replace(main, MC.stateBlock({ kind: "loading" }));
       var fn = { sources: sources, schedule: schedule, people: people, bindings: bindings, tools: tools, profiles: profiles }[sec.id];
       fn(sec).then(function (content) { util.replace(main, h("div.container", content)); }, function (err) { util.replace(main, MC.errorBlock(err, function () { renderSection(); })); });
-    }
-
-    /** 未接入分段：只读横幅 + 禁用的占位控件（title 给接入去向），绝不发请求。 */
-    function unwiredSection(sec) {
-      var why = (MC.unwiredSettings && MC.unwiredSettings[sec.id]) || "该设置分段尚未接入真实后端";
-      var demoInput = h("input.input", { type: "text", disabled: true, title: why, "aria-label": sec.label + "示例设置项（尚未接入）" });
-      var demoSave = h("button.btn.btn-primary", { type: "button", disabled: true, title: why }, "保存（尚未接入）");
-      return pageHead(sec).concat([
-        h("div.banner.banner-neutral", { style: "margin-bottom:16px" }, icon("lock"), h("div.banner-body", why + "。本分段当前只读：编辑控件全部禁用，且不会向服务器发出任何请求。")),
-        h("div.panel", h("div.panel-body.col", { style: "gap:12px;max-width:520px" }, h("div.small.muted", "「" + sec.label + "」的编辑控件将在接入后启用。"), demoInput, demoSave)),
-      ]);
     }
 
     var ro = function () { return !app.can("deployer"); };
@@ -98,12 +79,9 @@
     function sources(sec) {
       return api.get(app.p("/sources")).then(function (res) {
         var running = app.activeTasks.some(function (t) { return t.type === "update_all" && t.state === "running"; });
-        /* 按钮可用性 = 分段已接入（D2）且 tasks 已接入（D4，卡 6 已放行，这里只核对）。
-         * 未接入 ⇒ disabled + title，不发请求（决策 14）。 */
-        var tasksOff = !MC.settingsSegmentWired("sources") ? "更新源分段尚未接入" : !MC.caps.tasks ? MC.unwired.tasks : null;
         var all = h(
           "button.btn.btn-primary",
-          { type: "button", disabled: running || !!tasksOff || !res.items.length, title: tasksOff },
+          { type: "button", disabled: running || !res.items.length },
           icon("download"),
           running ? "全量更新进行中…" : "全部立即更新"
         );
@@ -120,8 +98,8 @@
             "button.btn.btn-sm",
             {
               type: "button",
-              disabled: ro() || !!tasksOff,
-              title: ro() ? "只有部署者（在服务器本机访问）可以修改" : tasksOff,
+              disabled: ro(),
+              title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null,
             },
             icon("refresh"),
             "更新"

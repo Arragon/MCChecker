@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 54;
+  var EXPECTED_CASES = 44;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -337,120 +337,6 @@
     ok(MC.util.initials(MC.util.identityName({ registered: false, name: "10.0.0.9" })) !== "10", "头像首字不取自 IP");
   });
 
-  test("能力开关：模板全开，生产只放行已接入项，且每项能力都有点名卡号的说明", function () {
-    var keys = MC.capKeys.slice().sort();
-    var on = MC.capsFor(true);
-    var off = MC.capsFor(false);
-    ok(keys.length >= 10, "键集非空");
-    eq(Object.keys(on).sort(), keys, "capsFor 覆盖全部能力键");
-    ok(keys.every(function (k) { return on[k] === true; }), "模板模式下全部可用");
-    ok(keys.every(function (k) { return off[k] === (MC.wiredCaps.indexOf(k) >= 0); }), "生产模式只放行已接入的接口");
-    ok(MC.wiredCaps.every(function (k) { return MC.capKeys.indexOf(k) >= 0; }), "WIRED 里不能有拼错或未登记的能力键");
-    eq(Object.keys(MC.unwired).sort(), keys, "每项能力都要有未接入说明");
-    ok(keys.every(function (k) { return /M\d-\d\d/.test(MC.unwired[k]); }), "说明必须点名接入卡号");
-  });
-
-  test("M3-03：审阅页已在生产放行，未实现的接口不得提前打开", function () {
-    var prod = MC.capsFor(false);
-    ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"].forEach(function (k) {
-      ok(prod[k], k + " 已接真实后端");
-    });
-    ok(prod.tools, "tools 已接入真实后端（M3-15）");
-    ok(MC.capKeys.every(function (k) { return prod[k]; }), "M3-15 之后 16 个能力键全部放行");
-    /* M3-06：settings 页级键已放行——页面内部的分段由 D2 分段开关控制（见下面专门用例），
-     * 未接入分段渲染只读横幅且不发请求，所以页级放行不再打空接口。 */
-    ok(prod.settings, "settings 页级键在 M3-06 放行");
-    /* M3-08：`/schedule` 接口已落地 ⇒ 页级键同时放行（速览的定时块读它、设置页写它）。 */
-    ok(prod.schedule, "schedule 页级键在 M3-08 放行");
-    /* 放行只改 WIRED：未接入文案必须留着，M4-08 删本机制前 view 仍靠它给禁用提示。 */
-    ok(/M\d-\d\d/.test(MC.unwired.review), "review 的未接入说明要保留并点名卡号：" + MC.unwired.review);
-    ok(/M\d-\d\d/.test(MC.unwired.settings), "settings 的未接入说明要保留并点名卡号：" + MC.unwired.settings);
-  });
-
-  test("M3-07 / D4：任务接口独立放行，tools 键不再代表任务可用性", function () {
-    var prod = MC.capsFor(false);
-    ok(MC.capKeys.indexOf("tasks") >= 0, "tasks 已登记在 CAP_KEYS");
-    ok(MC.wiredCaps.indexOf("tasks") >= 0, "tasks 已接入真实后端（M3-07）");
-    ok(prod.tasks, "生产模式下 tasks 为真：「立即拉取」与两个更新按钮可用");
-    ok(prod.tools, "tools 已接入真实后端（M3-15）");
-    eq(MC.capKeys.length, 16, "能力键共 16 项");
-    ok(/M\d-\d\d/.test(MC.unwired.tasks), "tasks 的未接入说明要点名卡号：" + MC.unwired.tasks);
-  });
-
-  test("M3-07 / D4：tasks 未接入时 pollTasks 与 startTask 一个请求都不发", function () {
-    var calls = [];
-    var origGet = MC.api.get;
-    var origPost = MC.api.post;
-    var origCap = MC.caps.tasks;
-    var poll = MC.App.prototype.pollTasks;
-    var start = MC.App.prototype.startTask;
-    var stubApp = { p: function (s) { return "/p/p1" + s; }, activeTasks: [], taskSlot: null, renderTasks: function () {}, pollTasks: poll };
-    try {
-      MC.api.get = function (path, query) { calls.push("GET " + path); return Promise.resolve({ items: [] }); };
-      MC.api.post = function (path, body) { calls.push("POST " + path); return Promise.resolve({ task: {} }); };
-      MC.caps.tasks = false;
-      poll.call(stubApp);
-      /* startTask 走 reject 而不是「假装任务已开始」；catch 挂上以免留下未处理的拒绝。
-       * 这句 catch **不许摘**：它是本文件唯一一处「不把链交给 test() 的浮空 Promise」，
-       * 正是文件头 C1 描述的那个形状——摘掉以后 HTTP 验收命令当场红，file:// 反而看不见。 */
-      start.call(stubApp, { type: "update_all" }).then(null, function () {});
-      eq(calls, [], "未接入时不得打 /tasks（决策 14：禁用 + 说明 + 不发请求）");
-    } finally {
-      /* 同步恢复：异步 finally 会让其余用例在整个同步批次里都用假 API（卡 3 的已知坑，
-       * 本卡已把执行序改成串行，这里保持同步恢复不变——更快且不依赖队列）。 */
-      MC.api.get = origGet;
-      MC.api.post = origPost;
-      MC.caps.tasks = origCap;
-    }
-  });
-
-  test("M3-06 / D2：设置页六个分段全部接入，未接入去向表为空", function () {
-    /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS；
-     * M3-06 sources、M3-08 schedule、M3-13 people、M3-14 bindings、M3-15 tools、
-     * M3-16 profiles 逐一放行。M3-16 之后没有未接入分段，门控逻辑留到 M4-08 删除。 */
-    eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
-    ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
-    ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
-    var unwired = MC.settingsSegments.filter(function (s) { return MC.wiredSettingsSegments.indexOf(s) < 0; });
-    eq(unwired, [], "六个分段全部接入");
-    eq(Object.keys(MC.unwiredSettings), [], "没有未接入分段，去向表必须为空");
-    /* 模板模式全开（预览不受门控）；生产模式六项全开。 */
-    var wasMock = MC.config.mock;
-    var origWired = MC.wiredSettingsSegments.slice();
-    try {
-      MC.config.mock = true;
-      ok(MC.settingsSegmentWired("people") && MC.settingsSegmentWired("sources"), "模板模式下分段全部可用");
-      MC.config.mock = false;
-      ok(MC.settingsSegmentWired("sources"), "生产模式 sources 已接入（M3-06）");
-      ok(MC.settingsSegmentWired("schedule"), "生产模式 schedule 已接入（M3-08）");
-      ok(MC.settingsSegmentWired("people"), "生产模式 people 已接入（M3-13：/ip-mapping 与 /admins 已有后端）");
-      ok(MC.settingsSegmentWired("bindings"), "生产模式 bindings 已接入（M3-14：/bindings 已有后端）");
-      ok(MC.settingsSegmentWired("tools"), "生产模式 tools 已接入（M3-15：/tools 已有后端）");
-      ok(MC.settingsSegmentWired("profiles"), "生产模式 profiles 已接入（M3-16：/profiles 已有后端）");
-      /* F8（卡 7 复审）：F 断言的是效果而不是切片自比——真的动手改暴露出的切片，
-       * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。
-       * M3-16 后没有未接入分段，改用不存在的段名验证闭包不被外部切片打开。 */
-      MC.wiredSettingsSegments.push("bogus");
-      ok(!MC.settingsSegmentWired("bogus"), "往对外切片 push 一个不存在的段，门控仍须是关的——白名单本体改不动");
-      /* 第二变异：先裁回原长再验一次（这一句是**变异步骤**，不是恢复——恢复在 finally）。 */
-      MC.wiredSettingsSegments.splice(origWired.length);
-      ok(MC.settingsSegmentWired("sources") && MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向关闭门控");
-    } finally {
-      /* 第三轮 nit：变异必须自清理，跟本文件其它 fixture 一样。原先只有成功路径上那句
-       * splice 会把 push 进去的 "bindings" 摘掉，所以上面任一 ok 抛错时它就留在
-       * 对外切片里带到跑完，后续读到它的用例会拿到脏值。finally 这一句在成功路径上是
-       * 幂等 no-op（已经裁到 origWired.length），只在失败路径上才真正复原。 */
-      MC.wiredSettingsSegments.splice(origWired.length);
-      MC.config.mock = wasMock;
-    }
-    eq(MC.wiredSettingsSegments, origWired, "MC.wiredSettingsSegments 是快照切片，外部改不动白名单本体（上面的动手变异才是正证）");
-  });
-
-  /* ---------- M3-06：设置页渲染用例（真 API 路径 + D2 分段门控的行为观测） ----------
-   * 这批用例把 MC.config.mock 暂时置为 false 走「生产」分支，并用 spy 替换 MC.api.*
-   * （视图只经由 MC.api 的方法名调用，替换属性即可拦住真实 fetch）。执行序已串行，
-   * 每例在自己的 settle 里恢复，后续用例拿到真身——由上面的「测试隔离」用例兜底。
-   */
   function tick() {
     return new Promise(function (resolve) {
       setTimeout(resolve, 0);
@@ -550,7 +436,6 @@
     MC.config.mock = false;
     var insts = [];
     var restoreFns = [];
-    var capsPatch = [];
     var activeRestore = null;
     var r = {
       stage: stage,
@@ -575,10 +460,6 @@
         restoreFns.push(s.restore);
         return s;
       },
-      capOff: function (key) {
-        capsPatch.push({ key: key, was: MC.caps[key] });
-        MC.caps[key] = false;
-      },
     };
     function finish() {
       MC.config.mock = wasMock;
@@ -586,7 +467,6 @@
       stage.remove();
       cleanOverlays();
       restoreFns.forEach(function (f) { f(); });
-      capsPatch.forEach(function (p) { MC.caps[p.key] = p.was; });
     }
     r.run = function (body) {
       var p;
@@ -755,23 +635,6 @@
         .then(function () {
           ok(spy.calls.indexOf('POST /p/default/tasks {"type":"update_all"}') >= 0, "全部更新同样只走 POST /tasks");
           eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "两次点击各发一个任务请求，没有重试或重复");
-          /* caps.tasks 关掉（模拟未接入）：更新类按钮禁用 + title 给去向，点击不发任务请求。 */
-          r.capOff("tasks");
-          var inst2 = r.mount(settingsApp(true), "sources");
-          return tick().then(function () {
-            var main2 = inst2.el.querySelector(".settings-main");
-            /* 「新增更新源」是 CRUD 按钮（sources 分段自带），不归 tasks 门控管，排除掉。 */
-            var btns = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return /更新/.test(b.textContent) && b.textContent.indexOf("新增") < 0; });
-            ok(btns.length >= 5, "四个行更新按钮 + 全部立即更新都要在，实际 " + btns.length);
-            btns.forEach(function (b) {
-              ok(b.disabled, "tasks 未接入 ⇒ 更新类按钮 disabled");
-              ok(/M3-\d\d/.test(b.getAttribute("title") || ""), "禁用要点名接入卡号，实际：" + b.getAttribute("title"));
-            });
-            btns.forEach(function (b) { b.click(); });
-            return tick();
-          }).then(function () {
-            eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }).length, 2, "未接入时点击不发任务请求");
-          });
         });
     });
   });
@@ -1376,42 +1239,6 @@
     });
   });
 
-  test("M3-07 / D4：文件页「立即拉取」只认 tasks 键——tools 开着也禁用，点击不发请求", function () {
-    /* Python 侧原先 grep fileview.js 里的 `MC.caps.tasks` 与提示文案（R45：源码文本
-     * 不是验收）。这里钉行为：只关 tasks、tools 保持开（旧实现正是借 tools 放行），
-     * 按钮必须 disabled + 有 title（不钉文案，改词不影响），点击不发任务请求。 */
-    var keepTools = MC.caps.tools;
-    MC.caps.tools = true;
-    var t = productionRun();
-    return t.run(function (r) {
-      var spy = r.useApi({
-        GET: function (path) {
-          if (/\/records$/.test(path)) return Promise.resolve({ record_url: "http://up/cfg_rec.xml", items: [] });
-          return Promise.resolve({ items: [] });
-        },
-        POST: function () { return Promise.resolve({ task: {} }); },
-      });
-      r.capOff("tasks");
-      var app = settingsApp(true);
-      app.files = [{ name: "cfg.xml", record_count: 2, archive_count: 1 }];
-      var inst = r.mountView(MC.views.f(app, { kind: "f", arg: "cfg.xml", query: { view: "records" } }));
-      return tick()
-        .then(function () {
-          ok(MC.caps.tools, "前提：tools 键仍开着——旧实现借它放行「立即拉取」");
-          var btns = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("立即拉取") >= 0; });
-          eq(btns.length, 1, "修改记录视图要有「立即拉取」按钮");
-          ok(btns[0].disabled, "tasks 未接入 ⇒ 按钮必须 disabled（不能借 tools 键放行）");
-          ok((btns[0].getAttribute("title") || "").length > 0, "禁用必须给出原因（title 非空；文案本身不参与验收）");
-          btns[0].click();
-          return tick();
-        })
-        .then(function () {
-          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }), [], "未接入时点击不得发任务请求：" + spy.calls.join(" | "));
-        })
-        .then(function () { MC.caps.tools = keepTools; });
-    });
-  });
-
   test("M3-06：改名对话框带 migrate_files 勾选；字段级错误保留输入；保存成功只刷新列表", function () {
     var t = productionRun();
     return t.run(function (r) {
@@ -1761,16 +1588,6 @@
   });
 
 
-  test("外壳：速览与文件页恒可用，其余由 MC.caps 决定", function () {
-    var capOfKind = MC.App.prototype.capOfKind;
-    MC.caps = MC.capsFor(false);
-    ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t") && capOfKind("review"), "速览、文件、搜索、临时标签与审阅页已接入真实后端");
-    ok(capOfKind("settings"), "设置页级键已随 M3-06 接入（页内分段另由 D2 开关控制）");
-    ok(capOfKind("dl"), "DL 页已随 M3-12 接入真实后端");
-    MC.caps = MC.capsFor(true);
-    ok(capOfKind("settings") && capOfKind("t") && capOfKind("dl"), "接入后可用");
-  });
-
   test("搜索高亮：用文本节点拆分关键词，关键字不进入 HTML（§9.8.8 / UC-25）", function () {
     var frag = MC.util.highlight('Port <img src=x onerror="window.__hl=1">', "port");
     var text = "";
@@ -1786,49 +1603,6 @@
     ok(!window.__hl, "载荷不执行");
     eq(MC.util.highlight("PARAM_01", "param_0").childNodes.length >= 2, true, "大小写不敏感");
     eq(MC.util.highlight("ab", "cd").querySelectorAll("mark").length, 0, "不命中时没有 mark");
-  });
-
-  test("组件：MC.menu 的未接入项真的 disabled 并带原因", function () {
-    var anchor = document.createElement("button");
-    document.body.appendChild(anchor);
-    var pop = MC.menu(anchor, [{ label: "删除文件…", disabled: true, title: MC.unwired.delete }]);
-    var item = pop.el.querySelector(".menu-item");
-    ok(item.disabled, "未接入项必须真的 disabled");
-    ok((item.getAttribute("title") || "").indexOf("M2-12") >= 0, "title 说明接入卡号");
-    MC.closePopover();
-    anchor.remove();
-  });
-
-  test("分段控件：未接入的分段真的不可点并说明原因", function () {
-    var clicked = [];
-    var seg = MC.segmented(
-      [{ value: "tree", label: "结构" }, { value: "history", label: "历史版本", disabled: true, title: MC.unwired.history }],
-      "tree",
-      function (v) { clicked.push(v); },
-      "文件视图"
-    );
-    var btns = seg.querySelectorAll("button");
-    eq(btns.length, 2);
-    ok(btns[1].disabled, "未接入分段必须真的 disabled");
-    eq(btns[1].getAttribute("aria-disabled"), "true");
-    ok((btns[1].getAttribute("title") || "").indexOf("M2-07") >= 0, "title 说明接入卡号");
-    btns[1].click();
-    btns[0].click();
-    eq(clicked, [], "禁用分段与重复点当前分段都不触发切换");
-  });
-
-  test("虚拟树：收藏未接入时星标渲染但禁用，键盘 S 给出原因", function () {
-    var idx = MC.doc.buildIndex({ nodes: MC.mockParse.parse('<R><a>1</a></R>', "s.xml").nodes });
-    var blocked = 0;
-    var tree = new MC.Tree(document.getElementById("host"), idx, { starReason: MC.unwired.favorites, onStarBlocked: function () { blocked++; } });
-    var star = tree.el.querySelector(".tr-star");
-    ok(star, "星标仍占位，行结构不因未接入而变");
-    ok(star.disabled, "未接入时星标禁用");
-    eq(star.getAttribute("title"), MC.unwired.favorites);
-    tree.select(1);
-    tree.el.dispatchEvent(new KeyboardEvent("keydown", { key: "S", bubbles: true }));
-    eq(blocked, 1, "按 S 给出未接入说明而不是静默失败");
-    tree.destroy();
   });
 
   test("显示属性开关：关闭后属性行不渲染，但 compact 数组未被裁剪", function () {

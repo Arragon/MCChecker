@@ -25,5 +25,4 @@ pip install pytest
 
 ## 4. 可选配置
 
-- `NICEGUI_STORAGE_SECRET`：用于启用 NiceGUI 的用户级持久化（例如记住当前机型选择）。未设置时会自动生成并存储到 `data/nicegui_storage_secret.txt`。
 

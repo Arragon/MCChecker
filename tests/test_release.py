@@ -36,7 +36,6 @@ EXPECTED_MEMBERS = {
     "app/core/storage.py",
     "app/services/search.py",
     "app/services/upload.py",
-    "app/static/favicon.svg",
     "app/web/assets/css/base.css",
     "app/web/assets/js/app.js",
     "app/web/assets/js/ui/icons.js",
@@ -148,9 +147,6 @@ def source_tree(tmp_path: Path) -> Path:
         ),
         "app/web/assets/js/views/settings.js": (
             'var url = h("input.input", { type: "url", placeholder: "http://…" });\n'
-        ),
-        "app/static/favicon.svg": (
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"></svg>\n"
         ),
         "docs/manual.md": "# 使用手册\n\n启动：`python run.py`。\n",
         "docs/MCChecker_FEATURE_CHANGES.md": "# 变更\n\n" + FC_HEADINGS,
@@ -413,24 +409,10 @@ def test_same_url_in_an_unlisted_file_is_a_violation(source_tree: Path, tmp_path
 
 def test_stale_inert_entry_fails_the_build(source_tree: Path, tmp_path: Path) -> None:
     """名单里的地址在产物里找不到 ⇒ 名单已经脱节，必须红（不许一边失效一边放行）。"""
-    svg = source_tree / "app" / "static" / "favicon.svg"
-    svg.write_text("<svg viewBox='0 0 16 16'></svg>\n", encoding="utf-8")
+    icons = source_tree / "app" / "web" / "assets" / "js" / "ui" / "icons.js"
+    icons.write_text("var NS = 'x';\n", encoding="utf-8")
     with pytest.raises(mr.ReleaseError, match="已经找不到"):
         build(source_tree, tmp_path / "out")
-
-
-def test_inert_entry_for_a_file_that_left_the_artifact_fails(source_tree: Path, tmp_path: Path) -> None:
-    """僵尸条目同样必须红：条目指的文件不再进产物，放行就悬在半空。
-
-    第二轮复审实测旧行为是**静默绿**（把宿主文件删掉，构建 exit 0），与「陈旧条目一定失败」
-    的说法正好相反；这里把另一个方向也钉上。
-    """
-    (source_tree / "app" / "static" / "favicon.svg").unlink()
-    out = tmp_path / "out"
-    zip_path = out / "MCChecker-2.0.0.zip"
-    with pytest.raises(mr.ReleaseError, match="已经不在产物里"):
-        mr.build_release(source_tree, zip_path)
-    assert not zip_path.exists(), "验收没过的包不许落地"
 
 
 def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
@@ -972,10 +954,10 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 21 个" in first.stdout, first.stdout
+    assert "成员 20 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
-    assert "已放行 app/static/favicon.svg" in first.stdout, first.stdout
+    assert "已放行 app/web/assets/js/ui/icons.js" in first.stdout, first.stdout
 
     refused = run_cli(common)
     assert refused.returncode == 1 and "已存在" in refused.stderr, refused.stderr

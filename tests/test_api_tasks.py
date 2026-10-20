@@ -11,7 +11,7 @@
    把那两行顺序反过来它一定转红；
 4. D4 前端门控与 mock 契约：门控行为（未接入 ⇒ 禁用 + title + 不发请求）由
    `app/web/tests/tests.js` 的浏览器用例执法，本文件只保留能由配置数据解析出的
-   结构约束（`WIRED ⊆ CAP_KEYS`）；mock 失败状态集不再与后端逐字对比，缺口见文件末尾说明。
+   mock 失败状态集不再与后端逐字对比，缺口见文件末尾说明。
 
 下载一律打本地 `http.server`（127.0.0.1 随机端口），`getproxies` 打桩成 `{}`
 （macOS 系统代理会把请求接走），重试退避打桩成记录器——与 `tests/test_api_sources.py`
@@ -1988,23 +1988,3 @@ class TestLayeringAndContract:
 # 如需恢复应做成执行 mock 真身的 cross-check，而不是再 grep 源码。
 
 
-class TestD4FrontendGating:
-    def test_api_js_declares_and_wires_the_tasks_key(self):
-        source = _js("app", "web", "assets", "js", "core", "api.js")
-        caps = re.findall(
-            r'"([A-Za-z_]+)"', _block(source, "var CAP_KEYS = [", 400).split("];")[0]
-        )
-        wired = re.findall(r'"([A-Za-z_]+)"', _block(source, "var WIRED = [", 400).split("];")[0])
-        unwired = _block(source, "MC.unwired = {", 1200).split("};")[0]
-
-        assert caps == [
-            "favorites", "remarks", "schedule", "search", "review", "dl", "settings", "import",
-            "delete", "history", "compare", "records", "tools", "revision", "temp", "tasks",
-        ]
-        assert len(caps) == 16
-        assert "tasks" in wired
-        assert set(wired) <= set(caps)  # 与前端测试页同一条不变量
-        assert re.search(r'tasks:\s*"[^"]*M3-07[^"]*"', unwired), "每项能力都要有未接入说明"
-
-    # 顶栏任务浮层的 active 任务渲染由 tests.js「total 未发布」等执行用例覆盖；
-    # `renderTasks` 的 900 字节窗口 grep 已删除（INH-1915）。

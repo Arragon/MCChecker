@@ -39,9 +39,8 @@
     return t.progress && t.progress.total ? t.progress.done + "/" + t.progress.total : "准备中";
   }
 
-  /** MC.caps 为 false 时对外展示的接入去向，与 CAP_KEYS 一一对应（见 core/api.js）。 */
-  var UNWIRED = MC.unwired;
-
+  /** true 为 false 时对外展示的接入去向，与 CAP_KEYS 一一对应（见 core/api.js）。 */
+  
   function App(root) {
     this.root = root;
     this.session = null;
@@ -112,10 +111,8 @@
     return true;
   };
 
-  /** 速览与文件工作区（结构分段）已接入真实后端；其余页面由 MC.caps 决定可用性。 */
-  App.prototype.capOfKind = function (kind) {
-    if (kind === "overview" || kind === "f") return true;
-    return !!MC.caps[kind === "t" ? "temp" : kind];
+  App.prototype.capOfKind = function () {
+    return true;
   };
 
   App.prototype.p = function (rest) {
@@ -307,9 +304,7 @@
       {
         type: "button",
         "aria-label": "导入配置文件",
-        "data-tip": MC.caps.import ? "导入配置文件" : null,
-        disabled: !MC.caps.import,
-        title: MC.caps.import ? null : UNWIRED.import,
+        "data-tip": "导入配置文件",
       },
       icon("plus")
     );
@@ -346,17 +341,13 @@
         var pending = self.files.reduce(function (s, f) { return s + (f.pending_remarks || 0); }, 0);
         if (pending) meta = h("span.badge-count.nav-meta", { "aria-label": pending + " 条待审" }, String(pending));
       }
-      var unwired = n.kind !== "overview" && !MC.caps[n.kind];
-      var title = unwired
-        ? UNWIRED[n.kind]
-        : n.kind === "settings" && !self.can("deployer")
+      var title = n.kind === "settings" && !self.can("deployer")
         ? "可以查看。只有部署者（在服务器本机访问）可以修改这些设置"
         : null;
       var btn = h(
         "button.nav-item",
         {
           type: "button",
-          disabled: unwired,
           "aria-current": active && active.kind === n.kind ? "page" : null,
           title: title,
         },
@@ -387,11 +378,6 @@
 
   App.prototype.refreshTools = function () {
     var self = this;
-    if (!MC.caps.tools) {
-      this.tools = [];
-      this.renderTools();
-      return Promise.resolve();
-    }
     return api.get(this.p("/tools")).then(function (res) {
       self.tools = res.items;
       self.renderTools();
@@ -407,7 +393,7 @@
     util.clear(this.fileListEl);
     if (!this.files.length) {
       this.fileListEl.appendChild(
-        h("li", MC.stateBlock({ kind: "empty", icon: "file", title: "暂无配置文件", desc: MC.caps.import ? "点击上方 + 导入本地文件或链接" : "暂无配置文件；" + UNWIRED.import }))
+        h("li", MC.stateBlock({ kind: "empty", icon: "file", title: "暂无配置文件", desc: "点击上方 + 导入本地文件或链接" }))
       );
       return;
     }
@@ -439,8 +425,8 @@
             label: "删除文件…",
             icon: "trash",
             danger: true,
-            disabled: !self.can("admin") || !MC.caps.delete,
-            title: !MC.caps.delete ? UNWIRED.delete : self.can("admin") ? null : "仅管理员可删除文件",
+            disabled: !self.can("admin"),
+            title: self.can("admin") ? null : "仅管理员可删除文件",
             onClick: function () { self.deleteFile(f); },
           },
         ], { align: "end" });
@@ -467,8 +453,8 @@
         h(
           "div.xsmall.muted",
           { style: "padding:4px 8px" },
-          MC.caps.tools ? "暂无外部工具" : UNWIRED.tools,
-          MC.caps.tools && self.can("deployer") ? h("span", "，可在「设置 › 工具菜单」添加") : null
+          "暂无外部工具",
+          self.can("deployer") ? h("span", "，可在「设置 › 工具菜单」添加") : null
         )
       );
       return;
@@ -627,7 +613,7 @@
       MC.stateBlock({
         kind: "locked",
         title: defaultTitle({ route: r }) + " 尚未接入",
-        desc: UNWIRED[r.kind === "t" ? "temp" : r.kind] || "该页面还没有接入真实后端。",
+        desc: "该页面还没有接入真实后端。",
         actions: [h("button.btn.btn-primary", { type: "button", onclick: function () { self.go({ kind: "overview" }); } }, "返回速览")],
       })
     );
@@ -800,7 +786,7 @@
   App.prototype.startPolling = function () {
     var self = this;
     function tick() {
-      if (!MC.caps.revision || document.hidden) return;
+      if (document.hidden) return;
       api.get(self.p("/revision")).then(function (r) {
         if (self.rev) {
           ["files", "favorites", "remarks", "settings"].forEach(function (part) {
@@ -827,8 +813,6 @@
   App.prototype.pollTasks = function () {
     var self = this;
     clearTimeout(this._taskTimer);
-    // D4（M3-07）：任务接口未接入时**一个请求都不发**（避免 404 噪声，决策 14）。
-    if (!MC.caps.tasks) return Promise.resolve();
     return api.get(this.p("/tasks"), { active: "1" }).then(function (res) {
       var before = self.activeTasks.map(function (t) { return t.id; });
       self.activeTasks = res.items;
@@ -864,9 +848,6 @@
 
   App.prototype.startTask = function (body) {
     var self = this;
-    // D4：未接入时不发请求，也不假装任务已开始——调用方本来就已按同一个键禁用按钮，
-    // 这里 reject 是给「按钮之外」的入口（命令面板、将来的快捷键）留的兜底。
-    if (!MC.caps.tasks) return Promise.reject(new MC.ApiError(0, "UNWIRED", MC.unwired.tasks));
     return api.post(this.p("/tasks"), body).then(function (res) {
       self.activeTasks = self.activeTasks.concat([res.task]);
       self.renderTasks();
@@ -999,7 +980,7 @@
       var q = input.value.trim();
       var ql = q.toLowerCase();
       items = [];
-      if (q && MC.caps.search) items.push({ icon: "search", title: "在全部文件中搜索 “" + q + "”", sub: "匹配变量名、值与收藏备注", run: function () { self.go({ kind: "search", query: { q: q } }); } });
+      if (q) items.push({ icon: "search", title: "在全部文件中搜索 “" + q + "”", sub: "匹配变量名、值与收藏备注", run: function () { self.go({ kind: "search", query: { q: q } }); } });
       self.files
         .filter(function (f) { return !ql || f.name.toLowerCase().indexOf(ql) >= 0; })
         .slice(0, 8)
@@ -1008,7 +989,6 @@
         });
       NAV.forEach(function (n) {
         if (n.admin && !self.can("admin")) return;
-        if (n.kind !== "overview" && !MC.caps[n.kind]) return;
         if (ql && n.label.toLowerCase().indexOf(ql) < 0) return;
         items.push({ icon: n.icon, title: n.label, sub: "前往", run: function () { self.go({ kind: n.kind }); } });
       });
