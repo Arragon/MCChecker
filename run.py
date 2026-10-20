@@ -137,7 +137,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 因此 HTTP 层在下面按需导入。
     storage.configure_data_dir(settings.data_dir)
     configure_logging(settings.log_level)
-    storage.ensure_profile_layout(migrate_legacy=False)
+    storage.ensure_profile_layout()
 
     from app.server.http import MCServer, SingleInstanceLock
     from app.server.router import build_router

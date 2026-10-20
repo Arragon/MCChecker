@@ -325,32 +325,150 @@ def _ensure_profile_layout_locked(migrate_legacy: bool) -> None:
     os.makedirs(default_base, exist_ok=True)
     if not migrate_legacy:
         return
+    _migrate_legacy_layout_locked(default_base)
 
-    legacy_to_new = [
-        (os.path.join(DATA_DIR, "config_mapping.json"), os.path.join(default_base, "config_mapping.json")),
-        (os.path.join(DATA_DIR, "favorites.json"), os.path.join(default_base, "favorites.json")),
-        (os.path.join(DATA_DIR, "bindings.json"), os.path.join(default_base, "bindings.json")),
-        (os.path.join(DATA_DIR, "tools.json"), os.path.join(default_base, "tools.json")),
-        (os.path.join(DATA_DIR, "schedule.json"), os.path.join(default_base, "schedule.json")),
-        (os.path.join(DATA_DIR, "ip_mapping.json"), os.path.join(default_base, "ip_mapping.json")),
-        (os.path.join(DATA_DIR, "admin_users.json"), os.path.join(default_base, "admin_users.json")),
-        (os.path.join(DATA_DIR, "edit_remarks.json"), os.path.join(default_base, "edit_remarks.json")),
-        (os.path.join(DATA_DIR, "dltool_config.json"), os.path.join(default_base, "dltool_config.json")),
-        (os.path.join(DATA_DIR, "configs"), os.path.join(default_base, "configs")),
-        (os.path.join(DATA_DIR, "archive"), os.path.join(default_base, "archive")),
-        (os.path.join(DATA_DIR, "cache"), os.path.join(default_base, "cache")),
+
+#: 旧布局迁移的条目名（§5.5）。`nicegui_storage_secret.txt` **不在**这里——它不是配置数据，
+#: 迁移不许删/搬它；日志目录也不在（M4-03 才引入）。
+_LEGACY_LAYOUT_NAMES = (
+    "config_mapping.json",
+    "favorites.json",
+    "bindings.json",
+    "tools.json",
+    "schedule.json",
+    "ip_mapping.json",
+    "admin_users.json",
+    "edit_remarks.json",
+    "dltool_config.json",
+    "configs",
+    "archive",
+    "cache",
+)
+
+
+def _legacy_layout_pairs(default_base: str):
+    return [
+        (os.path.join(DATA_DIR, name), os.path.join(default_base, name))
+        for name in _LEGACY_LAYOUT_NAMES
     ]
 
-    for legacy_path, new_path in legacy_to_new:
-        if not os.path.exists(legacy_path):
-            continue
-        if os.path.exists(new_path):
-            continue
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _entry_hashes(path: str) -> Dict[str, str]:
+    """文件 → sha256；目录返回 `{相对路径: sha256}`（与 recovery._tree 同口径）。"""
+    if os.path.isfile(path):
+        return {os.path.basename(path): _sha256_file(path)}
+    out: Dict[str, str] = {}
+    for base, _dirs, names in os.walk(path):
+        for name in names:
+            full = os.path.join(base, name)
+            out[os.path.relpath(full, path)] = _sha256_file(full)
+    return out
+
+
+def _remove_partial_target(target: str) -> None:
+    """迁移失败时只清目标副本；旧条目原样保留（§5.5 第 3 步）。"""
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        elif os.path.exists(target):
+            os.remove(target)
+    except Exception as exc:
+        logger.error("清理不完整的迁移副本失败 %s：%s", target, exc)
+
+
+def _create_legacy_recovery_entry(moment: datetime) -> Optional[str]:
+    root = get_recovery_root_dir()
+    try:
+        os.makedirs(root, exist_ok=True)
+        base = "%s_legacy_layout" % moment.strftime("%Y%m%d_%H%M%S")
+        for index in range(1, 51):
+            candidate = base if index == 1 else "%s_%d" % (base, index)
+            path = os.path.join(root, candidate)
+            try:
+                os.mkdir(path)
+            except FileExistsError:
+                continue
+            return path
+    except Exception as exc:
+        logger.error("创建旧布局迁移恢复条目失败：%s", exc)
+    return None
+
+
+def _migrate_legacy_layout_locked(default_base: str) -> None:
+    """复制 → 文件数/sha256 校验 → 才把旧条目移入恢复区（§5.5）。
+
+    任一条目失败只回滚该条目的目标副本，保留旧条目并记录 ERROR，启动继续；读取仍走
+    `load_*` 的旧位置回退。成功移动后写 `manifest.json`（`op=legacy_layout`，`moved`
+    里带每个文件的 sha256）；manifest 写失败不回滚已迁移的数据（目标副本已校验且旧条目
+    在恢复区，数据不丢），只记日志。
+    """
+    pairs = [
+        (legacy, target)
+        for legacy, target in _legacy_layout_pairs(default_base)
+        if os.path.exists(legacy) and not os.path.exists(target)
+    ]
+    if not pairs:
+        return
+    moment = datetime.now()
+    entry_path: Optional[str] = None
+    moved: List[Dict[str, Any]] = []
+    for legacy, target in pairs:
         try:
-            os.makedirs(os.path.dirname(new_path), exist_ok=True)
-            shutil.move(legacy_path, new_path)
-        except Exception as e:
-            logger.warning("迁移默认机型数据失败 %s -> %s: %s", legacy_path, new_path, e)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.path.isdir(legacy):
+                shutil.copytree(legacy, target)
+            else:
+                shutil.copy2(legacy, target)
+            if _entry_hashes(legacy) != _entry_hashes(target):
+                raise RuntimeError("副本与原条目的文件数或 sha256 不一致")
+        except Exception as exc:
+            _remove_partial_target(target)
+            logger.error("旧布局迁移失败，保留旧条目 %s：%s", legacy, exc)
+            continue
+
+        try:
+            if entry_path is None:
+                entry_path = _create_legacy_recovery_entry(moment)
+                if entry_path is None:
+                    raise RuntimeError("无法创建恢复条目")
+            destination = os.path.join(entry_path, os.path.basename(legacy))
+            shutil.move(legacy, destination)
+            moved.append(
+                {
+                    "from": os.path.relpath(legacy, DATA_DIR),
+                    "to": os.path.basename(legacy),
+                    "files": _entry_hashes(target),
+                }
+            )
+        except Exception as exc:
+            # 目标副本已完整校验；旧条目还在或已在恢复区，两种都不丢数据。
+            logger.error("旧条目移入恢复区失败，保留旧条目 %s：%s", legacy, exc)
+
+    if entry_path is None:
+        return
+    if not moved:
+        shutil.rmtree(entry_path, ignore_errors=True)
+        return
+    manifest = {
+        "op": "legacy_layout",
+        "profile": DEFAULT_PROFILE,
+        "target": "profiles/default",
+        "created_at": moment.strftime("%Y-%m-%d %H:%M:%S"),
+        "actor": {"ip": "", "name": "startup"},
+        "moved": moved,
+    }
+    try:
+        fsutil.atomic_write_json(os.path.join(entry_path, "manifest.json"), manifest)
+    except Exception as exc:
+        logger.error("旧布局迁移 manifest 写入失败，数据已安全迁移：%s", exc)
 
 
 def load_config_mapping() -> List[Dict[str, str]]:
