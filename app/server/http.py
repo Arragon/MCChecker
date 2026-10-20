@@ -299,6 +299,9 @@ class MCRequestHandler(BaseHTTPRequestHandler):
     def _handle(self, method: str, path: str, query: str, body: Optional[bytes]) -> None:
         if path in BLOCKED_PATHS or path.startswith(BLOCKED_PREFIXES):
             raise AppError(NOT_FOUND, "资源不存在")
+        # §7.12：旧 NiceGUI 静态资源不再提供（`/static/*` 一律 404，不落到路由表）。
+        if path == "/static" or path.startswith("/static/"):
+            raise AppError(NOT_FOUND, "资源不存在")
         if path == "/config.js":
             return self._send_bytes(
                 200,
