@@ -12,6 +12,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
 from datetime import datetime
@@ -80,11 +81,20 @@ SECURITY_HEADERS = {
 #: M4-08 的 §16.8 门禁按规范字面判。所以在分发之前按 `validate_filename` 的同一口径
 #: （`/` 与 `\` 本就是文件名非法字符）提前拒掉。
 #:
-#: 检查**解码后**的那一份是为了盖住二次编码（`%252F` 解一层成字面 `%2F`）；二次编码
-#: 本来也逃不掉——它只会变成一个含 `%` 的字面文件名，仍被关在根内，这里只是让响应码
-#: 也一致。代价：文件名里真含字面 `%2f`/`%5c`/`%00` 的配置无法经 URL 寻址（`api.seg()`
+#: 检查**解码后**的那一份是为了盖住二次编码：`%252F` 解一层成字面 `%2F`，
+#: `%25%32%30` 解一层成 `%20`；这两种都不在 raw 的三只 token 里，但二次解码后会变成
+#: 另一个路径段。`_LITERAL_PERCENT_ESCAPE_RE` 在解码后的那份上兜住整族 `%XX`。
+#: 代价：文件名里真含字面 `%2f`/`%5c`/`%00` 的配置无法经 URL 寻址（`api.seg()`
 #: 用 `encodeURIComponent`，正常路径不会走到这一步）。
 _ENCODED_UNSAFE = ("%2f", "%5c", "%00")
+
+#: `router.match` 会对捕获段**再解一次**，所以任何二次编码都会让删除端拿到另一个名字：
+#: `测试%20甲` 的路径段是 `测试%2520甲`，解两层后变成 `测试 甲`，可能误删同名单里的
+#: 另一个人（M3-13 评审 F1）。两种写法都要拦：
+#: ① raw 里的 `%25XX`（`%2520`）；
+#: ② 第一次 `unquote` 之后仍在的 `%XX`（`%25%32%30` → `%20`，`%25%32%35%32%30` → `%2520`）。
+_DOUBLE_ENCODED_UNSAFE_RE = re.compile(r"%25[0-9A-Fa-f]{2}", re.IGNORECASE)
+_LITERAL_PERCENT_ESCAPE_RE = re.compile(r"%[0-9A-Fa-f]{2}")
 
 #: §8.9 第 2 条要求的确切内容。
 CONFIG_JS = "window.MC=window.MC||{};window.MC.config={mock:false};"
@@ -486,7 +496,16 @@ def _content_type(path: str) -> str:
 
 
 def _reject_encoded_separators(raw_path: str, decoded_path: str) -> None:
-    """§16.8 第 3 条：编码的分隔符/空字节一律 400，不让它退化成「404 接口不存在」。"""
+    """§16.8 第 3 条：编码的分隔符/空字节一律 400，不让它退化成「404 接口不存在」。
+
+    另外拦住二次编码：raw 里的 `%25XX`，以及第一次 `unquote` 之后仍在的 `%XX`
+    （`%25%32%30` 这类百分号转义的十六进制位）。`router.match` 会再解一次，放过去
+    就会让写进名单的名字在删除端变成另一个名字（M3-13 评审 F1）。
+    """
+    if _DOUBLE_ENCODED_UNSAFE_RE.search(raw_path) or _LITERAL_PERCENT_ESCAPE_RE.search(
+        decoded_path
+    ):
+        raise AppError(INVALID_INPUT, "请求路径含二次编码的字符")
     haystacks = (raw_path.lower(), decoded_path.lower())
     for token in _ENCODED_UNSAFE:
         if any(token in hay for hay in haystacks):
