@@ -1457,46 +1457,236 @@
     return ok({ deleted: true });
   });
 
+  var DL_ITEMS = ["pp_energy", "rp_energy", "rp_width"];
+  var DL_MODES = ["forward", "reverse", "multi_check"];
+  var DL_TRANS_ZERO_MESSAGE = "传输系数不能为 0";
+
+  /* Python `float()` 的十进制语法（允许下划线分隔与首尾空白）。**不要**换回裸
+   * `Number(v)`：`Number("") === 0`、`Number(" ") === 0`、`Number([]) === 0`、
+   * `Number([5]) === 5`、`Number("0x10") === 16`，这五条后端分别是 invalid/400
+   * （C15 / R19）。hex/binary/octal、数组、布尔、null 一律不认；字符串形式的
+   * `inf`/`nan` 过不了正则，number 的 `Infinity`/`NaN` 由 isFinite 拒绝，与后端
+   * `float()` + `math.isfinite` 同判。 */
+  var DL_PY_FLOAT_RE = /^[+-]?(?:(?:\d(?:_?\d)*\.(?:\d(?:_?\d)*)?|\.\d(?:_?\d)*)(?:[eE][+-]?\d(?:_?\d)*)?|\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?)$/;
+
+  /** 按 Python float 的语法转成有限 number；不合法返回 null。
+   *  请求参数（compute/save）与 extract 提取值**都**走这里。 */
+  function dlNumber(v) {
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    var text = v.trim();
+    if (!text || !DL_PY_FLOAT_RE.test(text)) return null;
+    var num = Number(text.replace(/_/g, ""));
+    return isFinite(num) ? num : null;
+  }
+
+  /** 与 services/dl.py::_validated_params 同口径：{item} 或 {error}。
+   *  compute 与 save 都用它，保证 mock 不会放行后端会拒的参数（R19）。 */
+  function normalizeDlParams(raw, kind) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "参数必须是对象" };
+    if (!raw.coeffs || typeof raw.coeffs !== "object" || Array.isArray(raw.coeffs)) {
+      return { error: "系数必须是有限数值" };
+    }
+    var coeffs = {};
+    for (var i = 1; i <= 8; i++) {
+      var key = "k" + i;
+      var value = dlNumber(raw.coeffs[key]);
+      if (value === null) return { error: "系数必须是有限数值" };
+      coeffs[key] = value;
+    }
+    var b = dlNumber(raw.coeffs.b);
+    if (b === null) return { error: "系数必须是有限数值" };
+    coeffs.b = b;
+
+    var out = { coeffs: coeffs };
+    var ranges = ["x_min", "x_max", "y_min", "y_max"];
+    for (var j = 0; j < ranges.length; j++) {
+      var field = ranges[j];
+      var range = raw[field];
+      if (range === null || range === undefined || (typeof range === "string" && range.trim() === "")) {
+        out[field] = null;
+      } else {
+        var rangeNum = dlNumber(range);
+        if (rangeNum === null) return { error: "范围必须是有限数值", field: field };
+        out[field] = rangeNum;
+      }
+    }
+    if (kind === "pp_energy") {
+      var trans = dlNumber(raw.trans_coeff);
+      var power = dlNumber(raw.power_conv_coeff);
+      if (trans === null || power === null) {
+        return { error: "传输系数与功率转换系数必须是有限数值" };
+      }
+      out.trans_coeff = trans;
+      out.power_conv_coeff = power;
+      if (out.power_conv_coeff === 0) return { error: "功率转换系数不能为 0" };
+      if (out.trans_coeff === 0) return { error: DL_TRANS_ZERO_MESSAGE };
+    }
+    if (out.x_min !== null && out.x_max !== null && out.x_min >= out.x_max) {
+      return { error: "x 范围下限必须小于上限" };
+    }
+    if (out.y_min !== null && out.y_max !== null && out.y_min >= out.y_max) {
+      return { error: "y 范围下限必须小于上限" };
+    }
+    return { item: out };
+  }
+
+  function normalizeDlValues(raw) {
+    if (raw === undefined || raw === null) return { values: [] };
+    if (!Array.isArray(raw)) return { error: "输入值必须是数组" };
+    var values = [];
+    for (var i = 0; i < raw.length; i++) {
+      var num = dlNumber(raw[i]);
+      if (num === null) return { error: "输入值必须是有限数值" };
+      values.push(num);
+    }
+    return { values: values };
+  }
+
+  function validateDlName(raw) {
+    if (!Object.prototype.hasOwnProperty.call(raw, "name")) return null;
+    if (typeof raw.name !== "string" || !raw.name.trim()) return "名称必须是非空字符串";
+    return null;
+  }
+
+  function validateDlBinding(raw) {
+    if (raw.binding === undefined || raw.binding === null) return null;
+    if (typeof raw.binding !== "object" || Array.isArray(raw.binding)) return "binding 必须是对象";
+    var keys = ["source_file", "variable_path"];
+    for (var i = 0; i < keys.length; i++) {
+      var value = raw.binding[keys[i]];
+      if (value !== undefined && value !== null && typeof value !== "string") {
+        return "binding." + keys[i] + " 必须是字符串";
+      }
+    }
+    var fieldMap = raw.binding.field_map;
+    if (fieldMap !== undefined && fieldMap !== null) {
+      if (typeof fieldMap !== "object" || Array.isArray(fieldMap)) return "binding.field_map 必须是对象";
+      var names = Object.keys(fieldMap);
+      for (var j = 0; j < names.length; j++) {
+        if (typeof fieldMap[names[j]] !== "string") return "binding.field_map 必须是字符串映射";
+      }
+    }
+    return null;
+  }
+
+  /** 字段集合不变（只改值）：从现有 item 深拷贝，只覆盖已知键，忽略 payload 的未知键。 */
+  function mergeDlItem(existing, raw, clean, kind) {
+    var next = clone(existing);
+    if (!next.coeffs || typeof next.coeffs !== "object") next.coeffs = {};
+    Object.keys(clean.coeffs).forEach(function (k) { next.coeffs[k] = clean.coeffs[k]; });
+    ["x_min", "x_max", "y_min", "y_max"].forEach(function (k) { next[k] = clean[k]; });
+    if (kind === "pp_energy") {
+      next.trans_coeff = clean.trans_coeff;
+      next.power_conv_coeff = clean.power_conv_coeff;
+    }
+    if (typeof raw.name === "string" && raw.name.trim()) next.name = raw.name;
+    if (raw.binding && typeof raw.binding === "object" && !Array.isArray(raw.binding)) {
+      var binding = next.binding && typeof next.binding === "object" ? clone(next.binding) : {};
+      ["source_file", "variable_path"].forEach(function (k) {
+        if (Object.prototype.hasOwnProperty.call(raw.binding, k)) {
+          binding[k] = raw.binding[k] === null || raw.binding[k] === undefined ? "" : String(raw.binding[k]);
+        }
+      });
+      if (raw.binding.field_map && typeof raw.binding.field_map === "object" && !Array.isArray(raw.binding.field_map)) {
+        binding.field_map = clone(raw.binding.field_map);
+      }
+      next.binding = binding;
+    }
+    return next;
+  }
+
   function dlConfig(P) {
     if (!P.dl) P.dl = clone(S.profiles["default"].dl);
     return P.dl;
   }
 
+  /** 与后端 `services/dl.py::current_rev` 同语义：内容变才变、compute/extract 不影响它。
+   *  模板模式没有 SHA-1，用 `MC.mockParse.hash` 的内容哈希代替；值对前端不透明（只回传）。 */
+  function dlRev(P) {
+    return "d" + parse.hash(JSON.stringify(dlConfig(P).items));
+  }
+
   route("GET", "/p/{pid}/dl", function (a, req, P) {
     var cfg = dlConfig(P);
-    return ok({ rev: "r" + rev[a.pid].settings, items: clone(cfg.items) });
+    return ok({ rev: dlRev(P), items: clone(cfg.items) });
   });
 
   route("PUT", "/p/{pid}/dl/{item}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    if (req.headers["If-Match"] && req.headers["If-Match"] !== "r" + rev[a.pid].settings) {
+    var cfg = dlConfig(P);
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    // 与后端 `services/dl.py::save_item` 同序：① 头缺失 409；② body 形状与数值校验
+    // 400；③ 最后才比 rev 409。否则「rev 过期 + body 非法」时 mock 会报 409，
+    // 后端报 400（R19：模板模式不许比后端更早放行或更早拒绝）。
+    var header = req.headers["If-Match"] || req.headers["if-match"];
+    if (!header) {
+      return fail(409, "REVISION_CONFLICT", "缺少 If-Match 头：请先 GET /dl 取得当前 rev", { header: "If-Match" });
+    }
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+      return fail(400, "INVALID_INPUT", "请求体必须是完整 item 对象");
+    }
+    var missing = ["x_min", "x_max", "y_min", "y_max"].filter(function (k) {
+      return !Object.prototype.hasOwnProperty.call(req.body, k);
+    });
+    if (missing.length) {
+      return fail(
+        400,
+        "INVALID_INPUT",
+        "保存时必须提供完整的范围字段（缺少：" + missing.join("、") + "）；不需要限制时请显式传 null",
+        { field: missing[0] }
+      );
+    }
+    var norm = normalizeDlParams(req.body, a.item);
+    if (norm.error) return fail(400, "INVALID_INPUT", norm.error);
+    var nameErr = validateDlName(req.body);
+    if (nameErr) return fail(400, "INVALID_INPUT", nameErr, { field: "name" });
+    var bindingErr = validateDlBinding(req.body);
+    if (bindingErr) return fail(400, "INVALID_INPUT", bindingErr, { field: "binding" });
+    if (header !== dlRev(P)) {
       return fail(409, "REVISION_CONFLICT", "计算参数已被他人修改，请刷新后再保存");
     }
-    var cfg = dlConfig(P);
     if (!cfg.items[a.item]) return fail(404, "NOT_FOUND", "计算项不存在");
-    var err = dl.validate(req.body, a.item);
-    if (err) return fail(400, "INVALID_INPUT", err);
-    cfg.items[a.item] = Object.assign(cfg.items[a.item], clone(req.body));
+    cfg.editing = false;
+    cfg.items[a.item] = mergeDlItem(cfg.items[a.item], req.body, norm.item, a.item);
     bump(a.pid, "settings");
-    return ok({ rev: "r" + rev[a.pid].settings, item: clone(cfg.items[a.item]) });
+    return ok({ rev: dlRev(P), item: clone(cfg.items[a.item]) });
   });
 
   route("POST", "/p/{pid}/dl/{item}/extract", function (a, req, P) {
-    var bnd = req.body.binding || {};
-    var ix = currentIndex(P, bnd.source_file);
-    if (!ix) return fail(404, "NOT_FOUND", "绑定的配置文件不存在");
-    var ids = ix.byId[bnd.variable_path];
-    if (!ids) return fail(404, "NOT_FOUND", "在 " + bnd.source_file + " 中未找到 " + bnd.variable_path, { field: "variable_path" });
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    // 与后端同序：binding 不是对象 → 400（不是回落 {} 后 404）；source_file 缺 → 404；
+    // 节点找不到 → 404；field_map 非对象 → 400。缺 binding 的请求在 mock 里原先会
+    // 走下一条 `P.files[undefined]` 的 404，与后端的 400 漂移（R19）。
+    var bnd = req.body.binding;
+    if (!bnd || typeof bnd !== "object" || Array.isArray(bnd)) {
+      return fail(400, "INVALID_INPUT", "binding 必须是对象", { field: "binding" });
+    }
+    var sourceFile = bnd.source_file === undefined || bnd.source_file === null ? "" : String(bnd.source_file).trim();
+    if (!sourceFile) return fail(404, "NOT_FOUND", "绑定的配置文件不存在", { field: "source_file" });
+    var variablePath = bnd.variable_path === undefined || bnd.variable_path === null ? "" : String(bnd.variable_path).trim();
+    var ix = currentIndex(P, sourceFile);
+    if (!ix) return fail(404, "NOT_FOUND", "绑定的配置文件不存在", { field: "source_file" });
+    var ids = ix.byId[variablePath];
+    if (!ids) return fail(404, "NOT_FOUND", "在 " + sourceFile + " 中未找到 " + variablePath, { field: "variable_path" });
+    var fieldMap = bnd.field_map;
+    if (fieldMap === undefined || fieldMap === null) fieldMap = {};
+    else if (typeof fieldMap !== "object" || Array.isArray(fieldMap)) {
+      return fail(400, "INVALID_INPUT", "field_map 必须是对象", { field: "binding" });
+    }
     var N = ix.N;
     var i = ids[0];
     var children = {};
     for (var c = i + 1; c < N.p.length; c++) if (N.p[c] === i) children[N.l[c]] = N.v[c];
-    var fields = Object.keys(bnd.field_map || {}).map(function (fld) {
-      var coeff = bnd.field_map[fld];
-      if (!(fld in children)) return { field: fld, coeff: coeff, status: "missing" };
-      var num = Number(children[fld]);
-      return isFinite(num) ? { field: fld, coeff: coeff, status: "ok", value: num } : { field: fld, coeff: coeff, status: "invalid", raw: children[fld] };
+    var fields = Object.keys(fieldMap).map(function (fld) {
+      var coeff = fieldMap[fld];
+      // 无值节点（XML 空元素）与缺失同判 missing；缺失/非数值都不进 coeffs、至少不返回 0（C15）。
+      if (!(fld in children) || children[fld] === null) return { field: fld, coeff: coeff, status: "missing" };
+      var num = dlNumber(children[fld]);
+      return num === null
+        ? { field: fld, coeff: coeff, status: "invalid", raw: children[fld] }
+        : { field: fld, coeff: coeff, status: "ok", value: num };
     });
     var coeffs = {};
     fields.forEach(function (f) { if (f.status === "ok") coeffs[f.coeff] = f.value; });
@@ -1504,13 +1694,18 @@
   });
 
   route("POST", "/p/{pid}/dl/{item}/compute", function (a, req) {
-    var params = req.body.params;
-    var err = dl.validate(params, a.item);
-    if (err) return fail(400, "INVALID_INPUT", err);
-    var vals = req.body.values || [];
-    if (vals.some(function (v) { return !isFinite(v); })) return fail(400, "INVALID_INPUT", "输入包含非数值");
-    if (req.body.mode === "forward") return ok({ mode: "forward", results: dl.forward(params, a.item, vals) });
-    if (req.body.mode === "reverse") return ok({ mode: "reverse", results: dl.reverse(params, a.item, vals), exhaustive: false });
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    if (DL_MODES.indexOf(req.body.mode) < 0) {
+      return fail(400, "INVALID_INPUT", "mode 只允许 forward、reverse、multi_check");
+    }
+    var norm = normalizeDlParams(req.body.params, a.item);
+    if (norm.error) return fail(400, "INVALID_INPUT", norm.error);
+    var vals = normalizeDlValues(req.body.values);
+    if (vals.error) return fail(400, "INVALID_INPUT", vals.error);
+    var params = norm.item;
+    var values = vals.values;
+    if (req.body.mode === "forward") return ok({ results: dl.forward(params, a.item, values) });
+    if (req.body.mode === "reverse") return ok({ results: dl.reverse(params, a.item, values), exhaustive: false });
     return ok(dl.multiCheck(params, a.item));
   });
 

@@ -7,6 +7,7 @@
 - APScheduler 在 NiceGUI 中需要正确初始化，避免重复创建 scheduler
 - 版本对比时文件名前缀会导致路径不匹配，需要归一化路径后再比较
 - DL 反解里 `trans_coeff == 0.0` 是 **validate 放行但会除零** 的配置（M3-10 / INH-1895）：`dltool._scale_of` 对 `pp_energy` 返回 `trans_coeff / power_conv_coeff`，而 `validate` 只拒绝 `power_conv_coeff == 0.0`，所以换算系数 `s` 可以合法地等于 `0.0`；`reverse` 的 `y / s` 对**任意** y（含 `0.0`，Python 浮点除零不产出 inf/nan）抛 `ZeroDivisionError`，`multi_check` 在 `y_min`/`y_max` 任一非 None 时同样抛（两者都 None 时走观测域，不崩），`forward` 是乘 `s` 所以只是全 0。责任归 **M3-11（`app/services/dl.py`）**：把它翻成 400，或出 spec 让 `validate` 拒绝 `trans_coeff=0`；`dltool` 是纯 core、还没有调用方，不在这里兜底也不在这里加 HTTP。现状哨兵是 `tests/test_dltool_multi.py::TestTransCoeffZeroDividesByS`（钉「validate 返回空串 + 这两处抛」，M3-11 改行为时它会红）。`dlmath.js` 同样不拒绝 `trans_coeff=0`，但那边算出 `Infinity`/`NaN` 继续跑——两边只差在「谁响亮失败」。
+- DL 服务层的三条不变式（M3-11 / INH-1896 首轮评审）：① `GET /dl` 的 `rev` 与 `items` 必须在同一把 `storage.profile_lock(pid)` 内读（`ThreadingHTTPServer` 下 GET/PUT 并发，两次读之间插入保存会返回「旧 items + 新 rev」，客户端拿新 rev 再 PUT 就覆盖别人的保存）；② `PUT /dl/{item}` 的 body 按 §7.11 是完整 item，四个范围键缺一个就 400（`_validated_params` 把缺失与显式 null 都归一成 None，放行缺失会静默清空磁盘值；`name`/`binding` 缺失却是保留磁盘值）；③ mock 的数值转换必须按 Python `float()` 语法（`Number("")===0`、`Number([])===0`、`Number([5])===5`、`Number("0x10")===16`，后端分别是 invalid/400），且 PUT 先校验 body 再比 rev、缺 `If-Match` 的 409 要带 `detail.header`。
 
 ## 2. Proven Solutions
 - 树形视图使用 ui.expansion 替代 ui.tree，可实现在节点旁添加自定义组件（如收藏星标），ui.tree 的 add_slot 方式与 NiceGUI 事件系统集成较复杂
