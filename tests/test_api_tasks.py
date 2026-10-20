@@ -1982,20 +1982,10 @@ class TestLayeringAndContract:
         assert "tasks" in revision.PARTS
         assert tasks.TASK_PART == "tasks"
 
-    def test_mock_task_contract_matches_the_backend(self):
-        """R19：mock 与后端同 PR 对齐——payload 不带内部键，失败判定用同一套词汇。"""
-        from app.services import tasks as tasks_service
-
-        source = _js("app", "web", "assets", "js", "mock", "mock-api.js")
-        block = _block(source, "function runTask(", 2600)
-
-        assert "key: key" not in block  # `key` 是内部去重键，不进 §7.10 的 payload
-        assert "taskKeys[t.id]" in block
-        statuses = re.findall(
-            r'"([a-z_]+)"', _block(source, "var TASK_FAILED_STATUSES = [", 200).split("];")[0]
-        )
-        assert set(statuses) == set(tasks_service.FAILED_ITEM_STATUSES)
-        assert 'return ok({ task: t }, 202)' in block
+# R19 的 mock `/tasks` 行为由 `app/web/tests/tests.js` 的执行用例覆盖；
+# `function runTask(` 的 2600 字节窗口与 `TASK_FAILED_STATUSES` 源码 grep 已删除（INH-1915）。
+# 覆盖缺口：JS 的失败状态列表不再与 `tasks_service.FAILED_ITEM_STATUSES` 逐字对比，
+# 如需恢复应做成执行 mock 真身的 cross-check，而不是再 grep 源码。
 
 
 class TestD4FrontendGating:
@@ -2016,10 +2006,5 @@ class TestD4FrontendGating:
         assert set(wired) <= set(caps)  # 与前端测试页同一条不变量
         assert re.search(r'tasks:\s*"[^"]*M3-07[^"]*"', unwired), "每项能力都要有未接入说明"
 
-    def test_shell_task_entry_lists_active_tasks(self):
-        """D4 第 3 点：顶栏任务入口要能列出 active 任务（进度面板在 shell.js）。"""
-        source = _js("app", "web", "assets", "js", "views", "shell.js")
-        block = _block(source, "App.prototype.renderTasks = function", 900)
-
-        assert 't.state === "running" || t.state === "queued"' in block
-        assert "进行中的任务" in block
+    # 顶栏任务浮层的 active 任务渲染由 tests.js「total 未发布」等执行用例覆盖；
+    # `renderTasks` 的 900 字节窗口 grep 已删除（INH-1915）。
