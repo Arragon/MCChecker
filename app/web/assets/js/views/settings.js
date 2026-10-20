@@ -462,7 +462,7 @@
     /* ---------- 机型管理 ---------- */
     function profiles(sec) {
       return api.get("/session", { profile: app.pid }).then(function (s) {
-        var add = h("button.btn", { type: "button", onclick: profileDialog }, icon("plus"), "新增机型");
+        var add = h("button.btn", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: profileDialog }, icon("plus"), "新增机型");
         return [
           pageHead(sec, add),
           h(

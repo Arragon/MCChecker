@@ -218,7 +218,7 @@
    * （前端测试页有断言会红）。M4-08 全绿后与 MC.caps 一起删除。
    */
   var SETTINGS_SEGMENTS = ["sources", "schedule", "people", "bindings", "tools", "profiles"];
-  var WIRED_SETTINGS = ["sources", "schedule", "people", "bindings", "tools"];
+  var WIRED_SETTINGS = ["sources", "schedule", "people", "bindings", "tools", "profiles"];
 
   MC.settingsSegments = SETTINGS_SEGMENTS.slice();
   MC.wiredSettingsSegments = WIRED_SETTINGS.slice();
@@ -227,12 +227,9 @@
   };
 
   /* 每个未接入分段展示给用户的去向，与 MC.unwired 同风格（卡号即后端接口的接入卡）。
-   * 键集必须**恰好等于**「SETTINGS_SEGMENTS 里没被 WIRED_SETTINGS 放行的那些」——
-   * `schedule`（M3-08）、`people`（M3-13）、`bindings`（M3-14）、`tools`（M3-15）已落地，
-   * 所以它们的去向文案一并撤掉（多留会让前端测试页红）。 */
-  MC.unwiredSettings = {
-    profiles: "机型管理将在 M3-16 接入",
-  };
+   * M3-16 之后六个分段全部接入，键集为空；这个对象与 `MC.settingsSegmentWired` 的
+   * 门控逻辑留到 M4-08 与 `MC.caps` 一起删除。 */
+  MC.unwiredSettings = {};
 
   /* ===================== Router (hash) ===================== */
   /*
