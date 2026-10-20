@@ -15,15 +15,16 @@ r"""MCChecker 离线发布包构建（规范 §14.3；卡片 M4-06 / INH-1908）
    都能躲开，而它们照样能让一台没外网的机器发出请求。名单本身也会腐坏，所以
    `find_stale_inert_entries()` 反向检查两件事：条目对应的文件在产物里却找不到那条地址 ⇒ 失败；
    条目对应的文件**已经不在产物里**（僵尸条目）⇒ 同样失败。
-   地址的读法**在字面量扫得到的范围内**照 WHATWG URL 解析，而不是按字符串形状猜（第二轮复审
-   Important 1/2，第四轮复审 Important 1/2 补齐剩下的两族）：
+   地址的读法**在字面量扫得到的范围内**按 WHATWG 的预处理步骤（实体解码、去首尾 C0/空格、
+   删 TAB/LF/CR、`@` 之后才是主机）读主机，而不是按字符串形状猜；它不是完整的 WHATWG
+   解析器（IDNA、DNS、运行期拼接不在范围）。
    ① 特殊 scheme 里 `\` 等同 `/`、单斜杠也进权威段（`https:\evil.example.com\a.js` 的浏览器目标
    就是 `evil.example.com`）；② 不带 scheme 的写法要**开头连续两个**分隔符才进权威段，
    `\\evil.example.com\x.js`、`/\evil.example.com\x.js`、`/\\evil.example.com\x.js` 的主机都是
    `evil.example.com`（基址 `http://127.0.0.1:50002/…`，node 24 实测），而单个分隔符开头的
    `\evil.example.com\manual`、`/manual/ch2` 与 `C:\Users\me\app.py` 是相对路径/本机路径，
-   不算主机；③ HTML 的数字字符引用 `&#47;`/`&#x2f;`（分号可省）在交给 URL 解析器之前就变成 `/`，
-   所以 `href="&#47;&#47;evil.example.com/x.js"` 同样是外链；④ 主机段里出现 WHATWG 禁止的字符
+   不算主机；③ HTML 字符引用（数字与命名，分号可省）在交给 URL 解析器之前由 HTML 解析器
+   全量替换，所以 `&#47;&#47;`、`&#92;&#92;`、`&sol;&sol;` 与 `&#10;//` 都是外链；④ 主机段里出现 WHATWG 禁止的字符
    （`|`、`^`、`[` 等）时浏览器根本解析不出地址（实测 Invalid URL），那种写法不算目标——
    这一条同时保住 `app/utils/helpers.py` 里 `unsafe_chars = '<>:"/\\|?*'` 这类正文不被误杀；
    ⑤ Markdown 的 `[文字](//host/x)`、`[文字](<//host/a b>)`、`[ref]: //host/x`、`[ref]: <//host/x>`
@@ -32,11 +33,9 @@ r"""MCChecker 离线发布包构建（规范 §14.3；卡片 M4-06 / INH-1908）
 **这个闸门的已知边界**（字面量扫描的定义边界，不是漏放行；详见 `docs/know-how.md` 第 2 节）：
 ① 运行期拼出来的地址（`fetch("https://" + host + "/ping")`）；② UTF-16 等非 UTF-8/latin-1 编码的
 成员（解码只有这两条路）；③「条目为什么惰性」所依赖的运行期假设（`run.py` 的 `http://%s:%d` 的
-主机来自运行期配置，构建期看不见）；④ 上面那套归一化**认不得**的编码层——命名实体
-（`href="&sol;&sol;evil.example.com/x.js"` 交给解析器前会被 HTML 变成 `//host`，闸门只解码数字
-引用）、非特殊 scheme 配实体斜杠（`gopher:&#47;&#47;host`；`gopher://host` 那种字面写法仍然红）、
-以及 `<` 后紧跟空格的 Markdown 目的地（`](<  //host a>)`；按 CommonMark，`<…>` 目的地里不许有
-空白，那本来就不是链接，所以没为它加规则）。①②③④ 它抓不到，别把绿读成「产物绝对出不去网」。
+主机来自运行期配置，构建期看不见）；④ `<` 后紧跟空格的 Markdown 目的地
+（`](<  //host a>)`；按 CommonMark，`<…>` 目的地里不许有空白，那本来就不是链接，所以没为它加规则）。
+①②③④ 它抓不到，别把绿读成「产物绝对出不去网」。
 
 确定性：同一棵源树 → 同一成员集合、同一逐文件 sha256；zip 条目时间戳固定为 1980-01-01，
 唯一每次不同的是 `MANIFEST.json` 里的 `built_at_utc`（它记录的就是「这次构建」）。
@@ -50,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -109,9 +109,8 @@ EXCLUDED_PATHS: Tuple[str, ...] = (
 OPTIONAL_RUNTIME_DIR = "runtime/python"
 
 #: 本机地址不算外网（§16.7 说的是「非本服务器的请求」）。
-LOCAL_HOSTS = frozenset(
-    {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]", "0:0:0:0:0:0:0:1"}
-)
+#: `_host_of` 返回不带方括号的 IPv6 字面量，所以这里只需要 `::1`。
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 
 #: 逐条核对过、确认**不是网络目标**的绝对地址字面量（§16.7 唯一的例外出口）。
 #: 键是 `(成员相对路径, 地址字面量)`：换文件、换地址都要另开一条，目录级的放行不存在。
@@ -178,8 +177,21 @@ _NETWORK_SPECIAL_SCHEMES = frozenset({"http", "https", "ftp", "ws", "wss"})
 #: 命名引用（`&sol;`）与百分号编码（`%2F`）**不在**射程内，见模块文档字符串的边界说明。
 _NUMERIC_SLASH_REF_SRC = r"""&(?:#0*47(?![0-9])|#[xX]0*2[fF](?![0-9a-fA-F]));?"""
 _NUMERIC_SLASH_REF_RE = re.compile(_NUMERIC_SLASH_REF_SRC)
-#: 「一个权威分隔符」= `/`、`\`（对特殊 scheme 的基址二者等价），或一个解码成 `/` 的数字引用。
-_AUTH_SEP_SRC = r"""(?:[/\\]|""" + _NUMERIC_SLASH_REF_SRC + r""")"""
+#: `&#92;` / `&#x5c;`：解出来是反斜杠；对特殊 scheme 它与 `/` 一样是权威分隔符。
+_NUMERIC_BACKSLASH_REF_SRC = r"""&(?:#0*92(?![0-9])|#[xX]0*5[cC](?![0-9a-fA-F]));?"""
+#: 命名实体里的 `&sol;`（`/`）与 `&bsol;`（`\`）；HTML 解析阶段就会替换成真分隔符。
+_NAMED_SEP_REF_SRC = r"""&(?:sol|bsol);"""
+#: 「一个权威分隔符」= `/`、`\`（对特殊 scheme 的基址二者等价），或一个解码成
+#: `/` / `\` 的字符引用（数字或命名，分号可省）。
+_AUTH_SEP_SRC = (
+    r"""(?:[/\\]|"""
+    + _NUMERIC_SLASH_REF_SRC
+    + r"""|"""
+    + _NUMERIC_BACKSLASH_REF_SRC
+    + r"""|"""
+    + _NAMED_SEP_REF_SRC
+    + r""")"""
+)
 #: 权威段开头 = **连续两个**分隔符（`//`、`/\`、`\\`、`/\\`、`&#47;&#47;` 以及混着写）。
 #: 必须两个：单个 `/` 或 `\` 在基址下是相对路径，node 24 实测
 #: `new URL("\\evil.example.com\\manual", "http://127.0.0.1:50002/index.html")` 的主机
@@ -189,8 +201,9 @@ _RELATIVE_AUTHORITY_SRC = _AUTH_SEP_SRC + _AUTH_SEP_SRC
 #: 原始字节里的连续两个 `/`/`\`：`_read_url` 用它决定「已进权威段」，`_host_of` 先解码数字引用
 #: 再用它走同一条路（`&#47;&#47;` 解码后就是 `//`，不必在这里重复匹配引用）。
 _DOUBLE_SEP_RE = re.compile(r"""[/\\]{2}""")
-#: 主机段里不许出现的字符（WHATWG 的 forbidden host code point）。出现任何一个，**浏览器解析
-#: 直接失败**（node 24 实测 `new URL("/\\|?*", 基址)` 报 Invalid URL），所以那不是网络目标。
+#: 主机段里不许出现的字符——这是 WHATWG forbidden host code point 的一个**保守近似**
+#: （不包含 IDNA 与 IPv6 的完整规范化；本闸门只做字面量扫描）。出现任何一个，浏览器
+#: 直接解析失败（node 24 实测 `new URL("/\\|?*", 基址)` 报 Invalid URL），所以那不是网络目标。
 #: 分隔符 `/ ? # \`、userinfo 的 `@` 与端口 `:` 在上面已经切掉，这里查剩下的那几个。
 #: 少了这一条，新加的「引号后 `/\`」规则会误杀 `app/utils/helpers.py:36` 的
 #: `unsafe_chars = '<>:"/\\|?*'`（切成 token `/\\|?*`，主机段是 `|`）——那是非法文件名字符集，
@@ -201,6 +214,20 @@ _SPECIAL_SCHEME_AUTHORITY_RE = re.compile(r"""(?i)\b(?:https?|wss?|ftp):(?=%s)""
 #: 引号后面直接跟权威段开头：写进字符串常量的协议相对地址（运行期拼一下就是 `http://host/…`）。
 #: 限定「紧跟引号」是为了不把 JS/Python 的行注释 `// 说明` 和整除 `a // b` 当成地址。
 _QUOTED_RELATIVE_RE = re.compile(r"""(?<=["'`])""" + _RELATIVE_AUTHORITY_SRC)
+#: 引号后先有空白再出现权威段：`href=" //evil…"`、`fetch("\t//evil…")`。
+#: 空白由 WHATWG 在解析前剥掉，所以它不能把这条写法变成「不是地址」。
+_QUOTED_RELATIVE_WS_RE = re.compile(
+    r"""(["'`])\s+(""" + _RELATIVE_AUTHORITY_SRC + r""")"""
+)
+#: 解成空白（换行/制表/回车/空格）的字符引用后面紧跟权威段：`&#10;//evil…`。
+#: 起始位置取后面的权威段（group 1），因为空白本身不改变主机。
+_ENTITY_WS_AUTH_RE = re.compile(
+    r"""&#(?:0*9|0*10|0*13|0*32);?\s*(""" + _RELATIVE_AUTHORITY_SRC + r""")"""
+)
+#: srcset 的值是「地址 描述符」的逗号列表，必须逐候选切；整条属性一起匹配只会看见第一个候选。
+_SRCSET_ATTR_RE = re.compile(r"""\bsrcset\s*=\s*["']([^"']*)["']""", re.I)
+#: `srcset` 不带引号：值到空白为止；候选仍按逗号切（第四轮复审建议）。
+_SRCSET_UNQUOTED_RE = re.compile(r"""\bsrcset\s*=\s*([^\s"'<>][^\s<>]*)""", re.I)
 #: Markdown 行内链接/图片的目标：`[说明](//host/x)`、`![截图](//host/a.png)`、
 #: `](<//host/a b>)`（CommonMark 允许左括号后有空白、可用 `<…>` 包住带空格的目的地）、
 #: `](&#47;&#47;host/x)`（实体在 HTML/Markdown 解析阶段就变成 `/`，然后才交给 URL 解析器）。
@@ -244,6 +271,14 @@ _COMPILED_REFERENCE_PATTERNS = [re.compile(p, re.I) for p in _REFERENCE_PATTERNS
 #: `src="http://\n evil.example/x"` 照样发得出去，所以这里跟着删（复审裁定「安全判据
 #: 至少要和安全判据一样安全」——能删的必须是浏览器也删的）。
 _URL_STOP_CHARS = frozenset(" '\"()<>,;`]")
+#: 还在权威段里时，`;`、`(`、`)`、反引号、`]` 都可能属于 userinfo 或 IPv6，不能当终止符。
+#: 第四轮复审判例：`//;@evil…`、`//(@evil…`、`` //`@evil… ``、`//[::1]@evil…`。
+_URL_STOP_CHARS_AUTHORITY = frozenset(" '\"<>")
+#: WHATWG 解析前会剥掉首尾 C0/空格；`_host_of` 用它做预处理。
+_C0_AND_SPACE = "".join(chr(i) for i in range(0x21))
+#: 一个完整的 HTML 字符引用（数字或命名；分号可省）。`_read_url` 用它把整段引用当成
+#: 一个 token 的一部分，`_host_of` 再用标准库 `html.unescape` 全量解码。
+_HTML_ENTITY_RE = re.compile(r"&(?:#[0-9]+;?|#[xX][0-9A-Fa-f]+;?|[A-Za-z][A-Za-z0-9]+;?)")
 
 
 class ReleaseError(RuntimeError):
@@ -373,15 +408,19 @@ def _host_of(url: str) -> str:
     `/\\evil.example.com\x.js` 的主机都是 `evil.example.com`，而 `//localhost\x` 的主机是
     `localhost`（改之前这里报的是 `localhost\x`，是个假主机名）。单个分隔符开头
     （`\evil.example.com\manual`、`/manual/ch2`）是相对路径，没有主机。
-    取主机前还把解码成 `/` 的数字字符引用换回来（`&#47;&#47;evil.example.com/x.js` 交给 URL
-    解析器时已经是 `//evil.example.com/x.js`）；只解码这一个字符，不是通用实体解码器。
-    方括号里是 IPv6 字面量，整段取回：按 `:` 切会把 `[2001:db8::1]` 切成空串，
-    那等于给一个外部 IPv6 目标放行。
+    解析前先做 WHATWG 的预处理：`html.unescape` **全量**解码 HTML 字符引用（数字与命名，
+    分号可省；`&#92;`、`&sol;`、`&#10;` 都算），再剥首尾 C0/空格并删 TAB/LF/CR。这不是完整的
+    WHATWG 解析器（IDNA、DNS、运行期拼接不在范围内），但足以让「实体编码的分隔符」与
+    「空白藏法」不再从字面量扫描里漏出去。
+    权威段里先按**最后一个 `@`** 切掉 userinfo，再判方括号 IPv6；顺序反过来会把
+    `[::1]@evil.example.com` 读成 `[::1]`（本机）而静默放行。方括号里是 IPv6 字面量，
+    整段取回：按 `:` 切会把 `[2001:db8::1]` 切成空串。
     主机段里含 WHATWG 禁止的字符（`_FORBIDDEN_HOST_CHARS`）时返回 ""——浏览器根本解析不出
     地址（实测 Invalid URL），那种写法发不出请求，不算外链。
     """
-    if "&" in url:
-        url = _NUMERIC_SLASH_REF_RE.sub("/", url)
+    url = html.unescape(url)
+    url = url.strip(_C0_AND_SPACE)
+    url = url.replace("\t", "").replace("\n", "").replace("\r", "")
     if _DOUBLE_SEP_RE.match(url):
         # 无 scheme：开头连续跳过分隔符后进权威段（special authority ignore slashes 状态），
         # 剩下的 `\` 与 `/` 一样是分隔符。
@@ -403,10 +442,12 @@ def _host_of(url: str) -> str:
             return ""
     for sep in ("?", "#", "/"):
         body = body.split(sep, 1)[0]
+    # 权威段 = `@` 之前是 userinfo；先分它，再判 IPv6 方括号。顺序反过来会把
+    # `[::1]@evil.example.com` 读成 `[::1]`（本机）而静默放行。
+    body = body.rsplit("@", 1)[-1]
     if body.startswith("["):
         literal, _closes, _rest = body.partition("]")
         return literal[1:].lower()
-    body = body.rsplit("@", 1)[-1]
     host = body.split(":", 1)[0].lower()
     if any(ch in _FORBIDDEN_HOST_CHARS for ch in host):
         return ""
@@ -417,16 +458,15 @@ def _read_url(text: str, start: int) -> str:
     """从 `start` 起读一个地址 token（**保留源文件里的原样字节**，归一化只在 `_host_of` 里做，
     这样违规消息与惰性名单记的始终是文件里那一串）。
 
-    权威段（主机）里的 tab/换行/回车，浏览器会在解析前删掉，所以这里跟着删——
-    `src="http://\\n evil.example/x"` 是真发得出去的。路径段就不跟着删了：删下去只会把
-    后面整行吞进「地址」，而「联系哪台机器」在权威段结束时就定死了。
+    浏览器在解析前会删掉整条地址里的 tab/换行/回车（不只是权威段），所以这里一律跳过；
+    例如 `http:/<LF>/evil.example.com/x` 的换行会被删掉；`<`、引号、空白仍终止 token。
     特殊 scheme 的 `\\` 与 `/` 一样结束权威段（WHATWG authority state），所以它也要置
     `past_authority`，否则 `https:\\evil.example.com\\n/x` 会把整行吞进来；**开头两个分隔符**的
     无 scheme 写法同理（模块文档字符串 ② 的那一整族反斜杠权威段——基址是特殊的 http，
     `\\` 在那里与 `/` 等价，一样结束权威段）。
-    解码成 `/` 的数字字符引用（`&#47;`、`&#x2f;`，分号可省）整段留在 token 里并置
-    `past_authority`：`&`、`#`、数字本身都不是终止符，但引用结尾的 `;` 是——不按引用认的话
-    `href="&#47;&#47;evil.example.com/x.js"` 会被切成 `&#47`，主机就读不出来。
+    HTML 字符引用（`&#47;`、`&#92;`、`&sol;`，分号可省）整段留在 token 里；`&`、`#`、数字本身
+    都不是终止符，引用内部的 `;` 也不能把 token 切断。解码出来的 `/` 或反斜杠置
+    `past_authority`；空白引用交给 `_host_of` 统一删掉。
     """
     special = False
     if _DOUBLE_SEP_RE.match(text, start):
@@ -450,18 +490,19 @@ def _read_url(text: str, start: int) -> str:
     while index < len(text):
         ch = text[index]
         if ch == "&":
-            reference = _NUMERIC_SLASH_REF_RE.match(text, index)
+            reference = _HTML_ENTITY_RE.match(text, index)
             if reference is not None:
-                chars.append(reference.group(0))
-                index = reference.end()
-                past_authority = True  # 解码出来是 `/`
-                continue
+                decoded = html.unescape(reference.group(0))
+                if decoded != reference.group(0):
+                    chars.append(reference.group(0))
+                    index = reference.end()
+                    if decoded in ("/", "\\"):
+                        past_authority = True
+                    continue
         if ch in "\t\r\n":
-            if past_authority:
-                break
             index += 1
             continue
-        if ch in _URL_STOP_CHARS:
+        if ch in (_URL_STOP_CHARS if past_authority else _URL_STOP_CHARS_AUTHORITY):
             break
         if ch == "/" or (special and ch == "\\"):
             past_authority = True
@@ -498,12 +539,19 @@ def url_literals(text: str) -> List[Tuple[int, str]]:
     for regex in (_SCHEME_PREFIX_RE, _QUOTED_RELATIVE_RE, _SPECIAL_SCHEME_AUTHORITY_RE):
         for match in regex.finditer(text):
             starts.append(match.start())
-    for regex in (_META_REFRESH_RE, _MD_LINK_TARGET_RE, _MD_REF_DEF_RE) + tuple(
-        _COMPILED_REFERENCE_PATTERNS
-    ):
+    for match in _QUOTED_RELATIVE_WS_RE.finditer(text):
+        starts.append(match.start(2))
+    for regex in (
+        _META_REFRESH_RE,
+        _MD_LINK_TARGET_RE,
+        _MD_REF_DEF_RE,
+        _ENTITY_WS_AUTH_RE,
+    ) + tuple(_COMPILED_REFERENCE_PATTERNS):
         for match in regex.finditer(text):
             starts.append(match.start(1))
     for match in _SRCSET_ATTR_RE.finditer(text):
+        starts.extend(_srcset_candidate_starts(match.group(1), match.start(1)))
+    for match in _SRCSET_UNQUOTED_RE.finditer(text):
         starts.extend(_srcset_candidate_starts(match.group(1), match.start(1)))
 
     found: Dict[Tuple[int, str], None] = {}

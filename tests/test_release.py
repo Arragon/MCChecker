@@ -505,9 +505,23 @@ def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
         ("&#47;&#47evil.example.com\\x.js", "evil.example.com"),
         ("&#47evil.example.com/x.js", ""),  # 单个分隔符
         ("&#470;evil.example.com/x.js", ""),  # ǖ：数字后面还有数字就不是 `/`
-        ("&#X2F&#X2Fevil.example.com/x.js", ""),  # ˾：E 仍是十六进制位
-        ("&sol;&sol;evil.example.com/x.js", ""),  # 命名实体不在解码范围（已知边界 ④）
+        ("&#X2F&#X2Fevil.example.com/x.js", ""),  # 全量解码后是 `/˾vil…`：只剩一个分隔符，没有权威段
+        ("&sol;&sol;evil.example.com/x.js", "evil.example.com"),  # 命名实体也全量解码
         ("%2F%2Fevil.example.com/x.js", ""),  # 百分号编码按 WHATWG 本来也不进权威段
+        # 第四轮 Important 1：HTML 实体全量解码（反斜杠/名称/空白），再按 WHATWG 预处理。
+        ("&#92;&#92;evil.example.com/x.js", "evil.example.com"),
+        ("&#x5c;&#x5c;evil.example.com/x.js", "evil.example.com"),
+        ("&#92&#92;evil.example.com/x.js", "evil.example.com"),
+        ("&#47;&#92;evil.example.com/x.js", "evil.example.com"),
+        ("/&#92;evil.example.com/x.js", "evil.example.com"),
+        ("&#10;//evil.example.com/x.js", "evil.example.com"),
+        ("&#9;//evil.example.com/x.js", "evil.example.com"),
+        # 权威段先按最后一个 `@` 分 userinfo，再判 IPv6 方括号。
+        ("//[::1]@evil.example.com/x.js", "evil.example.com"),
+        ("//;@evil.example.com/x.js", "evil.example.com"),
+        ("//(@evil.example.com/x.js", "evil.example.com"),
+        ("//`@evil.example.com/x.js", "evil.example.com"),
+        ("http:/\n/evil.example.com/x.js", "evil.example.com"),
         # 主机段含 WHATWG 禁止字符 ⇒ 浏览器解析失败 ⇒ 没有目标（保住正则字符类那两处正文）。
         (r"\\\x00-\x1f", "x00-"),  # 允许的主机段形状：照旧算主机（所以进惰性名单）
         ("/\\|?*", ""),
@@ -624,6 +638,35 @@ def test_host_extraction_matches_whatwg_for_the_new_families(url: str, host: str
         # 引用式定义的尖括号目的地：渲染器剥掉 `<…>` 后交给 URL 解析器，同样是真引用语法。
         ("docs/manual.md", "[ref]: <//evil.example.com/manual>", "evil.example.com"),
         ("docs/manual.md", "[ref]: <&#47;&#47;evil.example.com/manual>", "evil.example.com"),
+        # ---- 第四轮复审 Important 1：HTML 字符引用要做全量解码，而不是只解 `&#47;` ----
+        # `&#92;` / `&#x5c;` 解成反斜杠；WHATWG 在解析前把它们当分隔符，两个就进权威段。
+        ("app/web/index.html", '<a href="&#92;&#92;evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#x5c;&#x5c;evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#92&#92;evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#47;&#92;evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="/&#92;evil.example.com/x.js">', "evil.example.com"),
+        ("docs/manual.md", "[说明](&#92;&#92;evil.example.com/manual)", "evil.example.com"),
+        # 命名实体 `&sol;` 解码成 `/`；`html.unescape` 就够，不要再写「需要 HTML 解析器」。
+        ("app/web/index.html", '<a href="&sol;&sol;evil.example.com/x.js">', "evil.example.com"),
+        # 解成换行/制表符的实体：WHATWG 先删 TAB/LF/CR，再解析。
+        ("app/web/index.html", '<a href="&#10;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#9;//evil.example.com/x.js">', "evil.example.com"),
+        # ---- 第四轮复审 Important 1：引号内前导 C0/空格 ----
+        ("app/web/index.html", '<a href=" //evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="\t//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="\n//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<style>@import url(" //evil.example.com/x.css");</style>', "evil.example.com"),
+        ("app/web/assets/js/app.js", 'fetch(" //evil.example.com/x")', "evil.example.com"),
+        ("run.py", 'urllib.request.urlopen(" //evil.example.com/x")', "evil.example.com"),
+        # ---- 第四轮复审 Important 1：权威段先按最后一个 `@` 分 userinfo，再判 IPv6 ----
+        # 改之前 `//[::1]@evil…` 被读成 `[::1]`（本机）而静默放行。
+        ("app/web/index.html", '<a href="//[::1]@evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="//;@evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="//(@evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="//`@evil.example.com/x.js">', "evil.example.com"),
+        # ---- 第四轮复审建议：无引号 srcset 与 `http:/<LF>/` ----
+        ("app/web/index.html", '<img srcset=//evil.example.com/x.js 1x>', "evil.example.com"),
+        ("app/web/index.html", '<a href="http:/\n/evil.example.com/x.js">', "evil.example.com"),
     ],
 )
 def test_planted_shapes_fail_the_build(
@@ -970,7 +1013,10 @@ def test_real_repo_every_listed_inert_entry_is_actually_present(tmp_path: Path) 
             if not host or host in mr.LOCAL_HOSTS:
                 continue
             seen.add((rel, url))
-    assert seen <= listed, "出现了没被逐条放行的地址：%s" % sorted(seen - listed)
+    assert seen == listed, (
+        "闸门看见的地址与惰性名单必须完全一致（少看见 = 名单脱节；多看见 = 漏放行）：%r"
+        % sorted(seen ^ listed)
+    )
     assert not mr.find_stale_inert_entries(blob), "名单里有产物已经不再包含的条目"
 
 
