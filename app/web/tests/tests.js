@@ -404,18 +404,17 @@
     }
   });
 
-  test("M3-06 / D2：设置页分段白名单——放行 sources、schedule、people、bindings 与 tools，只剩 profiles 有点名卡号的去向", function () {
-    /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS、
-     * 起点只有 sources（M3-06），M3-08 放行 schedule，M3-13 放行 people，
-     * M3-14 放行 bindings，M3-15 放行 tools；unwiredSettings 只剩 profiles 且文案点名
-     * 接入卡号。后续 M3-16 加最后一项时，本用例是它的公共回归。 */
+  test("M3-06 / D2：设置页六个分段全部接入，未接入去向表为空", function () {
+    /* 白名单形状（计划 §2.2）：SETTINGS_SEGMENTS 覆盖 6 个分段、WIRED ⊆ SEGMENTS；
+     * M3-06 sources、M3-08 schedule、M3-13 people、M3-14 bindings、M3-15 tools、
+     * M3-16 profiles 逐一放行。M3-16 之后没有未接入分段，门控逻辑留到 M4-08 删除。 */
     eq(MC.settingsSegments, ["sources", "schedule", "people", "bindings", "tools", "profiles"], "分段全集与路由 §8.3 一致");
     ok(MC.wiredSettingsSegments.length >= 1, "至少接入 sources");
     ok(MC.wiredSettingsSegments.every(function (s) { return MC.settingsSegments.indexOf(s) >= 0; }), "WIRED_SETTINGS 必须是 SETTINGS_SEGMENTS 的子集（防拼错）");
     var unwired = MC.settingsSegments.filter(function (s) { return MC.wiredSettingsSegments.indexOf(s) < 0; });
-    eq(Object.keys(MC.unwiredSettings).sort(), unwired.slice().sort(), "未接入分段都要有去向文案，且不多给已接入分段");
-    ok(unwired.every(function (s) { return /M\d-\d\d/.test(MC.unwiredSettings[s]); }), "去向文案要点名接入卡号");
-    /* 模板模式全开（预览不受门控）；生产模式只有已接入的三项。 */
+    eq(unwired, [], "六个分段全部接入");
+    eq(Object.keys(MC.unwiredSettings), [], "没有未接入分段，去向表必须为空");
+    /* 模板模式全开（预览不受门控）；生产模式六项全开。 */
     var wasMock = MC.config.mock;
     var origWired = MC.wiredSettingsSegments.slice();
     try {
@@ -427,15 +426,15 @@
       ok(MC.settingsSegmentWired("people"), "生产模式 people 已接入（M3-13：/ip-mapping 与 /admins 已有后端）");
       ok(MC.settingsSegmentWired("bindings"), "生产模式 bindings 已接入（M3-14：/bindings 已有后端）");
       ok(MC.settingsSegmentWired("tools"), "生产模式 tools 已接入（M3-15：/tools 已有后端）");
-      ok(!MC.settingsSegmentWired("profiles"), "生产模式只剩 profiles 未接入");
+      ok(MC.settingsSegmentWired("profiles"), "生产模式 profiles 已接入（M3-16：/profiles 已有后端）");
       /* F8（卡 7 复审）：F 断言的是效果而不是切片自比——真的动手改暴露出的切片，
        * 门控开关必须无动于衷（本体 WIRED_SETTINGS 藏在 core/api.js 闭包里）。
-       * 变异对象必须挑**未接入**的那一项：往切片里 push 一个已经放行的分段测不出任何东西。 */
-      MC.wiredSettingsSegments.push("profiles");
-      ok(!MC.settingsSegmentWired("profiles"), "往对外切片 push 之后门控仍须是关的——白名单本体改不动");
+       * M3-16 后没有未接入分段，改用不存在的段名验证闭包不被外部切片打开。 */
+      MC.wiredSettingsSegments.push("bogus");
+      ok(!MC.settingsSegmentWired("bogus"), "往对外切片 push 一个不存在的段，门控仍须是关的——白名单本体改不动");
       /* 第二变异：先裁回原长再验一次（这一句是**变异步骤**，不是恢复——恢复在 finally）。 */
       MC.wiredSettingsSegments.splice(origWired.length);
-      ok(MC.settingsSegmentWired("sources") && !MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向打开/关闭门控");
+      ok(MC.settingsSegmentWired("sources") && MC.settingsSegmentWired("profiles"), "裁掉切片内容也不能反向关闭门控");
     } finally {
       /* 第三轮 nit：变异必须自清理，跟本文件其它 fixture 一样。原先只有成功路径上那句
        * splice 会把 push 进去的 "bindings" 摘掉，所以上面任一 ok 抛错时它就留在
@@ -606,26 +605,39 @@
     return r;
   }
 
-  test("M3-06 / D2：未接入的 profiles 分段渲染只读横幅与禁用控件，且一个请求都不发", function () {
+  test("M3-16：profiles 分段在生产模式读 /session，列出机型；成员的新增/改名/删除全部禁用", function () {
     var t = productionRun();
     return t.run(function (r) {
-      var spy = r.useApi({});
-      /* 部署者身份也照样挡：分段没接口，谁都不该发请求（R14 唯一插入点）。
-       * `schedule`（M3-08）、`people`（M3-13）、`bindings`（M3-14）、`tools`（M3-15）
-       * 都已接入，移出本用例，各由自己的生产用例盯。 */
-      ["profiles"].forEach(function (seg) {
-        var inst = r.mount(settingsApp(true), seg);
-        var main = inst.el.querySelector(".settings-main");
-        ok(main.textContent.indexOf(MC.unwiredSettings[seg]) >= 0, seg + "：只读横幅必须给出接入去向「" + MC.unwiredSettings[seg] + "」");
-        var controls = main.querySelectorAll("button, input, select, textarea");
-        ok(controls.length > 0, seg + "：分段要有编辑控件（禁用占位）");
-        controls.forEach(function (c) {
-          ok(c.disabled, seg + " 的编辑控件必须真的 disabled");
-          ok(/M3-\d\d/.test(c.getAttribute("title") || ""), seg + " 控件的 title 要点名接入卡号，实际：" + c.getAttribute("title"));
-        });
+      var models = [
+        { id: "default", name: "默认机型" },
+        { id: "p1", name: "产线一" },
+      ];
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/session$/.test(path)) return Promise.resolve({ profile: models[0], profiles: models, server: {} });
+          return Promise.resolve({ items: [] });
+        },
       });
+      var inst = r.mount(settingsApp(true), "profiles");
       return tick().then(function () {
-        eq(spy.calls, [], "未接入分段一个请求都不发（不打 /profiles），实际：" + spy.calls.join(" | "));
+        var main = inst.el.querySelector(".settings-main");
+        eq(spy.calls, ['GET /session {"profile":"default"}'], "进入已接入的 profiles 只发这一个请求");
+        ok(main.textContent.indexOf("默认机型") >= 0 && main.textContent.indexOf("产线一") >= 0, "两个机型都要列出");
+        var add = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("新增机型") >= 0; })[0];
+        ok(add && !add.disabled, "部署者可以新增机型");
+        var rename = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent === "重命名"; })[0];
+        ok(rename && !rename.disabled, "部署者可以重命名");
+        var inst2 = r.mount(settingsApp(false), "profiles");
+        return tick().then(function () {
+          var main2 = inst2.el.querySelector(".settings-main");
+          var add2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("新增机型") >= 0; })[0];
+          ok(add2 && add2.disabled, "非部署者的新增按钮必须禁用");
+          ok(/部署者/.test(add2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (add2 ? add2.getAttribute("title") : "<没有按钮>"));
+          var rename2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "重命名"; })[0];
+          ok(rename2 && rename2.disabled, "非部署者的重命名按钮必须禁用");
+          var del2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "删除"; })[0];
+          ok(del2 && del2.disabled, "非部署者的删除按钮必须禁用");
+        });
       });
     });
   });

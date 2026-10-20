@@ -116,6 +116,10 @@ WRITE_ROUTE_ACTIONS = {
     # M3-15（INH-1900）：外部工具写接口只有部署者（§8.3）。
     ("PUT", "/api/v1/p/{pid}/tools/{name}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/tools/{name}"): "settings_write",
+    # M3-16（INH-1901）：机型注册表写接口只有部署者（§7.2）。
+    ("POST", "/api/v1/profiles"): "settings_write",
+    ("PATCH", "/api/v1/profiles/{pid}"): "settings_write",
+    ("DELETE", "/api/v1/profiles/{pid}"): "settings_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
 }
 
@@ -937,6 +941,10 @@ WRITE_FAMILIES = [
     # M3-15（INH-1900）：外部工具。body 的 URL 合法，带头的对照请求会越过 CSRF 落到业务层。
     ("PUT", "/api/v1/p/{pid}/tools/{name}", "deployer", {"name": "跨站工具", "description": "", "url": "https://example.com/x"}, False),
     ("DELETE", "/api/v1/p/{pid}/tools/{name}", "deployer", None, False),
+    # M3-16（INH-1901）：机型注册表。POST 无 pid；PATCH/DELETE 的 pid 由 seed_roles 提供。
+    ("POST", "/api/v1/profiles", "deployer", {"name": "跨站机型", "copy_from": None}, False),
+    ("PATCH", "/api/v1/profiles/{pid}", "deployer", {"name": "跨站改名"}, False),
+    ("DELETE", "/api/v1/profiles/{pid}", "deployer", None, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
     # M3-11（INH-1896）：DL 条件保存。body 留空也能证明 CSRF 闸门在 handler 之前

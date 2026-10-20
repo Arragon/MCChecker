@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 #: §5.6 清单里的 `op`；机型删除与旧布局迁移复用同一目录约定。
 OP_DELETE_FILE = "delete_file"
+OP_DELETE_PROFILE = "delete_profile"
 MANIFEST_FILE = "manifest.json"
 
 #: 条目目录名用 `%Y%m%d_%H%M%S`（不含空格与冒号，跨平台可移植）；清单里给人看的时间另用一套。
@@ -130,9 +131,12 @@ def create_entry(op: str, profile_id: str, target: str, moment: datetime) -> Tup
     用 `os.mkdir` 的「已存在即失败」占位，不用时间戳赌唯一：同名同秒的两次删除也必须各自
     留一份，否则第二次的副本会盖掉第一次。
     """
+    return _create_unique_entry(entry_name(op, profile_id, target, moment))
+
+
+def _create_unique_entry(base: str) -> Tuple[str, str]:
     root = storage.get_recovery_root_dir()
     os.makedirs(root, exist_ok=True)
-    base = entry_name(op, profile_id, target, moment)
     for index in range(1, MAX_ENTRY_TRIES + 1):
         candidate = base if index == 1 else "%s_%d" % (base, index)
         path = fsutil.resolve_within(root, candidate)
@@ -141,7 +145,60 @@ def create_entry(op: str, profile_id: str, target: str, moment: datetime) -> Tup
         except FileExistsError:
             continue
         return path, candidate
-    raise AppError(STORAGE_FAILURE, "无法为恢复条目生成唯一目录名", op=op, target=target)
+    raise AppError(STORAGE_FAILURE, "无法为恢复条目生成唯一目录名", target=base)
+
+
+def create_profile_entry(model_id: str, moment: datetime) -> Tuple[str, str]:
+    """机型删除条目：`<时间>_delete_profile_<机型>`（§5.6 / 卡 16）。"""
+    return _create_unique_entry(
+        "%s_%s_%s" % (moment.strftime(_DIR_TIME), OP_DELETE_PROFILE, model_id)
+    )
+
+
+def move_profile_to_recovery(
+    model_id: str, actor_name: str = "", actor_ip: str = ""
+) -> str:
+    """把 `data/profiles/<id>/` 整个目录移入恢复区，返回条目目录名。
+
+    顺序与文件删除一致：复制 → 逐文件 sha256 校验 → 才删源 → 写 manifest。
+    manifest 写失败时把整份目录放回原位置并清掉恢复条目；回滚自身失败则保留条目
+    （数据仍在恢复区）并把异常抛出，绝不报告成功。
+    """
+    moment = datetime.now()
+    source = storage.get_profile_data_dir(model_id)
+    entry_path, entry = create_profile_entry(model_id, moment)
+    rel = "profiles/%s" % model_id
+    manifest: Dict[str, Any] = {
+        "op": OP_DELETE_PROFILE,
+        "profile": model_id,
+        "created_at": moment.strftime(_DISPLAY_TIME),
+        "actor": {"ip": actor_ip or "", "name": actor_name or ""},
+        "moved": [],
+        "files": [],
+    }
+    try:
+        if os.path.exists(source):
+            manifest["moved"].append(move_in(entry_path, source, rel))
+            target = os.path.join(entry_path, rel)
+            manifest["files"] = [
+                {"path": path, "sha256": _sha256_file(full)}
+                for path, full in sorted(_tree(target).items())
+            ]
+        write_manifest(entry_path, manifest)
+    except BaseException:
+        restored = True
+        copied = os.path.join(entry_path, rel)
+        if os.path.exists(copied) and not os.path.exists(source):
+            try:
+                os.makedirs(os.path.dirname(source), exist_ok=True)
+                shutil.move(copied, source)
+            except Exception as exc:
+                restored = False
+                logger.error("机型删除回滚失败，数据保留在恢复区 %s: %s", entry, exc)
+        if restored:
+            shutil.rmtree(entry_path, ignore_errors=True)
+        raise
+    return entry
 
 
 def move_in(entry_path: str, source: str, rel: str) -> Dict[str, str]:

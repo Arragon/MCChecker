@@ -581,7 +581,8 @@
     if (deny) return deny;
     var name = String(req.body.name || "").trim();
     if (!name) return fail(400, "INVALID_INPUT", "请输入机型名称", { field: "name" });
-    if (S.models.some(function (m) { return m.name === name; })) return fail(409, "INVALID_INPUT", "已存在同名机型", { field: "name" });
+    if (S.models.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
+    if (req.body.copy_from && !profile(req.body.copy_from)) return fail(400, "INVALID_INPUT", "要复制的机型不存在", { field: "copy_from" });
     var slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "") || "model";
     var mid = slug;
     var k = 2;
@@ -594,6 +595,7 @@
       : { files: {}, mapping: [], sourceStatus: {}, favorites: [], remarks: [], bindings: [], tools: [], schedule: { enabled: false, interval_hours: 24, last_run: null }, admins: [], people: [], dl: null };
     rev[mid] = { files: 1, favorites: 1, remarks: 1, settings: 1, tasks: 1 };
     S.models.push({ id: mid, name: name });
+    bump("default", "settings");
     return ok({ profile: { id: mid, name: name } }, 201);
   });
 
@@ -604,17 +606,21 @@
     if (!m) return fail(404, "NOT_FOUND", "机型不存在");
     var name = String(req.body.name || "").trim();
     if (!name) return fail(400, "INVALID_INPUT", "请输入机型名称", { field: "name" });
+    if (S.models.some(function (x) { return x.id !== a.pid && x.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
     m.name = name;
+    bump("default", "settings");
     return ok({ profile: m });
   });
 
   route("DELETE", "/profiles/{pid}", function (a) {
     var deny = needDeployer(identity(a.pid));
     if (deny) return deny;
-    if (a.pid === "default") return fail(400, "INVALID_INPUT", "默认机型不能删除");
+    if (a.pid === "default") return fail(400, "INVALID_INPUT", "默认机型不能删除", { field: "id" });
+    if (!S.models.some(function (x) { return x.id === a.pid; })) return fail(404, "NOT_FOUND", "机型不存在");
     S.models = S.models.filter(function (x) { return x.id !== a.pid; });
     delete S.profiles[a.pid];
-    return ok({ deleted: true });
+    bump("default", "settings");
+    return ok({ deleted: true, recovery: "mock_delete_profile_" + a.pid });
   });
 
   route("GET", "/p/{pid}/revision", function (a) {

@@ -108,6 +108,7 @@ def build_router(settings: Settings) -> Router:
         api_favorites,
         api_history,
         api_people,
+        api_profiles,
         api_remarks,
         api_review,
         api_revision,
@@ -142,5 +143,6 @@ def build_router(settings: Settings) -> Router:
     api_dl.register(router)
     api_bindings.register(router)
     api_tools.register(router)
+    api_profiles.register(router)
     router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
     return router
