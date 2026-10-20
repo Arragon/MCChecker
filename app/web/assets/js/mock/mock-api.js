@@ -1470,31 +1470,93 @@
     return ok({ removed: removed });
   });
 
+  /* ---------- 外部工具：与后端 `app/services/tools.py` 同口径（M3-15 / INH-1900） ----------
+   * - 名称进 DELETE 路径段：`/`、`\`、控制字符与任何字面 `%XX` 在创建端拒；删除端宽松。
+   * - 说明可空，去空白后 ≤100、无控制字符。
+   * - URL 必须有主机且只允许 http/https。用 `new URL()` 解析，不用字符串前缀匹配
+   *   （`java\nscript:` 这类会被前缀网漏掉）；控制字符/空白/反斜杠/userinfo 先拒。
+   * - 名称唯一：撞已有条目 → 409 `FILE_EXISTS`；PUT 返回 `{item}`，DELETE 返回
+   *   `{removed: bool}`（R46：原 `{ok:true}`/`{deleted:true}` 是未定契约）。
+   */
+  var BAD_TOOL_NAME_MESSAGE = "工具名称需为 1-100 个字符，且不能包含 /、\\ 或任何 %XX 编码写法（这样的工具无法删除）";
+  var BAD_TOOL_DESCRIPTION_MESSAGE = "说明不能超过 100 个字符，且不能包含控制字符";
+  var BAD_TOOL_URL_MESSAGE = "访问地址必须是包含主机名的 http 或 https 链接";
+  var DUPLICATE_TOOL_MESSAGE = "已存在同名工具";
+  var TOOL_TEXT_MAX = 100;
+
+  function toolName(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw).trim();
+    if (!text || text.length > TOOL_TEXT_MAX) return null;
+    if (/[\/\\]/.test(text) || /%[0-9A-Fa-f]{2}/.test(text) || /[\u0000-\u001f\u007f]/.test(text)) return null;
+    return text;
+  }
+
+  function toolDescription(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw).trim();
+    if (text.length > TOOL_TEXT_MAX || /[\u0000-\u001f\u007f]/.test(text)) return null;
+    return text;
+  }
+
+  function toolUrl(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw).trim();
+    if (!text || /[\u0000-\u0020\u007f\\]/.test(text)) return null;
+    try {
+      var parsed = new URL(text);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      if (!parsed.hostname) return null;
+      if (parsed.username || parsed.password) return null;
+      return text;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function toolView(t) {
+    return {
+      name: String(t.name || ""),
+      description: String(t.description || ""),
+      url: String(t.url || ""),
+      added_at: t.added_at || null,
+    };
+  }
+
   route("GET", "/p/{pid}/tools", function (a, req, P) {
-    return ok({ items: clone(P.tools) });
+    return ok({ items: P.tools.map(toolView) });
   });
 
   route("PUT", "/p/{pid}/tools/{name}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    var name = String(req.body.name || "").trim();
-    var url = String(req.body.url || "").trim();
-    if (!name) return fail(400, "INVALID_INPUT", "请输入工具名称", { field: "name" });
-    if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "访问地址需以 http:// 或 https:// 开头", { field: "url" });
-    if (name !== a.name && P.tools.some(function (t) { return t.name === name; })) return fail(409, "INVALID_INPUT", "已存在同名工具", { field: "name" });
+    var name = toolName(req.body.name);
+    if (!name) return fail(400, "INVALID_INPUT", BAD_TOOL_NAME_MESSAGE, { field: "name" });
+    var description = toolDescription(req.body.description);
+    if (description === null) return fail(400, "INVALID_INPUT", BAD_TOOL_DESCRIPTION_MESSAGE, { field: "description" });
+    var url = toolUrl(req.body.url);
+    if (!url) return fail(400, "INVALID_INPUT", BAD_TOOL_URL_MESSAGE, { field: "url" });
+    if (name !== a.name && P.tools.some(function (t) { return t.name === name; })) return fail(409, "FILE_EXISTS", DUPLICATE_TOOL_MESSAGE, { field: "name" });
     var cur = P.tools.filter(function (t) { return t.name === a.name; })[0];
-    if (cur) Object.assign(cur, { name: name, description: String(req.body.description || ""), url: url });
-    else P.tools.push({ name: name, description: String(req.body.description || ""), url: url, added_at: util.nowString() });
+    if (cur) {
+      cur.name = name;
+      cur.description = description;
+      cur.url = url;
+    } else {
+      cur = { name: name, description: description, url: url, added_at: util.nowString() };
+      P.tools.push(cur);
+    }
     bump(a.pid, "settings");
-    return ok({ ok: true });
+    return ok({ item: toolView(cur) });
   });
 
   route("DELETE", "/p/{pid}/tools/{name}", function (a, req, P, id) {
     var deny = needDeployer(id);
     if (deny) return deny;
-    P.tools = P.tools.filter(function (t) { return t.name !== a.name; });
-    bump(a.pid, "settings");
-    return ok({ deleted: true });
+    var kept = P.tools.filter(function (t) { return t.name !== a.name; });
+    var removed = kept.length < P.tools.length;
+    if (removed) {
+      P.tools = kept;
+      bump(a.pid, "settings");
+    }
+    return ok({ removed: removed });
   });
 
   var DL_ITEMS = ["pp_energy", "rp_energy", "rp_width"];
