@@ -52,7 +52,7 @@
    * M3-13（INH-1898）：51 这个值由评审/验收在本树用 HTTP 形态重读确认（页面自报
    * `ALL PASSED (51)`），不是从任何一侧的数字推断出来的；改了 `app/web/**` 或并过
    * 主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 51;
+  var EXPECTED_CASES = 52;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
