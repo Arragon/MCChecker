@@ -1538,7 +1538,7 @@ class TestOrderedStop:
             handlers[signum] = handler
 
         monkeypatch.setattr(run, "load_settings", lambda argv=None: settings)
-        monkeypatch.setattr(run, "configure_logging", lambda level: None)
+        monkeypatch.setattr(run, "configure_logging", lambda level, data_dir=None: None)
         monkeypatch.setattr(run.storage, "configure_data_dir", lambda path: None)
         monkeypatch.setattr(
             run.storage, "ensure_profile_layout", lambda migrate_legacy=True: None

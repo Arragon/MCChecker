@@ -17,11 +17,12 @@ import hashlib
 import logging
 import os
 import shutil
+import time
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
-from ..core import fsutil, parse_cache, storage
+from ..core import fsutil, log_context, parse_cache, storage
 from ..core.errors import NOT_FOUND, STORAGE_FAILURE, AppError
 from . import revision
 
@@ -47,12 +48,17 @@ def delete_file(
     修订号只按**真正改动的权威数据**递增（决策 16）：`files` 总是动，其余三类只在确有
     移除时才动，所以「删一个光秃秃的文件」不会让别的用户看到收藏/建议分量白涨。
     """
+    started = time.perf_counter()
     clean_name = fsutil.validate_filename(name)
     moment = datetime.now()
     with storage.profile_write(profile_id), storage.use_profile(profile_id):
         payload, parts = _delete_locked(profile_id, clean_name, ip, actor_name, moment)
     for part in parts:
         revision.bump(profile_id, part)
+    log_context.business(
+        "file_delete", profile=profile_id, actor=actor_name, target=clean_name,
+        result="recovered", duration_ms=(time.perf_counter() - started) * 1000,
+    )
     return payload
 
 

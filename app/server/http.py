@@ -15,13 +15,14 @@ import os
 import re
 import time
 import urllib.parse
+import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 
 from .. import __version__
 from ..config import Settings
-from ..core import device_models, fsutil, storage
+from ..core import device_models, fsutil, log_context, storage
 from ..core.errors import (
     FORBIDDEN,
     INVALID_INPUT,
@@ -272,6 +273,11 @@ class MCRequestHandler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str) -> None:
         started = time.time()
         split = urllib.parse.urlsplit(self.path)
+        request_id = uuid.uuid4().hex[:12]
+        token = log_context.set_request_id(request_id)
+        self._response_status = 500
+        self._access_ip = auth.client_ip(self)
+        self._access_pid = "-"
         try:
             if method in WRITE_METHODS and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
                 # 未读 body 即拒绝：连接里可能残留未读数据，必须关闭连接
@@ -292,9 +298,19 @@ class MCRequestHandler(BaseHTTPRequestHandler):
                 500, {"error": {"code": STORAGE_FAILURE, "message": "服务器内部错误", "detail": {}}}
             )
         finally:
-            logger.debug(
-                "%s %s %dms", method, split.path, int((time.time() - started) * 1000)
+            duration_ms = int((time.time() - started) * 1000)
+            # §13 访问日志：method path status duration_ms actor_ip profile request_id；
+            # 只写 path，不写 query（query 里可能有 URL 凭据）。
+            logger.info(
+                "%s %s %d %dms ip=%s pid=%s",
+                method,
+                split.path,
+                getattr(self, "_response_status", 500),
+                duration_ms,
+                getattr(self, "_access_ip", "-"),
+                getattr(self, "_access_pid", "-"),
             )
+            log_context.reset_request_id(token)
 
     def _handle(self, method: str, path: str, query: str, body: Optional[bytes]) -> None:
         if path in BLOCKED_PATHS or path.startswith(BLOCKED_PREFIXES):
@@ -325,6 +341,7 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         ip = auth.client_ip(self)
         cid = auth.cookie_cid(self.headers.get("Cookie"))
         pid = params.get("pid") if params else None
+        self._access_pid = pid or "-"
         if pid is not None and not device_models.exists(pid):
             raise AppError(NOT_FOUND, "机型不存在")
 
@@ -430,6 +447,7 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         content_type: Optional[str],
         extra: Optional[Dict[str, str]] = None,
     ) -> None:
+        self._response_status = status
         headers = dict(extra or {})
         # §11.3：安全头在**唯一的发送出口**上统一加，304 与错误封套也不例外
         # （handler 显式给了同名头时以 handler 的为准，所以用 setdefault）。
