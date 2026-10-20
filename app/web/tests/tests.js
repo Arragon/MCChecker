@@ -49,9 +49,9 @@
    * git 默认合并对这一行不报冲突（只有一侧动过它），于是 43 直接胜出、42 侧的
    * 两条用例照样注册 ⇒ 语义冲突只能靠实测拆穿。HTTP keep-alive 形态下三轮都是
    * 「预期 43，实际注册 45」，45 条全部真跑到且绿，唯一红的就是这条闸。
-   * M3-13（INH-1898）：51 这个值由评审/验收在本树用 HTTP 形态重读确认（页面自报
-   * `ALL PASSED (51)`），不是从任何一侧的数字推断出来的；改了 `app/web/**` 或并过
-   * 主线之后必须再重读一次，不能沿用本值。 */
+   * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
+   * 51 是 M3-13 当时的读数，已被本卡的 +1 用例更新。改了 `app/web/**` 或并过主线
+   * 之后必须再重读一次，不能沿用本值。 */
   var EXPECTED_CASES = 52;
   var traps = [];
   function recordTrap(name, detail) {
@@ -1289,6 +1289,8 @@
     /* Python 侧原先 grep fileview.js 里的 `MC.caps.tasks` 与提示文案（R45：源码文本
      * 不是验收）。这里钉行为：只关 tasks、tools 保持开（旧实现正是借 tools 放行），
      * 按钮必须 disabled + 有 title（不钉文案，改词不影响），点击不发任务请求。 */
+    var keepTools = MC.caps.tools;
+    MC.caps.tools = true;
     var t = productionRun();
     return t.run(function (r) {
       var spy = r.useApi({
@@ -1314,7 +1316,8 @@
         })
         .then(function () {
           eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }), [], "未接入时点击不得发任务请求：" + spy.calls.join(" | "));
-        });
+        })
+        .then(function () { MC.caps.tools = keepTools; });
     });
   });
 
@@ -1411,6 +1414,11 @@
     ok(early.textContent.indexOf("0/0") < 0, "不能再出现 0/0");
     var later = slotFor([{ id: "t2", type: "update_all", target: null, state: "running", progress: { done: 2, total: 5 }, result: { items: [] }, actor: "张三" }]);
     ok(later.textContent.indexOf("2/5") >= 0 && later.textContent.indexOf("准备中") < 0, "total 已发布 ⇒ 正常 n/m");
+    var withQueued = slotFor([
+      { id: "t2", type: "update_all", target: null, state: "running", progress: { done: 2, total: 5 }, result: { items: [] }, actor: "张三" },
+      { id: "t3", type: "update_all", target: null, state: "queued", progress: { done: 0, total: 0 }, result: { items: [] }, actor: "李四" },
+    ]);
+    ok(withQueued.textContent.indexOf("等 2 项") >= 0, "queued 也算活跃任务，顶栏必须计入：" + withQueued.textContent);
   });
 
   test("M3-06：任务浮层里 total 未发布时**整条进度条都不画**（注释与 markup 不得各说各话）", function () {
@@ -1450,6 +1458,7 @@
       .then(function (r) {
         eq(r.status, 202, "单条更新走 POST /tasks");
         first = r.body.task;
+        ok(!("key" in first), "payload 不得泄漏内部去重键 key");
         eq([first.progress.done, first.progress.total], [0, 0], "契约 ①：入队时不预发 total，下载期间就是 0/0");
         eq(first.result.items.length, 0, "入队响应里没有结果条目");
         /* 互斥断言与在跑任务**并发**下发：mock 的模拟下载约 900ms 后完成，串行等待会

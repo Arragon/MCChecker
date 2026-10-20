@@ -11,7 +11,7 @@
    把那两行顺序反过来它一定转红；
 4. D4 前端门控与 mock 契约：门控行为（未接入 ⇒ 禁用 + title + 不发请求）由
    `app/web/tests/tests.js` 的浏览器用例执法，本文件只保留能由配置数据解析出的
-   结构约束（`WIRED ⊆ CAP_KEYS`、mock 失败状态集与后端一致）。
+   结构约束（`WIRED ⊆ CAP_KEYS`）；mock 失败状态集不再与后端逐字对比，缺口见文件末尾说明。
 
 下载一律打本地 `http.server`（127.0.0.1 随机端口），`getproxies` 打桩成 `{}`
 （macOS 系统代理会把请求接走），重试退避打桩成记录器——与 `tests/test_api_sources.py`
