@@ -522,6 +522,25 @@ def test_backslash_and_markdown_rules_do_not_reject_legitimate_text(
         ("//(@evil.example.com/x.js", "evil.example.com"),
         ("//`@evil.example.com/x.js", "evil.example.com"),
         ("http:/\n/evil.example.com/x.js", "evil.example.com"),
+        # 字符引用的十六进制/命名空白：HTML 解析阶段同样会先解码再删空白。
+        ("&#x20;//evil.example.com/x.js", "evil.example.com"),
+        ("&#x9;//evil.example.com/x.js", "evil.example.com"),
+        ("&#xa;//evil.example.com/x.js", "evil.example.com"),
+        ("&#xd;//evil.example.com/x.js", "evil.example.com"),
+        ("&Tab;//evil.example.com/x.js", "evil.example.com"),
+        ("&NewLine;//evil.example.com/x.js", "evil.example.com"),
+        # 实体编码的 scheme 字符：解码后是 https://…
+        ("http&#115;://evil.example.com/x.js", "evil.example.com"),
+        # 非特殊 scheme 配实体斜杠，解码后仍是 //host。
+        ("gopher:&#47;&#47;evil.example.com/x.js", "evil.example.com"),
+        # 空格 userinfo：WHATWG 读出的主机是 @ 之后的 evil。
+        ("//localhost @evil.example.com/x.js", "evil.example.com"),
+        ("//[::1] @evil.example.com/x.js", "evil.example.com"),
+        # scheme 与分隔符之间的换行会被 WHATWG 删掉。
+        ("http:\n//evil.example.com/x.js", "evil.example.com"),
+        ("https:\n/evil.example.com/x.js", "evil.example.com"),
+        # 完整写法的 IPv6 回环是本机，不是外部主机。
+        ("http://[0:0:0:0:0:0:0:1]:50002/x", "0:0:0:0:0:0:0:1"),
         # 主机段含 WHATWG 禁止字符 ⇒ 浏览器解析失败 ⇒ 没有目标（保住正则字符类那两处正文）。
         (r"\\\x00-\x1f", "x00-"),  # 允许的主机段形状：照旧算主机（所以进惰性名单）
         ("/\\|?*", ""),
@@ -667,6 +686,19 @@ def test_host_extraction_matches_whatwg_for_the_new_families(url: str, host: str
         # ---- 第四轮复审建议：无引号 srcset 与 `http:/<LF>/` ----
         ("app/web/index.html", '<img srcset=//evil.example.com/x.js 1x>', "evil.example.com"),
         ("app/web/index.html", '<a href="http:/\n/evil.example.com/x.js">', "evil.example.com"),
+        # ---- 第五轮评审：实体空白/命名实体、实体 scheme、空格 userinfo、scheme 内换行 ----
+        ("app/web/index.html", '<a href="&#x20;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#x9;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#xa;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&#xd;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&Tab;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="&NewLine;//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="http&#115;://evil.example.com/x.js">', "evil.example.com"),
+        ("docs/manual.md", "[说明](gopher:&#47;&#47;evil.example.com/x)", "evil.example.com"),
+        ("app/web/index.html", '<a href="//localhost @evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="//[::1] @evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="http:\n//evil.example.com/x.js">', "evil.example.com"),
+        ("app/web/index.html", '<a href="https:\n/evil.example.com/x.js">', "evil.example.com"),
     ],
 )
 def test_planted_shapes_fail_the_build(

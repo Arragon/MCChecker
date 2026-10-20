@@ -33,9 +33,10 @@ r"""MCChecker 离线发布包构建（规范 §14.3；卡片 M4-06 / INH-1908）
 **这个闸门的已知边界**（字面量扫描的定义边界，不是漏放行；详见 `docs/know-how.md` 第 2 节）：
 ① 运行期拼出来的地址（`fetch("https://" + host + "/ping")`）；② UTF-16 等非 UTF-8/latin-1 编码的
 成员（解码只有这两条路）；③「条目为什么惰性」所依赖的运行期假设（`run.py` 的 `http://%s:%d` 的
-主机来自运行期配置，构建期看不见）；④ `<` 后紧跟空格的 Markdown 目的地
-（`](<  //host a>)`；按 CommonMark，`<…>` 目的地里不许有空白，那本来就不是链接，所以没为它加规则）。
-①②③④ 它抓不到，别把绿读成「产物绝对出不去网」。
+主机来自运行期配置，构建期看不见）；④ `<` 后紧跟空格的 Markdown 目的地（`](<  //host a>)`；CommonMark 允许目的地里有空白，
+但渲染后是 `%20//…` 相对路径，不是网络目标）；⑤ 把控制符插进 scheme 字母之间
+（`h<LF>ttps://…`）——起点正则不跨 scheme 字符（scheme 与分隔符之间的 TAB/LF/CR 已覆盖）。
+①②③④⑤ 它抓不到，别把绿读成「产物绝对出不去网」。
 
 确定性：同一棵源树 → 同一成员集合、同一逐文件 sha256；zip 条目时间戳固定为 1980-01-01，
 唯一每次不同的是 `MANIFEST.json` 里的 `built_at_utc`（它记录的就是「这次构建」）。
@@ -110,7 +111,9 @@ OPTIONAL_RUNTIME_DIR = "runtime/python"
 
 #: 本机地址不算外网（§16.7 说的是「非本服务器的请求」）。
 #: `_host_of` 返回不带方括号的 IPv6 字面量，所以这里只需要 `::1`。
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+LOCAL_HOSTS = frozenset(
+    {"localhost", "127.0.0.1", "0.0.0.0", "::1", "0:0:0:0:0:0:0:1"}
+)
 
 #: 逐条核对过、确认**不是网络目标**的绝对地址字面量（§16.7 唯一的例外出口）。
 #: 键是 `(成员相对路径, 地址字面量)`：换文件、换地址都要另开一条，目录级的放行不存在。
@@ -161,6 +164,9 @@ _FEATURE_HEADING_RE = re.compile(r"""^###\s+(C\d+)\s+(.+?)\s*$""", re.M)
 #: 带 scheme 的绝对地址前缀（不限 http/https：`ftp://`、`gopher://`、自定义 scheme 都能被
 #: 浏览器或 urllib 拿去发请求，所以一律当网络目标看待）。
 _SCHEME_PREFIX_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*://""")
+#: scheme 后面的 TAB/LF/CR 会被 WHATWG 删掉后再解析：`http:<LF>//host` 仍是外链。
+#: 只覆盖 scheme 与分隔符之间的空白；把控制符插进 scheme 字母之间（`h<LF>ttps://`）仍是已知边界。
+_SCHEME_LOOSE_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*:[ \t\r\n]*[/\\]""")
 #: WHATWG 的「特殊 scheme」里**会联网的那五个**（http/https/ftp/ws/wss）：`scheme:` 后面哪怕只跟一个 `/` 或 `\`，
 #: 浏览器照样解析出主机并发请求。node 24 实测（本卡据此改的判据，不是猜的字符串形状）：
 #: `new URL("https:\\evil.example.com\\a.js").host === "evil.example.com"`、
@@ -240,7 +246,7 @@ _MD_REF_DEF_RE = re.compile(
     r"""^[ \t]{0,3}\[[^\]\n]+\][ \t]*:[ \t]*<?(""" + _RELATIVE_AUTHORITY_SRC + r""")""", re.M
 )
 #: srcset 的值是「地址 描述符」的逗号列表，必须逐候选切；整条属性一起匹配只会看见第一个候选。
-_SRCSET_ATTR_RE = re.compile(r"""\bsrcset\s*=\s*["']([^"']*)["']""", re.I)
+_SRCSET_UNQUOTED_RE = re.compile(r"""\bsrcset\s*=\s*([^\s"'<>][^\s<>]*)""", re.I)
 #: `<meta http-equiv="refresh" content="0;url=…">`：跳转地址藏在 content 值里面，不是属性值开头。
 _META_REFRESH_RE = re.compile(
     r"""\bcontent\s*=\s*["'][^"']*\burl\s*=\s*((?:https?:)?%s[^"'\s>]+)""" % _RELATIVE_AUTHORITY_SRC,
@@ -274,7 +280,8 @@ _URL_STOP_CHARS = frozenset(" '\"()<>,;`]")
 #: 还在权威段里时，`;`、`(`、`)`、反引号、`]` 都可能属于 userinfo 或 IPv6；但只有当
 #: 它们后面还有 `@` 时才放行，否则会把正文里的反引号/反斜杠散文吞成主机。
 #: 第四轮复审判例：`//;@evil…`、`//(@evil…`、`` //`@evil… ``、`//[::1]@evil…`。
-_AUTHORITY_SOFT_STOPS = frozenset(";()`],")
+#: 残余代价：代码 span 里的 `` `//`,@tag `` 仍可能被读成主机 `tag`；当前真树没有这种写法。
+_AUTHORITY_SOFT_STOPS = frozenset(" ;()`],")
 #: 权威段里的硬终止符：空白、引号、尖括号；`/`、`?`、`#` 也结束权威段。
 _URL_STOP_CHARS_AUTHORITY = frozenset(" '\"<>")
 #: WHATWG 解析前会剥掉首尾 C0/空格；`_host_of` 用它做预处理。
@@ -458,10 +465,16 @@ def _host_of(url: str) -> str:
 
 
 def _has_at_before_authority_end(text: str, index: int) -> bool:
-    """从 `index` 往后看：在权威段结束前是否还有 `@`（userinfo 的判据）。"""
+    """从 `index` 往后看：在权威段结束前是否还有 `@`（userinfo 的判据）。
+
+    空白（含 WHATWG 会删的 TAB/LF/CR）可以出现在 userinfo 里，扫描时跳过；
+    `/`、`?`、`#` 与引号/尖括号仍是权威段的硬边界。
+    """
     for ch in text[index + 1:]:
         if ch == "@":
             return True
+        if ch in "\t\r\n ":
+            continue
         if ch in _URL_STOP_CHARS_AUTHORITY or ch in "/?#":
             return False
     return False
@@ -557,9 +570,18 @@ def url_literals(text: str) -> List[Tuple[int, str]]:
     浏览器根本解析不出地址的 `_FORBIDDEN_HOST_CHARS` 写法）不在这里，它们指不了任何机器。
     """
     starts: List[int] = []
-    for regex in (_SCHEME_PREFIX_RE, _QUOTED_RELATIVE_RE, _SPECIAL_SCHEME_AUTHORITY_RE):
+    for regex in (
+        _SCHEME_PREFIX_RE,
+        _SCHEME_LOOSE_RE,
+        _QUOTED_RELATIVE_RE,
+        _SPECIAL_SCHEME_AUTHORITY_RE,
+    ):
         for match in regex.finditer(text):
             starts.append(match.start())
+    # 任意字符引用都可能是「实体编码的 scheme/空白/分隔符」的一部分；从这里起读，
+    # 由 `_read_url` 消费整段、`_host_of` 统一解码，避免只枚举少数几种实体。
+    for match in _HTML_ENTITY_RE.finditer(text):
+        starts.append(match.start())
     for match in _QUOTED_RELATIVE_WS_RE.finditer(text):
         starts.append(match.start(2))
     for regex in (
