@@ -23,7 +23,7 @@ import pytest
 from authz_fixtures import as_role, make_server, seed_roles, write_target
 
 from app.config import Settings
-from app.core import storage
+from app.core import downloader, storage
 from app.server.router import build_router
 from app.services import revision
 
@@ -34,30 +34,30 @@ XML = "<R><params><item>1</item><param_01 min=\"0\" max=\"10\">5</param_01></par
 WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/p/{pid}/favorites"): "favorites",
     ("PATCH", "/api/v1/p/{pid}/favorites"): "favorites",
-    ("DELETE", "/api/v1/p/{pid}/favorites"): "favorites",
+    ("DELETE", "/api/v1/p/{pid}/favorites"): "favorites (only if removed)",
     ("POST", "/api/v1/p/{pid}/remarks"): "remarks",
     ("POST", "/api/v1/p/{pid}/review/submit"): "remarks",
     ("POST", "/api/v1/p/{pid}/compare"): None,
     ("POST", "/api/v1/p/{pid}/temp"): None,
-    ("PUT", "/api/v1/p/{pid}/files/{name}"): "files",
-    ("POST", "/api/v1/p/{pid}/import-url"): "files",
-    ("DELETE", "/api/v1/p/{pid}/files/{name}"): "files",
+    ("PUT", "/api/v1/p/{pid}/files/{name}"): "files (unchanged -> none)",
+    ("POST", "/api/v1/p/{pid}/import-url"): "files (persist=true only)",
+    ("DELETE", "/api/v1/p/{pid}/files/{name}"): "files (+favorites/remarks/settings when refs removed)",
     ("POST", "/api/v1/p/{pid}/sources"): "settings",
     ("PATCH", "/api/v1/p/{pid}/sources/{name}"): "settings",
-    ("DELETE", "/api/v1/p/{pid}/sources/{name}"): "settings",
-    ("POST", "/api/v1/p/{pid}/tasks"): "tasks",
+    ("DELETE", "/api/v1/p/{pid}/sources/{name}"): "settings (only if removed)",
+    ("POST", "/api/v1/p/{pid}/tasks"): "tasks (finish also files/settings)",
     ("PUT", "/api/v1/p/{pid}/schedule"): "settings",
     ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings",
-    ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings",
+    ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings (only if removed)",
     ("POST", "/api/v1/p/{pid}/admins"): "settings",
-    ("DELETE", "/api/v1/p/{pid}/admins/{name}"): "settings",
+    ("DELETE", "/api/v1/p/{pid}/admins/{name}"): "settings (only if removed)",
     ("POST", "/api/v1/p/{pid}/dl/{item}/compute"): None,
     ("POST", "/api/v1/p/{pid}/dl/{item}/extract"): None,
     ("PUT", "/api/v1/p/{pid}/dl/{item}"): "settings",
     ("PUT", "/api/v1/p/{pid}/bindings/{group}"): "settings",
-    ("DELETE", "/api/v1/p/{pid}/bindings/{group}"): "settings",
+    ("DELETE", "/api/v1/p/{pid}/bindings/{group}"): "settings (only if removed)",
     ("PUT", "/api/v1/p/{pid}/tools/{name}"): "settings",
-    ("DELETE", "/api/v1/p/{pid}/tools/{name}"): "settings",
+    ("DELETE", "/api/v1/p/{pid}/tools/{name}"): "settings (only if removed)",
     ("POST", "/api/v1/profiles"): "settings (default)",
     ("PATCH", "/api/v1/profiles/{pid}"): "settings (default)",
     ("DELETE", "/api/v1/profiles/{pid}"): "settings (default)",
@@ -201,6 +201,7 @@ class TestBumpOnSuccess:
         after = _parts(self.pid)
         changed = [part for part in revision.PARTS if after[part] != before[part]]
         assert len(changed) == 1, (changed, before, after)
+        assert after[changed[0]] == before[changed[0]] + 1, (changed, before, after)
         return changed[0]
 
     def test_favorites(self):
@@ -321,6 +322,153 @@ class TestBumpOnSuccess:
         changed = [part for part in revision.PARTS if after[part] != before[part]]
         assert changed == ["settings"], (changed, before, after)
 
+    def test_favorites_patch_and_delete(self):
+        with make_server() as server:
+            caller = as_role(server, "member")
+            _sha, index = _doc_sha_and_index(caller, self.pid, FILE_A)
+            node = index["/R[1]/params[1]/item[1]"]
+            base = "/api/v1/p/%s/favorites" % self.pid
+
+            def expect(action):
+                before = _parts(self.pid)
+                status, _h, body = action()
+                assert status in (200, 201), body
+                after = _parts(self.pid)
+                assert after["favorites"] == before["favorites"] + 1, (before, after)
+
+            expect(lambda: caller.json("POST", base, {"file": FILE_A, "id": node}))
+            expect(lambda: caller.json(
+                "PATCH", base, {"file": FILE_A, "path": node, "note": "n"}
+            ))
+            expect(lambda: caller.json(
+                "DELETE", base + "?file=%s&path=%s" % (FILE_A, node)
+            ))
+
+    def test_sources_patch_and_delete(self):
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            base = "/api/v1/p/%s/sources" % self.pid
+
+            def expect(action):
+                before = _parts(self.pid)
+                status, _h, body = action()
+                assert status in (200, 201), body
+                after = _parts(self.pid)
+                assert after["settings"] == before["settings"] + 1, (before, after)
+
+            expect(lambda: caller.json(
+                "POST", base,
+                {"name": "s.xml", "url": "http://127.0.0.1:9/a.xml", "record_url": ""},
+            ))
+            expect(lambda: caller.json(
+                "PATCH", base + "/s.xml",
+                {"name": "s.xml", "url": "http://127.0.0.1:9/b.xml"},
+            ))
+            expect(lambda: caller.json("DELETE", base + "/s.xml"))
+
+    def test_import_url_bumps_only_when_persisted(self, monkeypatch):
+        monkeypatch.setattr(
+            downloader, "fetch", lambda url, policy: XML.replace("<item>1</item>", "<item>7</item>").encode("utf-8")
+        )
+        with make_server() as server:
+            visitor = as_role(server, "member")
+            before = _parts(self.pid)
+            status, _h, body = visitor.json(
+                "POST",
+                "/api/v1/p/%s/import-url" % self.pid,
+                {"url": "http://example.invalid/x.xml", "name": "tmp.xml"},
+            )
+            assert status == 200 and body["persisted"] is False, body
+            assert _parts(self.pid) == before, "临时导入不递增"
+
+            deployer = as_role(server, "deployer")
+            status, _h, body = deployer.json(
+                "POST",
+                "/api/v1/p/%s/import-url" % self.pid,
+                {"url": "http://example.invalid/y.xml", "name": "persisted.xml", "persist": True},
+            )
+            assert status == 200 and body["persisted"] is True, body
+            after = _parts(self.pid)
+            assert after["files"] == before["files"] + 1, (before, after)
+
+    def test_bindings_and_tools_delete_bump(self):
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            bindings = "/api/v1/p/%s/bindings/%s" % (self.pid, quote("组", safe=""))
+            status, _h, body = caller.json(
+                "PUT", bindings,
+                {"group_name": "组", "variables": [
+                    {"file": FILE_A, "path": FILE_A + "/R"},
+                    {"file": FILE_A, "path": FILE_A + "/R/params"},
+                ]},
+            )
+            assert status == 200, body
+            before = _parts(self.pid)
+            status, _h, body = caller.json("DELETE", bindings)
+            assert status == 200 and body == {"removed": True}, body
+            assert _parts(self.pid)["settings"] == before["settings"] + 1
+
+            tools = "/api/v1/p/%s/tools/%s" % (self.pid, quote("工具", safe=""))
+            status, _h, body = caller.json(
+                "PUT", tools,
+                {"name": "工具", "description": "", "url": "https://example.com"},
+            )
+            assert status == 200, body
+            before = _parts(self.pid)
+            status, _h, body = caller.json("DELETE", tools)
+            assert status == 200 and body == {"removed": True}, body
+            assert _parts(self.pid)["settings"] == before["settings"] + 1
+
+    def test_people_deletes_bump(self):
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            admins = "/api/v1/p/%s/admins" % self.pid
+            assert caller.json("POST", admins, {"name": "甲"})[0] == 201
+            before = _parts(self.pid)
+            status, _h, body = caller.json("DELETE", admins + "/" + quote("甲", safe=""))
+            assert status == 200 and body == {"removed": True}, body
+            assert _parts(self.pid)["settings"] == before["settings"] + 1
+
+            ip_url = "/api/v1/p/%s/ip-mapping/10.7.7.7" % self.pid
+            assert caller.json("PUT", ip_url, {"ip": "10.7.7.7", "name": "甲"})[0] == 200
+            before = _parts(self.pid)
+            status, _h, body = caller.json("DELETE", ip_url)
+            assert status == 200 and body == {"removed": True}, body
+            assert _parts(self.pid)["settings"] == before["settings"] + 1
+
+    def test_profile_rename_bumps_default(self):
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            status, _h, body = caller.json(
+                "POST", "/api/v1/profiles", {"name": "改名机型", "copy_from": None}
+            )
+            assert status == 201, body
+            model_id = body["profile"]["id"]
+            before = _parts(storage.DEFAULT_PROFILE)
+            status, _h, body = caller.json(
+                "PATCH", "/api/v1/profiles/%s" % model_id, {"name": "改名之后"}
+            )
+            assert status == 200, body
+            after = _parts(storage.DEFAULT_PROFILE)
+            assert after["settings"] == before["settings"] + 1, (before, after)
+
+    def test_conflict_and_404_do_not_bump(self):
+        with make_server() as server:
+            caller = as_role(server, "deployer")
+            admins = "/api/v1/p/%s/admins" % self.pid
+            assert caller.json("POST", admins, {"name": "甲"})[0] == 201
+            before = _parts(self.pid)
+            status, _h, body = caller.json("POST", admins, {"name": "甲"})
+            assert status == 409, body
+            assert _parts(self.pid) == before
+
+            default_before = _parts(storage.DEFAULT_PROFILE)
+            status, _h, _body = caller.json(
+                "PATCH", "/api/v1/profiles/nope", {"name": "x"}
+            )
+            assert status == 404
+            assert _parts(storage.DEFAULT_PROFILE) == default_before
+
 
 class TestUC40SecondClient:
     def test_another_client_sees_the_new_counter(self):
@@ -371,10 +519,13 @@ class TestRevisionCounterIsPureMemory:
         monkeypatch.setattr(builtins, "open", boom)
         try:
             assert revision.snapshot("pure")["parts"]["files"] == 2
+            revision.bump("pure", "files")
+            assert revision.snapshot("pure")["parts"]["files"] == 3
         finally:
             monkeypatch.setattr(builtins, "open", original)
 
     def test_snapshot_is_cheap(self):
+        """本地近似：真实 P99 由 M4-05 的 `bench_api.py` 在真实服务上测，这里只防退化。"""
         import time
 
         revision.reset()
@@ -386,10 +537,11 @@ class TestRevisionCounterIsPureMemory:
 
 
 # 覆盖映射（本文件不重复造轮子）：
-# - `POST /import-url` 的 persist=false 不递增、persist=true 递增 files：`tests/test_api_import.py`
+# - `POST /import-url` 的持久化分支：本文件 `test_import_url_bumps_only_when_persisted`，
+#   `tests/test_api_import.py` 另有行为用例。
 # - `POST /tasks` 的入队/进度/收口递增：`tests/test_api_tasks.py::TestRevisionBumps`
 # - `PUT /dl/{item}`、compute/extract：`tests/test_api_dl.py`
 # - `DELETE /files/{name}` 及引用分量：`tests/test_api_delete.py`
-# - `PATCH/DELETE /profiles/{pid}`：`tests/test_api_profiles.py`
-# - 前端 10 秒轮询与黄横幅（UC-40 的体感部分仍记「未验证 · 待人工确认」）：
-#   `app/web/tests/tests.js` 的 revision/横幅用例。
+# - `PATCH/DELETE /profiles/{pid}`：`tests/test_api_profiles.py`（本文件也覆盖成功 +1）
+# - UC-40 的 10 秒体感属跨设备项，仍记「未验证 · 待人工确认」；本文件只钉住「B 写后 A 的
+#   下一次 `/revision` 拿到新计数」，不声称前端黄横幅已被自动化覆盖。
