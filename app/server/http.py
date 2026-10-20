@@ -335,6 +335,9 @@ class MCRequestHandler(BaseHTTPRequestHandler):
             actor=actor,
             # C26：X-Filename 先按百分号解码，文件名合法性留给服务层用 validate_filename 判。
             filename=urllib.parse.unquote(self.headers.get("X-Filename") or "") or None,
+            # 条件请求头（M3-11 `PUT /dl/{item}` 的 If-Match）要能被 handler 读到；
+            # 头名大小写不敏感，这里统一归一成小写（`self.headers` 本身也是不敏感的）。
+            headers={name.lower(): value for name, value in self.headers.items()},
         )
         if pid is None:
             self._send_response(handler(ctx, params, query_params, body))

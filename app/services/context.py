@@ -7,7 +7,7 @@ M1-03 定义结构并在 HTTP 层统一构造；`authorize(ctx, action)` 的权�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 from .auth import Actor
 
@@ -31,3 +31,6 @@ class RequestContext:
     #: 上传类请求的原始文件名（`X-Filename`，已在 HTTP 层做过百分号解码，C26）。
     #: 合法性由各服务用 `fsutil.validate_filename` 判定——上下文不做策略。
     filename: Optional[str] = None
+    #: 原始请求头，**键统一小写**（HTTP 头名大小写不敏感；HTTP 层负责归一）。
+    #: 条件请求头（M3-11 的 `If-Match`）需要它；分发层语义不变。
+    headers: Optional[Dict[str, str]] = None

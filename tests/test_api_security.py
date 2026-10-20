@@ -98,6 +98,13 @@ WRITE_ROUTE_ACTIONS = {
     ("PATCH", "/api/v1/p/{pid}/sources/{name}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/sources/{name}"): "settings_write",
     ("PUT", "/api/v1/p/{pid}/schedule"): "settings_write",
+    # M3-11（INH-1896）：DL 条件保存，仅部署者（§7.11）。If-Match 由 handler 从
+    # `RequestContext.headers` 读取；缺失/过期都是 409，不改变「写接口必须表态权限档」这条对账。
+    ("PUT", "/api/v1/p/{pid}/dl/{item}"): "settings_write",
+    # 同为 M3-11：compute / extract 是 POST 但纯计算、只预览（R20 同口径「明确不递增」），
+    # 全部角色可用，所以登记为 None——不登记会让上面的双向对账直接红。
+    ("POST", "/api/v1/p/{pid}/dl/{item}/compute"): None,
+    ("POST", "/api/v1/p/{pid}/dl/{item}/extract"): None,
     # M3-13（INH-1898）：人员两张表的写接口全部只有部署者（§7.9）。
     ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
@@ -106,7 +113,10 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
 }
 
-ROUTE_VALUES = {"pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7"}
+ROUTE_VALUES = {
+    "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
+    "item": "pp_energy",
+}
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。
 TRAVERSALS = [
@@ -906,6 +916,9 @@ WRITE_FAMILIES = [
     ("DELETE", "/api/v1/p/{pid}/admins/{name}", "deployer", None, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
+    # M3-11（INH-1896）：DL 条件保存。body 留空也能证明 CSRF 闸门在 handler 之前
+    # （带头的对照请求得到 409/400 都不算 CSRF 403）。
+    ("PUT", "/api/v1/p/{pid}/dl/{item}", "deployer", {}, False),
 ]
 
 

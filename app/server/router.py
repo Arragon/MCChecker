@@ -102,6 +102,7 @@ def build_router(settings: Settings) -> Router:
     from . import (
         api_compare,
         api_delete,
+        api_dl,
         api_documents,
         api_favorites,
         api_history,
@@ -136,5 +137,6 @@ def build_router(settings: Settings) -> Router:
     api_tasks.register(router)
     api_schedule.register(router)
     api_people.register(router)
+    api_dl.register(router)
     router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
     return router
