@@ -271,8 +271,11 @@ _COMPILED_REFERENCE_PATTERNS = [re.compile(p, re.I) for p in _REFERENCE_PATTERNS
 #: `src="http://\n evil.example/x"` 照样发得出去，所以这里跟着删（复审裁定「安全判据
 #: 至少要和安全判据一样安全」——能删的必须是浏览器也删的）。
 _URL_STOP_CHARS = frozenset(" '\"()<>,;`]")
-#: 还在权威段里时，`;`、`(`、`)`、反引号、`]` 都可能属于 userinfo 或 IPv6，不能当终止符。
+#: 还在权威段里时，`;`、`(`、`)`、反引号、`]` 都可能属于 userinfo 或 IPv6；但只有当
+#: 它们后面还有 `@` 时才放行，否则会把正文里的反引号/反斜杠散文吞成主机。
 #: 第四轮复审判例：`//;@evil…`、`//(@evil…`、`` //`@evil… ``、`//[::1]@evil…`。
+_AUTHORITY_SOFT_STOPS = frozenset(";()`],")
+#: 权威段里的硬终止符：空白、引号、尖括号；`/`、`?`、`#` 也结束权威段。
 _URL_STOP_CHARS_AUTHORITY = frozenset(" '\"<>")
 #: WHATWG 解析前会剥掉首尾 C0/空格；`_host_of` 用它做预处理。
 _C0_AND_SPACE = "".join(chr(i) for i in range(0x21))
@@ -454,6 +457,16 @@ def _host_of(url: str) -> str:
     return host
 
 
+def _has_at_before_authority_end(text: str, index: int) -> bool:
+    """从 `index` 往后看：在权威段结束前是否还有 `@`（userinfo 的判据）。"""
+    for ch in text[index + 1:]:
+        if ch == "@":
+            return True
+        if ch in _URL_STOP_CHARS_AUTHORITY or ch in "/?#":
+            return False
+    return False
+
+
 def _read_url(text: str, start: int) -> str:
     """从 `start` 起读一个地址 token（**保留源文件里的原样字节**，归一化只在 `_host_of` 里做，
     这样违规消息与惰性名单记的始终是文件里那一串）。
@@ -502,7 +515,15 @@ def _read_url(text: str, start: int) -> str:
         if ch in "\t\r\n":
             index += 1
             continue
-        if ch in (_URL_STOP_CHARS if past_authority else _URL_STOP_CHARS_AUTHORITY):
+        if ch in _URL_STOP_CHARS:
+            if (
+                not past_authority
+                and ch in _AUTHORITY_SOFT_STOPS
+                and _has_at_before_authority_end(text, index)
+            ):
+                chars.append(ch)
+                index += 1
+                continue
             break
         if ch == "/" or (special and ch == "\\"):
             past_authority = True
