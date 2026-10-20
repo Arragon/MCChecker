@@ -355,7 +355,7 @@
     ["favorites", "revision", "remarks", "search", "history", "compare", "records", "import", "temp", "delete", "review"].forEach(function (k) {
       ok(prod[k], k + " 已接真实后端");
     });
-    ["dl", "tools"].forEach(function (k) {
+    ["tools"].forEach(function (k) {
       ok(!prod[k], k + " 尚未实现，不能提前放行");
     });
     /* M3-06：settings 页级键已放行——页面内部的分段由 D2 分段开关控制（见下面专门用例），
@@ -1675,7 +1675,7 @@
     MC.caps = MC.capsFor(false);
     ok(capOfKind("overview") && capOfKind("f") && capOfKind("search") && capOfKind("t") && capOfKind("review"), "速览、文件、搜索、临时标签与审阅页已接入真实后端");
     ok(capOfKind("settings"), "设置页级键已随 M3-06 接入（页内分段另由 D2 开关控制）");
-    ok(!capOfKind("dl"), "未接入的 kind 不可用");
+    ok(capOfKind("dl"), "DL 页已随 M3-12 接入真实后端");
     MC.caps = MC.capsFor(true);
     ok(capOfKind("settings") && capOfKind("t") && capOfKind("dl"), "接入后可用");
   });
