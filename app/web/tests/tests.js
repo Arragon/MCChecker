@@ -1285,6 +1285,39 @@
     });
   });
 
+  test("M3-07 / D4：文件页「立即拉取」只认 tasks 键——tools 开着也禁用，点击不发请求", function () {
+    /* Python 侧原先 grep fileview.js 里的 `MC.caps.tasks` 与提示文案（R45：源码文本
+     * 不是验收）。这里钉行为：只关 tasks、tools 保持开（旧实现正是借 tools 放行），
+     * 按钮必须 disabled + 有 title（不钉文案，改词不影响），点击不发任务请求。 */
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/records$/.test(path)) return Promise.resolve({ record_url: "http://up/cfg_rec.xml", items: [] });
+          return Promise.resolve({ items: [] });
+        },
+        POST: function () { return Promise.resolve({ task: {} }); },
+      });
+      r.capOff("tasks");
+      var app = settingsApp(true);
+      app.files = [{ name: "cfg.xml", record_count: 2, archive_count: 1 }];
+      var inst = r.mountView(MC.views.f(app, { kind: "f", arg: "cfg.xml", query: { view: "records" } }));
+      return tick()
+        .then(function () {
+          ok(MC.caps.tools, "前提：tools 键仍开着——旧实现借它放行「立即拉取」");
+          var btns = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("立即拉取") >= 0; });
+          eq(btns.length, 1, "修改记录视图要有「立即拉取」按钮");
+          ok(btns[0].disabled, "tasks 未接入 ⇒ 按钮必须 disabled（不能借 tools 键放行）");
+          ok((btns[0].getAttribute("title") || "").length > 0, "禁用必须给出原因（title 非空；文案本身不参与验收）");
+          btns[0].click();
+          return tick();
+        })
+        .then(function () {
+          eq(spy.calls.filter(function (c) { return c.indexOf("POST") === 0; }), [], "未接入时点击不得发任务请求：" + spy.calls.join(" | "));
+        });
+    });
+  });
+
   test("M3-06：改名对话框带 migrate_files 勾选；字段级错误保留输入；保存成功只刷新列表", function () {
     var t = productionRun();
     return t.run(function (r) {

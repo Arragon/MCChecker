@@ -9,7 +9,9 @@
 3. `run.py` 的**有序停止**（R9：先 `runner.shutdown` 再 `server.shutdown`）——
    `test_ordered_stop_waits_for_in_flight_task_before_stopping_http` 是变异验证的靶子：
    把那两行顺序反过来它一定转红；
-4. D4 前端门控与 mock 契约（这几处是「不发请求」的静态条件，用源码文本断言）。
+4. D4 前端门控与 mock 契约：门控行为（未接入 ⇒ 禁用 + title + 不发请求）由
+   `app/web/tests/tests.js` 的浏览器用例执法，本文件只保留能由配置数据解析出的
+   结构约束（`WIRED ⊆ CAP_KEYS`、mock 失败状态集与后端一致）。
 
 下载一律打本地 `http.server`（127.0.0.1 随机端口），`getproxies` 打桩成 `{}`
 （macOS 系统代理会把请求接走），重试退避打桩成记录器——与 `tests/test_api_sources.py`
@@ -1444,12 +1446,143 @@ class TestOrderedStop:
         server.server_close()
         assert not thread.is_alive()
 
-    def test_run_py_uses_the_sequence_in_both_exit_paths(self):
-        """R9：`_handle_signal` 与正常退出路径都要走同一条有序停止，不能只改一处。"""
-        src = _js("run.py")
-        assert "settings.max_workers" in src  # max_workers 来自 Settings（app/config.py:61）
-        assert src.count("ordered_stop(runner, server)") == 2, "两条退出路径都要有序停止"
-        assert "runner.shutdown" in src and "server.shutdown" in src
+    @pytest.mark.parametrize("drained", [True, False])
+    def test_main_orders_the_exit_wait_before_releasing_the_lock(
+        self, tmp_path, monkeypatch, drained
+    ):
+        """`main()` 的两条退出路径都走同一套有序停止，锁只在工作线程散尽后才删。
+
+        旧断言 grep `run.py` 的标识符拼写（R45）：把 `lock.release()` 挪到
+        `wait_for_workers` 之前、或把 `stop_and_release(...)` 整段删掉再留一句同名
+        注释，源码文本不变、旧断言照样绿。这里注入假 settings / runner / server /
+        lock 直接跑 `main()`：信号路径与 `finally` 路径各产生一次
+        scheduler → runner → server，`server_close` 与 `wait_for_workers` 之后才
+        允许删锁；没排空时锁文件必须还在。
+        """
+        import run
+        import signal
+        import types
+
+        from app.config import Settings
+        from app.server import http as http_module
+        from app.server import router as router_module
+        from app.services import scheduler as scheduler_service
+        from app.services import tasks as tasks_service
+
+        log: List[str] = []
+        lock_path = tmp_path / "data" / ".mcchecker.lock"
+        signal_path_done = threading.Event()
+
+        class _FakeRunner:
+            max_workers = 3
+
+            def __init__(self) -> None:
+                self.timeouts: List[float] = []
+
+            def shutdown(self, timeout: float = 30) -> None:
+                self.timeouts.append(timeout)
+                log.append("runner")
+
+            def wait_for_workers(self, timeout: float) -> bool:
+                log.append("wait")
+                return drained
+
+        class _FakeServer:
+            def serve_forever(self, poll_interval: float = 0.2) -> None:
+                handlers[signal.SIGTERM](signal.SIGTERM, None)
+                assert signal_path_done.wait(5), "信号退出路径没有走到 server.shutdown"
+
+            def shutdown(self) -> None:
+                log.append("server")
+                signal_path_done.set()
+
+            def server_close(self) -> None:
+                log.append("close")
+
+        class _FakeScheduler:
+            def stop(self) -> None:
+                log.append("scheduler")
+
+            def is_alive(self) -> bool:
+                return False
+
+        class _FakeLock:
+            path = str(lock_path)
+
+            def acquire(self) -> None:
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                lock_path.write_text("{}", encoding="utf-8")
+
+            def release(self) -> None:
+                log.append("release")
+                lock_path.unlink()
+
+        runner = _FakeRunner()
+        server = _FakeServer()
+        scheduler = _FakeScheduler()
+        lock = _FakeLock()
+        handlers: Dict[int, Any] = {}
+        settings = Settings(
+            host="127.0.0.1",
+            port=0,
+            data_dir=str(tmp_path / "data"),
+            web_dir=os.path.join(ROOT, "app", "web"),
+            max_workers=7,
+        )
+
+        def init_runner(max_workers: int) -> _FakeRunner:
+            log.append("init:%d" % max_workers)
+            return runner
+
+        def fake_signal(signum, handler):
+            handlers[signum] = handler
+
+        monkeypatch.setattr(run, "load_settings", lambda argv=None: settings)
+        monkeypatch.setattr(run, "configure_logging", lambda level: None)
+        monkeypatch.setattr(run.storage, "configure_data_dir", lambda path: None)
+        monkeypatch.setattr(
+            run.storage, "ensure_profile_layout", lambda migrate_legacy=True: None
+        )
+        monkeypatch.setattr(run, "_count_profiles", lambda: 0)
+        monkeypatch.setattr(
+            run,
+            "signal",
+            types.SimpleNamespace(
+                SIGINT=signal.SIGINT, SIGTERM=signal.SIGTERM, signal=fake_signal
+            ),
+        )
+        monkeypatch.setattr(http_module, "SingleInstanceLock", lambda data_dir, port: lock)
+        monkeypatch.setattr(
+            http_module, "MCServer", lambda cfg, router, runner=None: server
+        )
+        monkeypatch.setattr(router_module, "build_router", lambda cfg: object())
+        monkeypatch.setattr(tasks_service, "init_runner", init_runner)
+        monkeypatch.setattr(scheduler_service, "init_scheduler", lambda r: scheduler)
+        monkeypatch.setattr(scheduler_service, "get_scheduler", lambda: scheduler)
+
+        assert run.main([]) == 0
+
+        assert log[0] == "init:7"  # worker 数来自 Settings，不是写死的常量
+        assert runner.timeouts == [tasks_service.DEFAULT_SHUTDOWN_TIMEOUT] * 2
+        expected = [
+            "init:7",
+            "scheduler",
+            "runner",
+            "server",  # 信号路径
+            "scheduler",
+            "runner",
+            "server",  # 正常退出路径
+            "close",
+            "wait",
+        ]
+        if drained:
+            expected.append("release")
+            assert not lock_path.exists()
+        else:
+            assert lock_path.exists(), (
+                "工作线程没排空却把锁删了：端口已释放，第二个实例会进来同写 data/"
+            )
+        assert log == expected
 
     def test_http_worker_threads_stay_daemon(self):
         """R9 的边界：`daemon_threads = True` 管的是 HTTP 处理线程本身，本卡不动它。
@@ -1608,14 +1741,6 @@ class TestLockOutlivesWriters:
         assert tasks.EXIT_WORKER_TIMEOUT == 300.0
         assert tasks.EXIT_WORKER_TIMEOUT > 3 * hung_source  # 串行撞三个死源也覆盖得住
         assert tasks.EXIT_WORKER_TIMEOUT > 5 * tasks.DEFAULT_SHUTDOWN_TIMEOUT
-
-    def test_run_py_deletes_the_lock_only_through_the_exit_wait(self):
-        """`main()` 的 `finally` 只能经 `stop_and_release` 删锁，不许再直接 `lock.release()`。"""
-        src = _js("run.py")
-        tail = src[src.index("    finally:") :]
-
-        assert "stop_and_release(runner, server, lock)" in tail
-        assert "lock.release()" not in tail, "退出路径上直接删锁 = 写的人还活着时锁就没了（C1）"
 
 
 # ---------------------------------------------------------------------------
@@ -1874,15 +1999,6 @@ class TestLayeringAndContract:
 
 
 class TestD4FrontendGating:
-    def test_fileview_no_longer_borrows_the_tools_key(self):
-        """卡面 grep：`tools` 键从此只代表外部工具。"""
-        source = _js("app", "web", "assets", "js", "views", "fileview.js")
-
-        assert "MC.caps.tools" not in source
-        assert "MC.caps.tasks" in source
-        assert "拉取修改记录需要任务接口（M3-07）" in source
-        assert "属 M3-08" not in source  # 注释里写错的卡号已纠正
-
     def test_api_js_declares_and_wires_the_tasks_key(self):
         source = _js("app", "web", "assets", "js", "core", "api.js")
         caps = re.findall(
@@ -1899,27 +2015,6 @@ class TestD4FrontendGating:
         assert "tasks" in wired
         assert set(wired) <= set(caps)  # 与前端测试页同一条不变量
         assert re.search(r'tasks:\s*"[^"]*M3-07[^"]*"', unwired), "每项能力都要有未接入说明"
-
-    def test_shell_does_not_request_tasks_when_unwired(self):
-        source = _js("app", "web", "assets", "js", "views", "shell.js")
-        for name in ("pollTasks", "startTask"):
-            block = _block(source, "App.prototype.%s = function" % name, 700)
-            assert "if (!MC.caps.tasks)" in block, name
-            assert block.index("if (!MC.caps.tasks)") < block.index("api."), name
-
-    def test_settings_update_buttons_are_gated_on_the_tasks_key(self):
-        """D4 第 4 点：两个更新按钮都按 `MC.caps.tasks` 决定 disabled + title。
-
-        实现里把开关算成一个局部 `tasksOff` 供两个按钮共用（比在两处各写一遍
-        `!MC.caps.tasks` 更难写错），所以断言落在「两个按钮的 disabled 表达式」上。
-        """
-        source = _js("app", "web", "assets", "js", "views", "settings.js")
-
-        assert "MC.caps.tasks" in source
-        assert "MC.unwired.tasks" in source
-        for marker in ("disabled: running || !!tasksOff", "disabled: ro() || !!tasksOff"):
-            assert marker in source, marker  # 全部更新 / 单条更新，一个都不能漏
-        assert source.count("tasksOff") >= 5
 
     def test_shell_task_entry_lists_active_tasks(self):
         """D4 第 3 点：顶栏任务入口要能列出 active 任务（进度面板在 shell.js）。"""
