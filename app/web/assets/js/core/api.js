@@ -218,7 +218,7 @@
    * （前端测试页有断言会红）。M4-08 全绿后与 MC.caps 一起删除。
    */
   var SETTINGS_SEGMENTS = ["sources", "schedule", "people", "bindings", "tools", "profiles"];
-  var WIRED_SETTINGS = ["sources", "schedule", "people"];
+  var WIRED_SETTINGS = ["sources", "schedule", "people", "bindings"];
 
   MC.settingsSegments = SETTINGS_SEGMENTS.slice();
   MC.wiredSettingsSegments = WIRED_SETTINGS.slice();
@@ -231,7 +231,6 @@
    * `schedule`（M3-08）与 `people`（M3-13）已落地，所以它们的去向文案一并撤掉
    * （多留会让前端测试页红）。 */
   MC.unwiredSettings = {
-    bindings: "变量绑定将在 M3-14 接入",
     tools: "外部工具将在 M3-15 接入",
     profiles: "机型管理将在 M3-16 接入",
   };

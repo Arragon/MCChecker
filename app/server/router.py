@@ -100,6 +100,7 @@ def build_router(settings: Settings) -> Router:
     compact 文档、原文下载、收藏、修订号、搜索）。
     """
     from . import (
+        api_bindings,
         api_compare,
         api_delete,
         api_dl,
@@ -138,5 +139,6 @@ def build_router(settings: Settings) -> Router:
     api_schedule.register(router)
     api_people.register(router)
     api_dl.register(router)
+    api_bindings.register(router)
     router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
     return router
