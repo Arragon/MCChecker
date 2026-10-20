@@ -14,7 +14,7 @@ import pytest
 class TestFileDownloads:
     def test_resolve_current_download_target(self):
         from app.core import storage
-        from app.pages.file_downloads import DOWNLOAD_KIND_CURRENT, resolve_download_target
+        from app.server.legacy import DOWNLOAD_KIND_CURRENT, resolve_download_target
 
         storage.save_config_file("alpha.xml", b"<root />")
 
@@ -27,7 +27,7 @@ class TestFileDownloads:
 
     def test_resolve_archive_download_target_preserves_version_name(self):
         from app.core import storage
-        from app.pages.file_downloads import DOWNLOAD_KIND_ARCHIVE, resolve_download_target
+        from app.server.legacy import DOWNLOAD_KIND_ARCHIVE, resolve_download_target
 
         storage.save_config_file("history.xml", b"<root><a>1</a></root>")
         storage.save_config_file("history.xml", b"<root><a>2</a></root>")
@@ -44,7 +44,7 @@ class TestFileDownloads:
         assert os.path.basename(target.path) == archive_filename
 
     def test_resolve_download_target_rejects_invalid_path_segment(self):
-        from app.pages.file_downloads import DOWNLOAD_KIND_CURRENT, DownloadResolutionError, resolve_download_target
+        from app.server.legacy import DOWNLOAD_KIND_CURRENT, DownloadResolutionError, resolve_download_target
 
         with pytest.raises(DownloadResolutionError) as exc_info:
             resolve_download_target(DOWNLOAD_KIND_CURRENT, "../secret.xml")
@@ -53,7 +53,7 @@ class TestFileDownloads:
         assert "不合法" in exc_info.value.message
 
     def test_resolve_download_target_raises_for_missing_resource(self):
-        from app.pages.file_downloads import DOWNLOAD_KIND_CURRENT, DownloadResolutionError, resolve_download_target
+        from app.server.legacy import DOWNLOAD_KIND_CURRENT, DownloadResolutionError, resolve_download_target
 
         with pytest.raises(DownloadResolutionError) as exc_info:
             resolve_download_target(DOWNLOAD_KIND_CURRENT, "missing.xml")
@@ -62,7 +62,7 @@ class TestFileDownloads:
         assert "不存在" in exc_info.value.message
 
     def test_build_download_url_contains_profile_and_archive_name(self):
-        from app.pages.file_downloads import DOWNLOAD_KIND_ARCHIVE, build_download_url
+        from app.server.legacy import DOWNLOAD_KIND_ARCHIVE, build_download_url
 
         url = build_download_url(
             DOWNLOAD_KIND_ARCHIVE,

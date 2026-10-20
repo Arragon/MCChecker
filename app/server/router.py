@@ -120,9 +120,13 @@ def build_router(settings: Settings) -> Router:
         api_temp,
         api_tools,
         api_upload,
+        legacy,
     )
 
     router = Router()
+    # §7.12：旧路由必须在 `/api/v1` 之前匹配（下载/记录页与新版接口不共享路径，
+    # 但顺序写在这里，避免以后新增通配路由时被抢先）。
+    legacy.register(router)
     api_session.register(router, settings)
     router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
