@@ -128,7 +128,10 @@ class TestFailureRollback(Base):
             handle.write(b"<R/>")
         self.reset_targets("configs")
 
-        def boom(_src, _dst):
+        def boom(_src, dst):
+            os.makedirs(dst, exist_ok=True)
+            with open(os.path.join(dst, "partial.txt"), "w", encoding="utf-8") as handle:
+                handle.write("half")
             raise RuntimeError("copy boom")
 
         monkeypatch.setattr(storage.shutil, "copytree", boom)
