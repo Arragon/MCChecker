@@ -280,6 +280,88 @@ class TestDelete:
         ]
         assert leftovers == [], leftovers
 
+    def test_partial_source_removal_keeps_the_complete_recovery_copy(self):
+        """评审 Critical：`_remove_source` 半删后抛错时，副本是唯一完整数据，绝不能清条目。"""
+        source_base = storage.get_profile_data_dir(self.pid)
+        original = recovery._remove_source
+
+        def partial(source):
+            os.remove(os.path.join(source, "configs", "a.xml"))
+            raise RuntimeError("partial remove")
+
+        recovery._remove_source = partial
+        try:
+            with make_server() as server:
+                status, _h, body = as_role(server, "deployer").json(
+                    "DELETE", "/api/v1/profiles/%s" % self.pid
+                )
+        finally:
+            recovery._remove_source = original
+        assert status == 500, body
+        assert os.path.isdir(source_base), "残源可以留在原处，但数据不能丢"
+        entries = [
+            name
+            for name in os.listdir(storage.get_recovery_root_dir())
+            if "_delete_profile_%s" % self.pid in name
+        ]
+        assert len(entries) == 1, entries
+        recovered = os.path.join(
+            storage.get_recovery_root_dir(), entries[0], "profiles", self.pid,
+            "configs", "a.xml",
+        )
+        assert os.path.isfile(recovered), "被半删掉的文件必须仍在恢复区副本里"
+        assert device_models.exists(self.pid), "注册表还没动，机型必须还在"
+
+    def test_create_copy_failure_rolls_back_registry_and_partial_directory(self):
+        original = storage.copy_profile_data
+
+        def boom(_src, _dst):
+            raise RuntimeError("copy boom")
+
+        storage.copy_profile_data = boom
+        try:
+            with make_server() as server:
+                status, _h, body = _create(
+                    as_role(server, "deployer"), "复制失败", self.pid
+                )
+        finally:
+            storage.copy_profile_data = original
+        assert status == 500, body
+        assert not any(
+            model.get("name") == "复制失败" for model in device_models.load_models()
+        ), "复制失败不能留下已注册机型"
+        leftovers = [
+            name
+            for name in os.listdir(storage.PROFILES_DIR)
+            if name not in {m["id"] for m in device_models.load_models()}
+        ]
+        assert leftovers == [], leftovers
+
+    def test_registry_remove_failure_restores_the_data_directory(self):
+        original = device_models.remove_model
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("registry boom")
+
+        device_models.remove_model = boom
+        source_base = storage.get_profile_data_dir(self.pid)
+        try:
+            with make_server() as server:
+                status, _h, body = as_role(server, "deployer").json(
+                    "DELETE", "/api/v1/profiles/%s" % self.pid
+                )
+        finally:
+            device_models.remove_model = original
+        assert status == 500, body
+        assert device_models.exists(self.pid), "注册表写失败时机型必须还在"
+        assert os.path.isfile(os.path.join(source_base, "configs", "a.xml")), "数据必须放回"
+        entries = [
+            name
+            for name in os.listdir(storage.get_recovery_root_dir())
+            if "_delete_profile_%s" % self.pid in name
+        ]
+        assert entries == [], entries
+
     def test_unknown_profile_is_404(self):
         with make_server() as server:
             status, _h, _body = as_role(server, "deployer").json(

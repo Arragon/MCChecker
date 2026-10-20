@@ -61,7 +61,18 @@ def create_profile(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     with _LOCK:
         if _name_index(device_models.load_models(), name) is not None:
             raise AppError(FILE_EXISTS, DUPLICATE_NAME_MESSAGE, field=NAME_FIELD)
-        model_id = device_models.add_model(name, copy_from)
+        model_id = device_models.add_model(name)
+        if copy_from:
+            try:
+                storage.copy_profile_data(copy_from, model_id)
+            except BaseException:
+                # 注册表已经写了新机型，复制失败必须回滚，否则留下一个空/半机型且重试 409。
+                try:
+                    device_models.remove_model(model_id, delete_data=False)
+                    storage.delete_profile_data(model_id)
+                except Exception as exc:
+                    logger.error("创建机型复制失败后的清理未完成 %s: %s", model_id, exc)
+                raise
     revision.bump(storage.DEFAULT_PROFILE, PART)
     _reload_scheduler()
     return {
@@ -101,11 +112,20 @@ def delete_profile(
     with _LOCK:
         if _model_index(device_models.load_models(), target) is None:
             raise AppError(NOT_FOUND, "机型不存在")
-        entry = recovery.move_profile_to_recovery(
-            target, actor_name=actor_name, actor_ip=actor_ip
-        )
-        if not device_models.remove_model(target, delete_data=False):
-            raise AppError(NOT_FOUND, "机型不存在")
+        # 删除与运行中的任务写互斥：不取机型写锁的话，任务可能把字节写进一个正在被
+        # 搬走的目录，恢复区里的副本就不是删除那一刻的完整状态。
+        with storage.profile_write(target):
+            entry = recovery.move_profile_to_recovery(
+                target, actor_name=actor_name, actor_ip=actor_ip
+            )
+            try:
+                removed = device_models.remove_model(target, delete_data=False)
+            except BaseException:
+                recovery.restore_profile_entry(entry, target)
+                raise
+            if not removed:
+                recovery.restore_profile_entry(entry, target)
+                raise AppError(NOT_FOUND, "机型不存在")
     revision.bump(storage.DEFAULT_PROFILE, PART)
     _reload_scheduler()
     return {"deleted": True, "recovery": entry}

@@ -575,14 +575,20 @@
     });
   });
 
+  function profileName(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw).trim();
+    if (!text || text.length > 100 || /[\u0000-\u001f\u007f]/.test(text)) return null;
+    return text;
+  }
+
   route("POST", "/profiles", function (a, req) {
     var id = identity("default");
     var deny = needDeployer(id);
     if (deny) return deny;
-    var name = String(req.body.name || "").trim();
+    var name = profileName(req.body.name);
     if (!name) return fail(400, "INVALID_INPUT", "请输入机型名称", { field: "name" });
-    if (S.models.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
     if (req.body.copy_from && !profile(req.body.copy_from)) return fail(400, "INVALID_INPUT", "要复制的机型不存在", { field: "copy_from" });
+    if (S.models.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
     var slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "") || "model";
     var mid = slug;
     var k = 2;
@@ -591,7 +597,7 @@
     var copiedFiles = {};
     if (src) Object.keys(src.files).forEach(function (n) { copiedFiles[n] = { current: { text: fileText(src.files[n].current), mtime: src.files[n].current.mtime }, archives: clone(src.files[n].archives), records: [] }; });
     S.profiles[mid] = src
-      ? Object.assign(clone(Object.assign({}, src, { files: {} })), { files: copiedFiles, remarks: [], admins: [], people: [], sourceStatus: {} })
+      ? Object.assign(clone(Object.assign({}, src, { files: {} })), { files: copiedFiles, remarks: [], admins: [], people: [], sourceStatus: {}, schedule: Object.assign({}, src.schedule || {}, { last_run: null }) })
       : { files: {}, mapping: [], sourceStatus: {}, favorites: [], remarks: [], bindings: [], tools: [], schedule: { enabled: false, interval_hours: 24, last_run: null }, admins: [], people: [], dl: null };
     rev[mid] = { files: 1, favorites: 1, remarks: 1, settings: 1, tasks: 1 };
     S.models.push({ id: mid, name: name });
@@ -604,7 +610,7 @@
     if (deny) return deny;
     var m = S.models.filter(function (x) { return x.id === a.pid; })[0];
     if (!m) return fail(404, "NOT_FOUND", "机型不存在");
-    var name = String(req.body.name || "").trim();
+    var name = profileName(req.body.name);
     if (!name) return fail(400, "INVALID_INPUT", "请输入机型名称", { field: "name" });
     if (S.models.some(function (x) { return x.id !== a.pid && x.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
     m.name = name;

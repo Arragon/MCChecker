@@ -186,19 +186,49 @@ def move_profile_to_recovery(
             ]
         write_manifest(entry_path, manifest)
     except BaseException:
-        restored = True
         copied = os.path.join(entry_path, rel)
-        if os.path.exists(copied) and not os.path.exists(source):
-            try:
-                os.makedirs(os.path.dirname(source), exist_ok=True)
-                shutil.move(copied, source)
-            except Exception as exc:
-                restored = False
-                logger.error("机型删除回滚失败，数据保留在恢复区 %s: %s", entry, exc)
-        if restored:
+        drop_entry = False
+        if os.path.exists(copied):
+            if not os.path.exists(source):
+                # 源已被完整移走：把完整副本放回原位，成功后才清条目。
+                try:
+                    os.makedirs(os.path.dirname(source), exist_ok=True)
+                    shutil.move(copied, source)
+                    drop_entry = True
+                except Exception as exc:
+                    logger.error("机型删除回滚失败，数据保留在恢复区 %s: %s", entry, exc)
+            else:
+                # `_remove_source` 可能只删了一部分就抛错：此时源是残的，副本才是唯一完整
+                # 副本。绝不 rmtree 条目——那会把最后一份数据也删掉（M3-16 评审 Critical）。
+                logger.error("机型删除时源未完整移除，保留恢复条目 %s", entry)
+        else:
+            # 复制根本没建立目标；源未被触碰，空条目可以清掉。
+            drop_entry = True
+        if drop_entry:
             shutil.rmtree(entry_path, ignore_errors=True)
         raise
     return entry
+
+
+def restore_profile_entry(entry: str, model_id: str) -> bool:
+    """把恢复条目里的机型目录放回原位（注册表写失败时的逆操作）。
+
+    只处理「源目录不存在」的形态；源还在（哪怕是残的）就不覆盖，交给运维按 manifest
+    处理。成功放回后清掉条目；返回是否真的恢复了。
+    """
+    entry_path = fsutil.resolve_within(storage.get_recovery_root_dir(), entry)
+    copied = os.path.join(entry_path, "profiles", model_id)
+    source = storage.get_profile_data_dir(model_id)
+    if not os.path.exists(copied) or os.path.exists(source):
+        return False
+    try:
+        os.makedirs(os.path.dirname(source), exist_ok=True)
+        shutil.move(copied, source)
+    except Exception as exc:
+        logger.error("恢复机型目录失败 %s: %s", entry, exc)
+        return False
+    shutil.rmtree(entry_path, ignore_errors=True)
+    return True
 
 
 def move_in(entry_path: str, source: str, rel: str) -> Dict[str, str]:
