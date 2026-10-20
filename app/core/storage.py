@@ -214,8 +214,7 @@ def _ensure_dirs():
       目录不在就先炸，属于「写确实需要」而不是防御性调用）。
 
     `app/` 里剩下的唯一调用者是 `parse_cache._get_cache_dir()`（`app/core/parse_cache.py:15`）：
-    它同时被 v1 NiceGUI 页面（`app/pages/**`，M4-07 待删）的读和 `invalidate()` 的写用到，
-    `app/server/**` 够不到，所以这不构成「v2 读路径还得在这里补建」的理由（`scripts/bench_xml.py`
+    它只被 `invalidate()` 的写用到，`app/server/**` 够不到，所以这不构成「v2 读路径还得在这里补建」的理由（`scripts/bench_xml.py`
     与 `tests/conftest.py` 各自显式调它做初始化，同理不算读副作用）。写请求倒是会把它撞出来：
     `DELETE /api/v1/p/{pid}/files/{name}` 经 `recovery._invalidate()` → `parse_cache.invalidate()`
     走到这里，把缺失的骨架目录重新长出来（实测：一棵只剩 `configs/` 的根上补出了
@@ -328,7 +327,7 @@ def _ensure_profile_layout_locked(migrate_legacy: bool) -> None:
     _migrate_legacy_layout_locked(default_base)
 
 
-#: 旧布局迁移的条目名（§5.5）。`nicegui_storage_secret.txt` **不在**这里——它不是配置数据，
+#: 旧布局迁移的条目名（§5.5）。旧版会话密钥文件（`storage-secret`）**不在**这里——它不是配置数据，
 #: 迁移不许删/搬它；日志目录也不在（M4-03 才引入）。
 _LEGACY_LAYOUT_NAMES = (
     "config_mapping.json",

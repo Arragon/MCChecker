@@ -185,31 +185,6 @@ def isolated_data_root(tmp_path, monkeypatch):
     yield
 
 
-@pytest.fixture(scope="session", autouse=True)
-def isolated_nicegui_storage(tmp_path_factory):
-    """把 NiceGUI 的持久化目录从仓库 `.nicegui/` 挪到临时目录。
-
-    做法与 NiceGUI 自带 `nicegui.testing` 一致：改 `Storage.path` 后重建
-    `app.storage`，让 `FilePersistentDict` 使用新路径。
-    """
-    try:
-        from nicegui import app as nicegui_app
-        from nicegui.storage import Storage
-    except ImportError:
-        yield
-        return
-
-    original_path = Storage.path
-    original_storage = nicegui_app.storage
-    Storage.path = tmp_path_factory.mktemp("nicegui")
-    nicegui_app.storage = Storage()
-    try:
-        yield
-    finally:
-        Storage.path = original_path
-        nicegui_app.storage = original_storage
-
-
 @pytest.fixture(autouse=True)
 def isolated_task_runner(isolated_data_root):
     """后台任务队列是**进程内单例**，工作线程会泄漏到别的用例（卡 6 / M3-07）。

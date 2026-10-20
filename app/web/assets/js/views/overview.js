@@ -30,12 +30,7 @@
     function load(silent) {
       var gen = ++loadGen;
       if (!silent) util.replace(bodyEl, MC.stateBlock({ kind: "loading" }));
-      if (!MC.caps.favorites) {
-        data = { groups: [], schedule: null };
-        render();
-        return Promise.resolve();
-      }
-      var scheduleReq = MC.caps.schedule ? api.get(app.p("/schedule")).then(null, function () { return null; }) : Promise.resolve(null);
+      var scheduleReq = api.get(app.p("/schedule")).then(null, function () { return null; });
       return Promise.all([api.get(app.p("/favorites")), scheduleReq]).then(
         function (res) {
           if (gen !== loadGen) return;
@@ -54,19 +49,11 @@
         main.append(
           h(
             "div.panel",
-            MC.caps.favorites
-              ? MC.stateBlock({
+            MC.stateBlock({
                   kind: "empty",
                   icon: "star",
                   title: "还没有收藏变量",
                   desc: "打开任意配置文件，点击节点前的 ☆（或选中后按 S）即可收藏。收藏对本机型的所有用户可见。",
-                  actions: openFirst,
-                })
-              : MC.stateBlock({
-                  kind: "empty",
-                  icon: "star",
-                  title: "收藏尚未接入",
-                  desc: MC.unwired.favorites + "；接入后这里显示你收藏的关键变量在当前版本里的值。",
                   actions: openFirst,
                 })
           )

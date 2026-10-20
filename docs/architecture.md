@@ -2,7 +2,7 @@
 
 > 本文件是兼容入口，不再作为完整架构设计事实源。
 >
-> **重构目标设计（2026-10-15 批准，尚未实现）**：`docs/MCChecker_REDESIGN_SPEC.md`
+> **v2 设计（2026-10-15 批准，已实现）**：`docs/MCChecker_REDESIGN_SPEC.md`
 > ——技术栈改为 Python 3.9.11 标准库 HTTP + JSON API + 原生前端（`app/web/`），零运行时依赖；
 > 与旧实现的功能实现差异见 `docs/MCChecker_FEATURE_CHANGES.md`。
 >
@@ -11,17 +11,17 @@
 >
 > **执行手册（进度台账、分支/PR 协议、单卡 SOP、接力入口）**：`docs/MCChecker_DELIVERY_PLAN.md`
 >
-> 下方“Current Implementation”仍描述当前运行代码（NiceGUI 版本），重构完成前保持不变。
+> 下方“Current Implementation”已按 v2 运行代码更新；NiceGUI 页面与 APScheduler 已在 M4-07 移除。
 
 ## Overview
 
-MCChecker 是一个基于 Python + NiceGUI 的内网配置文件解析与管理工具。
+MCChecker 是一个基于 Python 标准库 HTTP 服务与原生前端的内网配置文件解析与管理工具。
 
 当前实现基线：
 
 - Runtime: Python
-- UI/Web: NiceGUI
-- Scheduler: APScheduler
+- UI/Web: 原生 JavaScript（`app/web/`）
+- Scheduler: 标准库线程 + `services/scheduler.py`
 - Parsing: XML/JSON
 - Storage: 本地文件 + JSON
 - Diff: 本地结构/文本比较
@@ -32,10 +32,10 @@ MCChecker 是一个基于 Python + NiceGUI 的内网配置文件解析与管理�
 
 ```text
 app/
-├── core/       # parser, storage, scheduler, differ, downloader, dltool 等核心逻辑
-├── pages/      # NiceGUI 页面与交互
-├── utils/      # 辅助能力
-└── static/     # 本地静态资源
+├── core/       # parser, storage, differ, downloader, dltool 等核心逻辑
+├── server/     # HTTP 分发、路由、legacy 兼容、api_*.py
+├── services/   # 业务服务（含 scheduler）
+└── web/        # 原生前端（index.html + assets/js）
 
 data/
 └── profiles/   # 按机型/profile 保存业务数据

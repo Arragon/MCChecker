@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-MCChecker 是一个基于 Python + NiceGUI 的内网配置文件解析检查工具，支持 XML/JSON 配置的在线解析、搜索、对比与版本归档。
+MCChecker 是一个基于 Python 标准库 HTTP 服务的内网配置文件解析检查工具，支持 XML/JSON 配置的在线解析、搜索、对比与版本归档。
 
 ## 2. 环境准备
 
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-默认监听：`0.0.0.0:50001`
+默认监听：`0.0.0.0:50002`
 
 停止：
 
@@ -53,13 +53,9 @@ python main.py
 
 ## 6. 配置项
 
-### 6.1 NICEGUI_STORAGE_SECRET（可选）
+### 6.1 端口与数据目录
 
-用于启用 NiceGUI 的用户级持久化能力（如记住当前机型选择）。可通过环境变量注入：
-
-- `NICEGUI_STORAGE_SECRET`: 任意随机字符串
-
-未设置时，应用会自动生成并写入到 `data/nicegui_storage_secret.txt`，以保证刷新页面或重启服务后仍能正确读取此前的机型选择。
+默认端口 50002；`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
 
 ## 7. 数据目录说明
 

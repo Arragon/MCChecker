@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 REAL_DATA_DIR = os.path.join(REPO_ROOT, "data")
-REAL_NICEGUI_DIR = os.path.join(REPO_ROOT, ".nicegui")
 
 
 def _assert_outside_repo_and_inside_tmp(path: str, tmp_root: str) -> None:
@@ -85,17 +83,3 @@ class TestBusinessDataIsolation:
             storage.LEGACY_EDIT_REMARKS_FILE,
         ):
             _assert_outside_repo_and_inside_tmp(path, str(tmp_path))
-
-
-class TestNiceguiStorageIsolation:
-    """NiceGUI 的持久化目录必须不在仓库内。"""
-
-    def test_storage_path_moved_out_of_repo(self):
-        try:
-            from nicegui.storage import Storage
-        except ImportError:
-            return
-        assert os.path.abspath(Storage.path) != REAL_NICEGUI_DIR
-        assert not str(Storage.path).startswith(REAL_DATA_DIR)
-        # 会话级夹具用的是 tmp_path_factory，因此落点与 pytest 的临时根一致
-        assert os.path.abspath(Storage.path).startswith(os.path.realpath(tempfile.gettempdir()))

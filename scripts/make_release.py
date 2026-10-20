@@ -123,7 +123,6 @@ LOCAL_HOSTS = frozenset(
 #: `_host_of()` 里做，所以「登记的字面量」与「找不找得到」两件事始终对得上。
 INERT_URL_LITERALS: Tuple[Tuple[str, str, str], ...] = (
     # XML 命名空间标识符：SVG 规范要求的固定 URI，解析器拿它做名字，不会去取。
-    ("app/static/favicon.svg", "http://www.w3.org/2000/svg", "SVG XML 命名空间"),
     ("app/web/assets/js/ui/icons.js", "http://www.w3.org/2000/svg", "内联 SVG 的 XML 命名空间"),
     ("app/web/index.html", "http://www.w3.org/2000/svg", "data: URI 里的 SVG XML 命名空间"),
     # 输入框提示文字与示例文案：值是给用户看的，不参与任何请求。

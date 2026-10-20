@@ -1,5 +1,7 @@
 # Project Know-How
 
+> v2 已移除 `MC.caps`/`WIRED`/`WIRED_SETTINGS`/`MC.unwired*` 与 NiceGUI；下文提到这些机制或旧页面的条目仅作历史参考，不要照旧流程改代码。
+
 ## 1. Common Problems
 - NiceGUI 的 `ui.tree` 组件需要特定的数据格式，需将解析结果转换为 `{id, label, children}` 结构
 - XML 属性需在树形视图中特殊处理，作为 `@attr_name` 子节点展示
@@ -72,6 +74,8 @@
 
 
 ## 3. Development Notes
+
+> v1 的 NiceGUI / APScheduler 开发笔记保留在下方仅作历史参考；M4-07 已删除 `app/pages/`、`app/static/`、`app/utils/auth.py`、`app/core/scheduler.py`、`app/core/tabs_state.py` 与 `.nicegui/` 跟踪，运行时代码不再 import 这些包。
 - NiceGUI 的 `app.storage.user` 基于浏览器会话
 - 若需要 `app.storage.user` 在刷新后仍可用，需要在 `ui.run()` 里设置 `storage_secret`（本项目默认自动生成）
 - NiceGUI 的 `app.storage.general` 用于全局持久化
