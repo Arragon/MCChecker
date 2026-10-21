@@ -944,6 +944,7 @@ class TestSourcesApi:
                     "name",
                     "url",
                     "record_url",
+                    "keyword",
                     "local_updated_at",
                     "last_result",
                 }

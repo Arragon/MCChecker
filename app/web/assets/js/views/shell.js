@@ -17,6 +17,7 @@
     { kind: "search", label: "全局搜索", icon: "search" },
     { kind: "review", label: "审阅修改", icon: "review", admin: true },
     { kind: "dl", label: "DL 计算", icon: "calc" },
+    { kind: "tools", label: "外部工具", icon: "tool" },
     { kind: "settings", label: "设置", icon: "settings" },
   ];
 
@@ -286,7 +287,6 @@
     var self = this;
     this.navList = h("ul.nav-list");
     this.fileListEl = h("ul.file-list", { "aria-label": "配置文件" });
-    this.toolListEl = h("div");
     this.fileCountEl = h("span.count");
     var filter = h("input.input.input-sm", { type: "search", placeholder: "筛选文件名", "aria-label": "筛选文件名", value: this.fileFilter });
     filter.addEventListener("input", function () {
@@ -314,14 +314,12 @@
           h("div.side-section-head", h("span", "配置文件 "), this.fileCountEl, h("span.spacer"), importBtn),
           h("div.side-filter.input-wrap", icon("filter"), filter),
           this.fileListEl
-        ),
-        h("section.side-section", h("div.side-section-head", "外部工具"), this.toolListEl)
+        )
       ),
       h("div.sidebar-foot", "MCChecker " + this.session.server.version)
     );
     this.renderNav();
     this.renderFileList();
-    this.renderTools();
   };
 
   App.prototype.renderNav = function () {
@@ -374,7 +372,7 @@
     var self = this;
     return api.get(this.p("/tools")).then(function (res) {
       self.tools = res.items;
-      self.renderTools();
+      MC.bus.emit("tools", self.tools);
     }, function () {});
   };
 
@@ -433,34 +431,6 @@
           h("div.file-text", h("div.file-name", { title: f.name }, f.name), h("div.file-meta", meta.join(" · "))),
           f.pending_remarks ? h("span.file-flag.badge.badge-warning", { title: f.pending_remarks + " 条待审建议" }, icon("message"), String(f.pending_remarks)) : null,
           h("div.file-actions", dl, more)
-        )
-      );
-    });
-  };
-
-  App.prototype.renderTools = function () {
-    if (!this.toolListEl) return;
-    util.clear(this.toolListEl);
-    var self = this;
-    if (!this.tools.length) {
-      this.toolListEl.appendChild(
-        h(
-          "div.xsmall.muted",
-          { style: "padding:4px 8px" },
-          "暂无外部工具",
-          self.can("deployer") ? h("span", "，可在「设置 › 工具菜单」添加") : null
-        )
-      );
-      return;
-    }
-    this.tools.forEach(function (t) {
-      var href = util.safeUrl(t.url);
-      self.toolListEl.appendChild(
-        h(
-          "a.tool-link",
-          { href: href || "#", target: "_blank", rel: "noopener noreferrer", title: t.url, onclick: href ? null : function (e) { e.preventDefault(); MC.toast.warning("该工具地址无效", "仅支持 http/https 链接"); } },
-          icon("external"),
-          h("div.grow", h("div.truncate", t.name), t.description ? h("div.tool-desc.truncate", t.description) : null)
         )
       );
     });
@@ -764,11 +734,11 @@
   function defaultTitle(t) {
     var k = t.route.kind;
     if (k === "f") return t.route.arg;
-    return { overview: "速览", search: "全局搜索", review: "审阅修改", dl: "DL 计算", settings: "设置", t: "临时文件" }[k] || k;
+    return { overview: "速览", search: "全局搜索", review: "审阅修改", dl: "DL 计算", tools: "外部工具", settings: "设置", t: "临时文件" }[k] || k;
   }
 
   function defaultIcon(kind) {
-    return { overview: "overview", search: "search", review: "review", dl: "calc", settings: "settings", f: "file", t: "file-temp" }[kind] || "file";
+    return { overview: "overview", search: "search", review: "review", dl: "calc", tools: "tool", settings: "settings", f: "file", t: "file-temp" }[kind] || "file";
   }
 
   /* ===================== polling (multi-user) ===================== */

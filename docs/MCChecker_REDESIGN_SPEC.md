@@ -105,10 +105,10 @@ MCChecker 是部署在内网、面向设备配置人员的 **XML/JSON 配置文�
 | F14 | 文件下载 | 当前版本与历史版本下载，保留原文件名/版本名；失败提示并可重试；路由 `/api/file-download` | `pages/file_downloads.py` | 各处「下载」；旧路由保留兼容 |
 | F15 | 更新源管理 | 映射表（文件名、下载链接、修改记录链接）增删改；改名可迁移本地文件与归档；单条刷新；全量更新与状态徽标 | `pages/management.py`、`storage.*config_mapping*` | 设置 · 更新源 |
 | F16 | 定时更新 | 启用开关 + 间隔小时（“天”单位未接入）；每机型一个周期任务，执行全量更新（含修改记录）；每 24 h 清理归档解析缓存 | `core/scheduler.py`、`management.py` | 设置 · 定时更新 |
-| F17 | IP 对应表 | IP → 姓名，增删改；按机型保存 | `management.py`、`storage.*ip_mapping*` | 设置 · 人员与权限 |
-| F18 | 管理员列表 | 姓名列表，增删改；按机型保存 | `management.py`、`storage.*admin_user*` | 设置 · 人员与权限 |
+| F17 | IP 对应表 | IP → 姓名，增删改；全机型共用一份 | `storage.*ip_mapping*` | 设置 · 人员与权限 |
+| F18 | 管理员列表 | 姓名列表，增删改；全机型共用一份 | `storage.*admin_user*` | 设置 · 人员与权限 |
 | F19 | 变量绑定 | 绑定组 = 名称 + 若干（文件, 路径）；对比时标注绑定组 | `pages/bindings.py`、`storage.*binding*`、`differ` | 设置 · 变量绑定；对比结果紫色标签 |
-| F20 | 工具菜单 | 名称/说明/地址增删改；右侧工具箱点击新窗口打开 | `pages/tools.py`、`home.py::_render_tools_sidebar` | 设置 · 工具菜单；侧栏「外部工具」 |
+| F20 | 工具菜单 | 名称/说明/地址增删改；点击在新窗口打开 | `views/tools.js`、`services/tools.py` | 侧栏按钮「外部工具」（位于 DL 计算与设置之间）；设置 · 工具菜单 |
 | F21 | DL 快捷计算 | 三个计算项（PP 能量/RP 能量/RP 脉宽）；系数 k1–k8、b；PP 额外“传输系数/功率转换系数”；x/y 范围；正向/反向；多解检测与提示；多解时手选生成唯一解表；从配置文件按字段映射提取系数并可刷新；修改/保存/取消 | `pages/dltool.py`、`core/dltool.py` | 「DL 计算」 |
 | F22 | 多机型 | 切换、新增（可从当前复制）、重命名、删除（可选同时删数据）；所有业务数据按机型隔离 | `home.py`、`core/device_models.py`、`storage.copy/delete_profile_data` | 顶栏机型切换；设置 · 机型管理 |
 | F23 | 标签页工作区 | 多标签、上限 15（淘汰最早非活动）、关闭相邻激活、返回历史栈、按机型持久化 | `home.py`、`core/tab_manager.py`、`core/tabs_state.py` | 标签栏（§8.4） |
@@ -116,7 +116,7 @@ MCChecker 是部署在内网、面向设备配置人员的 **XML/JSON 配置文�
 | F25 | 删除文件 | 管理员删除文件及其归档、记录、收藏、绑定引用、建议 | `home.py::_show_delete_file_dialog`、`storage.delete_config_file` | 文件「更多」菜单 |
 | F26 | 旧布局迁移 | 启动时把 `data/*.json`、`data/configs|archive|cache` 迁到 `data/profiles/default/` | `storage.ensure_profile_layout` | 启动迁移（§5.6，改为复制-校验） |
 | F27 | 解析缓存 | 按源路径 + mtime/size 缓存解析树；归档缓存 7 天 / 500 条清理 | `core/parse_cache.py` | 文档缓存 v2（§6.5） |
-| F28 | 启动与端口 | `python main.py`；`MCHECKER_PORT` 已定义但实际固定 50002 | `run.py` | §3.6 配置；默认端口仍为 50002 |
+| F28 | 启动与端口 | `python main.py`；`MCHECKER_PORT` / `--port` 覆盖默认值 | `run.py`、`app/config.py` | §3.6；默认端口是 `DEFAULT_PORT`（50003） |
 
 ### 2.2 关键问题（按用户影响排序）
 
@@ -260,7 +260,7 @@ ContextVar 说明：`storage` 的 `_profile_var` 是 ContextVar，每个请求�
 @dataclass(frozen=True)
 class Settings:
     host: str = "0.0.0.0"
-    port: int = 50002                 # 与现网实际端口一致（run.py 当前固定 50002）
+    port: int = 50003                 # app.config.DEFAULT_PORT，全项目唯一默认端口
     data_dir: str = "<仓库根>/data"
     web_dir: str = "<仓库根>/app/web"
     trusted_proxies: Tuple[str, ...] = ()
@@ -309,13 +309,12 @@ def client_ip(handler) -> str:
 
 def resolve_actor(ip: str, profile_id: str) -> Actor:
     deployer = ip in deployer_ips()        # 127.0.0.1、::1、本机所有接口地址（启动时计算并缓存，同现有逻辑）
-    with storage.use_profile(profile_id):
-        name = storage.resolve_person_by_ip(ip) or ip
-        admin = storage.is_admin_user(name)
+    name = storage.resolve_person_by_ip(ip) or ip   # 人员表在数据根，不随机型
+    admin = storage.is_admin_user(name)
     return Actor(ip, name, name != ip, deployer, admin)
 ```
 
-- IP 对应表与管理员名单**保持按机型保存**（与现状一致，架构书 §2.9）。因此同一个人在不同机型可能权限不同，`/session?profile=` 返回的是该机型下的身份。
+- IP 对应表与管理员名单放在数据根，**全机型共用一套**。同一 IP 在任何机型上的姓名和管理员身份都相同；`/session?profile=` 里的机型只决定当前数据空间，不决定身份。
 - 角色标签：`部署者 · 管理员` / `部署者` / `管理员` / `成员`（已登记非管理员）/ `访客`（未登记）。修复“部署者显示为游客”。
 - IPv4 映射的 IPv6（`::ffff:10.1.2.3`）先规范化为 IPv4 再匹配。
 
@@ -354,6 +353,8 @@ def resolve_actor(ip: str, profile_id: str) -> Actor:
 ```text
 data/
   device_models.json                 # [{id, name}]；default 永远存在
+  ip_mapping.json                    # IP → 姓名；全机型共用
+  admin_users.json                   # 管理员名单；全机型共用
   nicegui_storage_secret.txt         # 旧文件，保留不动、不再使用
   .mcchecker.lock                    # 新：单实例锁（运行期）
   profiles/<pid>/
@@ -362,7 +363,7 @@ data/
     archive/<name>/<archive_name>.diff.json   # 旧派生摘要（兼容读取；新版不再写入此处）
     records/<name>/record_YYYYMMDD_HHMMSS<ext> # 修改记录原文（权威）
     config_mapping.json  favorites.json  bindings.json  edit_remarks.json
-    tools.json  schedule.json  ip_mapping.json  admin_users.json  dltool_config.json
+    tools.json  schedule.json  dltool_config.json
     update_status.json               # 新（可选）：各更新源最近一次结果
     cache/parse_tree/                # 旧缓存，只读兼容，清理任务可删除
     cache/doc_v2/<sha256>.json.gz    # 新：compact 文档缓存（可丢弃）
@@ -670,7 +671,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 | `PATCH /profiles/{pid}` | 部署者 | `{"name"}` | `{"profile"}` |
 | `DELETE /profiles/{pid}` | 部署者 | — | `{"deleted": true, "recovery": "<恢复区目录名>"}`；`default` → 400。数据目录移入恢复区（C27） |
 
-复制机型（`copy_from`）复制：`configs/`、`archive/`、`config_mapping.json`、`favorites.json`、`bindings.json`、`tools.json`、`schedule.json`（`last_run` 置空）、`dltool_config.json`；**不复制**：`records/`、`edit_remarks.json`、`ip_mapping.json`、`admin_users.json`、`update_status.json`、`cache/`（与现有 `copy_profile_data` 一致，另外不再复制 cache）。
+复制机型（`copy_from`）复制：`configs/`、`archive/`、`config_mapping.json`、`favorites.json`、`bindings.json`、`tools.json`、`schedule.json`（`last_run` 置空）、`dltool_config.json`；**不复制**：`records/`、`edit_remarks.json`、`update_status.json`、`cache/`。`ip_mapping.json` 与 `admin_users.json` 在数据根，不属于机型目录，复制和删除机型都不动它们。
 
 ### 7.3 修订号（多用户同步）
 
@@ -679,7 +680,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 - 服务端在内存为每个机型维护 5 个单调递增计数；对应写操作成功后 +1；进程启动时从 1 开始（客户端只比较是否变化）。
 - 调度任务、其他用户的写入同样递增，因此前端 10 s 轮询即可得知“别人改了什么”（§8.5）。
 - 该接口必须极轻量：**计数器本身不读磁盘**（`services/revision.py` 的状态只在内存锁下），P99 < 5 ms。
-  - 口径更正（B10.1 / M4-05 实测，2026-10-19）：旧写法「本接口不读磁盘」与 §13 与交付手册 R13「身份实时读、不加缓存」在**任何带 `{pid}` 的路由上不可能同时成立**——实测该端点每请求固定打开数据根内 3 个文件（`device_models.json` + 该机型 `ip_mapping.json` / `admin_users.json`，出处 `server/http.py:282`、`services/auth.py:110-116`）。收窄后两件事都保住：计数逻辑仍然零磁盘 I/O，身份仍然按 R13 实时读。
+  - 口径更正（B10.1 / M4-05 实测，2026-10-19）：旧写法「本接口不读磁盘」与 §13 与交付手册 R13「身份实时读、不加缓存」在**任何带 `{pid}` 的路由上不可能同时成立**——实测该端点每请求固定打开数据根内 3 个文件（`device_models.json` + 全机型共用的 `ip_mapping.json` / `admin_users.json`，出处 `server/http.py`、`services/auth.py`）。收窄后两件事都保住：计数逻辑仍然零磁盘 I/O，身份仍然按 R13 实时读。
 
 ### 7.4 文件
 
@@ -753,9 +754,9 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 
 | 方法 路径 | 权限 | 请求 → 响应 |
 |---|---|---|
-| `GET /p/{pid}/sources` | 全部 | `{"items": [{"name","url","record_url","local_updated_at","last_result": update_status\|null}]}` |
-| `POST /p/{pid}/sources` | 部署者 | `{"name","url","record_url"}` → 201；`name` 用 `validate_filename`（**允许中文**，替代旧的 ASCII 白名单，C26）；`url`/`record_url` 必须 http(s) |
-| `PATCH /p/{pid}/sources/{name}` | 部署者 | `{"name","url","record_url","migrate_files": bool}`；改名且 `migrate_files`：迁移 `configs/`、`archive/`、`records/`，并更新收藏、绑定、建议、DL 绑定中的文件名引用；迁移前目标存在任一项 → 409；迁移失败 → 回滚已移动项 |
+| `GET /p/{pid}/sources` | 全部 | `{"items": [{"name","url","record_url","keyword","local_updated_at","last_result": update_status\|null}]}` |
+| `POST /p/{pid}/sources` | 部署者 | `{"name","url","record_url","keyword?"}` → 201；`name` 用 `validate_filename`（**允许中文**，替代旧的 ASCII 白名单，C26）；`url`/`record_url` 必须 http(s)。`keyword` 可空，非空时必须是可编译的正则 |
+| `PATCH /p/{pid}/sources/{name}` | 部署者 | `{"name","url","record_url","keyword?","migrate_files": bool}`；改名且 `migrate_files`：迁移 `configs/`、`archive/`、`records/`，并更新收藏、绑定、建议、DL 绑定中的文件名引用；迁移前目标存在任一项 → 409；迁移失败 → 回滚已移动项。未带 `keyword` 时保留原关键词 |
 | `DELETE /p/{pid}/sources/{name}` | 部署者 | 只删映射（同现状），不删文件 |
 | `GET /p/{pid}/schedule` | 全部 | `{"enabled","interval_hours","last_run","next_run_at"}` |
 | `PUT /p/{pid}/schedule` | 部署者 | `{"enabled","interval_hours"}`，`1 ≤ interval_hours ≤ 2160` 的整数；保存后调度器重算 |
@@ -962,18 +963,18 @@ MC.views[kind] = function (app, route) {
   全局搜索
   审阅修改  (待审数)            ← 仅管理员可见
   DL 计算
+  外部工具
   设置
   ── 配置文件 n  [+导入] ──
   [筛选文件名]
   文件条目（格式标签 · 名称 · 更新时间/历史数/手动导入 · 待审徽标；悬停/聚焦：下载、更多）
-  ── 外部工具 ──
-  工具链接（新窗口）
 主区：标签栏 + 当前视图
   文件视图分段：结构 | 历史版本 (n) | 对比 | 修改记录 (n)
+  外部工具：紧凑链接网格，新窗口打开
   设置子导航：更新源 | 定时更新 | 人员与权限 | 变量绑定 | 工具菜单 | 机型管理
 ```
 
-旧入口迁移对照：顶栏“上传/URL 下载”→ 侧栏“+”导入；顶栏“全局搜索”→ 顶栏搜索框与命令面板；顶栏“更新设置/变量绑定/工具菜单”→ 设置；右侧工具箱“DL 快捷计算”→ 侧栏“DL 计算”；右侧工具箱工具 → 侧栏“外部工具”；“返回”按钮 → 浏览器返回；机型菜单 → 顶栏机型 ▾ + 设置 · 机型管理。
+旧入口迁移对照：顶栏“上传/URL 下载”→ 侧栏“+”导入；顶栏“全局搜索”→ 顶栏搜索框与命令面板；顶栏“更新设置/变量绑定/工具菜单”→ 设置；右侧工具箱“DL 快捷计算”→ 侧栏“DL 计算”；右侧工具箱工具 → 侧栏“外部工具”页面；“返回”按钮 → 浏览器返回；机型菜单 → 顶栏机型 ▾ + 设置 · 机型管理。
 
 ### 9.3 布局与尺寸
 
@@ -1301,9 +1302,9 @@ class Scheduler(threading.Thread):
 ### 14.2 启动 / 停止
 ```bash
 python run.py                      # 或 python main.py（兼容）
-python run.py --port 50002 --data-dir D:\MCChecker\data
+python run.py --port 50003 --data-dir D:\MCChecker\data
 ```
-- 成功标志：日志 `MCChecker 2.0.0 listening on http://0.0.0.0:50002 (data=…, profiles=2, scheduler=on)`。
+- 成功标志：日志 `MCChecker 2.0.0 listening on http://0.0.0.0:50003 (data=…, profiles=2, scheduler=on)`。不传 `--port` 时端口同样是 `DEFAULT_PORT`。
 - 停止：前台 Ctrl+C（触发 §10.4 的有序停止）；Windows 服务/计划任务方式见手册。
 
 ### 14.3 离线发布包（`scripts/make_release.py`，标准库实现）
@@ -1436,7 +1437,7 @@ python run.py --port 50002 --data-dir D:\MCChecker\data
 | UC-33 | 定时 | 设为 2 天保存 | `interval_hours=48`；下次执行时间正确；页面显示“2 天” |
 | UC-34 | IP 与管理员 | 登记当前 IP 并加为管理员 | 刷新身份后显示管理员，侧栏出现“审阅修改” |
 | UC-35 | 变量绑定 | 新增 2 变量的组 | 对比中这些变量带紫色组名；少于 2 个时字段报错 |
-| UC-36 | 工具菜单 | 新增 `ftp://x` → 报错；改 http 保存 | 侧栏外部工具出现并新窗口打开 |
+| UC-36 | 工具菜单 | 新增 `ftp://x` → 报错；改 http 保存 | 「外部工具」页出现该链接并新窗口打开 |
 | UC-37 | DL 正向/反向 | PP 输入 `10 20 200`；RP 反向输入 `60` | 越界行标注；多解给出选择；CSV 使用选择 |
 | UC-38 | DL 草稿与保存 | 访客修改系数试算；部署者保存；两人同时保存 | 访客不能保存；后保存者收到 REVISION_CONFLICT |
 | UC-39 | DL 提取 | 从配置刷新系数，其中一个字段缺失 | 预览标“字段缺失”；该系数保持原值 |

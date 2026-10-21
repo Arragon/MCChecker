@@ -48,7 +48,11 @@ def create_source(
     authz.authorize(ctx, "settings_write")
     payload = json_body(body)
     item = updates.create_source(
-        params["pid"], payload.get("name"), payload.get("url"), payload.get("record_url")
+        params["pid"],
+        payload.get("name"),
+        payload.get("url"),
+        payload.get("record_url"),
+        payload.get("keyword"),
     )
     return Response(status=201, payload={"item": item})
 
@@ -71,6 +75,7 @@ def rename_source(
         # 缺省按 True：与 `storage.update_config_mapping` 同默认，改名把本地文件与
         # 历史留在旧名下是更难发现的数据孤儿。
         bool(payload.get("migrate_files", True)),
+        payload.get("keyword") if "keyword" in payload else None,
     )
     return Response(payload={"item": item})
 

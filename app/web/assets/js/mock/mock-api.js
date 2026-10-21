@@ -31,9 +31,22 @@
   var identityKey = util.storageGet("mc.demo.identity", "deployer-admin");
   if (!IDENTITIES[identityKey]) identityKey = "deployer-admin";
 
+  /* 人员与管理员全机型共用一份。各 profile 上的 people/admins 指向同一数组，写的时候整表换上再挂回去。 */
+  var sharedPeople = JSON.parse(JSON.stringify(S.people || []));
+  var sharedAdmins = JSON.parse(JSON.stringify((S.profiles.default && S.profiles.default.admins) || []));
+  function publishPeople(people, admins) {
+    if (people) sharedPeople = people;
+    if (admins) sharedAdmins = admins;
+    Object.keys(S.profiles).forEach(function (pid) {
+      S.profiles[pid].people = sharedPeople;
+      S.profiles[pid].admins = sharedAdmins;
+    });
+  }
+  function bumpPeopleSettings() {
+    Object.keys(rev).forEach(function (pid) { rev[pid].settings++; });
+  }
+  publishPeople(sharedPeople, sharedAdmins);
   Object.keys(S.profiles).forEach(function (pid) {
-    var P = S.profiles[pid];
-    P.people = P.people || JSON.parse(JSON.stringify(S.people));
     rev[pid] = { files: 1, favorites: 1, remarks: 1, settings: 1, tasks: 1 };
   });
 
@@ -599,6 +612,7 @@
     S.profiles[mid] = src
       ? Object.assign(clone(Object.assign({}, src, { files: {} })), { files: copiedFiles, remarks: [], admins: [], people: [], sourceStatus: {}, schedule: Object.assign({}, src.schedule || {}, { last_run: null }) })
       : { files: {}, mapping: [], sourceStatus: {}, favorites: [], remarks: [], bindings: [], tools: [], schedule: { enabled: false, interval_hours: 24, last_run: null }, admins: [], people: [], dl: null };
+    publishPeople(sharedPeople, sharedAdmins);
     rev[mid] = { files: 1, favorites: 1, remarks: 1, settings: 1, tasks: 1 };
     S.models.push({ id: mid, name: name });
     bump("default", "settings");
@@ -1043,13 +1057,16 @@
     var name = String(req.body.name || "").trim();
     var url = String(req.body.url || "").trim();
     var rec = String(req.body.record_url || "").trim();
+    var keyword = String(req.body.keyword || "").trim();
     if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不能为空且不能包含 \\ / : * ? \" < > |", { field: "name" });
     if (!url) return fail(400, "INVALID_INPUT", "下载链接不能为空", { field: "url" });
     if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "下载链接需以 http:// 或 https:// 开头", { field: "url" });
     if (rec && !/^https?:\/\//i.test(rec)) return fail(400, "INVALID_INPUT", "修改记录链接需以 http:// 或 https:// 开头", { field: "record_url" });
     // 同名已存在：与后端同用 409 FILE_EXISTS（§7.1 把 INVALID_INPUT 定为 400）。
     if (P.mapping.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名更新源", { field: "name" });
-    P.mapping.push({ name: name, url: url, record_url: rec });
+    var item = { name: name, url: url, record_url: rec };
+    if (keyword) item.keyword = keyword;
+    P.mapping.push(item);
     bump(a.pid, "settings");
     return ok({ item: P.mapping[P.mapping.length - 1] }, 201);
   });
@@ -1063,6 +1080,7 @@
     var name = String(req.body.name || "").trim();
     var url = String(req.body.url || "").trim();
     var rec = String(req.body.record_url || "").trim();
+    var keyword = req.body.keyword === undefined || req.body.keyword === null ? null : String(req.body.keyword).trim();
     if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不合法", { field: "name" });
     if (!url) return fail(400, "INVALID_INPUT", "下载链接不能为空", { field: "url" });
     if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "下载链接需以 http:// 或 https:// 开头", { field: "url" });
@@ -1084,6 +1102,10 @@
     m.name = name;
     m.url = url;
     m.record_url = rec;
+    if (keyword !== null) {
+      if (keyword) m.keyword = keyword;
+      else delete m.keyword;
+    }
     // 改名不产生新的文件内容，只改设置：与后端一致，只递增 settings（R5）。
     bump(a.pid, "settings");
     return ok({ item: m });
@@ -1355,8 +1377,8 @@
     var item = { ip: ip, name: name, updated_at: util.nowString() };
     if (found >= 0) rows[found] = item;
     else rows.push(item);
-    P.people = rows;
-    bump(a.pid, "settings");
+    publishPeople(rows, null);
+    bumpPeopleSettings();
     return ok({ item: clone(item) });
   });
 
@@ -1366,9 +1388,12 @@
     var target = normalizeIp(a.ip);
     if (!target) return fail(400, "INVALID_INPUT", BAD_IP_MESSAGE, { field: "ip" });
     var before = P.people.length;
-    P.people = P.people.filter(function (x) { return normalizeIp(x.ip) !== target; });
-    var removed = P.people.length !== before;
-    if (removed) bump(a.pid, "settings"); // 删了 0 条不递增（决策 16，与 DELETE /sources 同形）
+    var keptPeople = P.people.filter(function (x) { return normalizeIp(x.ip) !== target; });
+    var removed = keptPeople.length !== before;
+    if (removed) {
+      publishPeople(keptPeople, null);
+      bumpPeopleSettings(); // 删了 0 条不递增（决策 16，与 DELETE /sources 同形）
+    }
     return ok({ removed: removed });
   });
 
@@ -1391,8 +1416,8 @@
       return fail(409, "FILE_EXISTS", "该管理员已存在", { name: name, field: "name" });
     }
     var item = { name: name, updated_at: util.nowString() };
-    P.admins.push(item);
-    bump(a.pid, "settings");
+    publishPeople(null, P.admins.concat([item]));
+    bumpPeopleSettings();
     return ok({ item: clone(item) }, 201);
   });
 
@@ -1407,9 +1432,12 @@
     // 不是本文件要修的东西。别把它「统一」成创建端那一档。
     if (!validPersonName(name)) return fail(400, "INVALID_INPUT", BAD_NAME_MESSAGE, { field: "name" });
     var before = P.admins.length;
-    P.admins = P.admins.filter(function (x) { return String(x.name || "").trim() !== name; });
-    var removed = P.admins.length !== before;
-    if (removed) bump(a.pid, "settings"); // 同上：删了 0 条不 bump
+    var keptAdmins = P.admins.filter(function (x) { return String(x.name || "").trim() !== name; });
+    var removed = keptAdmins.length !== before;
+    if (removed) {
+      publishPeople(null, keptAdmins);
+      bumpPeopleSettings(); // 同上：删了 0 条不 bump
+    }
     return ok({ removed: removed });
   });
 

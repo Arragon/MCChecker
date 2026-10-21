@@ -108,12 +108,15 @@ def _warn_untrusted_xff_once() -> None:
 
 
 def resolve_actor(ip: str, profile_id: str) -> Actor:
-    """按机型解析身份（§4.1）：同一 IP 在不同机型的姓名/管理员身份可以不同。"""
+    """解析身份（§4.1）。IP 对应表与管理员名单全机型共用，不随机型变化。
+
+    `profile_id` 仍由调用方传入（路由都带机型），身份解析不再读机型目录。
+    """
+    del profile_id
     deployer = ip in deployer_ips()
-    with storage.use_profile(profile_id):
-        registered_name = storage.resolve_person_by_ip(ip)
-        name = registered_name or ip
-        admin = storage.is_admin_user(name)
+    registered_name = storage.resolve_person_by_ip(ip)
+    name = registered_name or ip
+    admin = storage.is_admin_user(name)
     return Actor(
         ip=ip,
         name=name,

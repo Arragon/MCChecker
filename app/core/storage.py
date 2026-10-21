@@ -28,7 +28,7 @@ from typing import Any, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tu
 
 from . import fsutil
 from .errors import FILE_EXISTS, NOT_FOUND, STORAGE_FAILURE, AppError, CorruptDataError
-from .locks import profile_lock, write_gate
+from .locks import people_lock, profile_lock, write_gate
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +278,17 @@ def profile_write(profile_id: Optional[str] = None) -> Iterator[None]:
 
 
 @contextmanager
+def people_write() -> Iterator[None]:
+    """全机型共用的人员配置锁（`data/ip_mapping.json`、`data/admin_users.json`）。
+
+    与机型锁分开：两个机型同时改人员表必须串行，否则后写的整份覆盖会丢掉先写的那一行。
+    """
+    with write_gate.write():
+        with people_lock:
+            yield
+
+
+@contextmanager
 def _reserve_file(directory: str, candidates: Iterable[str]) -> Iterator[str]:
     """按 §5.3 的顺序用独占创建（`O_CREAT | O_EXCL`）拿到第一个未被占用的名字。
 
@@ -316,6 +327,7 @@ LEGACY_MAPPING_FILE = MAPPING_FILE
 def ensure_profile_layout(migrate_legacy: bool = True) -> None:
     with _profile_write(DEFAULT_PROFILE):
         _ensure_profile_layout_locked(migrate_legacy)
+    _ensure_shared_people()
 
 
 def _ensure_profile_layout_locked(migrate_legacy: bool) -> None:
@@ -335,8 +347,6 @@ _LEGACY_LAYOUT_NAMES = (
     "bindings.json",
     "tools.json",
     "schedule.json",
-    "ip_mapping.json",
-    "admin_users.json",
     "edit_remarks.json",
     "dltool_config.json",
     "configs",
@@ -1331,29 +1341,119 @@ def update_favorite_note(variable_path: str, source_file: str, note: str) -> boo
         return False
 
 
-# ===================== IP 对应表 =====================
+# ===================== IP 对应表 / 管理员名单（全机型共用） =====================
+#
+# 这两份不是机型数据。身份要在所有机型上一致，所以文件放在数据根：
+# `data/ip_mapping.json`、`data/admin_users.json`。`profile_id` 参数保留给旧调用点，不参与路径。
+# 各机型目录里若还留着旧副本，只在全局文件还不存在时合并一次，之后以数据根为准，不删旧副本。
 
 IP_MAPPING_FILE = os.path.join(DATA_DIR, "ip_mapping.json")
+ADMIN_USERS_FILE = os.path.join(DATA_DIR, "admin_users.json")
+#: 与上面两份是同一位置。保留旧名字，是为了数据根重定向时这两条常量仍被改写。
 LEGACY_IP_MAPPING_FILE = IP_MAPPING_FILE
+LEGACY_ADMIN_USERS_FILE = ADMIN_USERS_FILE
+_SHARED_PEOPLE_FILES = (
+    ("ip_mapping.json", "ip"),
+    ("admin_users.json", "name"),
+)
+
+
+def _shared_people_path(filename: str) -> str:
+    return os.path.join(DATA_DIR, filename)
 
 
 def get_ip_mapping_file(profile_id: Optional[str] = None) -> str:
-    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
-    return _get_profile_json_file("ip_mapping.json", pid)
+    del profile_id
+    return _shared_people_path("ip_mapping.json")
+
+
+def get_admin_users_file(profile_id: Optional[str] = None) -> str:
+    del profile_id
+    return _shared_people_path("admin_users.json")
+
+
+def _profile_ids_for_people_merge() -> List[str]:
+    if not os.path.isdir(PROFILES_DIR):
+        return []
+    try:
+        names = [name for name in os.listdir(PROFILES_DIR) if os.path.isdir(os.path.join(PROFILES_DIR, name))]
+    except OSError:
+        return []
+    if DEFAULT_PROFILE in names:
+        names.remove(DEFAULT_PROFILE)
+        return [DEFAULT_PROFILE] + sorted(names)
+    return sorted(names)
+
+
+def _merge_people_rows(merged: List[Any], index: Dict[str, int], rows: Any, key: str) -> None:
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if not isinstance(row, dict):
+            merged.append(row)
+            continue
+        ident = str(row.get(key) or "").strip()
+        if not ident:
+            merged.append(row)
+            continue
+        prev = index.get(ident)
+        if prev is None:
+            index[ident] = len(merged)
+            merged.append(row)
+            continue
+        old_at = str(merged[prev].get("updated_at") or "")
+        new_at = str(row.get("updated_at") or "")
+        if new_at > old_at:
+            merged[prev] = row
+
+
+def _promote_shared_people_file(filename: str, key: str) -> None:
+    """全局文件还不存在时，把各机型目录里的旧副本合并上来。调用方已持人员锁。"""
+    target = _shared_people_path(filename)
+    if os.path.exists(target):
+        return
+    merged: List[Any] = []
+    index: Dict[str, int] = {}
+    found = False
+    for pid in _profile_ids_for_people_merge():
+        path = os.path.join(PROFILES_DIR, pid, filename)
+        if not os.path.isfile(path):
+            continue
+        found = True
+        try:
+            rows = _load_json(path, [])
+        except CorruptDataError:
+            logger.error("人员表损坏，跳过合并 %s", path)
+            continue
+        _merge_people_rows(merged, index, rows, key)
+    if not found:
+        return
+    _save_json(target, merged)
+    logger.info("人员配置已合并为全机型共用：%s（%d 条）", filename, len(merged))
+
+
+def _ensure_shared_people() -> None:
+    """把仍散落在机型目录里的人员表收成数据根上的一份。已有全局文件则不动。"""
+    pending = [
+        (filename, key)
+        for filename, key in _SHARED_PEOPLE_FILES
+        if not os.path.exists(_shared_people_path(filename))
+    ]
+    if not pending:
+        return
+    with people_write():
+        for filename, key in pending:
+            _promote_shared_people_file(filename, key)
 
 
 def load_ip_mapping() -> List[Dict[str, str]]:
-    profile = get_active_profile()
-    path = _get_profile_json_file("ip_mapping.json", profile)
-    if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_IP_MAPPING_FILE):
-        return _load_json(LEGACY_IP_MAPPING_FILE, [])
-    return _load_json(path, [])
+    _ensure_shared_people()
+    return _load_json(get_ip_mapping_file(), [])
 
 
 def save_ip_mapping(mapping: List[Dict[str, str]]) -> None:
-    profile = get_active_profile()
-    with _profile_write(profile):
-        _save_json(_get_profile_json_file("ip_mapping.json", profile), mapping)
+    with people_write():
+        _save_json(get_ip_mapping_file(), mapping)
 
 
 def upsert_ip_mapping(ip: str, name: str) -> bool:
@@ -1362,7 +1462,7 @@ def upsert_ip_mapping(ip: str, name: str) -> bool:
     if not ip_text or not name_text:
         raise ValueError("IP 和姓名不能为空")
 
-    with _profile_write():
+    with people_write():
         mapping = load_ip_mapping()
         for item in mapping:
             if (item.get("ip") or "").strip() == ip_text:
@@ -1384,7 +1484,7 @@ def upsert_ip_mapping(ip: str, name: str) -> bool:
 
 def remove_ip_mapping(ip: str) -> bool:
     ip_text = str(ip or "").strip()
-    with _profile_write():
+    with people_write():
         mapping = load_ip_mapping()
         new_mapping = [item for item in mapping if (item.get("ip") or "").strip() != ip_text]
         save_ip_mapping(new_mapping)
@@ -1401,29 +1501,14 @@ def resolve_person_by_ip(ip: str) -> str:
     return ""
 
 
-# ===================== 管理员列表 =====================
-
-ADMIN_USERS_FILE = os.path.join(DATA_DIR, "admin_users.json")
-LEGACY_ADMIN_USERS_FILE = ADMIN_USERS_FILE
-
-
-def get_admin_users_file(profile_id: Optional[str] = None) -> str:
-    pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
-    return _get_profile_json_file("admin_users.json", pid)
-
-
 def load_admin_users() -> List[Dict[str, str]]:
-    profile = get_active_profile()
-    path = _get_profile_json_file("admin_users.json", profile)
-    if not os.path.exists(path) and profile == DEFAULT_PROFILE and os.path.exists(LEGACY_ADMIN_USERS_FILE):
-        return _load_json(LEGACY_ADMIN_USERS_FILE, [])
-    return _load_json(path, [])
+    _ensure_shared_people()
+    return _load_json(get_admin_users_file(), [])
 
 
 def save_admin_users(users: List[Dict[str, str]]) -> None:
-    profile = get_active_profile()
-    with _profile_write(profile):
-        _save_json(_get_profile_json_file("admin_users.json", profile), users)
+    with people_write():
+        _save_json(get_admin_users_file(), users)
 
 
 def upsert_admin_user(name: str) -> bool:
@@ -1431,7 +1516,7 @@ def upsert_admin_user(name: str) -> bool:
     if not name_text:
         raise ValueError("管理员姓名不能为空")
 
-    with _profile_write():
+    with people_write():
         users = load_admin_users()
         for item in users:
             if (item.get("name") or "").strip() == name_text:
@@ -1451,7 +1536,7 @@ def upsert_admin_user(name: str) -> bool:
 
 def remove_admin_user(name: str) -> bool:
     name_text = str(name or "").strip()
-    with _profile_write():
+    with people_write():
         users = load_admin_users()
         new_users = [item for item in users if (item.get("name") or "").strip() != name_text]
         save_admin_users(new_users)
@@ -1942,8 +2027,7 @@ def save_update_status(status: Dict[str, Any]) -> None:
 
 #: 复制机型时带上的目录（规范 §7.2、C27）。
 #: `cache/` 可重建；`records/`、`edit_remarks.json`、`review_idempotency.json`、
-#: `ip_mapping.json`、`admin_users.json`、`update_status.json` 属于运行期数据，
-#: 不随机型复制。
+#: `update_status.json` 不随机型复制。人员表在数据根，不属于机型目录。
 COPY_PROFILE_DIRS = ("configs", "archive")
 
 #: 复制机型时带上的 JSON（规范 §7.2）。

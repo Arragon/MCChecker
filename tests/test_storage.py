@@ -330,6 +330,43 @@ class TestIdentityTables:
         assert ok is True
         assert [item["name"] for item in storage.load_admin_users()] == ["张三"]
 
+    def test_legacy_per_profile_tables_merge_into_one_shared_file(self):
+        import json
+        import os
+
+        from app.core import device_models, storage
+
+        first = device_models.add_model("甲")
+        second = device_models.add_model("乙")
+        for pid in (first, second):
+            os.makedirs(storage.get_profile_data_dir(pid), exist_ok=True)
+        with open(os.path.join(storage.get_profile_data_dir(first), "ip_mapping.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                [{"ip": "10.0.0.1", "name": "旧", "updated_at": "2026-01-01 00:00:00"}],
+                handle,
+            )
+        with open(os.path.join(storage.get_profile_data_dir(second), "ip_mapping.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                [
+                    {"ip": "10.0.0.1", "name": "新", "updated_at": "2026-02-01 00:00:00"},
+                    {"ip": "10.0.0.2", "name": "乙", "updated_at": "2026-02-01 00:00:00"},
+                ],
+                handle,
+            )
+        with open(os.path.join(storage.get_profile_data_dir(first), "admin_users.json"), "w", encoding="utf-8") as handle:
+            json.dump([{"name": "旧", "updated_at": "2026-01-01 00:00:00"}], handle)
+
+        by_ip = {row["ip"]: row["name"] for row in storage.load_ip_mapping()}
+        assert by_ip == {"10.0.0.1": "新", "10.0.0.2": "乙"}
+        assert [row["name"] for row in storage.load_admin_users()] == ["旧"]
+        assert os.path.isfile(os.path.join(storage.DATA_DIR, "ip_mapping.json"))
+        assert os.path.isfile(os.path.join(storage.DATA_DIR, "admin_users.json"))
+
+        storage.set_active_profile(second)
+        storage.upsert_ip_mapping("10.0.0.3", "丙")
+        storage.set_active_profile(first)
+        assert storage.resolve_person_by_ip("10.0.0.3") == "丙"
+
 
 class TestEditRemarks:
     def test_add_group_and_apply_review_results(self):

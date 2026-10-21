@@ -14,7 +14,7 @@
    而**删除端保持宽松**好让 v1 存量行仍有出路）；重名管理员 → 409 `FILE_EXISTS`
    （**不是** 400，§7.1 的状态码表）。三类的字节与计数都不变。
    mock 一侧的同一判据靠**执行** `mock-api.js` 核对，见本文件末尾的 `TestMockPeopleContract`。
-3. **改 IP = 同一次机型锁里先删后写**（§7.9）：`PUT /ip-mapping/10.0.0.1` + body `10.0.0.2`
+3. **改 IP = 同一次人员锁里先删后写**（§7.9）：`PUT /ip-mapping/10.0.0.1` + body `10.0.0.2`
    ⇒ 旧行消失、新行存在、总数不变。`TestNoLostUpdate` 用「竞争方必须是另一个线程」的既定
    写法（`docs/know-how.md` 第 2 / 4 节）证明它不是一次「锁外读 + 锁内写」。
 4. **身份实时生效**（§4.1 / 不许加缓存）：UC-34 端到端——登记当前访问者的 IP 并加为管理员
@@ -911,20 +911,23 @@ class TestAdmins:
         assert payload["error"]["detail"]["field"] == "name"
         assert _state(seeded) == before
 
-    def test_the_two_lists_are_per_profile(self, pid):
-        """机型是数据空间（§5.1 / §9.8.10）：在 A 上加的管理员不该让 B 里同名的人也变成管理员。"""
+    def test_the_two_lists_are_shared_by_every_profile(self, pid):
+        """人员表不是机型数据：在 A 上加的管理员，换到 B 仍是同一个管理员。"""
         other = device_models.add_model("另一个机型")
-        for target in (pid, other):
-            _seed(target, mapping=[{"ip": XFF_MEMBER, "name": MEMBER_NAME, "updated_at": "2026-10-17 09:00:00"}])
+        _seed(pid, mapping=[{"ip": XFF_MEMBER, "name": MEMBER_NAME, "updated_at": "2026-10-17 09:00:00"}])
         with make_server() as server:
-            as_role(server, "deployer").json("POST", _url(pid, "/admins"), {"name": MEMBER_NAME})
-            for target, expected in ((pid, True), (other, False)):
+            status, _, added = as_role(server, "deployer").json(
+                "POST", _url(pid, "/admins"), {"name": MEMBER_NAME}
+            )
+            assert status == 201, added
+            for target in (pid, other):
                 _, _, session = as_role(server, "member").json(
                     "GET", "/api/v1/session?profile=%s" % _seg(target)
                 )
-                assert session["identity"]["is_admin"] is expected, target
+                assert session["identity"]["is_admin"] is True, target
+                assert session["identity"]["name"] == MEMBER_NAME, target
             _, _, admins_elsewhere = as_role(server, "deployer").json("GET", _url(other, "/admins"))
-            assert admins_elsewhere == {"items": []}
+            assert [row["name"] for row in admins_elsewhere["items"]] == [MEMBER_NAME]
 
 
 # ---------------------------------------------------------------------------
@@ -1046,13 +1049,12 @@ class TestNoLostUpdate:
         racer: List[threading.Thread] = []
 
         def other() -> None:
-            with storage.profile_write(seeded):
-                with storage.use_profile(seeded):
-                    fresh = real_load()
-                    fresh.append(
-                        {"ip": "10.6.6.6", "name": "并发写的人", "updated_at": "2026-10-18 11:00:00"}
-                    )
-                    storage.save_ip_mapping(fresh)
+            with storage.people_write():
+                fresh = real_load()
+                fresh.append(
+                    {"ip": "10.6.6.6", "name": "并发写的人", "updated_at": "2026-10-18 11:00:00"}
+                )
+                storage.save_ip_mapping(fresh)
 
         def load_then_race():
             rows = real_load()
@@ -1069,7 +1071,7 @@ class TestNoLostUpdate:
         finally:
             for thread in racer:
                 thread.join(10)
-                assert not thread.is_alive(), "竞争线程还扣在锁上：机型锁没释放"
+                assert not thread.is_alive(), "竞争线程还扣在锁上：人员锁没释放"
 
         ips = [row["ip"] for row in _rows(seeded)]
         assert "10.0.0.1" not in ips, "改 IP 的「删旧」没生效"
@@ -1080,6 +1082,21 @@ class TestNoLostUpdate:
 # ---------------------------------------------------------------------------
 # 9. 接线与契约
 # ---------------------------------------------------------------------------
+
+
+class TestSharedAcrossProfiles:
+    def test_a_write_on_one_profile_is_the_same_table_everywhere(self, pid):
+        other = device_models.add_model("另一机型")
+        before = revision.snapshot(other)["parts"]["settings"]
+        people.put_ip_mapping(pid, "10.4.4.4", {"ip": "10.4.4.4", "name": "共用"})
+        people.add_admin(pid, "共用")
+        assert [row["name"] for row in people.list_ip_mapping(other)["items"]] == ["共用"]
+        assert [row["name"] for row in people.list_admins(other)["items"]] == ["共用"]
+        assert revision.snapshot(other)["parts"]["settings"] == before + 2
+        assert os.path.isfile(os.path.join(storage.DATA_DIR, "ip_mapping.json"))
+        assert os.path.isfile(os.path.join(storage.DATA_DIR, "admin_users.json"))
+        assert not os.path.exists(os.path.join(storage.get_profile_data_dir(pid), "ip_mapping.json"))
+        assert not os.path.exists(os.path.join(storage.get_profile_data_dir(other), "admin_users.json"))
 
 
 class TestWiring:

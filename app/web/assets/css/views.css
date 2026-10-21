@@ -1097,3 +1097,118 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.tools-filter {
+  width: min(280px, 42vw);
+  flex: none;
+}
+
+.tools-body {
+  padding: 12px 16px 16px;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.tool-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 148px;
+  padding: var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
+}
+
+.tool-tile-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.tool-open {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  color: var(--c-text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh);
+  text-align: left;
+  text-decoration: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.tool-open:hover {
+  color: var(--c-primary-text);
+  text-decoration: none;
+}
+
+.tool-open .svg-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--c-primary);
+}
+
+.tool-name {
+  overflow-wrap: anywhere;
+}
+
+.tool-desc {
+  margin: 0;
+  min-height: 2.8em;
+  color: var(--c-text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-url {
+  margin: 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--c-border);
+  color: var(--c-primary-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-url.is-invalid {
+  color: var(--c-danger-text);
+}
+
+a.tool-url:hover {
+  text-decoration: underline;
+}
+
+.tool-ops {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+@media (max-width: 720px) {
+  .view-header:has(.tools-filter) {
+    flex-wrap: wrap;
+  }
+
+  .tools-filter {
+    width: 100%;
+  }
+}

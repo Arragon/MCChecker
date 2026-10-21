@@ -38,10 +38,12 @@ import hashlib
 import json
 import logging
 import os
+import re
+import urllib.parse
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..core import downloader, fsutil, parser, storage
+from ..core import bundle, downloader, fsutil, parser, storage
 from ..core.errors import (
     FILE_EXISTS,
     INVALID_INPUT,
@@ -113,43 +115,24 @@ def update_source(pid: str, name: str, actor: str) -> Dict[str, Any]:
             status = "too_large" if exc.code == TOO_LARGE else "download_failed"
             return _finish(_result(target, status, exc.message), actor)
 
-        # 第 3 步：能不能解析成 XML/JSON。解析器的体积/深度上限同样算「内容不合格」，
-        # 但它的原因对用户更有用，所以那种情况保留解析器自己的消息。
+        # 第 3 步起：单个 XML/JSON 仍按本条文件名提交；压缩包先解开，再按正则关键词切削文件名。
+        keyword = str(entry.get("keyword") or "").strip()
         try:
-            document = parser.to_compact(content, target)
+            pieces = bundle.expand_update_payload(
+                content,
+                keyword=keyword,
+                source_name=target,
+                remote_name=_remote_basename(url),
+                max_bytes=_policy().max_bytes,
+            )
         except AppError as exc:
-            reason = exc.message if exc.code == TOO_LARGE else INVALID_CONTENT_REASON
-            return _finish(_result(target, "rejected", reason), actor)
+            status = "too_large" if exc.code == TOO_LARGE else "rejected"
+            return _finish(_result(target, status, exc.message), actor)
 
-        # 第 4 步：根节点指纹。当前文件不存在（或本身解析不了）时没有可比对象，不据此拒绝。
-        current = _current_bytes(target)
-        if current is not None:
-            old_fp = _root_fingerprint(current, target)
-            new_fp = _fingerprint(document, content)
-            if old_fp is not None and new_fp is not None and old_fp[0] != new_fp[0]:
-                reason = ROOT_CHANGED_REASON % (old_fp[1], new_fp[1])
-                return _finish(_result(target, "rejected", reason), actor)
-
-        # 第 5、6 步：锁内确认「刚才比过的那份当前内容」没被并发换掉，然后交给 storage
-        # 决定写不写、归不归档（R5：`unchanged` 由它判定，本模块不再自己比 sha）。
-        with storage.profile_write(pid):
-            if _sha(current) != _sha(_current_bytes(target)):
-                result = _result(target, "rejected", RACE_REASON)
-            else:
-                saved = storage.save_config_file_detailed(target, content)
-                if saved.unchanged:
-                    result = _result(target, "unchanged", UNCHANGED_REASON)
-                else:
-                    reason = (
-                        "已归档旧版本 %s" % saved.archived
-                        if saved.archived
-                        else "已写入本地文件（此前没有本地版本）"
-                    )
-                    result = _result(target, "success", reason, archived=saved.archived)
-
-        if result["status"] == "success":
+        outcomes = [_commit_config(pid, name, body) for name, body in pieces]
+        if any(item["status"] == "success" for item in outcomes):
             revision.bump(pid, PART)
-        return _finish(result, actor)
+        return _publish_outcomes(target, outcomes, actor)
 
 
 def update_all(pid: str, actor: str, task: Optional[Any] = None) -> Dict[str, Any]:
@@ -269,6 +252,7 @@ def list_sources(pid: str) -> List[Dict[str, Any]]:
                     "name": name,
                     "url": str(entry.get("url") or ""),
                     "record_url": str(entry.get("record_url") or ""),
+                    "keyword": str(entry.get("keyword") or ""),
                     "local_updated_at": _local_updated_at(name),
                     "last_result": status.get(name),
                 }
@@ -276,11 +260,13 @@ def list_sources(pid: str) -> List[Dict[str, Any]]:
         return items
 
 
-def create_source(pid: str, name: Any, url: Any, record_url: Any) -> Dict[str, Any]:
+def create_source(
+    pid: str, name: Any, url: Any, record_url: Any, keyword: Any = None
+) -> Dict[str, Any]:
     """新增更新源（部署者）。`name` 走 `fsutil.validate_filename`（允许中文，C26）。
 
     不走 `storage.add_config_mapping`：那个函数对同名项是「覆盖 url」，而 §7.9 要的是 409。
-    这里在一次机型锁里读-改-写整份映射，字段仍是 `name/url/record_url`。
+    `keyword` 可空；非空时才写入映射，避免旧数据多一个空字段。
     """
     clean_name = _validated_name(name)
     item = {
@@ -288,6 +274,9 @@ def create_source(pid: str, name: Any, url: Any, record_url: Any) -> Dict[str, A
         "url": _validated_url(url, "url"),
         "record_url": _validated_url(record_url, "record_url", required=False),
     }
+    clean_keyword = _validated_keyword(keyword)
+    if clean_keyword:
+        item["keyword"] = clean_keyword
     with storage.use_profile(pid), storage.profile_write(pid):
         mapping = storage.load_config_mapping()
         if _entry_by_name(mapping, clean_name) is not None:
@@ -306,6 +295,7 @@ def rename_source(
     url: Any,
     record_url: Any,
     migrate_files: bool = True,
+    keyword: Any = None,
 ) -> Dict[str, Any]:
     """改 url / 改 `record_url` / 改名（部署者）。
 
@@ -320,6 +310,8 @@ def rename_source(
     target = _validated_name(name)
     clean_url = _validated_url(url, "url")
     clean_record = _validated_url(record_url, "record_url", required=False)
+    # None：请求没带 keyword，保留原值。空串：清掉关键词。
+    clean_keyword = None if keyword is None else _validated_keyword(keyword)
     # 改名是一次跨多份数据的读-改-写（映射 + 五份引用 + 三处产物 + `update_status.json` 的键），
     # 整段扣在同一把机型锁里：`update_config_mapping` 内部另取的 `_profile_write()` 解析到
     # 同一把 per-pid RLock，可重入、无死锁（与 `create_source` 同形）。
@@ -348,6 +340,15 @@ def rename_source(
             # 「用户文件名写错了」，bug 就没痕迹了。
             logger.warning("更新源改名在净化步被拒（%s -> %s）：%s", original, target, exc)
             raise AppError(INVALID_INPUT, str(exc), field="name") from exc
+        if clean_keyword is not None:
+            mapping = storage.load_config_mapping()
+            found = _entry_by_name(mapping, target)
+            if found is not None:
+                if clean_keyword:
+                    found["keyword"] = clean_keyword
+                else:
+                    found.pop("keyword", None)
+                storage.save_config_mapping(mapping)
         if target != original:
             # 状态键按**映射名**走，与 `migrate_files` 无关：不搬的话改名后 `last_result` 恒 null。
             _retarget_update_status(original, target)
@@ -379,6 +380,83 @@ def delete_source(pid: str, name: Any) -> bool:
 # ---------------------------------------------------------------------------
 # 内部实现
 # ---------------------------------------------------------------------------
+
+
+def _commit_config(pid: str, name: str, content: bytes) -> Dict[str, Any]:
+    """校验并提交一份配置。不写状态文件、不递增修订号，由调用方汇总。"""
+    try:
+        document = parser.to_compact(content, name)
+    except AppError as exc:
+        reason = exc.message if exc.code == TOO_LARGE else INVALID_CONTENT_REASON
+        return _result(name, "rejected", reason)
+
+    current = _current_bytes(name)
+    if current is not None:
+        old_fp = _root_fingerprint(current, name)
+        new_fp = _fingerprint(document, content)
+        if old_fp is not None and new_fp is not None and old_fp[0] != new_fp[0]:
+            return _result(name, "rejected", ROOT_CHANGED_REASON % (old_fp[1], new_fp[1]))
+
+    with storage.profile_write(pid):
+        if _sha(current) != _sha(_current_bytes(name)):
+            return _result(name, "rejected", RACE_REASON)
+        saved = storage.save_config_file_detailed(name, content)
+        if saved.unchanged:
+            return _result(name, "unchanged", UNCHANGED_REASON)
+        reason = (
+            "已归档旧版本 %s" % saved.archived
+            if saved.archived
+            else "已写入本地文件（此前没有本地版本）"
+        )
+        return _result(name, "success", reason, archived=saved.archived)
+
+
+def _publish_outcomes(
+    source_name: str, outcomes: List[Dict[str, Any]], actor: str
+) -> Dict[str, Any]:
+    """多文件时，每份结果记在自己的文件名下；更新源这一行记汇总。"""
+    summary = _summarize(source_name, outcomes)
+    for outcome in outcomes:
+        if outcome["name"] != summary["name"]:
+            _finish(outcome, actor)
+    return _finish(summary, actor)
+
+
+def _summarize(source_name: str, outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if len(outcomes) == 1 and outcomes[0]["name"] == source_name:
+        return outcomes[0]
+    statuses = [str(item.get("status") or "") for item in outcomes]
+    if any(status == "success" for status in statuses):
+        status = "success"
+    elif statuses and all(status == "unchanged" for status in statuses):
+        status = "unchanged"
+    else:
+        status = "rejected"
+    reason = "；".join("%s：%s" % (item["name"], item["reason"]) for item in outcomes)
+    archived = outcomes[0].get("archived") if len(outcomes) == 1 else None
+    return _result(source_name, status, reason, archived=archived)
+
+
+def _remote_basename(url: str) -> str:
+    path = urllib.parse.urlsplit(str(url or "")).path
+    name = path.rsplit("/", 1)[-1]
+    return urllib.parse.unquote(name)
+
+
+_KEYWORD_MAX = 200
+
+
+def _validated_keyword(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) > _KEYWORD_MAX:
+        raise AppError(INVALID_INPUT, "正则关键词过长", field="keyword")
+    try:
+        re.compile(text)
+    except re.error as exc:
+        raise AppError(INVALID_INPUT, "正则关键词无法编译：%s" % exc, field="keyword")
+    return text
 
 
 def _policy() -> downloader.DownloadPolicy:

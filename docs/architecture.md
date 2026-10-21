@@ -38,7 +38,9 @@ app/
 └── web/        # 原生前端（index.html + assets/js）
 
 data/
-└── profiles/   # 按机型/profile 保存业务数据
+├── ip_mapping.json    # 人员 IP 对应表，全机型共用
+├── admin_users.json   # 管理员名单，全机型共用
+└── profiles/          # 按机型/profile 保存配置与业务数据
 
 tests/
 └── pytest 回归测试

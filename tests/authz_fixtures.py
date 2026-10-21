@@ -19,9 +19,10 @@ with make_server() as server:
 | `member` | 10.0.0.2 | 登记为姓名，不在管理员名单 |
 | `admin` | 10.0.0.3 | 登记为姓名且在管理员名单 |
 | `deployer` | 127.0.0.1（真实对端，不带 XFF） | 未登记 → 部署者但非管理员 |
-| `deployer_admin` | 127.0.0.1 | 登记为姓名且在管理员名单（需 `seed_roles(..., local_admin=True)` 的机型） |
+| `deployer_admin` | ::1（经受信代理注入 XFF） | 登记为姓名且在管理员名单（`seed_roles(..., local_admin=True)`） |
 
-本机地址只能有一个身份，所以 `deployer` 与 `deployer_admin` 分别在两个机型上验证。
+人员表全机型共用，不能再靠「只在另一个机型登记 127.0.0.1」拆出两个本机身份。
+`::1` 同样算部署者，所以 `deployer_admin` 走这个地址，`127.0.0.1` 保持未登记。
 """
 
 from __future__ import annotations
@@ -74,7 +75,8 @@ def make_server(trusted_proxies=("127.0.0.1",), router=None):
 def seed_roles(profile_name: str = "p1", local_admin: bool = False) -> str:
     """建机型并在其中登记成员/管理员两个地址；返回 pid。
 
-    `local_admin=True` 时把本机地址 127.0.0.1 也登记为管理员（用于 `deployer_admin` 角色）。
+    `local_admin=True` 时把部署者地址 `::1` 登记为管理员（用于 `deployer_admin` 角色）。
+    直连的 `127.0.0.1` 保持未登记，这样两种本机身份可以同时存在。
     """
     from app.core import device_models, storage
 
@@ -85,7 +87,8 @@ def seed_roles(profile_name: str = "p1", local_admin: bool = False) -> str:
     storage.upsert_ip_mapping(XFF_ADMIN, ADMIN_NAME)
     storage.upsert_admin_user(ADMIN_NAME)
     if local_admin:
-        storage.upsert_ip_mapping("127.0.0.1", LOCAL_ADMIN_NAME)
+        # ::1 也是部署者地址，且和直连的 127.0.0.1 不是同一条人员记录。
+        storage.upsert_ip_mapping("::1", LOCAL_ADMIN_NAME)
         storage.upsert_admin_user(LOCAL_ADMIN_NAME)
     return pid
 
@@ -142,7 +145,7 @@ _ROLE_XFF = {
     "member": XFF_MEMBER,
     "admin": XFF_ADMIN,
     "deployer": None,
-    "deployer_admin": None,
+    "deployer_admin": "::1",
 }
 
 

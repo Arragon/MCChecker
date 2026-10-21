@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-默认监听：`0.0.0.0:50002`
+默认监听：`0.0.0.0:50003`（`app/config.py` 的 `DEFAULT_PORT`）
 
 停止：
 
@@ -55,7 +55,11 @@ python main.py
 
 ### 6.1 端口与数据目录
 
-默认端口 50002；`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
+默认端口是 `app/config.py` 的 `DEFAULT_PORT`（50003）。`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
+
+### 6.2 更新源回读
+
+更新源下载的内容可以是 XML、JSON，或 zip / tar / gzip 压缩包。压缩包里的 XML 和 JSON 会解压进当前机型的文件列表。可选的正则关键词用来切削文件名：关键词 `MachineConstant` 会把 `Default_MachineConstant_basics.xml` 保存为 `MachineConstant.xml`。不填关键词时，单个文件仍按更新源的文件名保存，压缩包按包内原文件名加入。
 
 ## 7. 数据目录说明
 
@@ -77,7 +81,7 @@ python main.py
 ## 9. 审阅修改
 
 - 文件解析页中的条目支持在 hover 时打开“修改备注”输入弹窗，系统会自动记录提交 IP，并通过 IP 对应表归属到具体人员。
-- “更新设置”页新增两个管理模块：
+- “更新设置”页的人员与权限对所有机型共用一套，不随机型切换：
   - `IP 对应表`：维护 `IP -> 人员姓名` 的映射。
   - `管理员列表`：维护具备审阅修改和文件删除权限的管理员名单。
 - 右上角会显示当前访问者的身份标签：未命中管理员名单显示“游客”，命中后显示“管理员”。
