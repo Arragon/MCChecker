@@ -16,14 +16,6 @@
     else MC.toastError("保存失败", err);
   }
 
-  function hostOf(url) {
-    try {
-      return new URL(url).host || url;
-    } catch (e) {
-      return "";
-    }
-  }
-
   MC.views.tools = function (app) {
     var items = [];
     var query = "";
@@ -104,24 +96,19 @@
 
     function tile(t, ro) {
       var href = util.safeUrl(t.url);
-      var text = h(
-        "span.tool-copy",
-        h("span.tool-name", t.name),
-        h(
-          "span.tool-meta",
-          h("span.tool-host", hostOf(t.url) || "地址无效"),
-          t.description ? h("span.tool-desc", t.description) : null
-        )
-      );
       var open = href
-        ? h("a.tool-open", { href: href, target: "_blank", rel: "noopener noreferrer", title: t.url }, icon("external"), text)
-        : h("button.tool-open", { type: "button", title: t.url, onclick: function () { MC.toast.warning("该工具地址无效", "仅支持 http/https 链接"); } }, icon("external"), text);
+        ? h("a.tool-open", { href: href, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span.tool-name", t.name))
+        : h("button.tool-open", { type: "button", onclick: function () { MC.toast.warning("该工具地址无效", "仅支持 http/https 链接"); } }, icon("external"), h("span.tool-name", t.name));
+      var note = h("p.tool-desc", t.description ? t.description : h("span.muted", "无备注"));
+      var address = href
+        ? h("a.tool-url", { href: href, target: "_blank", rel: "noopener noreferrer" }, t.url)
+        : h("p.tool-url.is-invalid", t.url || "地址无效");
       var ops = ro ? null : h(
         "div.tool-ops",
         h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "编辑 " + t.name, title: "编辑", onclick: function () { toolDialog(t); } }, icon("edit")),
         h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "删除 " + t.name, title: "删除", onclick: function () { removeTool(t); } }, icon("trash"))
       );
-      return h("div.tool-tile", { role: "listitem" }, open, ops);
+      return h("article.tool-tile", { role: "listitem" }, h("div.tool-tile-head", open, ops), note, address);
     }
 
     function toolDialog(t) {

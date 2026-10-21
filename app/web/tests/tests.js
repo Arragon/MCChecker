@@ -623,8 +623,8 @@
         eq(links[0].getAttribute("rel"), "noopener noreferrer");
         ok(links[0].href.indexOf("https://example.com/build") === 0, "地址用安全链接打开");
         ok(inst.el.textContent.indexOf("构建工具") >= 0);
-        ok(inst.el.textContent.indexOf("生成固件的脚本") >= 0);
-        ok(inst.el.textContent.indexOf("example.com") >= 0, "卡片上显示主机，方便扫视");
+        ok(inst.el.textContent.indexOf("https://example.com/build?x=1") >= 0, "卡片上显示完整地址");
+        ok(inst.el.textContent.indexOf("生成固件的脚本") >= 0, "卡片上显示完整备注");
         var edit = inst.el.querySelector("button[aria-label='编辑 构建工具']");
         ok(edit, "部署者可以编辑");
         var guest = r.mountView(MC.views.tools(settingsApp(false), { kind: "tools", query: {} }));
