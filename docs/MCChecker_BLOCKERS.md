@@ -312,7 +312,9 @@ E       assert ['mcsched', 'mcsched'] == ['mcsched']
 
 ---
 
-## B14 · 2026-10-20 20:05 UTC · 发布闸门对「控制符紧贴 scheme 冒号」的起始漏判（M4-06 合并后登记）
+## B14 · 2026-10-20 20:05 UTC · 发布闸门对「控制符紧贴 scheme 冒号」的起始漏判（M4-06 合并后登记；**2026-10-21 已解除**）
+
+> **解除记录**：PR #101 → merge `f79b20e`。`_SCHEME_LOOSE_RE`/`_SPECIAL_SCHEME_AUTHORITY_RE` 允许 scheme 名与冒号之间的 TAB/LF/CR，新增扫描/构建形状用例与变异证明；发布测试 168、全量 1862×3、H3 执法。
 
 **事实**：M4-06 已按第七轮 scoped 评审 Approved 合并（PR #82 → `2fb5190`）。评审最后一条 Minor 指出：`scripts/make_release.py` 的 `url_literals` 对 `https\n://evil.example.com/x` 与 `https\r://evil.example.com/x` 返回 `[]`，而 node 24 的 host 是 `evil.example.com`；同一注释里举的 `h<LF>ttps://` 其实会被抓（按 `ttps://` 读主机）。现行 104 成员产物没有外链泄漏（外部主机引用 0），所以这是「声称的覆盖面」问题，不是现行泄漏。
 
