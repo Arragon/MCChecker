@@ -1218,18 +1218,121 @@
       var set = activeSet(id);
       var b = set.binding || { source_file: "", variable_path: "", field_map: {} };
       var fileSel = h("select.select", h("option", { value: "" }, "请选择文件"), app.files.map(function (f) { return h("option", { value: f.name, selected: f.name === b.source_file }, f.name); }));
-      var pathInput = h("input.input.input-mono", { type: "text", value: b.variable_path || "", placeholder: "例如 scenario_a.xml/CONFIG_ROOT/SCENARIO_BLOCK/input" });
-      var mapInput = h("textarea.textarea.input-mono", { rows: 5, placeholder: "m1=k1\nm2=k2\nn=b" }, Object.keys(b.field_map || {}).map(function (k) { return k + "=" + b.field_map[k]; }).join("\n"));
+      var pathInput = h("input.input.input-mono", { type: "text", value: b.variable_path || "", placeholder: "例如 scenario_a.xml/CONFIG_ROOT/SCENARIO_BLOCK/input", "aria-label": "变量路径" });
+      var searchInput = h("input.input.input-sm", { type: "search", placeholder: "搜索名称、路径或值", "aria-label": "搜索变量" });
+      var listHost = h("div.dl-var-list");
+      var listStatus = h("div.dl-var-status");
+      var mapInput = h("textarea.textarea.input-mono", { rows: 4, placeholder: "m1=k1\nm2=k2\nn=b" }, Object.keys(b.field_map || {}).map(function (k) { return k + "=" + b.field_map[k]; }).join("\n"));
       var mapField = MC.field({ label: "字段 → 系数映射", control: mapInput, help: "每行一条：字段名=系数名，系数名为 k1…k8 或 b" });
+      var nodes = [];
+      var loadToken = 0;
+
+      function renderList() {
+        var name = fileSel.value;
+        var selected = pathInput.value.trim();
+        if (!name) {
+          listStatus.textContent = "";
+          util.replace(listHost, h("div.dl-var-empty", "选择文件后可以浏览变量"));
+          return;
+        }
+        if (listStatus.dataset.state === "loading") return;
+        if (listStatus.dataset.state === "error") return;
+        var q = searchInput.value.trim().toLowerCase();
+        var matched = [];
+        for (var i = 0; i < nodes.length; i++) {
+          if (!q || nodes[i].hay.indexOf(q) >= 0) matched.push(nodes[i]);
+        }
+        var shown = matched.slice(0, 80);
+        listStatus.textContent = matched.length
+          ? "显示 " + shown.length + (matched.length > shown.length ? " / " + matched.length + "，缩小搜索以查看其余" : " / " + matched.length)
+          : "没有匹配的变量";
+        util.replace(listHost, shown.length ? shown.map(function (n) {
+          return h(
+            "button.dl-var-row" + (selected === n.path ? ".is-active" : ""),
+            { type: "button", onclick: function () { pathInput.value = n.path; renderList(); } },
+            h(
+              "span.dl-var-main",
+              h("span.dl-var-leaf", n.rel.split("/").pop()),
+              h("span.dl-var-rel", n.rel)
+            ),
+            n.value !== null && n.value !== undefined ? h("span.dl-var-val", { title: String(n.value) }, n.value) : null
+          );
+        }) : h("div.dl-var-empty", q ? "没有匹配的变量" : "这份文件没有可绑定的节点"));
+      }
+
+      function loadFile() {
+        var name = fileSel.value;
+        var token = ++loadToken;
+        nodes = [];
+        if (!name) {
+          listStatus.dataset.state = "";
+          renderList();
+          return;
+        }
+        listStatus.dataset.state = "loading";
+        listStatus.textContent = "正在读取…";
+        util.replace(listHost, h("div.dl-var-empty", "正在读取…"));
+        api.get(app.p("/files/" + api.seg(name) + "/document")).then(function (doc) {
+          if (token !== loadToken) return;
+          var N = doc.nodes || {};
+          var parents = N.p || [];
+          var labels = N.l || [];
+          var values = N.v || [];
+          var built = [];
+          for (var i = 1; i < parents.length; i++) {
+            var chain = [];
+            var k = i;
+            var guard = 0;
+            while (k > 0 && guard <= parents.length) {
+              chain.unshift(String(labels[k]));
+              k = parents[k];
+              guard++;
+            }
+            var rel = chain.join("/");
+            var value = values[i];
+            built.push({
+              path: name + "/" + rel,
+              rel: rel,
+              value: value,
+              hay: (rel + "\n" + (value === null || value === undefined ? "" : value)).toLowerCase(),
+            });
+          }
+          nodes = built;
+          listStatus.dataset.state = "ready";
+          renderList();
+        }, function (err) {
+          if (token !== loadToken) return;
+          listStatus.dataset.state = "error";
+          listStatus.textContent = "";
+          util.replace(listHost, h("div.dl-var-empty", MC.errorText(err)));
+        });
+      }
+
+      fileSel.addEventListener("change", loadFile);
+      searchInput.addEventListener("input", renderList);
+      pathInput.addEventListener("input", function () {
+        if (listStatus.dataset.state !== "loading") renderList();
+      });
+      loadFile();
+
       MC.modal({
         title: "系数绑定 · " + setTitle(id),
-        size: "wide",
+        size: "xwide",
         body: h(
-          "div.col",
-          { style: "gap:12px" },
-          MC.field({ label: "来源配置文件", control: fileSel }),
-          MC.field({ label: "变量路径", control: pathInput, help: "可粘贴详情面板的绑定路径。XML 与 JSON 都支持，例如 config.xml/CONFIG_ROOT/input，也可填节点 ID 或定位符。属性写成 min 或 @min 都可以。" }),
-          mapField
+          "div.dl-bind-grid",
+          h(
+            "div.col",
+            { style: "gap:12px" },
+            MC.field({ label: "来源配置文件", control: fileSel }),
+            MC.field({ label: "变量路径", control: pathInput, help: "点选右侧变量，或直接填写、粘贴路径。" }),
+            mapField
+          ),
+          h(
+            "div.dl-var-pane",
+            h("div.dl-var-head", h("span.section-title", { style: "margin:0" }, "变量"), searchInput),
+            listHost,
+            listStatus
+          )
         ),
         footer: function (close) {
           return [
