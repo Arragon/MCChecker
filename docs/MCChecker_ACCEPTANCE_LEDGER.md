@@ -47,10 +47,10 @@
 | UC-40 | 多用户提示 | M3-17 | 已落地 | tests/test_api_revision.py（29 写路由对账 + B 写后 A 读到新计数）；10 秒体感待人工 | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
 | UC-41 | 机型 | M3-16 | 已落地 | tests/test_api_profiles.py（复制范围、恢复区 manifest、default 保护） | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
 | UC-42 | 标签 | M1-05 | 已落地 | — | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
-| UC-43 | 链接分享 | M4-08 | 未开工 | — | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
+| UC-43 | 链接分享 | M4-08 | 进行中 | 同一 `#/p/default/f/scenario_a.xml` 在全新 Chrome 页面打开，标题/机型/文件一致 | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
 | UC-44 | 访客权限 | M1-04/M2-10 | 已落地 | — | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
-| UC-45 | 响应式 | M4-08 | 未开工 | — | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
-| UC-46 | 旧链接 | M4-01 | 已落地 | tests/test_api_legacy.py（probe JSON、RFC 5987、302、静态 404、穿越 400） | 真实浏览器里用旧链接完成一次下载与一次记录页跳转的人工步骤与结果记录 |
+| UC-45 | 响应式 | M4-08 | 进行中 | 900×800 下侧栏 `position:fixed`、宽 264px，toggle 在 `translateX(0)` 与 `-264px` 间切换；详情面板宽 344px 仍在 | 真实浏览器里的人工步骤与结果记录（§16.2 要求最终在真实后端执行） |
+| UC-46 | 旧链接 | M4-01 | 已落地 | 真服务：probe 返回 `{ok:true,filename:scenario_a.xml,kind:current}`；`/record_view?config=scenario_a.xml&record=rec.xml&profile=default` 302 到 `/#/p/default/f/scenario_a.xml?version=record:rec.xml`；下载正文与源文件一致 | 真实浏览器里用旧链接完成一次下载与一次记录页跳转的人工步骤与结果记录 |
 
 ## §16.3–16.8 非功能项现状（同一口径：卡落地 ≠ 已验收）
 
@@ -68,6 +68,7 @@ UC-07 大文件体感、UC-19 文本差异复制的浏览器行为、UC-40 横�
 ## M4-08 执行记录（2026-10-21）
 
 - 真实浏览器/真实后端：临时 data 根启动 `run.py`，`PUT /api/v1/p/default/files/demo.xml` 后，无头 Chrome 打开 `/` 与 `/#/p/default/f/demo.xml`，DOM 分别命中 `默认机型/部署者/demo.xml` 与 `params/item/timeout`（UC-01～03 的步骤与结果已回填）。
+- 同一真实服务：旧下载 probe/302 与下载正文已核（UC-46）；全新 Chrome 页面打开同 URL 验证分享（UC-43）；900px 下侧栏为 fixed 抽屉、toggle 位移正确（UC-45）。
 - 同一真实服务再种 16 个文件（`scenario_a.xml` + `scenario_01…15`），用 Chrome DevTools 驱动：点击 `param_03` 得到范围/路径详情；`ArrowDown` 选中 `@desc3`；文件内筛选 `param_1` 显示 `1 / 1` 并跳 `param_10`；关闭“显示属性”后 `@desc` 行消失、参数行内范围保留（UC-03～06 已回填）。
 
 - 全量：主线 `ae4b276` 上 `1852 passed ×3`（H3 执法中：真实 `data/` 3 文件/8 目录）；前端 HTTP `ALL PASSED (44)` ×3；发布测试 166；`check_py39.sh` 通过。
