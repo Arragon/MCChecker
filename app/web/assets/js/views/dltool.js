@@ -133,6 +133,40 @@
     return y;
   }
 
+  /**
+   * 在已填写的 x 上下限内取样。若同时填了 y 上下限，只保留落在 y 范围内的点。
+   * 返回这些点上 x、y 各自的最小和最大。x 上下限不齐时 bounded 为 false。
+   */
+  function curveExtrema(set, id) {
+    if (!curveReady(set, id)) return { ready: false, bounded: false, empty: true };
+    var xmin = finiteNum(set.x_min);
+    var xmax = finiteNum(set.x_max);
+    if (xmin === null || xmax === null || !(xmin < xmax)) return { ready: true, bounded: false, empty: true };
+    var ymin = finiteNum(set.y_min);
+    var ymax = finiteNum(set.y_max);
+    var steps = 480;
+    var found = null;
+    for (var i = 0; i <= steps; i++) {
+      var x = xmin + ((xmax - xmin) * i) / steps;
+      var y = evalCurveY(set, id, x);
+      if (!isFinite(y)) continue;
+      if (ymin !== null && y < ymin) continue;
+      if (ymax !== null && y > ymax) continue;
+      if (!found) found = { xMin: x, xMax: x, yMin: y, yMax: y };
+      else {
+        if (x < found.xMin) found.xMin = x;
+        if (x > found.xMax) found.xMax = x;
+        if (y < found.yMin) found.yMin = y;
+        if (y > found.yMax) found.yMax = y;
+      }
+    }
+    if (!found) return { ready: true, bounded: true, empty: true };
+    found.ready = true;
+    found.bounded = true;
+    found.empty = false;
+    return found;
+  }
+
   function curveReady(set, id) {
     if (id !== "pp_energy") return true;
     var den = Number(set.power_conv_coeff);
@@ -463,6 +497,8 @@
     return "已标出 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : "");
   }
 
+  MC.dlCurveExtrema = curveExtrema;
+
   MC.views.dl = function (app, route) {
     var q = route.query || {};
     var S = {
@@ -754,8 +790,10 @@
 
       var canvas = h("canvas.dl-plot", { role: "img", "aria-label": "当前数值关系图" });
       var caption = h("div.dl-plot-caption", "正在绘制…");
+      var extrema = h("div.dl-extrema");
       S.ui.canvas = canvas;
       S.ui.caption = caption;
+      S.ui.extrema = extrema;
       S.ui.chartWrap = h("div.dl-plot-wrap", canvas);
 
       var resHost = h("div.dl-res");
@@ -784,7 +822,8 @@
                 h("div.dl-legend", h("span", h("i.lg-curve"), "曲线"), h("span", h("i.lg-x"), "x 边界"), h("span", h("i.lg-y"), "y 边界"), h("span", h("i.lg-pt"), "计算点"))
               ),
               S.ui.chartWrap,
-              caption
+              caption,
+              extrema
             )
           ),
           resHost
@@ -999,6 +1038,21 @@
       );
     }
 
+    function extremaNodes(set, id, axis) {
+      var got = curveExtrema(set, id);
+      if (!got.bounded) return h("div.dl-extrema-note", "填写 x 的上下限后，自动给出范围内 x、y 的最大最小值");
+      if (got.empty) return h("div.dl-extrema-note", "当前曲线在 x、y 范围内没有点");
+      function cell(label, value, unit) {
+        return h("div.dl-ext", h("span.dl-ext-k", label), h("span.mono", util.formatNumber(value)), unit ? h("span.dl-ext-u", unit) : null);
+      }
+      return [
+        cell("x 最小", got.xMin, axis.xUnit),
+        cell("x 最大", got.xMax, axis.xUnit),
+        cell("y 最小", got.yMin, axis.yUnit),
+        cell("y 最大", got.yMax, axis.yUnit),
+      ];
+    }
+
     /* ---------------- 图 ---------------- */
     function drawPlot() {
       var ui = S.ui;
@@ -1009,6 +1063,7 @@
       var marks = collectMarks(set, id, S.dir, S.inputs[keyOf(id)], S.results[keyOf(id)]);
       var summary = paintPlot(ui.canvas, set, id, marks, axis, S.focus);
       if (ui.caption) ui.caption.textContent = summary;
+      if (ui.extrema) util.replace(ui.extrema, extremaNodes(set, id, axis));
       ui.canvas.setAttribute("aria-label", "数值关系图。" + summary);
     }
 

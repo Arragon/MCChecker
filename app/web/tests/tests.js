@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 46;
+  var EXPECTED_CASES = 47;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1689,6 +1689,10 @@
         var sec = attrSection();
         ok(sec, "选中带属性的元素时，详情要有「属性」");
         ok(sec.textContent.indexOf("a") >= 0 && sec.textContent.indexOf("1") >= 0, "要列出属性名和值，实际：" + sec.textContent);
+        var titles = [...inst.el.querySelectorAll(".insp-section .section-title")].map(function (n) { return n.textContent; });
+        var sugAt = titles.findIndex(function (t) { return t.indexOf("修改建议") === 0; });
+        var attrAt = titles.findIndex(function (t) { return t.indexOf("属性") === 0; });
+        ok(sugAt >= 0 && attrAt > sugAt, "修改建议要在属性上面，实际顺序：" + titles.join(" / "));
         inst.update({ kind: "f", arg: "x.xml", query: { node: "/R[1]/param_1[1]" } });
         var paramSec = attrSection();
         ok(paramSec, "param_ 节点不能因为有参数信息就省掉属性");
@@ -1700,6 +1704,30 @@
         MC.api.get = origGet;
       }
     });
+  });
+
+  test("DL：在 x、y 范围内给出曲线上 x 和 y 的最大最小值", function () {
+    var zero = { k1: 0, k2: 0, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0, k8: 0, b: 0 };
+    var line = { k1: 1, k2: 0, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0, k8: 0, b: 0 };
+    var open = MC.dlCurveExtrema({ coeffs: line, x_min: null, x_max: 10, y_min: null, y_max: null }, "rp_energy");
+    ok(open.bounded === false, "x 上下限不齐时不给数值");
+    var full = MC.dlCurveExtrema({ coeffs: line, x_min: 0, x_max: 10, y_min: null, y_max: null }, "rp_energy");
+    eq(full.xMin, 0);
+    eq(full.xMax, 10);
+    eq(full.yMin, 0);
+    eq(full.yMax, 10);
+    var clipped = MC.dlCurveExtrema({ coeffs: line, x_min: 0, x_max: 10, y_min: 2, y_max: 8 }, "rp_energy");
+    eq(clipped.xMin, 2);
+    eq(clipped.xMax, 8);
+    eq(clipped.yMin, 2);
+    eq(clipped.yMax, 8);
+    var quad = MC.dlCurveExtrema({ coeffs: { k1: 0, k2: 1, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0, k8: 0, b: 0 }, x_min: -2, x_max: 2, y_min: null, y_max: null }, "rp_energy");
+    eq(quad.yMin, 0);
+    eq(quad.yMax, 4);
+    eq(quad.xMin, -2);
+    eq(quad.xMax, 2);
+    var blocked = MC.dlCurveExtrema({ coeffs: zero, x_min: 0, x_max: 1, y_min: null, y_max: null, trans_coeff: 1, power_conv_coeff: 0 }, "pp_energy");
+    ok(blocked.ready === false, "功率转换系数为 0 时不算范围");
   });
 
   test("显示属性开关：关闭后属性行不渲染，但 compact 数组未被裁剪", function () {

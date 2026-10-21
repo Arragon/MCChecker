@@ -1326,6 +1326,35 @@
   font-size: var(--fs-xs);
 }
 
+.dl-extrema {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.dl-extrema-note {
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
+.dl-ext {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.dl-ext-k {
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
+.dl-ext-u {
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
 .dl-legend {
   display: flex;
   flex-wrap: wrap;

@@ -513,14 +513,14 @@
           )
         );
       }
+      if (!isTemp) parts.push(renderSuggest(i));
+
       if (t === "element") {
         var attrs = idx.attrsOf(i);
         if (attrs.length) {
           parts.push(section("属性", h("dl.kv", attrs.map(function (a) { return [h("dt.mono", idx.l[a].replace(/^@/, "")), h("dd.mono", idx.v[a])]; }))));
         }
       }
-
-      if (!isTemp) parts.push(renderSuggest(i));
 
       var vpath = S.name + "/" + idx.displayPath(i, "/");
       parts.push(
