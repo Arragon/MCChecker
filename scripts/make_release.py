@@ -164,7 +164,7 @@ _FEATURE_HEADING_RE = re.compile(r"""^###\s+(C\d+)\s+(.+?)\s*$""", re.M)
 _SCHEME_PREFIX_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*://""")
 #: scheme 后面的 TAB/LF/CR 会被 WHATWG 删掉后再解析：`http:<LF>//host` 仍是外链。
 #: 只覆盖 scheme 与分隔符之间的空白；把控制符插进 scheme 字母之间（`h<LF>ttps://`）仍是已知边界。
-_SCHEME_LOOSE_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*:[ \t\r\n]*[/\\]""")
+_SCHEME_LOOSE_RE = re.compile(r"""[a-zA-Z][a-zA-Z0-9+.\-]*[ \t\r\n]*:[ \t\r\n]*[/\\]""")
 #: WHATWG 的「特殊 scheme」里**会联网的那五个**（http/https/ftp/ws/wss）：`scheme:` 后面哪怕只跟一个 `/` 或 `\`，
 #: 浏览器照样解析出主机并发请求。node 24 实测（本卡据此改的判据，不是猜的字符串形状）：
 #: `new URL("https:\\evil.example.com\\a.js").host === "evil.example.com"`、
@@ -214,7 +214,7 @@ _DOUBLE_SEP_RE = re.compile(r"""[/\\]{2}""")
 #: 不是地址。放行的是解析失败的目标，不是放宽判据。
 _FORBIDDEN_HOST_CHARS = frozenset(' \t\r\n"#<>?@[]^|')
 #: `scheme:` 后面紧跟一个权威分隔符（含 `&#47;` 写法）：见上面那段 node 实测。
-_SPECIAL_SCHEME_AUTHORITY_RE = re.compile(r"""(?i)\b(?:https?|wss?|ftp):(?=%s)""" % _AUTH_SEP_SRC)
+_SPECIAL_SCHEME_AUTHORITY_RE = re.compile(r"""(?i)\b(?:https?|wss?|ftp)[ \t\r\n]*:[ \t\r\n]*(?=%s)""" % _AUTH_SEP_SRC)
 #: 引号后面直接跟权威段开头：写进字符串常量的协议相对地址（运行期拼一下就是 `http://host/…`）。
 #: 限定「紧跟引号」是为了不把 JS/Python 的行注释 `// 说明` 和整除 `a // b` 当成地址。
 _QUOTED_RELATIVE_RE = re.compile(r"""(?<=["'`])""" + _RELATIVE_AUTHORITY_SRC)

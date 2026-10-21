@@ -1050,3 +1050,28 @@ def test_real_repo_zip_is_deterministic_apart_from_timestamp(tmp_path: Path) -> 
         manifest_a = json.loads(fa.read(mr.MANIFEST_NAME).decode("utf-8"))
         manifest_b = json.loads(sa.read(mr.MANIFEST_NAME).decode("utf-8"))
     assert manifest_a["files"] == manifest_b["files"]
+
+
+def test_control_between_scheme_and_separator_is_seen_by_the_scanner():
+    """B14：`https<LF>://host` / `https<CR>://host` 的 WHATWG 主机是 evil.example.com。
+
+    旧扫描只认连续 `scheme://`，这两条 `url_literals` 返回空；这里同时钉扫描起点与主机。
+    """
+    for raw in (
+        "https\n://evil.example.com/x.js",
+        "https\r://evil.example.com/x.js",
+        "https \n ://evil.example.com/x.js",
+    ):
+        found = [url for _line, url in mr.url_literals(raw)]
+        assert found, raw
+        assert mr._host_of(found[0]) == "evil.example.com", (raw, found)
+
+
+def test_build_rejects_control_between_scheme_and_separator(source_tree: Path, tmp_path: Path) -> None:
+    js = source_tree / "app" / "web" / "assets" / "js" / "views" / "importer.js"
+    js.write_text('fetch("https\n://evil.example.com/x");\n', encoding="utf-8")
+    out = tmp_path / "out"
+    zip_path = out / "MCChecker-2.0.0.zip"
+    with pytest.raises(mr.ReleaseError, match=re.escape("evil.example.com")):
+        mr.build_release(source_tree, zip_path)
+    assert not zip_path.exists(), "验收没过的包不许落地"
