@@ -274,6 +274,7 @@ def save_item(
     clean = _validated_params(payload, item)
     name = _validated_name(payload)
     binding = _validated_binding(payload)
+    aom = _validated_aom(payload, item)
 
     with storage.use_profile(pid), storage.profile_write(pid):
         if header != _current_rev_in_profile():
@@ -287,7 +288,7 @@ def save_item(
         if not isinstance(items, dict) or not isinstance(items.get(item), dict):
             # `_ensure_defaults` 保证三件都在；走到这里说明文件形状被破坏。
             raise AppError(NOT_FOUND, "计算项不存在")
-        new_item = _merged_item(items[item], clean, name, binding)
+        new_item = _merged_item(items[item], clean, name, binding, aom)
         items[item] = new_item
         dltool.save_config(cfg)
         new_rev = _current_rev_in_profile()
@@ -468,11 +469,42 @@ def _validated_binding(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return clean
 
 
+def _validated_aom(payload: Dict[str, Any], item: str) -> Optional[Dict[str, Any]]:
+    """RP 脉宽的 AOM2 模式与固定和。其它计算项忽略这两个键。
+
+    没给的键保留磁盘原值。`aom_sum` 显式 null 表示清空。
+    """
+    if item != "rp_width":
+        return None
+    if "aom_mode" not in payload and "aom_sum" not in payload:
+        return None
+    clean: Dict[str, Any] = {}
+    if "aom_mode" in payload:
+        mode = payload.get("aom_mode")
+        if mode not in ("delay", "width"):
+            raise AppError(INVALID_INPUT, "AOM2 模式只能是 delay 或 width", field="aom_mode")
+        clean["aom_mode"] = mode
+    if "aom_sum" in payload:
+        raw = payload.get("aom_sum")
+        if raw is None or raw == "":
+            clean["aom_sum"] = None
+        else:
+            try:
+                number = float(raw)
+            except (TypeError, ValueError):
+                raise AppError(INVALID_INPUT, "AOM2 delay 与 width 的和必须是有限数值", field="aom_sum")
+            if not math.isfinite(number):
+                raise AppError(INVALID_INPUT, "AOM2 delay 与 width 的和必须是有限数值", field="aom_sum")
+            clean["aom_sum"] = number
+    return clean
+
+
 def _merged_item(
     existing: Dict[str, Any],
     clean: Dict[str, Any],
     name: Optional[str],
     binding: Optional[Dict[str, Any]],
+    aom: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """从磁盘上的现有 item 深拷贝，只覆盖已知键 —— 字段集合不变（只改值）。"""
     new_item = deepcopy(existing)
@@ -497,6 +529,9 @@ def _merged_item(
         for key, value in binding.items():
             merged[key] = deepcopy(value)
         new_item["binding"] = merged
+    if aom:
+        for key, value in aom.items():
+            new_item[key] = value
     return new_item
 
 

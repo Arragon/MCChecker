@@ -166,12 +166,39 @@ def _download(target: str, persist: bool, settings) -> bytes:
 
 
 def _name_from_url(url: str) -> str:
-    path = urllib.parse.urlparse(url).path or ""
-    tail = os.path.basename(path)
-    try:
-        return fsutil.validate_filename(tail) if tail else DEFAULT_IMPORT_NAME
-    except AppError:
-        return DEFAULT_IMPORT_NAME
+    """从链接推断文件名，优先保留 `.xml` / `.json` 后缀。
+
+    路径末段、以及 `filename` / `file` / `name` 查询参数都会看。百分号编码先解开。
+    有配置后缀的候选优先于没有后缀的（`/download?file=cfg.json` 得到 `cfg.json`，
+    而不是 `download`）。都没有合法名字时才用 `downloaded.xml`。
+    """
+    parts = urllib.parse.urlsplit(str(url or ""))
+    candidates = []
+    tail = os.path.basename(urllib.parse.unquote(parts.path or "")).strip()
+    if tail:
+        candidates.append(tail)
+    query = urllib.parse.parse_qs(parts.query, keep_blank_values=False)
+    for key in ("filename", "file", "name"):
+        for raw in query.get(key) or []:
+            name = os.path.basename(urllib.parse.unquote(str(raw)).replace("\\", "/")).strip()
+            if name:
+                candidates.append(name)
+
+    valid = []
+    for candidate in candidates:
+        try:
+            valid.append(fsutil.validate_filename(candidate))
+        except AppError:
+            continue
+    for name in valid:
+        if os.path.splitext(name)[1].lower() in (".xml", ".json"):
+            return name
+    for name in valid:
+        if "." in name:
+            return name
+    if valid:
+        return valid[0]
+    return DEFAULT_IMPORT_NAME
 
 
 def _check_size(data: bytes, max_bytes: int) -> None:

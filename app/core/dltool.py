@@ -61,6 +61,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         },
         "rp_width": {
             "name": "计算RP脉宽",
+            "aom_mode": "delay",
+            "aom_sum": None,
             **deepcopy(DEFAULT_ITEM),
         },
     },
@@ -102,6 +104,9 @@ def _ensure_defaults(cfg: dict):
             if item_id == "pp_energy":
                 it.setdefault("trans_coeff", 1.0)
                 it.setdefault("power_conv_coeff", 1.0)
+            if item_id == "rp_width":
+                it.setdefault("aom_mode", "delay")
+                it.setdefault("aom_sum", None)
             # 确保所有系数键存在
             for k in DEFAULT_COEFFS:
                 it["coeffs"].setdefault(k, 0.0)

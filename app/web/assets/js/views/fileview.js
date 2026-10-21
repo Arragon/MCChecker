@@ -187,6 +187,7 @@
         isTemp ? h("span.badge.badge-warning", "临时 · 仅自己可见") : null,
         S.version !== "current" && !isTemp ? h("span.badge.badge-primary", versionLabel(S.version)) : null,
         S.version !== "current" && !isTemp ? h("button.link-btn.small", { type: "button", onclick: function () { nav({ view: "tree" }); } }, "回到当前版本") : null,
+        meta,
         h("span.spacer"),
         h("button.btn", { type: "button", onclick: function () { isTemp ? downloadTemp() : app.downloadFile(S.name, S.version); } }, icon("download"), S.version === "current" || isTemp ? "下载" : "下载此版本"),
         moreButton()
@@ -207,7 +208,7 @@
       var staleBanner = S.stale
         ? h("div.banner.banner-warning", icon("refresh"), h("div.banner-body", "此文件已被他人或定时任务更新，当前显示的是旧内容。"), h("button.btn.btn-sm", { type: "button", onclick: function () { S.doc = null; loadDoc(); app.syncRevision(); } }, "重新加载"))
         : null;
-      util.replace(header, title, meta, h("div.row", seg), staleBanner);
+      util.replace(header, title, h("div.row", seg), staleBanner);
     }
 
     function moreButton() {
@@ -518,6 +519,8 @@
         }
       }
 
+      if (!isTemp) parts.push(renderSuggest(i));
+
       var vpath = S.name + "/" + idx.displayPath(i, "/");
       parts.push(
         section(
@@ -543,7 +546,6 @@
         });
         var fav = fs.direct[id];
         parts.push(section("收藏", h("div.col", favBtn, fav && fav.note ? h("div.small.muted", "备注：" + fav.note) : null)));
-        parts.push(renderSuggest(i));
       }
 
       util.replace(

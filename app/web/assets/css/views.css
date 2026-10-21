@@ -10,8 +10,8 @@
 .fv-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: var(--sp-3) var(--sp-5) 10px;
+  gap: 6px;
+  padding: 6px var(--sp-4) 6px;
   border-bottom: 1px solid var(--c-border);
 }
 
@@ -24,7 +24,7 @@
 
 .fv-title-row h1 {
   overflow: hidden;
-  font-size: 17px;
+  font-size: 15px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -80,7 +80,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 8px var(--sp-5) 8px var(--sp-4);
+  padding: 4px var(--sp-3);
   border-bottom: 1px solid var(--c-border);
 }
 
@@ -101,8 +101,8 @@
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  height: 26px;
-  padding: 0 var(--sp-4);
+  height: 22px;
+  padding: 0 var(--sp-3);
   border-top: 1px solid var(--c-border);
   background: var(--c-surface-2);
   color: var(--c-text-3);
@@ -983,13 +983,23 @@
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   overflow-x: auto;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.6;
 }
 
 .calc-io {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--sp-4);
+}
+
+.dl-layout .panel-header {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.result-table th {
+  white-space: normal;
 }
 
 .result-table td.mono {

@@ -17,6 +17,33 @@
     { id: "rp_energy", label: "RP 能量" },
     { id: "rp_width", label: "RP 脉宽" },
   ];
+  var AXES = {
+    pp_energy: { x: "电动波片角度", xUnit: "urad", y: "PP@PF能量", yUnit: "mJ" },
+    rp_energy: { x: "RP能量", xUnit: "mJ", y: "TFP2角度(SMTM页面)", yUnit: "" },
+    rp_width: { x: "RP脉宽", xUnit: "", delay: "AOM2 delay(SMSM1页面)", width: "AOM2 width(SMSM1页面)", unit: "ns" },
+  };
+
+  function withUnit(name, unit) {
+    return unit ? name + "（" + unit + "）" : name;
+  }
+
+  function axisOf(id, item) {
+    if (id !== "rp_width") {
+      var spec = AXES[id];
+      return { x: spec.x, xUnit: spec.xUnit, y: spec.y, yUnit: spec.yUnit, other: "", otherUnit: "" };
+    }
+    var mode = item && item.aom_mode === "width" ? "width" : "delay";
+    var yName = mode === "width" ? AXES.rp_width.width : AXES.rp_width.delay;
+    var other = mode === "width" ? AXES.rp_width.delay : AXES.rp_width.width;
+    return { x: AXES.rp_width.x, xUnit: AXES.rp_width.xUnit, y: yName, yUnit: AXES.rp_width.unit, other: other, otherUnit: AXES.rp_width.unit, mode: mode };
+  }
+
+  function complementOf(y, item) {
+    var sum = finiteNum(item && item.aom_sum);
+    var value = finiteNum(y);
+    if (sum === null || value === null) return null;
+    return sum - value;
+  }
 
   function parseNumbers(text) {
     var tokens = String(text || "").split(/[\s,;，；]+/).filter(Boolean);
@@ -133,7 +160,9 @@
   }
 
   function paintPlot(canvas, summaryEl, item, id, marks) {
-    var yName = id === "pp_energy" ? "PP" : "y";
+    var axis = axisOf(id, item);
+    var yName = withUnit(axis.y, axis.yUnit);
+    var xName = withUnit(axis.x, axis.xUnit);
     function say(text) {
       if (summaryEl) summaryEl.textContent = text;
       canvas.setAttribute("aria-label", text);
@@ -345,8 +374,8 @@
       ctx.textBaseline = ly < plotT + 18 ? "top" : "bottom";
       ctx.fillText(label, plotL + 6, ly < plotT + 18 ? ly + 2 : ly - 2);
     }
-    vline(xmin, "x 下限");
-    vline(xmax, "x 上限");
+    vline(xmin, xName + " 下限");
+    vline(xmax, xName + " 上限");
     hline(yminB, yName + " 下限");
     hline(ymaxB, yName + " 上限");
 
@@ -379,7 +408,7 @@
     marks.forEach(function (m) {
       if (m.status === "out_of_x_range" || m.status === "out_of_y_range") outCount++;
     });
-    var summary = "曲线表示当前系数下 x 与 " + yName + " 的关系。竖虚线是 x 边界，横虚线是 " + yName + " 边界。";
+    var summary = "曲线表示当前系数下 " + xName + " 与 " + yName + " 的关系。竖虚线是 " + xName + " 边界，横虚线是 " + yName + " 边界。";
     if (marks.length) summary += "已标出 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）。" : "。");
     else summary += "在下方输入数值后，计算点会标在曲线上。";
     say(summary);
@@ -484,6 +513,27 @@
       return inp;
     }
 
+    function aomPanel(item) {
+      var mode = item.aom_mode === "width" ? "width" : "delay";
+      var seg = MC.segmented(
+        [{ value: "delay", label: "AOM2 delay 模式" }, { value: "width", label: "AOM2 width 模式" }],
+        mode,
+        function (v) { item.aom_mode = v; render(); },
+        "RP 脉宽结果模式"
+      );
+      var other = mode === "width" ? AXES.rp_width.delay : AXES.rp_width.width;
+      var yName = mode === "width" ? AXES.rp_width.width : AXES.rp_width.delay;
+      return h(
+        "div",
+        h("div.section-title", "AOM2"),
+        h("div.col", { style: "gap:8px" },
+          seg,
+          h("div.field", h("label.field-label", "AOM2 delay + AOM2 width（ns）"), numInput(item.aom_sum, function (v) { item.aom_sum = v; }, "AOM2 delay 与 width 的和")),
+          h("div.field-help", "这个和是固定值，可以改。当前 y 是" + yName + "，" + other + " = 和 − y。")
+        )
+      );
+    }
+
     function paramsPanel(id, item) {
       var coeffs = h(
         "div.coeff-grid",
@@ -492,7 +542,13 @@
         })
       );
       var terms = KEYS.filter(function (k) { return k !== "b" && Number(item.coeffs[k]); }).map(function (k) { return util.formatNumber(item.coeffs[k]) + "·x" + (k === "k1" ? "" : k.slice(1).replace(/\d/g, function (d) { return "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]; })); });
-      var formula = h("div.formula", "f(x) = " + (terms.length ? terms.join(" + ").replace(/\+ -/g, "− ") : "0") + " + " + util.formatNumber(item.coeffs.b), id === "pp_energy" ? "    PP = f(x) × 传输系数 ÷ 功率转换系数" : "");
+      var axis = axisOf(id, item);
+      var formula = h(
+        "div.formula",
+        h("div", "f(x) = " + (terms.length ? terms.join(" + ").replace(/\+ -/g, "− ") : "0") + " + " + util.formatNumber(item.coeffs.b)),
+        id === "pp_energy" ? h("div", "PP@PF能量 = f(x) × 传输系数 ÷ 功率转换系数") : null,
+        h("div", "x：" + withUnit(axis.x, axis.xUnit) + "　　y：" + withUnit(axis.y, axis.yUnit))
+      );
 
       var pp = id === "pp_energy"
         ? h(
@@ -506,7 +562,7 @@
       var ranges = h(
         "div.form-grid",
         { style: "grid-template-columns:repeat(4,1fr)" },
-        [["x_min", "x 下限"], ["x_max", "x 上限"], ["y_min", id === "pp_energy" ? "PP 下限" : "y 下限"], ["y_max", id === "pp_energy" ? "PP 上限" : "y 上限"]].map(function (r) {
+        [["x_min", withUnit(axis.x, axis.xUnit) + " 下限"], ["x_max", withUnit(axis.x, axis.xUnit) + " 上限"], ["y_min", withUnit(axis.y, axis.yUnit) + " 下限"], ["y_max", withUnit(axis.y, axis.yUnit) + " 上限"]].map(function (r) {
           return h("div.field", h("label.field-label", r[1]), numInput(item[r[0]], function (v) { item[r[0]] = v; }, r[1]));
         })
       );
@@ -530,7 +586,8 @@
           formula,
           h("div", h("div.section-title", "多项式系数"), coeffs),
           pp ? h("div", h("div.section-title", "PP 能量换算"), pp) : null,
-          h("div", h("div.section-title", "有效范围（留空表示不限制）"), ranges, h("div.field-help", { style: "margin-top:6px" }, "反向求解在 x 范围内找根（未设置时为 −100 ~ 100）；超出范围的输入会在结果中标出。")),
+          h("div", h("div.section-title", "有效范围（留空表示不限制）"), ranges, h("div.field-help", { style: "margin-top:6px" }, "反向求解在 " + withUnit(axis.x, axis.xUnit) + " 范围内找根（未设置时为 −100 ~ 100）；超出范围的输入会在结果中标出。")),
+          id === "rp_width" ? aomPanel(item) : null,
           h("div", h("div.section-title", "系数绑定"), bindInfo),
           (S.multi[id] = S.multi[id] || h("div"))
         )
@@ -646,7 +703,10 @@
 
     function calcPanel(id, item) {
       var mode = S.mode;
-      var ta = h("textarea.textarea.input-mono", { rows: 4, placeholder: mode === "forward" ? "输入 x 值，可用空格、逗号或换行分隔\n例如：10 20 35.5" : "输入目标 " + (id === "pp_energy" ? "PP 能量" : "y") + " 值\n例如：40 60", "aria-label": "输入值" }, S.inputs[mode]);
+      var axis = axisOf(id, item);
+      var xLabel = withUnit(axis.x, axis.xUnit);
+      var yLabel = withUnit(axis.y, axis.yUnit);
+      var ta = h("textarea.textarea.input-mono", { rows: 4, placeholder: mode === "forward" ? "输入" + xLabel + "，可用空格、逗号或换行分隔\n例如：10 20 35.5" : "输入目标 " + yLabel + "\n例如：40 60", "aria-label": "输入值" }, S.inputs[mode]);
       ta.addEventListener("input", function () { S.inputs[mode] = ta.value; drawPlot(); });
       var runBtn = h("button.btn.btn-primary", { type: "button" }, icon(mode === "forward" ? "arrow-right" : "search"), mode === "forward" ? "计算" : "求解");
       var resHost = h("div");
@@ -670,30 +730,59 @@
           return;
         }
         var rs = entry.res.results;
-        var yLabel = id === "pp_energy" ? "PP 能量" : "y";
-        var STATUS = { ok: null, out_of_x_range: "x 超出范围", out_of_y_range: yLabel + " 超出范围", none: "范围内无实数解", identity: "常数函数：所有 x 都满足", single: null, multiple: null };
+        var xLabel = withUnit(axis.x, axis.xUnit);
+        var yLabel = withUnit(axis.y, axis.yUnit);
+        var otherLabel = axis.other ? withUnit(axis.other, axis.otherUnit) : "";
+        function otherCell(y) {
+          if (!otherLabel) return null;
+          var other = complementOf(y, item);
+          return h("td.mono", other === null ? "—" : util.formatNumber(other));
+        }
+        var STATUS = { ok: null, out_of_x_range: xLabel + " 超出范围", out_of_y_range: yLabel + " 超出范围", none: "范围内无实数解", identity: "常数函数：所有 x 都满足", single: null, multiple: null };
         var table;
         if (mode === "forward") {
-          table = h("table.table.is-compact.result-table", h("thead", h("tr", h("th", "#"), h("th", "x"), id === "pp_energy" ? h("th", "f(x)") : null, h("th", yLabel), h("th", "状态"))), h("tbody", rs.map(function (r) {
-            return h("tr", h("td.num.muted", String(r.input_index + 1)), h("td.mono", util.formatNumber(r.x)), id === "pp_energy" ? h("td.mono.muted", r.y_base === undefined ? "—" : util.formatNumber(r.y_base)) : null, h("td.mono", { style: "color:var(--c-primary-text);font-weight:600" }, r.y === undefined ? "—" : util.formatNumber(r.y)), h("td", STATUS[r.status] ? h("span.badge.badge-warning", STATUS[r.status]) : h("span.badge.badge-success", "正常")));
+          table = h("table.table.is-compact.result-table", h("thead", h("tr", h("th", "#"), h("th", xLabel), id === "pp_energy" ? h("th", "f(x)") : null, h("th", yLabel), otherLabel ? h("th", otherLabel) : null, h("th", "状态"))), h("tbody", rs.map(function (r) {
+            return h("tr", h("td.num.muted", String(r.input_index + 1)), h("td.mono", util.formatNumber(r.x)), id === "pp_energy" ? h("td.mono.muted", r.y_base === undefined ? "—" : util.formatNumber(r.y_base)) : null, h("td.mono", { style: "color:var(--c-primary-text);font-weight:600" }, r.y === undefined ? "—" : util.formatNumber(r.y)), otherCell(r.y), h("td", STATUS[r.status] ? h("span.badge.badge-warning", STATUS[r.status]) : h("span.badge.badge-success", "正常")));
           })));
         } else {
-          table = h("table.table.is-compact.result-table", h("thead", h("tr", h("th", "#"), h("th", "目标 " + yLabel), h("th", "解 x"), h("th", "状态"))), h("tbody", rs.map(function (r) {
+          table = h("table.table.is-compact.result-table", h("thead", h("tr", h("th", "#"), h("th", "目标 " + yLabel), otherLabel ? h("th", otherLabel) : null, h("th", "解 " + xLabel), h("th", "状态"))), h("tbody", rs.map(function (r) {
             var cell;
             if (r.status === "multiple") {
               var sel = h("select.select.input-sm", { "aria-label": "选择第 " + (r.input_index + 1) + " 行采用的解", style: "width:auto" }, h("option", { value: "" }, "选择采用的解…"), r.x_values.map(function (x) { return h("option", { value: String(x), selected: entry.choice[r.input_index] === x }, util.formatNumber(x)); }));
               sel.addEventListener("change", function () { entry.choice[r.input_index] = sel.value === "" ? undefined : Number(sel.value); drawPlot(); });
               cell = h("td", h("div.row", h("span.mono.multi", r.x_values.map(util.formatNumber).join(", ")), sel));
             } else cell = h("td.mono", r.x_values && r.x_values.length ? util.formatNumber(r.x_values[0]) : "—");
-            return h("tr", h("td.num.muted", String(r.input_index + 1)), h("td.mono", util.formatNumber(r.y)), cell, h("td", r.status === "multiple" ? h("span.badge.badge-warning", r.x_values.length + " 个解") : STATUS[r.status] ? h("span.badge.badge-danger", STATUS[r.status]) : h("span.badge.badge-success", "唯一解")));
+            return h("tr", h("td.num.muted", String(r.input_index + 1)), h("td.mono", util.formatNumber(r.y)), otherCell(r.y), cell, h("td", r.status === "multiple" ? h("span.badge.badge-warning", r.x_values.length + " 个解") : STATUS[r.status] ? h("span.badge.badge-danger", STATUS[r.status]) : h("span.badge.badge-success", "唯一解")));
           })));
         }
         var multi = mode === "reverse" && rs.some(function (r) { return r.status === "multiple"; });
         function csv() {
-          if (mode === "forward") return ["x," + yLabel + ",状态"].concat(rs.map(function (r) { return [r.x, r.y === undefined ? "" : r.y, STATUS[r.status] || "正常"].join(","); })).join("\n");
-          return ["目标" + yLabel + ",解x,状态"].concat(rs.map(function (r) {
+          if (mode === "forward") {
+            var head = [xLabel, yLabel];
+            if (otherLabel) head.push(otherLabel);
+            head.push("状态");
+            return [head.join(",")].concat(rs.map(function (r) {
+              var row = [r.x, r.y === undefined ? "" : r.y];
+              if (otherLabel) {
+                var other = complementOf(r.y, item);
+                row.push(other === null ? "" : other);
+              }
+              row.push(STATUS[r.status] || "正常");
+              return row.join(",");
+            })).join("\n");
+          }
+          var revHead = ["目标" + yLabel];
+          if (otherLabel) revHead.push(otherLabel);
+          revHead.push("解" + xLabel, "状态");
+          return [revHead.join(",")].concat(rs.map(function (r) {
             var x = r.status === "multiple" ? (entry.choice[r.input_index] !== undefined ? entry.choice[r.input_index] : r.x_values.join(" | ")) : (r.x_values[0] !== undefined ? r.x_values[0] : "");
-            return [r.y, x, r.status === "multiple" ? (entry.choice[r.input_index] !== undefined ? "已选定" : "多解") : STATUS[r.status] || "唯一解"].join(",");
+            var row = [r.y];
+            if (otherLabel) {
+              var other = complementOf(r.y, item);
+              row.push(other === null ? "" : other);
+            }
+            row.push(x, r.status === "multiple" ? (entry.choice[r.input_index] !== undefined ? "已选定" : "多解") : STATUS[r.status] || "唯一解");
+            return row.join(",");
           })).join("\n");
         }
         drawPlot();
@@ -705,7 +794,7 @@
         );
       }
 
-      var yName = id === "pp_energy" ? "PP" : "y";
+      var yName = yLabel;
       plotCanvas = h("canvas.dl-plot", { role: "img", "aria-label": "当前数值关系图" });
       plotSummary = h("p.dl-plot-summary", "正在绘制当前数值关系。");
       var plotCard = h(
@@ -721,8 +810,8 @@
         ),
         plotSummary
       );
-      var seg = MC.segmented([{ value: "forward", label: "正向 x → " + yName }, { value: "reverse", label: "反向 " + yName + " → x" }], mode, function (v) { S.mode = v; render(); }, "计算方向");
-      var panel = h("section.panel", h("div.panel-header", h("h2", "计算"), seg), h("div.panel-body.col", { style: "gap:12px" }, plotCard, MC.field({ label: mode === "forward" ? "输入 x" : "输入目标值", control: ta }), h("div.row", h("span.xsmall.muted.grow", itemDirty(id) ? "将使用未保存的草稿参数计算" : "使用已保存的参数计算"), runBtn), resHost));
+      var seg = MC.segmented([{ value: "forward", label: "正向 " + xLabel + " → " + yName }, { value: "reverse", label: "反向 " + yName + " → " + xLabel }], mode, function (v) { S.mode = v; render(); }, "计算方向");
+      var panel = h("section.panel", h("div.panel-header", h("h2", "计算"), seg), h("div.panel-body.col", { style: "gap:12px" }, plotCard, MC.field({ label: mode === "forward" ? "输入 " + xLabel : "输入目标 " + yName, control: ta }), h("div.row", h("span.xsmall.muted.grow", itemDirty(id) ? "将使用未保存的草稿参数计算" : "使用已保存的参数计算"), runBtn), resHost));
       renderResults();
       return panel;
     }

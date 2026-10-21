@@ -1058,6 +1058,42 @@ class TestSaveItem:
 # ---------------------------------------------------------------------------
 
 
+    def test_rp_width_saves_aom_mode_and_sum(self):
+        pid = seed_roles("dlsaveaom")
+        rev = _seed_config(pid)
+        payload = _load_item(pid, "rp_width")
+        payload["aom_mode"] = "width"
+        payload["aom_sum"] = 120
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_width"),
+                payload,
+                headers={"If-Match": rev},
+            )
+        assert status == 200, body
+        assert body["item"]["aom_mode"] == "width"
+        assert body["item"]["aom_sum"] == 120.0
+        saved = _load_item(pid, "rp_width")
+        assert saved["aom_mode"] == "width"
+        assert saved["aom_sum"] == 120.0
+
+    def test_rp_width_rejects_unknown_aom_mode(self):
+        pid = seed_roles("dlsaveaom2")
+        rev = _seed_config(pid)
+        payload = _load_item(pid, "rp_width")
+        payload["aom_mode"] = "both"
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_width"),
+                payload,
+                headers={"If-Match": rev},
+            )
+        assert status == 400, body
+        assert body["error"]["detail"]["field"] == "aom_mode"
+
+
 class TestTransCoeffZero:
     def _zero_trans(self):
         return _item(

@@ -46,10 +46,38 @@
       pick(e.dataTransfer.files[0]);
     });
     fileInput.addEventListener("change", function () { pick(fileInput.files[0]); });
+    function nameFromUrl(raw) {
+      var text = String(raw || "").trim().split("#")[0];
+      var qpos = text.indexOf("?");
+      var path = qpos >= 0 ? text.slice(0, qpos) : text;
+      var query = qpos >= 0 ? text.slice(qpos + 1) : "";
+      function decode(value) {
+        try { return decodeURIComponent(String(value || "").replace(/\+/g, " ")); } catch (e) { return String(value || ""); }
+      }
+      var leaf = decode(path.split("/").pop() || "").trim();
+      var fromQuery = "";
+      query.split("&").forEach(function (pair) {
+        if (!pair) return;
+        var eq = pair.indexOf("=");
+        var key = decode(eq >= 0 ? pair.slice(0, eq) : pair);
+        if (key !== "filename" && key !== "file" && key !== "name") return;
+        fromQuery = decode(eq >= 0 ? pair.slice(eq + 1) : "").split("/").pop().split("\\").pop();
+      });
+      function extOf(name) {
+        var i = String(name || "").lastIndexOf(".");
+        return i > 0 ? name.slice(i).toLowerCase() : "";
+      }
+      var options = [];
+      if (leaf) options.push(leaf);
+      if (fromQuery) options.push(fromQuery);
+      var i;
+      for (i = 0; i < options.length; i++) if (extOf(options[i]) === ".xml" || extOf(options[i]) === ".json") return options[i];
+      for (i = 0; i < options.length; i++) if (extOf(options[i])) return options[i];
+      return options[0] || "";
+    }
     urlInput.addEventListener("input", function () {
       if (!nameInput.dataset.touched) {
-        var last = urlInput.value.split("?")[0].split("/").pop();
-        nameInput.value = last || "";
+        nameInput.value = nameFromUrl(urlInput.value);
         checkExists();
       }
     });

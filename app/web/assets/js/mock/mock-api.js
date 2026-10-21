@@ -1756,6 +1756,12 @@
       next.power_conv_coeff = clean.power_conv_coeff;
     }
     if (typeof raw.name === "string" && raw.name.trim()) next.name = raw.name;
+    if (kind === "rp_width") {
+      if (raw.aom_mode === "delay" || raw.aom_mode === "width") next.aom_mode = raw.aom_mode;
+      if (Object.prototype.hasOwnProperty.call(raw, "aom_sum")) {
+        next.aom_sum = raw.aom_sum === null || raw.aom_sum === "" ? null : dlNumber(raw.aom_sum);
+      }
+    }
     if (raw.binding && typeof raw.binding === "object" && !Array.isArray(raw.binding)) {
       var binding = next.binding && typeof next.binding === "object" ? clone(next.binding) : {};
       ["source_file", "variable_path"].forEach(function (k) {
@@ -1819,6 +1825,12 @@
     if (nameErr) return fail(400, "INVALID_INPUT", nameErr, { field: "name" });
     var bindingErr = validateDlBinding(req.body);
     if (bindingErr) return fail(400, "INVALID_INPUT", bindingErr, { field: "binding" });
+    if (a.item === "rp_width" && Object.prototype.hasOwnProperty.call(req.body, "aom_mode") && req.body.aom_mode !== "delay" && req.body.aom_mode !== "width") {
+      return fail(400, "INVALID_INPUT", "AOM2 模式只能是 delay 或 width", { field: "aom_mode" });
+    }
+    if (a.item === "rp_width" && Object.prototype.hasOwnProperty.call(req.body, "aom_sum") && req.body.aom_sum !== null && req.body.aom_sum !== "" && dlNumber(req.body.aom_sum) === null) {
+      return fail(400, "INVALID_INPUT", "AOM2 delay 与 width 的和必须是有限数值", { field: "aom_sum" });
+    }
     if (header !== dlRev(P)) {
       return fail(409, "REVISION_CONFLICT", "计算参数已被他人修改，请刷新后再保存");
     }
