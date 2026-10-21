@@ -1060,11 +1060,16 @@ def test_control_between_scheme_and_separator_is_seen_by_the_scanner():
     for raw in (
         "https\n://evil.example.com/x.js",
         "https\r://evil.example.com/x.js",
-        "https \n ://evil.example.com/x.js",
+        "git\n://evil.example.com/x.js",  # 非特殊 scheme 只走 _SCHEME_LOOSE_RE
     ):
         found = [url for _line, url in mr.url_literals(raw)]
         assert found, raw
         assert mr._host_of(found[0]) == "evil.example.com", (raw, found)
+    # 空格不在 WHATWG 的删除集里，`https \n ://` 实际解析失败；扫描器仍保守地按外链拦，
+    # 这是有意的多拦，不写成「浏览器会访问」。
+    conservative = "https \n ://evil.example.com/x.js"
+    found = [url for _line, url in mr.url_literals(conservative)]
+    assert found and mr._host_of(found[0]) == "evil.example.com", found
 
 
 def test_build_rejects_control_between_scheme_and_separator(source_tree: Path, tmp_path: Path) -> None:
