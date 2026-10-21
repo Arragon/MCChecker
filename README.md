@@ -12,7 +12,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-服务默认在 `0.0.0.0:50002` 启动，内网其他机器可通过 `http://<服务器IP>:50002` 访问；可通过环境变量 `MCHECKER_PORT` 指定端口。
+服务默认在 `0.0.0.0:50003` 启动（`app/config.py` 的 `DEFAULT_PORT`），内网其他机器可通过 `http://<服务器IP>:50003` 访问；可通过环境变量 `MCHECKER_PORT` 或 `--port` 指定端口。
 
 ## 功能列表
 
@@ -50,4 +50,4 @@ pytest tests/ -v
 
 ## 配置说明
 
-- 默认端口 50002；`python run.py --port <端口> --data-dir <目录>` 可覆盖。
+- 默认端口是 `app/config.py` 的 `DEFAULT_PORT`（50003）；`python run.py --port <端口> --data-dir <目录>` 可覆盖。

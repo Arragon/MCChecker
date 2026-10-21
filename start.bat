@@ -25,7 +25,16 @@ if not defined PYEXE call :probe "python"
 if not defined PYEXE call :probe "py"
 if not defined PYEXE goto :no_python
 
-set "PORT=50002"
+rem 默认端口只定义在 app\config.py 的 DEFAULT_PORT，这里读那一行，不再写死数字。
+set "PORT="
+for /f "tokens=3" %%P in ('findstr /b /c:"DEFAULT_PORT = " "%ROOT%app\config.py"') do (
+    if not defined PORT set "PORT=%%P"
+)
+if not defined PORT (
+    echo 启动失败：%ROOT%app\config.py 里没有 DEFAULT_PORT。默认端口只定义在这一处。
+    pause
+    exit /b 1
+)
 if defined MCHECKER_PORT set "PORT=%MCHECKER_PORT%"
 set "DATA=%ROOT%data"
 if defined MCHECKER_DATA_DIR set "DATA=%MCHECKER_DATA_DIR%"

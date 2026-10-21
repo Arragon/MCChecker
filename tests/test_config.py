@@ -26,7 +26,8 @@ class TestDefaults:
         settings = config.load_settings([])
 
         assert settings.host == "0.0.0.0"
-        assert settings.port == 50002
+        assert config.DEFAULT_PORT == 50003
+        assert settings.port == config.DEFAULT_PORT
         assert settings.data_dir == os.path.join(config.REPO_ROOT, "data")
         assert settings.web_dir == os.path.join(config.REPO_ROOT, "app", "web")
         assert settings.trusted_proxies == ()

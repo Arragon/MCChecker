@@ -9,7 +9,6 @@
 # 逻辑写在函数里，测试用 MCHECKER_START_LIB=0 source 本文件后直接调用这些函数
 # （tests/test_release.py 里有），所以刻意不用 `set -e/-u`，错误一律显式 return/exit。
 
-MCHECKER_DEFAULT_PORT=50002
 #: 与规范 §14.1、§16.6 一致的下限。
 MCHECKER_PYTHON_CHECK='import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)'
 
@@ -19,8 +18,17 @@ MCHECKER_PYTHON_CHECK='import sys; sys.exit(0 if sys.version_info >= (3, 9) else
 # 符号链接），用逻辑路径打印就会跟日志里的 `data=` 差一层链接。
 mcc_self=$0
 case "$mcc_self" in
-    */*) MCHECKER_SCRIPT_DIR=$(CDPATH= cd -- "${mcc_self%/*}" && pwd -P) || MCHECKER_SCRIPT_DIR=. ;;
-    *) MCHECKER_SCRIPT_DIR=$(pwd) ;;
+    */start.sh|start.sh)
+        # 直接执行：目录就是脚本所在目录，哪怕旁边还没有 run.py 也要报「包不完整」。
+        case "$mcc_self" in
+            */*) MCHECKER_SCRIPT_DIR=$(CDPATH= cd -- "${mcc_self%/*}" && pwd -P) || MCHECKER_SCRIPT_DIR=. ;;
+            *) MCHECKER_SCRIPT_DIR=$(pwd -P) ;;
+        esac
+        ;;
+    *)
+        # 被 source 时 $0 是 shell。测试从仓库根调用，用当前目录。
+        MCHECKER_SCRIPT_DIR=$(pwd -P)
+        ;;
 esac
 
 mcc_die() {
@@ -59,20 +67,54 @@ mcc_pick_python() {
     return 1
 }
 
+mcc_default_port() {
+    # 默认端口只有 app/config.py 的 DEFAULT_PORT 一处。按行读取，不在脚本里再写数字。
+    # 不用 sed：发布包测试把 PATH 收成只有解释器，外部命令不一定在。
+    mcc_cfg="$MCHECKER_SCRIPT_DIR/app/config.py"
+    if [ ! -f "$mcc_cfg" ]; then
+        mcc_die "启动失败：找不到 $mcc_cfg。默认端口只定义在 app/config.py 的 DEFAULT_PORT。"
+        return 1
+    fi
+    mcc_port=""
+    while IFS= read -r mcc_line || [ -n "$mcc_line" ]; do
+        case "$mcc_line" in
+            "DEFAULT_PORT = "[0-9]*)
+                mcc_port=${mcc_line#DEFAULT_PORT = }
+                mcc_port=${mcc_port%%[!0-9]*}
+                break
+                ;;
+        esac
+    done < "$mcc_cfg"
+    if [ -z "$mcc_port" ]; then
+        mcc_die "启动失败：$mcc_cfg 里没有 DEFAULT_PORT = <端口>。"
+        return 1
+    fi
+    printf '%s\n' "$mcc_port"
+}
+
 mcc_resolve_port() {
-    # 打印出来的地址要跟实际监听端口一致：命令行 --port > 环境变量 > 默认（§3.6 的优先级）。
-    mcc_port="${MCHECKER_PORT:-$MCHECKER_DEFAULT_PORT}"
+    # 打印出来的地址要跟实际监听端口一致：命令行 --port > 环境变量 > DEFAULT_PORT（§3.6）。
+    mcc_port="${MCHECKER_PORT:-}"
+    mcc_from_args=""
     mcc_prev=""
     for mcc_arg in "$@"; do
         if [ "$mcc_prev" = "--port" ]; then
-            mcc_port="$mcc_arg"
+            mcc_from_args="$mcc_arg"
         fi
         case "$mcc_arg" in
-            --port=*) mcc_port="${mcc_arg#--port=}" ;;
+            --port=*) mcc_from_args="${mcc_arg#--port=}" ;;
         esac
         mcc_prev="$mcc_arg"
     done
-    printf '%s\n' "$mcc_port"
+    if [ -n "$mcc_from_args" ]; then
+        printf '%s\n' "$mcc_from_args"
+        return 0
+    fi
+    if [ -n "$mcc_port" ]; then
+        printf '%s\n' "$mcc_port"
+        return 0
+    fi
+    mcc_default_port
 }
 
 mcc_resolve_data_dir() {
@@ -99,7 +141,7 @@ mcc_main() {
         return 1
     fi
     mcc_python=$(mcc_pick_python) || return 1
-    mcc_port=$(mcc_resolve_port "$@")
+    mcc_port=$(mcc_resolve_port "$@") || return 1
     mcc_data=$(mcc_resolve_data_dir "$@")
     printf 'MCChecker 启动中：解释器 %s，数据根 %s\n' "$mcc_python" "$mcc_data"
     printf '  （§3.6 优先级：--data-dir > 环境变量 MCHECKER_DATA_DIR > 默认 %s/data；升级要整份备份的是这个目录）\n' \

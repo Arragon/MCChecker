@@ -809,12 +809,21 @@ def test_start_sh_reports_url_and_launches_packaged_app(tmp_path: Path) -> None:
 
 
 def start_sh_release_root(tmp_path: Path, run_py_text: str) -> Path:
-    """一个最小发布目录：真 start.sh + 一个只打印、不起服务的 run.py。"""
+    """一个最小发布目录：真 start.sh + 一个只打印、不起服务的 run.py。
+
+    默认端口从 `app/config.py` 读取，所以把仓库里的那一份放进来，不另写一个数字。
+    """
     root = tmp_path / "release"
     root.mkdir()
     (root / "run.py").write_text(run_py_text, encoding="utf-8")
     (root / "start.sh").write_text((REPO_ROOT / "start.sh").read_text(encoding="utf-8"), encoding="utf-8")
     (root / "start.sh").chmod(0o755)
+    app_dir = root / "app"
+    app_dir.mkdir()
+    (app_dir / "config.py").write_text(
+        (REPO_ROOT / "app" / "config.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -893,6 +902,33 @@ def test_start_sh_uses_the_documented_runtime_python_dir(tmp_path: Path) -> None
     assert str(root / "runtime/python/bin/python3") in proc.stdout, proc.stdout
     assert "runtime/bin/python3" not in proc.stdout, proc.stdout
     assert "ARGS=run.py" in proc.stdout, proc.stdout  # 被选中的那个真的接到了 run.py
+
+
+def test_launchers_read_the_single_default_port() -> None:
+    """默认端口只允许出现在 `app.config.DEFAULT_PORT`。启动脚本自己再写一个数字就会分叉。"""
+    from app.config import DEFAULT_PORT
+
+    for name in ("start.sh", "start.bat"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        assert "50002" not in text and "50003" not in text, name
+        assert "config.py" in text, name
+    assert DEFAULT_PORT == 50003
+
+    env = start_sh_env(Path("/tmp"), [str(Path(sys.executable).parent)])
+    env["MCHECKER_START_LIB"] = "0"
+    env["PATH"] = os.pathsep.join([env["PATH"], "/bin", "/usr/bin"])
+    script = ". '%s'; mcc_resolve_port" % (REPO_ROOT / "start.sh")
+    proc = subprocess.run(
+        ["/bin/sh", "-c", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        env=env,
+        cwd=str(REPO_ROOT),
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(DEFAULT_PORT), proc.stdout
 
 
 def test_start_sh_library_mode_exposes_the_resolvers(tmp_path: Path) -> None:

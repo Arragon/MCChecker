@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-默认监听：`0.0.0.0:50002`
+默认监听：`0.0.0.0:50003`（`app/config.py` 的 `DEFAULT_PORT`）
 
 停止：
 
@@ -55,7 +55,7 @@ python main.py
 
 ### 6.1 端口与数据目录
 
-默认端口 50002；`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
+默认端口是 `app/config.py` 的 `DEFAULT_PORT`（50003）。`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
 
 ## 7. 数据目录说明
 

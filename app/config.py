@@ -21,8 +21,8 @@ from typing import List, Optional, Tuple
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DEFAULT_HOST = "0.0.0.0"
-#: 与现网实际端口一致（F28 要求默认值不变）。
-DEFAULT_PORT = 50002
+#: 全项目唯一的默认端口。start.sh / start.bat 从这一行读取，其它地方不要再写死端口数字。
+DEFAULT_PORT = 50003
 DEFAULT_DATA_DIR = os.path.join(REPO_ROOT, "data")
 DEFAULT_WEB_DIR = os.path.join(REPO_ROOT, "app", "web")
 DEFAULT_UPLOAD_MAX_MB = 50
