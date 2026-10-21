@@ -127,6 +127,8 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
     传入 `argv` 便于测试；传 `None` 时读 `sys.argv[1:]`。
     """
     cli = _parse_cli(list(sys.argv[1:]) if argv is None else list(argv))
+    if cli.dry_run and not cli.restore_dir:
+        raise SettingsError("--dry-run 只能与 --restore 一起使用")
     env = os.environ
 
     host = DEFAULT_HOST

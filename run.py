@@ -186,10 +186,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         except AppError as exc:
             print("恢复计划失败：%s" % exc.message, file=sys.stderr)
             return 2
-        print("恢复计划（dry-run，只读；未修改任何文件）：%s" % plan["entry"])
+        print("恢复计划（dry-run，只读；未修改任何文件）：%s（op=%s）" % (plan["entry"], plan["op"]))
         for step in plan["steps"]:
             suffix = "" if step["exists"] else "  [恢复区副本缺失]"
-            print("  %s -> %s%s" % (step["from"], step["to"], suffix))
+            print("  %s -> %s%s" % (step["source"], step["destination"], suffix))
         for kind, refs in sorted(plan["removed_refs"].items()):
             print("  removed_refs.%s: %s" % (kind, json.dumps(refs, ensure_ascii=False)))
         return 0
