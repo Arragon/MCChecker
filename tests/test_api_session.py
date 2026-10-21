@@ -138,7 +138,7 @@ class TestForwardedFor:
 
 
 class TestPerProfileIdentity:
-    def test_same_ip_has_different_roles_on_different_profiles(self):
+    def test_same_ip_has_the_same_role_on_every_profile(self):
         from app.core import storage
 
         (p1, p2) = seed_models("p1", "p2")
@@ -156,9 +156,12 @@ class TestPerProfileIdentity:
         assert on_p1["identity"]["registered"] is True
         assert on_p1["identity"]["is_admin"] is True
         assert on_p1["identity"]["role_label"] == "管理员"
-        assert on_p2["identity"]["name"] == "10.1.2.3"
-        assert on_p2["identity"]["registered"] is False
-        assert on_p2["identity"]["role_label"] == "访客"
+        assert on_p2["identity"]["name"] == "张三"
+        assert on_p2["identity"]["registered"] is True
+        assert on_p2["identity"]["is_admin"] is True
+        assert on_p2["identity"]["role_label"] == "管理员"
+        assert not os.path.exists(os.path.join(storage.get_profile_data_dir(p1), "ip_mapping.json"))
+        assert os.path.isfile(os.path.join(storage.DATA_DIR, "ip_mapping.json"))
 
     def test_registered_member_without_admin(self):
         from app.core import storage

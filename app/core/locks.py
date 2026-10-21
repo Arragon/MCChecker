@@ -53,6 +53,9 @@ def profile_lock_count() -> int:
 #: 保护 `device_models.json` 的读改写。
 registry_lock = threading.RLock()
 
+#: 人员与管理员名单全机型共用一份文件，读改写用这一把，不用机型锁。
+people_lock = threading.RLock()
+
 
 # ---------------------------------------------------------------------------
 # 维护态写闸门

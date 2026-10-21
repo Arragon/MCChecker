@@ -16,9 +16,9 @@
   客户端地址是规范化过的，而 `resolve_person_by_ip` 按**字符串逐字**比较，所以人写的
   `FE80::1`、`::ffff:10.1.2.3` 存进去就永远匹配不上——登记了 IP、加了管理员，身份却不生效。
   只在**写入那一次**归一，读取路径原样回显磁盘上的旧写法（§5.2「现有字段不变」）。
-* 「改 IP」（路径 IP ≠ body IP）必须**在同一次机型锁里先删后写**：分两次取锁的话，两次锁
-  之间跑完的另一次写会被这里的旧副本覆盖（§5.4 的丢失更新，`docs/know-how.md` 第 2 节那条
-  「锁外读 + 锁内写」的同族错法），最坏结果是表里同时留下新旧两条或旧条目丢失。
+* 「改 IP」（路径 IP ≠ body IP）必须**在同一次人员锁里先删后写**：人员表全机型共用，锁是
+  `storage.people_write()`，不是机型锁。分两次取锁的话，两次锁之间跑完的另一次写会被这里的
+  旧副本覆盖（§5.4 的丢失更新），最坏结果是表里同时留下新旧两条或旧条目丢失。
 * 「删了 0 条」不递增修订号，也不写一个字节（与 `updates.delete_source` 同口径）。
 * 管理员姓名与 IP 键**都不许含让「删除路径」走不通的东西**（M3-13 / INH-1898 三轮裁定）：
   §7.9 的删除把姓名 / IP 放进路径段，而 §16.8 第 3 条的全站守卫会把编码过的分隔符拦成一只
@@ -103,21 +103,32 @@ _UNMANAGEABLE_IP_MESSAGE = (
 # ---------------------------------------------------------------------------
 
 
+def _note_settings_changed(pid: str) -> None:
+    """人员配置是全机型一份，所以每个机型的 settings 修订都要动，打开着的界面才会刷新。"""
+    revision.bump(pid, PART)
+    from ..core import device_models
+
+    for model in device_models.load_models():
+        other = str(model.get("id") or "")
+        if other and other != pid:
+            revision.bump(other, PART)
+
+
 def list_ip_mapping(pid: str) -> Dict[str, Any]:
     """`GET /p/{pid}/ip-mapping` → `{"items": [{"ip","name","updated_at"}]}`。
 
-    磁盘上是什么写法就回显什么（旧行可能是非规范拼写；归一只在写入那一次发生）。
-    读接口：一个字节都不写、永不递增。
+    路径仍带机型，读到的是数据根上那一份共用表。磁盘上是什么写法就回显什么
+    （旧行可能是非规范拼写；归一只在写入那一次发生）。读接口不写字节、不递增。
     """
-    with storage.use_profile(pid):
-        rows = storage.load_ip_mapping()
+    del pid
+    rows = storage.load_ip_mapping()
     return {"items": [_ip_row(row) for row in rows if isinstance(row, dict)]}
 
 
 def list_admins(pid: str) -> Dict[str, Any]:
-    """`GET /p/{pid}/admins` → `{"items": [{"name","updated_at"}]}`。"""
-    with storage.use_profile(pid):
-        rows = storage.load_admin_users()
+    """`GET /p/{pid}/admins` → `{"items": [{"name","updated_at"}]}`。全机型同一份名单。"""
+    del pid
+    rows = storage.load_admin_users()
     return {"items": [_admin_row(row) for row in rows if isinstance(row, dict)]}
 
 
@@ -143,8 +154,8 @@ def put_ip_mapping(pid: str, path_ip: Any, payload: Optional[Dict[str, Any]]) ->
     new_ip = _validated_ip_key(_validated_ip(body.get(IP_FIELD, path_ip)))
     name = _validated_name(body.get(NAME_FIELD))
     stamp = _now()
-    # 一次锁内完成「删旧 + 写新」：`save_ip_mapping` 内部再取同一把 per-pid RLock 只是重入。
-    with storage.use_profile(pid), storage.profile_write(pid):
+    # 一次人员锁内完成「删旧 + 写新」：`save_ip_mapping` 再取同一把锁只是重入。
+    with storage.people_write():
         rows = storage.load_ip_mapping()
         if new_ip != old_ip:
             rows = [row for row in rows if not _row_ip_matches(row, old_ip)]
@@ -155,8 +166,8 @@ def put_ip_mapping(pid: str, path_ip: Any, payload: Optional[Dict[str, Any]]) ->
         else:
             rows = [entry if i == index else row for i, row in enumerate(rows)]
         storage.save_ip_mapping(rows)
-    revision.bump(pid, PART)
-    logger.info("IP 对应表已保存：机型=%s %s → %s（%s）", pid, old_ip, new_ip, name)
+    _note_settings_changed(pid)
+    logger.info("IP 对应表已保存（全机型共用）：来自机型=%s %s → %s（%s）", pid, old_ip, new_ip, name)
     return {"item": dict(entry)}
 
 
@@ -173,15 +184,15 @@ def delete_ip_mapping(pid: str, ip: Any) -> Dict[str, Any]:
     「顺手统一掉」——两个入口不对称是裁定，不是漂移。
     """
     target = _validated_ip(ip)
-    with storage.use_profile(pid), storage.profile_write(pid):
+    with storage.people_write():
         rows = storage.load_ip_mapping()
         kept = [row for row in rows if not _row_ip_matches(row, target)]
         removed = len(kept) < len(rows)
         if removed:
             storage.save_ip_mapping(kept)
     if removed:
-        revision.bump(pid, PART)
-        logger.info("IP 对应表已删除条目：机型=%s %s", pid, target)
+        _note_settings_changed(pid)
+        logger.info("IP 对应表已删除条目（全机型共用）：来自机型=%s %s", pid, target)
     return {"removed": removed}
 
 
@@ -197,14 +208,14 @@ def add_admin(pid: str, name: Any) -> Dict[str, Any]:
     """
     clean = _validated_admin_name(name)
     stamp = _now()
-    with storage.use_profile(pid), storage.profile_write(pid):
+    with storage.people_write():
         rows = storage.load_admin_users()
         if _name_index(rows, clean) is not None:
             raise AppError(FILE_EXISTS, "该管理员已存在", name=clean, field=NAME_FIELD)
         entry = {"name": clean, "updated_at": stamp}
         storage.save_admin_users(rows + [entry])
-    revision.bump(pid, PART)
-    logger.info("管理员名单已新增：机型=%s %s", pid, clean)
+    _note_settings_changed(pid)
+    logger.info("管理员名单已新增（全机型共用）：来自机型=%s %s", pid, clean)
     return {"item": dict(entry)}
 
 
@@ -224,15 +235,15 @@ def remove_admin(pid: str, name: Any) -> Dict[str, Any]:
     看到这段想「统一两个入口」的人，请先让这三条红一遍再决定。
     """
     clean = _validated_name(name)
-    with storage.use_profile(pid), storage.profile_write(pid):
+    with storage.people_write():
         rows = storage.load_admin_users()
         kept = [row for row in rows if _row_name(row) != clean]
         removed = len(kept) < len(rows)
         if removed:
             storage.save_admin_users(kept)
     if removed:
-        revision.bump(pid, PART)
-        logger.info("管理员名单已移除：机型=%s %s", pid, clean)
+        _note_settings_changed(pid)
+        logger.info("管理员名单已移除（全机型共用）：来自机型=%s %s", pid, clean)
     return {"removed": removed}
 
 

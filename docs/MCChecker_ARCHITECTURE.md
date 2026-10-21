@@ -64,7 +64,7 @@ MCChecker 应继续采用 **Python + NiceGUI + APScheduler + 本地文件/JSON �
 
 ### 2.9 profile 身份语义必须保持现状而非偷偷重构
 
-当前 `ip_mapping.json` 与 `admin_users.json` 实际是 profile-scoped；profile 本身又不是租户/部门授权边界。整改必须显式携带 profile 并保留当前行为，不能在没有产品决定时把身份表静默改成全局，也不能宣称现有 profile 已提供部门数据隔离。
+`ip_mapping.json` 与 `admin_users.json` 已改为数据根上的全机型共用表（产品确认：按机型各存一套是设计失误）。profile 仍然不是租户/部门授权边界，也不能宣称现有 profile 已提供部门数据隔离。
 
 ## 3. 当前架构
 

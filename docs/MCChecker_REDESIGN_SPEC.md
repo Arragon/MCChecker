@@ -105,8 +105,8 @@ MCChecker 是部署在内网、面向设备配置人员的 **XML/JSON 配置文�
 | F14 | 文件下载 | 当前版本与历史版本下载，保留原文件名/版本名；失败提示并可重试；路由 `/api/file-download` | `pages/file_downloads.py` | 各处「下载」；旧路由保留兼容 |
 | F15 | 更新源管理 | 映射表（文件名、下载链接、修改记录链接）增删改；改名可迁移本地文件与归档；单条刷新；全量更新与状态徽标 | `pages/management.py`、`storage.*config_mapping*` | 设置 · 更新源 |
 | F16 | 定时更新 | 启用开关 + 间隔小时（“天”单位未接入）；每机型一个周期任务，执行全量更新（含修改记录）；每 24 h 清理归档解析缓存 | `core/scheduler.py`、`management.py` | 设置 · 定时更新 |
-| F17 | IP 对应表 | IP → 姓名，增删改；按机型保存 | `management.py`、`storage.*ip_mapping*` | 设置 · 人员与权限 |
-| F18 | 管理员列表 | 姓名列表，增删改；按机型保存 | `management.py`、`storage.*admin_user*` | 设置 · 人员与权限 |
+| F17 | IP 对应表 | IP → 姓名，增删改；全机型共用一份 | `storage.*ip_mapping*` | 设置 · 人员与权限 |
+| F18 | 管理员列表 | 姓名列表，增删改；全机型共用一份 | `storage.*admin_user*` | 设置 · 人员与权限 |
 | F19 | 变量绑定 | 绑定组 = 名称 + 若干（文件, 路径）；对比时标注绑定组 | `pages/bindings.py`、`storage.*binding*`、`differ` | 设置 · 变量绑定；对比结果紫色标签 |
 | F20 | 工具菜单 | 名称/说明/地址增删改；右侧工具箱点击新窗口打开 | `pages/tools.py`、`home.py::_render_tools_sidebar` | 设置 · 工具菜单；侧栏「外部工具」 |
 | F21 | DL 快捷计算 | 三个计算项（PP 能量/RP 能量/RP 脉宽）；系数 k1–k8、b；PP 额外“传输系数/功率转换系数”；x/y 范围；正向/反向；多解检测与提示；多解时手选生成唯一解表；从配置文件按字段映射提取系数并可刷新；修改/保存/取消 | `pages/dltool.py`、`core/dltool.py` | 「DL 计算」 |
@@ -309,13 +309,12 @@ def client_ip(handler) -> str:
 
 def resolve_actor(ip: str, profile_id: str) -> Actor:
     deployer = ip in deployer_ips()        # 127.0.0.1、::1、本机所有接口地址（启动时计算并缓存，同现有逻辑）
-    with storage.use_profile(profile_id):
-        name = storage.resolve_person_by_ip(ip) or ip
-        admin = storage.is_admin_user(name)
+    name = storage.resolve_person_by_ip(ip) or ip   # 人员表在数据根，不随机型
+    admin = storage.is_admin_user(name)
     return Actor(ip, name, name != ip, deployer, admin)
 ```
 
-- IP 对应表与管理员名单**保持按机型保存**（与现状一致，架构书 §2.9）。因此同一个人在不同机型可能权限不同，`/session?profile=` 返回的是该机型下的身份。
+- IP 对应表与管理员名单放在数据根，**全机型共用一套**。同一 IP 在任何机型上的姓名和管理员身份都相同；`/session?profile=` 里的机型只决定当前数据空间，不决定身份。
 - 角色标签：`部署者 · 管理员` / `部署者` / `管理员` / `成员`（已登记非管理员）/ `访客`（未登记）。修复“部署者显示为游客”。
 - IPv4 映射的 IPv6（`::ffff:10.1.2.3`）先规范化为 IPv4 再匹配。
 
@@ -354,6 +353,8 @@ def resolve_actor(ip: str, profile_id: str) -> Actor:
 ```text
 data/
   device_models.json                 # [{id, name}]；default 永远存在
+  ip_mapping.json                    # IP → 姓名；全机型共用
+  admin_users.json                   # 管理员名单；全机型共用
   nicegui_storage_secret.txt         # 旧文件，保留不动、不再使用
   .mcchecker.lock                    # 新：单实例锁（运行期）
   profiles/<pid>/
@@ -362,7 +363,7 @@ data/
     archive/<name>/<archive_name>.diff.json   # 旧派生摘要（兼容读取；新版不再写入此处）
     records/<name>/record_YYYYMMDD_HHMMSS<ext> # 修改记录原文（权威）
     config_mapping.json  favorites.json  bindings.json  edit_remarks.json
-    tools.json  schedule.json  ip_mapping.json  admin_users.json  dltool_config.json
+    tools.json  schedule.json  dltool_config.json
     update_status.json               # 新（可选）：各更新源最近一次结果
     cache/parse_tree/                # 旧缓存，只读兼容，清理任务可删除
     cache/doc_v2/<sha256>.json.gz    # 新：compact 文档缓存（可丢弃）
@@ -670,7 +671,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 | `PATCH /profiles/{pid}` | 部署者 | `{"name"}` | `{"profile"}` |
 | `DELETE /profiles/{pid}` | 部署者 | — | `{"deleted": true, "recovery": "<恢复区目录名>"}`；`default` → 400。数据目录移入恢复区（C27） |
 
-复制机型（`copy_from`）复制：`configs/`、`archive/`、`config_mapping.json`、`favorites.json`、`bindings.json`、`tools.json`、`schedule.json`（`last_run` 置空）、`dltool_config.json`；**不复制**：`records/`、`edit_remarks.json`、`ip_mapping.json`、`admin_users.json`、`update_status.json`、`cache/`（与现有 `copy_profile_data` 一致，另外不再复制 cache）。
+复制机型（`copy_from`）复制：`configs/`、`archive/`、`config_mapping.json`、`favorites.json`、`bindings.json`、`tools.json`、`schedule.json`（`last_run` 置空）、`dltool_config.json`；**不复制**：`records/`、`edit_remarks.json`、`update_status.json`、`cache/`。`ip_mapping.json` 与 `admin_users.json` 在数据根，不属于机型目录，复制和删除机型都不动它们。
 
 ### 7.3 修订号（多用户同步）
 
@@ -679,7 +680,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 - 服务端在内存为每个机型维护 5 个单调递增计数；对应写操作成功后 +1；进程启动时从 1 开始（客户端只比较是否变化）。
 - 调度任务、其他用户的写入同样递增，因此前端 10 s 轮询即可得知“别人改了什么”（§8.5）。
 - 该接口必须极轻量：**计数器本身不读磁盘**（`services/revision.py` 的状态只在内存锁下），P99 < 5 ms。
-  - 口径更正（B10.1 / M4-05 实测，2026-10-19）：旧写法「本接口不读磁盘」与 §13 与交付手册 R13「身份实时读、不加缓存」在**任何带 `{pid}` 的路由上不可能同时成立**——实测该端点每请求固定打开数据根内 3 个文件（`device_models.json` + 该机型 `ip_mapping.json` / `admin_users.json`，出处 `server/http.py:282`、`services/auth.py:110-116`）。收窄后两件事都保住：计数逻辑仍然零磁盘 I/O，身份仍然按 R13 实时读。
+  - 口径更正（B10.1 / M4-05 实测，2026-10-19）：旧写法「本接口不读磁盘」与 §13 与交付手册 R13「身份实时读、不加缓存」在**任何带 `{pid}` 的路由上不可能同时成立**——实测该端点每请求固定打开数据根内 3 个文件（`device_models.json` + 全机型共用的 `ip_mapping.json` / `admin_users.json`，出处 `server/http.py`、`services/auth.py`）。收窄后两件事都保住：计数逻辑仍然零磁盘 I/O，身份仍然按 R13 实时读。
 
 ### 7.4 文件
 

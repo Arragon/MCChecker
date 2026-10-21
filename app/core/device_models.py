@@ -97,6 +97,9 @@ def add_model(name: str, copy_from: Optional[str] = None) -> str:
         models.append({"id": mid, "name": (name or "").strip() or mid})
         _save_models_unlocked(models)
 
+    # 机型目录是数据空间。人员表已不在这里，不能再靠写 ip_mapping 把目录带出来。
+    os.makedirs(storage.get_profile_data_dir(mid), exist_ok=True)
+
     # 复制数据放在注册表锁之外：那是重 I/O，§3.5 要求锁内不做大操作。
     if copy_from:
         storage.copy_profile_data(copy_from, mid)

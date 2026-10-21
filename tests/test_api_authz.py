@@ -83,7 +83,7 @@ def authz_env():
 
 
 def pid_for(env, role: str) -> str:
-    """deployer_admin 的「本机=管理员」登记只在 p2 上。"""
+    """人员身份全机型相同。deployer_admin 仍打在 p2 上，避免和 p1 的探针文件互相覆盖。"""
     return env["p2"] if role == "deployer_admin" else env["p1"]
 
 

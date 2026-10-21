@@ -105,7 +105,7 @@ class TestAccessLog(Base):
     def test_file_save_emits_business_log(self):
         pid = seed_roles("logs2", local_admin=True)
         with make_server() as server:
-            status, _h, body = as_role(server, "deployer").request(
+            status, _h, body = as_role(server, "deployer_admin").request(
                 "PUT",
                 "/api/v1/p/%s/files/%s?overwrite=1" % (pid, FILE_A),
                 body=b"<R><x>1</x></R>",

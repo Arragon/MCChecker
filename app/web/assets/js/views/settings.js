@@ -13,7 +13,7 @@
   var SECTIONS = [
     { id: "sources", label: "更新源", icon: "link", desc: "为每个配置文件维护下载链接与修改记录链接，支持单条或全量立即更新。" },
     { id: "schedule", label: "定时更新", icon: "clock", desc: "按固定间隔自动执行全量更新（含修改记录拉取）。" },
-    { id: "people", label: "人员与权限", icon: "users", desc: "IP 对应表用于识别建议提交人；管理员可审阅修改建议、删除文件。" },
+    { id: "people", label: "人员与权限", icon: "users", desc: "IP 对应表与管理员名单全机型共用。IP 对应表用于识别建议提交人；管理员可审阅修改建议、删除文件。" },
     { id: "bindings", label: "变量绑定", icon: "link", desc: "把不同文件中含义相同的变量绑定为一组，对比时会以紫色标出。" },
     { id: "tools", label: "工具菜单", icon: "tool", desc: "维护侧栏「外部工具」中的常用链接。" },
     { id: "profiles", label: "机型管理", icon: "device", desc: "每个机型拥有独立的文件、历史、收藏、绑定与设置。" },
@@ -460,7 +460,7 @@
               );
             }))))
           ),
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "机型是数据空间而不是权限边界：人员与管理员名单也按机型分别维护。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "机型是数据空间而不是权限边界：人员与管理员名单全机型共用一套。"),
         ];
       });
     }

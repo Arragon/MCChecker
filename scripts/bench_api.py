@@ -197,10 +197,13 @@ def build_corpus(
             # 版本排序按 mtime（services/history._list_versions），文件名只影响展示。
             write(target, "v%02d_2026-10-18.xml" % index, make_xml(HISTORY_NODES, seed + 700001 + index))
 
-    # 真实部署里每个机型都有身份/映射文件（§5.1）；`/revision` 的「不读磁盘」只有把它们
-    # 放进语料才测得出真相——缺文件时 `fsutil.read_json` 连 open 都不做，会假绿。
+    # 人员表在数据根，全机型一份；映射/收藏仍按机型。`/revision` 的「不读磁盘」只有把
+    # 身份文件放进语料才测得出真相——缺文件时 `fsutil.read_json` 连 open 都不做，会假绿。
+    for name in ("ip_mapping.json", "admin_users.json"):
+        with open(os.path.join(data_dir, name), "wb") as fh:
+            fh.write(b"[]\n")
     for pid in (search_pid, files_pid):
-        for name in ("ip_mapping.json", "admin_users.json", "config_mapping.json", "favorites.json"):
+        for name in ("config_mapping.json", "favorites.json"):
             path = os.path.join(data_dir, "profiles", pid, name)
             with open(path, "wb") as fh:
                 fh.write(b"[]\n")
@@ -794,7 +797,7 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
         """50 次真实轮询逐次计时：§7.3 的预算是 P99，必须一个请求一个样本。
 
         「不读磁盘」这一半要先问前提在不在：`fsutil.read_json` 遇不到文件时**连 open 都
-        不做**（M4-05 实测），所以数据根里缺 `device_models.json` / 该机型的
+        不做**（M4-05 实测），所以数据根里缺 `device_models.json` /
         `ip_mapping.json` / `admin_users.json` 时，「open 0 次」是必然结果、不构成证据。
         那种情况下本条判**不可判**（红），不给 PASS——默认合成语料会建齐这三个文件，
         逃生口指向缺身份文件的数据根时才会走到这条分支。
@@ -802,8 +805,8 @@ def build_cases(api: Api, corpus: Dict[str, Any], ctx: Dict[str, Any]) -> List[C
         url = "/api/v1/p/%s/revision" % files_pid
         premise = (
             "device_models.json",
-            os.path.join("profiles", files_pid, "ip_mapping.json"),
-            os.path.join("profiles", files_pid, "admin_users.json"),
+            "ip_mapping.json",
+            "admin_users.json",
         )
         missing = [rel for rel in premise if not os.path.isfile(os.path.join(opens.root, rel))]
         api.expect("GET", url)  # 先走一遍，连接与身份解析路径热起来
