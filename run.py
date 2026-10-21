@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import logging.handlers
 import os
@@ -21,6 +22,7 @@ from typing import Any, List, Optional
 
 from app import __version__
 from app.config import SettingsError, load_settings
+from app.core.errors import AppError
 from app.core import storage
 from app.services import scheduler as services_scheduler
 from app.services import tasks
@@ -171,6 +173,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 数据根必须在导入「导入期派生路径」的模块之前切换（例如 dltool.DLTOOL_FILE），
     # 因此 HTTP 层在下面按需导入。
     storage.configure_data_dir(settings.data_dir)
+
+    if settings.restore_dir:
+        configure_logging(settings.log_level)
+        if not settings.dry_run:
+            print("恢复只提供 --dry-run（不会自动写回）：加 --dry-run 查看计划", file=sys.stderr)
+            return 2
+        from app.services import recovery as recovery_service
+
+        try:
+            plan = recovery_service.plan_restore(settings.restore_dir)
+        except AppError as exc:
+            print("恢复计划失败：%s" % exc.message, file=sys.stderr)
+            return 2
+        print("恢复计划（dry-run，只读；未修改任何文件）：%s" % plan["entry"])
+        for step in plan["steps"]:
+            suffix = "" if step["exists"] else "  [恢复区副本缺失]"
+            print("  %s -> %s%s" % (step["from"], step["to"], suffix))
+        for kind, refs in sorted(plan["removed_refs"].items()):
+            print("  removed_refs.%s: %s" % (kind, json.dumps(refs, ensure_ascii=False)))
+        return 0
+
     configure_logging(settings.log_level, settings.data_dir)
 
     from app.server.http import MCServer, SingleInstanceLock

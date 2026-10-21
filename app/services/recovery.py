@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 from ..core import fsutil, log_context, parse_cache, storage
-from ..core.errors import NOT_FOUND, STORAGE_FAILURE, AppError
+from ..core.errors import INVALID_INPUT, NOT_FOUND, STORAGE_FAILURE, AppError
 from . import revision
 
 logger = logging.getLogger(__name__)
@@ -160,6 +160,38 @@ def create_profile_entry(model_id: str, moment: datetime) -> Tuple[str, str]:
         "%s_%s_%s" % (moment.strftime(_DIR_TIME), OP_DELETE_PROFILE, model_id)
     )
 
+
+
+def plan_restore(entry: str) -> Dict[str, Any]:
+    """只读恢复计划（M4-09）：manifest 的 moved 逐条给出「恢复区副本 → 原位置」。"""
+    entry_path = os.path.abspath(os.path.expanduser(str(entry or "")))
+    if not os.path.isdir(entry_path):
+        raise AppError(NOT_FOUND, "恢复条目不存在：%s" % entry_path)
+    manifest_path = os.path.join(entry_path, MANIFEST_FILE)
+    if not os.path.isfile(manifest_path):
+        raise AppError(NOT_FOUND, "恢复条目缺少 manifest.json：%s" % entry_path)
+    manifest = fsutil.read_json(manifest_path, None)
+    if not isinstance(manifest, dict):
+        raise AppError(INVALID_INPUT, "manifest.json 不是 JSON 对象")
+    steps = []
+    for item in manifest.get("moved") or []:
+        if not isinstance(item, dict):
+            continue
+        source = os.path.join(entry_path, str(item.get("to") or ""))
+        destination = os.path.join(storage.DATA_DIR, str(item.get("from") or ""))
+        steps.append(
+            {
+                "from": source,
+                "to": destination,
+                "exists": os.path.exists(source),
+            }
+        )
+    return {
+        "entry": entry_path,
+        "op": manifest.get("op"),
+        "steps": steps,
+        "removed_refs": manifest.get("removed_refs") or {},
+    }
 
 def move_profile_to_recovery(
     model_id: str, actor_name: str = "", actor_ip: str = ""

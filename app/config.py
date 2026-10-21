@@ -60,6 +60,8 @@ class Settings:
     tab_limit: int = DEFAULT_TAB_LIMIT
     max_workers: int = DEFAULT_MAX_WORKERS
     log_level: str = DEFAULT_LOG_LEVEL
+    restore_dir: str = ""
+    dry_run: bool = False
 
 
 def _text(raw: object, what: str) -> str:
@@ -114,6 +116,8 @@ def _parse_cli(argv: List[str]) -> argparse.Namespace:
         default=None,
         help="数据根目录（默认 %s）" % DEFAULT_DATA_DIR,
     )
+    parser.add_argument("--restore", dest="restore_dir", default=None, help="只打印恢复计划（必须配 --dry-run）")
+    parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="只读恢复计划，不写任何文件")
     return parser.parse_args(argv)
 
 
@@ -154,6 +158,7 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
         port = _int(cli.port, "--port", 1, 65535)
     if cli.data_dir is not None:
         data_dir = _text(cli.data_dir, "--data-dir")
+    restore_dir = _abs_dir(cli.restore_dir) if cli.restore_dir else ""
 
     return Settings(
         host=host,
@@ -163,4 +168,6 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
         upload_max_bytes=upload_max_bytes,
         download_allow=download_allow,
         log_level=log_level,
+        restore_dir=restore_dir,
+        dry_run=bool(cli.dry_run),
     )
