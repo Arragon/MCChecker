@@ -240,6 +240,12 @@
 - **新方案**：`MCHECKER_PORT` / `--port` 生效。默认端口只有 `app/config.py` 的 `DEFAULT_PORT`（现为 **50003**）；`start.sh` / `start.bat` 从这一行读取，不再各自写死。非法值启动失败并提示；另有 `--data-dir`、受信代理等配置（规范 §3.6）。
 - **验收**：规范 T-04。
 
+### C31 Linux 后台运行
+- **原实现**：类 Unix 只有前台 `start.sh`（最后 `exec` 到 `run.py`），停止方式是 Ctrl+C。进程能响应 `SIGTERM` 并有序退出，但发布包里没有后台启停脚本，也没有 systemd 单元。
+- **新方案**：`service.sh` 提供 `start` / `stop` / `restart` / `status` / `logs`。`start` 脱离终端；`stop` 只发送 `SIGTERM` 并等待单实例锁释放。`unit` 打印 systemd 单元，`ExecStart` 使用 `start.sh --no-reload`，避免热更新父进程提前退出后被 systemd 杀掉仍在写盘的子进程。
+- **不改变**：`start.sh` 仍是前台入口；单实例锁、有序停止和数据目录优先级不变。
+- **验收**：`tests/test_service_sh.py`。
+
 ---
 
 ## 八、变更影响汇总
@@ -247,6 +253,6 @@
 | 类别 | 编号 |
 |---|---|
 | 用户可见的交互变化 | C02、C03、C05、C07、C10、C15、C16、C17、C18、C21、C24、C29 |
-| 有意的行为改变（需在发布说明中告知） | C09（访客导入可用）、C12（内容未变不再归档）、C13（相同修改记录不重复保存）、C20/C27（删除进入恢复区）、C26（文件名规则统一）、C25（端口变量生效） |
+| 有意的行为改变（需在发布说明中告知） | C09（访客导入可用）、C12（内容未变不再归档）、C13（相同修改记录不重复保存）、C20/C27（删除进入恢复区）、C26（文件名规则统一）、C25（端口变量生效）、C31（Linux 后台启停） |
 | 正确性/安全修复 | C04、C06、C08、C11、C15、C19、C22、C23、C28、C30 |
 | 不涉及数据格式变化 | 除下列新增可选字段/文件外全部不变：`edit_remarks.json` 的 `locator/source_sha256/schema_version`；`schedule.json` 的 `last_run`；新文件 `update_status.json`；新目录 `temporary/`、`recovery/`、`logs/`、`cache/doc_v2/`、`cache/diff_v2/` |

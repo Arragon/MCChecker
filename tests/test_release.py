@@ -47,6 +47,7 @@ EXPECTED_MEMBERS = {
     "run.py",
     "start.bat",
     "start.sh",
+    "service.sh",
 }
 
 # 应当被排除、且这台机器上确实存在的条目（.mimosa/.workbuddy/.superpowers 是草稿目录）。
@@ -107,6 +108,7 @@ def source_tree(tmp_path: Path) -> Path:
         "main.py": "from run import main\n",
         "start.sh": "#!/bin/sh\necho start\n",
         "start.bat": "@echo off\r\nrem start\r\n",
+        "service.sh": "#!/bin/sh\necho service\n",
         "app/__init__.py": '__version__ = "2.0.0"\n',
         "app/config.py": "DEFAULT_PORT = 50002  # 端口说明里有 http://127.0.0.1:50002 例子\n",
         "app/core/__init__.py": "",
@@ -912,6 +914,9 @@ def test_launchers_read_the_single_default_port() -> None:
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
         assert "50002" not in text and "50003" not in text, name
         assert "config.py" in text, name
+    service_text = (REPO_ROOT / "service.sh").read_text(encoding="utf-8")
+    assert "50002" not in service_text and "50003" not in service_text
+    assert "start.sh" in service_text
     assert DEFAULT_PORT == 50003
 
     env = start_sh_env(Path("/tmp"), [str(Path(sys.executable).parent)])
@@ -990,7 +995,7 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 20 个" in first.stdout, first.stdout
+    assert "成员 21 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
     assert "已放行 app/web/assets/js/ui/icons.js" in first.stdout, first.stdout

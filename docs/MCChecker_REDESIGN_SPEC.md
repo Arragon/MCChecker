@@ -1310,10 +1310,10 @@ python run.py                      # 或 python main.py（兼容）
 python run.py --port 50003 --data-dir D:\MCChecker\data
 ```
 - 成功标志：日志 `MCChecker 2.0.0 listening on http://0.0.0.0:50003 (data=…, profiles=2, scheduler=on)`。不传 `--port` 时端口同样是 `DEFAULT_PORT`。
-- 停止：前台 Ctrl+C（触发 §10.4 的有序停止）；Windows 服务/计划任务方式见手册。
+- 停止：前台 Ctrl+C（触发 §10.4 的有序停止）。Linux 后台用发布目录里的 `./service.sh start|stop|restart|status|logs`：`start` 脱离终端，`stop` 只发 `SIGTERM` 并等待有序停止，不发 `SIGKILL`。`./service.sh unit` 打印 systemd 单元（`Type=simple`、`KillSignal=SIGTERM`、`TimeoutStopSec` 覆盖写盘等待、`ExecStart` 带 `--no-reload`），审查后由 `systemctl` 管理，不与 `service.sh start` 同时使用。Windows 服务/计划任务方式见手册。
 
 ### 14.3 离线发布包（`scripts/make_release.py`，标准库实现）
-- 生成 `dist/MCChecker-2.0.0.zip`：包含 `run.py`、`main.py`、`app/`（排除 `app/web/assets/js/mock/`、`app/web/template.html`、`app/web/tests/`、`__pycache__`、`*.pyc`）、`docs/manual.md`、`README.md`、`start.bat`/`start.sh`。**不包含** `data/`、`.nicegui/`。
+- 生成 `dist/MCChecker-2.0.0.zip`：包含 `run.py`、`main.py`、`app/`（排除 `app/web/assets/js/mock/`、`app/web/template.html`、`app/web/tests/`、`__pycache__`、`*.pyc`）、`docs/manual.md`、`README.md`、`start.bat`/`start.sh`/`service.sh`。**不包含** `data/`、`.nicegui/`。
 - 可选：把 `python-3.9.11-embed-amd64.zip` 解压到 `runtime/python/`（由发布人员在有网环境下载一次放入），`start.bat` 优先使用 `runtime\python\python.exe`，否则使用系统 `python`。
 - 升级：停止旧版 → 备份整个 `data/`（复制）→ 解压新版本覆盖程序文件（不覆盖 `data/`）→ 启动 → 检查日志的迁移与恢复提示。回滚：停止 → 恢复程序文件 → 启动（新版只新增可选字段与新目录，旧版可读）。
 

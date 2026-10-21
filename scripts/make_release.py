@@ -68,6 +68,7 @@ RELEASE_ENTRIES: Tuple[str, ...] = (
     "README.md",
     "start.sh",
     "start.bat",
+    "service.sh",
     "docs/manual.md",
     "app",
 )
@@ -702,7 +703,7 @@ def read_member_bytes(source_root: Path, members: Sequence[str]) -> Dict[str, by
 
 def _member_mode(rel: str, path: Path) -> int:
     """入口脚本要能被双击/直接执行，权限位写进 zip（Linux/macOS 解压后可 `./start.sh`）。"""
-    if rel in ("start.sh", "start.bat"):
+    if rel in ("start.sh", "start.bat", "service.sh"):
         return 0o755
     mode = path.stat().st_mode & 0o777
     return mode or 0o644

@@ -14,6 +14,8 @@ python main.py
 
 服务默认在 `0.0.0.0:50003` 启动（`app/config.py` 的 `DEFAULT_PORT`），内网其他机器可通过 `http://<服务器IP>:50003` 访问；可通过环境变量 `MCHECKER_PORT` 或 `--port` 指定端口。
 
+Linux 上要脱离终端运行时用 `./service.sh start`，停止用 `./service.sh stop`（发送 SIGTERM，等有序退出）。`./service.sh status`、`restart`、`logs` 查看和管理。需要开机自启时，`./service.sh unit` 会打印一份 systemd 单元，审查后再交给 `systemctl`。细节见 `docs/manual.md`。
+
 ## 功能列表
 
 - **文件解析**: 支持 XML/JSON 文件上传或 URL 下载解析，保留完整层级结构

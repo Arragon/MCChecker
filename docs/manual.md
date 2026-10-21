@@ -31,6 +31,28 @@ python main.py
 停止：
 
 - 前台运行：在终端按 `Ctrl+C`
+- 后台运行：在发布目录执行 `./service.sh stop`。脚本发送 `SIGTERM` 并等待有序停止（任务排空，写盘结束后才删除单实例锁）。不要用 `kill -9`。
+
+Linux 后台：
+
+```bash
+./service.sh start --data-dir /var/lib/mcchecker
+./service.sh status
+./service.sh logs
+./service.sh restart
+./service.sh stop
+```
+
+`start` 之后关闭终端，进程仍在。参数和 `python run.py` 相同，并会记下来，下次 `restart` 不带参数时沿用。`status` 在运行中返回 0，未运行返回 1。
+
+用 systemd 托管时，先审查单元再安装。单元里固定加了 `--no-reload`：热更新的父进程收到停止信号后会立刻退出，systemd 会把还在做有序停止的子进程一起杀掉。装好之后用 `systemctl` 管理，不要再同时执行 `./service.sh start`。
+
+```bash
+./service.sh unit --data-dir /var/lib/mcchecker | sudo tee /etc/systemd/system/mcchecker.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now mcchecker
+sudo systemctl stop mcchecker
+```
 
 ## 5. 多机型适配
 
@@ -114,7 +136,7 @@ python main.py
 
 ## 14.6 恢复区手工恢复（v2）
 
-1. 停止 MCChecker（前台 Ctrl+C），确认单实例锁已删除。
+1. 停止 MCChecker（前台 Ctrl+C，或 `./service.sh stop`），确认单实例锁已删除。
 2. 在 `data/recovery/` 下找到目标条目，读取 `manifest.json` 的 `moved`（`from` 是原位置、`to` 是恢复区内副本）与 `removed_refs`。
 3. 先运行 `python run.py --restore data/recovery/<条目> --dry-run --data-dir data` 复核计划；该命令只打印、不写任何文件。
 4. 手工把 `to` 指向的副本复制回 `from`，逐文件比对 sha256；引用（收藏/绑定/建议）按 `removed_refs` 手工回填。

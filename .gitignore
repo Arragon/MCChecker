@@ -1,6 +1,7 @@
 .vscode/
 .pytest_cache/
 data/
+.mcchecker.service
 __pycache__/
 *.py[cod]
 .venv*/
