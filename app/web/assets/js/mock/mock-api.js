@@ -1057,13 +1057,16 @@
     var name = String(req.body.name || "").trim();
     var url = String(req.body.url || "").trim();
     var rec = String(req.body.record_url || "").trim();
+    var keyword = String(req.body.keyword || "").trim();
     if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不能为空且不能包含 \\ / : * ? \" < > |", { field: "name" });
     if (!url) return fail(400, "INVALID_INPUT", "下载链接不能为空", { field: "url" });
     if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "下载链接需以 http:// 或 https:// 开头", { field: "url" });
     if (rec && !/^https?:\/\//i.test(rec)) return fail(400, "INVALID_INPUT", "修改记录链接需以 http:// 或 https:// 开头", { field: "record_url" });
     // 同名已存在：与后端同用 409 FILE_EXISTS（§7.1 把 INVALID_INPUT 定为 400）。
     if (P.mapping.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名更新源", { field: "name" });
-    P.mapping.push({ name: name, url: url, record_url: rec });
+    var item = { name: name, url: url, record_url: rec };
+    if (keyword) item.keyword = keyword;
+    P.mapping.push(item);
     bump(a.pid, "settings");
     return ok({ item: P.mapping[P.mapping.length - 1] }, 201);
   });
@@ -1077,6 +1080,7 @@
     var name = String(req.body.name || "").trim();
     var url = String(req.body.url || "").trim();
     var rec = String(req.body.record_url || "").trim();
+    var keyword = req.body.keyword === undefined || req.body.keyword === null ? null : String(req.body.keyword).trim();
     if (!validName(name)) return fail(400, "INVALID_INPUT", "文件名不合法", { field: "name" });
     if (!url) return fail(400, "INVALID_INPUT", "下载链接不能为空", { field: "url" });
     if (!/^https?:\/\//i.test(url)) return fail(400, "INVALID_INPUT", "下载链接需以 http:// 或 https:// 开头", { field: "url" });
@@ -1098,6 +1102,10 @@
     m.name = name;
     m.url = url;
     m.record_url = rec;
+    if (keyword !== null) {
+      if (keyword) m.keyword = keyword;
+      else delete m.keyword;
+    }
     // 改名不产生新的文件内容，只改设置：与后端一致，只递增 settings（R5）。
     bump(a.pid, "settings");
     return ok({ item: m });

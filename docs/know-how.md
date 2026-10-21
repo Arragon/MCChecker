@@ -18,6 +18,7 @@
 - "部署者"和IP显示已从界面移除，is_deployer() 仅用于功能权限判断（管理按钮可见性等）
 - 使用递归函数将 XML/JSON 统一转换为树形结构
 - 使用 IP 地址判断部署者权限，127.0.0.1 和服务端本机 IP 视为部署者
+- 更新源回读可以是单个 XML/JSON，也可以是 zip、tar 或 gzip。压缩包只取出其中的 `.xml`/`.json`（不落盘、不跟符号链接）。映射上的可选 `keyword` 是正则：在文件名去掉扩展名后搜索，命中则保存为「匹配文本（有捕获组时用第 1 组）+ 小写扩展名」。`MachineConstant` 把 `Default_MachineConstant_basics.xml` 收成 `MachineConstant.xml`。没关键词时，单个文件仍用更新源自己的文件名，压缩包按包内原名加入。加密包、解压超过下载上限、切削后重名都会拒绝。
 - 人员与管理员名单全机型共用 `data/ip_mapping.json` 与 `data/admin_users.json`，读写用 `storage.people_write()`，不要再写进 `profiles/<pid>/`。旧的按机型副本只在全局文件还不存在时合并一次（同一 IP 保留 `updated_at` 较新的那条），合并后不删除机型目录里的旧文件。`/revision` 仍会打开这两份身份文件，路径在数据根而不是机型目录。
 - 文件版本归档使用日期后缀: `filename_20260524.xml`，若已存在则精确到秒
 - 版本对比使用 difflib.unified_diff 生成文本差异，结构化差异使用归一化路径匹配

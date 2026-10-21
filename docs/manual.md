@@ -57,6 +57,10 @@ python main.py
 
 默认端口是 `app/config.py` 的 `DEFAULT_PORT`（50003）。`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
 
+### 6.2 更新源回读
+
+更新源下载的内容可以是 XML、JSON，或 zip / tar / gzip 压缩包。压缩包里的 XML 和 JSON 会解压进当前机型的文件列表。可选的正则关键词用来切削文件名：关键词 `MachineConstant` 会把 `Default_MachineConstant_basics.xml` 保存为 `MachineConstant.xml`。不填关键词时，单个文件仍按更新源的文件名保存，压缩包按包内原文件名加入。
+
 ## 7. 数据目录说明
 
 默认数据目录为 `data/`，其中：

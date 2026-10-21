@@ -120,7 +120,7 @@
           });
           return h(
             "tr",
-            h("td", h("div.cell-strong.mono", it.name), it.local_updated_at ? h("div.xsmall.muted", "本地版本 " + util.formatTime(it.local_updated_at)) : h("div.xsmall", { style: "color:var(--c-warning-text)" }, "尚未下载")),
+            h("td", h("div.cell-strong.mono", it.name), it.keyword ? h("div.xsmall.muted", "关键词 " + it.keyword) : null, it.local_updated_at ? h("div.xsmall.muted", "本地版本 " + util.formatTime(it.local_updated_at)) : h("div.xsmall", { style: "color:var(--c-warning-text)" }, "尚未下载")),
             h("td", h("div.mono.xsmall.break-all", it.url), it.record_url ? h("div.xsmall.muted.break-all", "修改记录：" + it.record_url) : h("div.xsmall.muted", "未配置修改记录链接")),
             h("td", st ? h("div.row", { style: "gap:6px" }, h("span.dot" + dot), h("span", st.label)) : h("span.muted", "—"), st ? h("div.xsmall.muted", util.formatTime(st.at) + (st.reason ? " · " + st.reason : "")) : null),
             h("td.cell-actions", upd, more)
@@ -134,7 +134,7 @@
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "文件"), h("th", "下载链接"), h("th", "最近结果"), h("th.cell-actions", "操作"))), h("tbody", rows)))
               : MC.stateBlock({ kind: "empty", icon: "link", title: "还没有更新源", desc: "添加后可一键从链接拉取最新配置，旧版本自动归档。", actions: ro() ? null : [h("button.btn.btn-primary", { type: "button", onclick: function () { sourceDialog(null); } }, "新增更新源")] })
           ),
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "更新时先下载到暂存区并校验能否解析、根节点是否一致，校验通过才替换当前版本；内容未变化不会产生新的历史版本。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "回读可以是 XML、JSON 或 zip/tar.gz。压缩包里的 XML/JSON 会解压进文件列表；若填写了正则关键词，文件名里匹配到的那段会成为新文件名，例如关键词 MachineConstant 会把 Default_MachineConstant_basics.xml 保存为 MachineConstant.xml。校验通过才替换当前版本；内容未变化不会产生新的历史版本。"),
         ];
       });
     }
@@ -143,18 +143,24 @@
       var name = h("input.input.input-mono", { type: "text", value: it ? it.name : "", placeholder: "config.xml" });
       var url = h("input.input.input-mono", { type: "url", value: it ? it.url : "", placeholder: "http://…" });
       var rec = h("input.input.input-mono", { type: "url", value: it ? it.record_url : "", placeholder: "可选" });
+      var keyword = h("input.input.input-mono", { type: "text", value: it && it.keyword ? it.keyword : "", placeholder: "例如 MachineConstant" });
       var migrate = h("input", { type: "checkbox", checked: true });
-      var F = { name: MC.field({ label: "文件名", required: true, control: name }), url: MC.field({ label: "下载链接", required: true, control: url }), record_url: MC.field({ label: "修改记录链接", control: rec, help: "用于拉取上游的修改记录文件" }) };
+      var F = {
+        name: MC.field({ label: "文件名", required: true, control: name }),
+        url: MC.field({ label: "下载链接", required: true, control: url }),
+        record_url: MC.field({ label: "修改记录链接", control: rec, help: "用于拉取上游的修改记录文件" }),
+        keyword: MC.field({ label: "正则关键词", control: keyword, help: "可选。匹配文件名中的一段，保存为「匹配文字 + 扩展名」。留空则单个文件按上面的文件名保存，压缩包按包内原名加入。" }),
+      };
       var migrateRow = it ? h("label.check", migrate, "改名时同时迁移本地文件、历史版本、收藏与建议") : null;
       MC.modal({
         title: it ? "编辑更新源" : "新增更新源",
         size: "wide",
-        body: h("div.col", { style: "gap:12px" }, F.name, F.url, F.record_url, migrateRow),
+        body: h("div.col", { style: "gap:12px" }, F.name, F.url, F.record_url, F.keyword, migrateRow),
         footer: function (close) {
           var save = h("button.btn.btn-primary", { type: "button" }, "保存");
           save.addEventListener("click", function () {
             Object.keys(F).forEach(function (k) { F[k].setError(""); });
-            var body = { name: name.value.trim(), url: url.value.trim(), record_url: rec.value.trim(), migrate_files: migrate.checked };
+            var body = { name: name.value.trim(), url: url.value.trim(), record_url: rec.value.trim(), keyword: keyword.value.trim(), migrate_files: migrate.checked };
             MC.withBusy(save, function () {
               var p = it ? api.patch(app.p("/sources/" + api.seg(it.name)), body) : api.post(app.p("/sources"), body);
               return p.then(function () { close(); MC.toast.success("已保存"); app.syncRevision(); app.refreshFiles(); renderSection(true); }, function (err) { fieldError(F, err); });

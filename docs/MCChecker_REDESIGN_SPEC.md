@@ -754,9 +754,9 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 
 | 方法 路径 | 权限 | 请求 → 响应 |
 |---|---|---|
-| `GET /p/{pid}/sources` | 全部 | `{"items": [{"name","url","record_url","local_updated_at","last_result": update_status\|null}]}` |
-| `POST /p/{pid}/sources` | 部署者 | `{"name","url","record_url"}` → 201；`name` 用 `validate_filename`（**允许中文**，替代旧的 ASCII 白名单，C26）；`url`/`record_url` 必须 http(s) |
-| `PATCH /p/{pid}/sources/{name}` | 部署者 | `{"name","url","record_url","migrate_files": bool}`；改名且 `migrate_files`：迁移 `configs/`、`archive/`、`records/`，并更新收藏、绑定、建议、DL 绑定中的文件名引用；迁移前目标存在任一项 → 409；迁移失败 → 回滚已移动项 |
+| `GET /p/{pid}/sources` | 全部 | `{"items": [{"name","url","record_url","keyword","local_updated_at","last_result": update_status\|null}]}` |
+| `POST /p/{pid}/sources` | 部署者 | `{"name","url","record_url","keyword?"}` → 201；`name` 用 `validate_filename`（**允许中文**，替代旧的 ASCII 白名单，C26）；`url`/`record_url` 必须 http(s)。`keyword` 可空，非空时必须是可编译的正则 |
+| `PATCH /p/{pid}/sources/{name}` | 部署者 | `{"name","url","record_url","keyword?","migrate_files": bool}`；改名且 `migrate_files`：迁移 `configs/`、`archive/`、`records/`，并更新收藏、绑定、建议、DL 绑定中的文件名引用；迁移前目标存在任一项 → 409；迁移失败 → 回滚已移动项。未带 `keyword` 时保留原关键词 |
 | `DELETE /p/{pid}/sources/{name}` | 部署者 | 只删映射（同现状），不删文件 |
 | `GET /p/{pid}/schedule` | 全部 | `{"enabled","interval_hours","last_run","next_run_at"}` |
 | `PUT /p/{pid}/schedule` | 部署者 | `{"enabled","interval_hours"}`，`1 ≤ interval_hours ≤ 2160` 的整数；保存后调度器重算 |
