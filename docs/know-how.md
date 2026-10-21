@@ -3,6 +3,7 @@
 > v2 已移除 `MC.caps`/`WIRED`/`WIRED_SETTINGS`/`MC.unwired*` 与 NiceGUI；下文提到这些机制或旧页面的条目仅作历史参考，不要照旧流程改代码。
 
 ## 1. Common Problems
+- Python 热更新是**换进程**，不是 `importlib.reload`。父进程监视 `app/**/*.py`、`run.py`、`main.py` 的 mtime，变化稳定 0.4 秒后对子进程发 SIGTERM，子进程走原来的有序停止（调度器 → 任务队列 → HTTP → 工作线程散尽才删单实例锁）再被拉起。`__pycache__`、`data/` 和 `app/web` 静态文件不触发重启。父进程用新会话启动子进程，这样 Ctrl+C 只打到父进程，再由它转发 SIGTERM；不要改成父子同一进程组，否则两边会同时进信号处理。子进程必须带 `MCCHECKER_RUN_CHILD=1`，否则会再套一层监视。`tests/test_api_tasks.py` 直接跑 `run.main()` 时要把 `Settings.reload` 设成 False，否则进的是父进程，假 server 不会被调用。
 - NiceGUI 的 `ui.tree` 组件需要特定的数据格式，需将解析结果转换为 `{id, label, children}` 结构
 - XML 属性需在树形视图中特殊处理，作为 `@attr_name` 子节点展示
 - NiceGUI 标签页管理需手动维护状态，使用定时器刷新 UI

@@ -1528,6 +1528,9 @@ class TestOrderedStop:
             data_dir=str(tmp_path / "data"),
             web_dir=os.path.join(ROOT, "app", "web"),
             max_workers=7,
+            # 这个用例直接跑 main() 里的服务循环。默认热更新会改走父进程监视，
+            # 假 server 就进不去了。
+            reload=False,
         )
 
         def init_runner(max_workers: int) -> _FakeRunner:

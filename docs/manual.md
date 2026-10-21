@@ -26,6 +26,8 @@ python main.py
 
 默认监听：`0.0.0.0:50003`（`app/config.py` 的 `DEFAULT_PORT`）
 
+默认开启 Python 热更新。服务开着的时候覆盖 `app/`、`run.py` 或 `main.py` 里的 `.py`，进程会在源码稳定约半秒后自动停掉再拉起，随后刷新页面即使用新代码。这次重启会中断正在处理的请求。页面的 HTML/JS/CSS 本来就按请求读磁盘，改那些文件只要刷新，不必等重启。不需要热更新时用 `python main.py --no-reload`，或设置 `MCHECKER_RELOAD=0`。
+
 停止：
 
 - 前台运行：在终端按 `Ctrl+C`

@@ -116,7 +116,7 @@ MCChecker 是部署在内网、面向设备配置人员的 **XML/JSON 配置文�
 | F25 | 删除文件 | 管理员删除文件及其归档、记录、收藏、绑定引用、建议 | `home.py::_show_delete_file_dialog`、`storage.delete_config_file` | 文件「更多」菜单 |
 | F26 | 旧布局迁移 | 启动时把 `data/*.json`、`data/configs|archive|cache` 迁到 `data/profiles/default/` | `storage.ensure_profile_layout` | 启动迁移（§5.6，改为复制-校验） |
 | F27 | 解析缓存 | 按源路径 + mtime/size 缓存解析树；归档缓存 7 天 / 500 条清理 | `core/parse_cache.py` | 文档缓存 v2（§6.5） |
-| F28 | 启动与端口 | `python main.py`；`MCHECKER_PORT` / `--port` 覆盖默认值 | `run.py`、`app/config.py` | §3.6；默认端口是 `DEFAULT_PORT`（50003） |
+| F28 | 启动与端口 | `python main.py`；`MCHECKER_PORT` / `--port` 覆盖默认值；默认监视 Python 源码并重启进程（`--no-reload` 或 `MCHECKER_RELOAD=0` 关闭） | `run.py`、`app/config.py`、`app/server/reloader.py` | §3.6；默认端口是 `DEFAULT_PORT`（50003） |
 
 ### 2.2 关键问题（按用户影响排序）
 

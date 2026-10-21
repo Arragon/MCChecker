@@ -194,6 +194,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("  removed_refs.%s: %s" % (kind, json.dumps(refs, ensure_ascii=False)))
         return 0
 
+    # 热更新放在占锁之前：父进程只监视源码，不听端口、不拿单实例锁。
+    # 子进程带 MCCHECKER_RUN_CHILD=1，走下面原来的启动路径。
+    if settings.reload and os.environ.get("MCCHECKER_RUN_CHILD") != "1":
+        from app.server.reloader import supervise
+
+        return supervise(None if argv is None else list(argv))
+
     configure_logging(settings.log_level, settings.data_dir)
 
     from app.server.http import MCServer, SingleInstanceLock

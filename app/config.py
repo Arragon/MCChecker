@@ -62,6 +62,8 @@ class Settings:
     log_level: str = DEFAULT_LOG_LEVEL
     restore_dir: str = ""
     dry_run: bool = False
+    #: 默认开启：覆盖 `app/`、`run.py`、`main.py` 里的 `.py` 后重启进程。`--no-reload` 关掉。
+    reload: bool = True
 
 
 def _text(raw: object, what: str) -> str:
@@ -118,6 +120,20 @@ def _parse_cli(argv: List[str]) -> argparse.Namespace:
     )
     parser.add_argument("--restore", dest="restore_dir", default=None, help="只打印恢复计划（必须配 --dry-run）")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="只读恢复计划，不写任何文件")
+    reload_group = parser.add_mutually_exclusive_group()
+    reload_group.add_argument(
+        "--reload",
+        dest="reload",
+        action="store_true",
+        default=None,
+        help="Python 源码变化后重启进程（默认开启）",
+    )
+    reload_group.add_argument(
+        "--no-reload",
+        dest="reload",
+        action="store_false",
+        help="关闭 Python 源码热更新",
+    )
     return parser.parse_args(argv)
 
 
@@ -154,6 +170,10 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
     if "MCHECKER_LOG_LEVEL" in env:
         log_level = _log_level(env["MCHECKER_LOG_LEVEL"], "MCHECKER_LOG_LEVEL")
 
+    reload = True
+    if "MCHECKER_RELOAD" in env:
+        reload = _bool_text(env["MCHECKER_RELOAD"], "MCHECKER_RELOAD")
+
     if cli.host is not None:
         host = _text(cli.host, "--host")
     if cli.port is not None:
@@ -161,6 +181,8 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
     if cli.data_dir is not None:
         data_dir = _text(cli.data_dir, "--data-dir")
     restore_dir = _abs_dir(cli.restore_dir) if cli.restore_dir else ""
+    if cli.reload is not None:
+        reload = bool(cli.reload)
 
     return Settings(
         host=host,
@@ -172,4 +194,14 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
         log_level=log_level,
         restore_dir=restore_dir,
         dry_run=bool(cli.dry_run),
+        reload=reload,
     )
+
+
+def _bool_text(raw: object, what: str) -> bool:
+    value = str(raw).strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise SettingsError("%s=%s 只能是 1/0、true/false、yes/no、on/off" % (what, raw))
