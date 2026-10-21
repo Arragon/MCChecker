@@ -101,8 +101,8 @@ python main.py
 三个计算项的横轴、纵轴是：
 
 - PP 能量：x 为电动波片角度（urad），y 为 PP@PF能量（mJ）
-- RP 能量：x 为 RP能量（mJ），y 为 TFP2角度(SMTM页面)
-- RP 脉宽：x 为 RP脉宽，y 为 AOM2 delay(SMSM1页面) 或 AOM2 width(SMSM1页面)（ns）
+- RP 能量：x 为 RP能量（mJ），y 为 TFP2角度(SMTM页面)（urad）
+- RP 脉宽：x 为 RP脉宽（ns），y 为 AOM2 delay(SMSM1页面) 或 AOM2 width(SMSM1页面)（ns）
 
 **求解。** 切换「正向 x → y」或「反向 y → x」，在左侧输入数值（空格、逗号、分号或换行分隔）。输入停下来约 0.35 秒后自动计算，改参数也会自动重算，所以结果始终对应当前参数；`Ctrl+Enter` 立即计算。右侧的曲线标出 x、y 边界和计算点（超出边界的点是空心橙点），鼠标移到结果行上会高亮对应的点。结果表按行对应输入，可复制或下载 CSV；反向求解遇到多个解时，在下拉框里逐行选择采用哪一个，系统不会替你挑。
 

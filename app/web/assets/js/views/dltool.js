@@ -26,10 +26,10 @@
   ];
   var AXES = {
     pp_energy: { x: "电动波片角度", xUnit: "urad", y: "PP@PF能量", yUnit: "mJ" },
-    rp_energy: { x: "RP能量", xUnit: "mJ", y: "TFP2角度(SMTM页面)", yUnit: "" },
+    rp_energy: { x: "RP能量", xUnit: "mJ", y: "TFP2角度(SMTM页面)", yUnit: "urad" },
     rp_width: {
       x: "RP脉宽",
-      xUnit: "",
+      xUnit: "ns",
       delay: { name: "AOM2 delay(SMSM1页面)", unit: "ns", mode: "AOM2 delay 模式" },
       width: { name: "AOM2 width(SMSM1页面)", unit: "ns", mode: "AOM2 width 模式" },
     },
@@ -692,8 +692,7 @@
       var sum = h(
         "div.dl-sum",
         h("div.dl-sum-title", "固定和", h("span.xsmall.muted", "AOM2 delay + AOM2 width")),
-        numField(item.aom_sum, function (v) { item.aom_sum = v; }, "AOM2 delay 与 width 的和", { unit: "ns", placeholder: "填写后显示另一项" }),
-        h("div.dl-sum-help", "两项之和不变，另一项 = 和 − y")
+        numField(item.aom_sum, function (v) { item.aom_sum = v; }, "AOM2 delay 与 width 的和", { unit: "ns", placeholder: "未设置" })
       );
       return h(
         "section.panel.dl-modes",
@@ -775,8 +774,7 @@
               h("div.dl-pane-title", h("label", { for: ta.id }, "输入 " + (fwd ? "x" : "y")), h("span.dl-pane-sub", nameNode(fwd ? axis.x : axis.y, fwd ? axis.xUnit : axis.yUnit))),
               ta,
               parseEl,
-              h("div.dl-actions", runBtn, clearBtn),
-              h("div.dl-kbd", "输入后自动计算 · ", h("kbd", "Ctrl"), "+", h("kbd", "Enter"), " 立即计算")
+              h("div.dl-actions", runBtn, clearBtn)
             ),
             h(
               "div.dl-chart",
@@ -864,7 +862,7 @@
       var otherLabel = axis.other ? withUnit(axis.other, axis.otherUnit) : "";
 
       if (!entry) {
-        util.replace(host, h("div.dl-empty", icon("calc"), h("div.dl-empty-title", "结果会显示在这里"), h("div.xsmall", dir === "forward" ? "在左侧输入 x 值，系统会自动算出对应的 y" : "在左侧输入目标 y 值，系统会在 x 范围内反求候选解")));
+        util.replace(host, h("div.dl-res-head", h("h3", "结果")));
         return;
       }
       if (entry.error) {
@@ -1079,8 +1077,7 @@
         "div.dl-group",
         h("div.section-title", "有效范围"),
         rangeRow(set, axis, "x"),
-        rangeRow(set, axis, "y"),
-        h("div.field-help", "留空表示不限制。反向求解在 x 范围内找根（未设置时用 −100 ~ 100），超出范围的输入会在结果里标出。")
+        rangeRow(set, axis, "y")
       );
     }
 
