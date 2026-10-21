@@ -79,3 +79,33 @@ def test_missing_manifest_is_nonzero(tmp_path, capsys):
     code = run.main(["--restore", str(entry), "--dry-run", "--data-dir", str(tmp_path / "restore-data")])
     err = capsys.readouterr().err
     assert code == 2 and "manifest.json" in err, err
+
+
+def test_dry_run_without_restore_is_rejected(tmp_path, capsys):
+    code = run.main(["--dry-run", "--data-dir", str(tmp_path / "restore-data")])
+    err = capsys.readouterr().err
+    assert code == 2 and "只能与 --restore" in err, err
+
+
+def _write_manifest(entry, payload):
+    (entry / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_bad_manifest_shapes_are_rejected(tmp_path, capsys):
+    entry = _entry(tmp_path)
+    for payload, needle in (
+        ({"moved": {"bad": 1}, "removed_refs": {}}, "moved 必须是数组"),
+        ({"moved": [], "removed_refs": []}, "removed_refs 必须是对象"),
+        ({"moved": [{"from": "profiles/p/configs/a.xml", "to": "../../outside"}], "removed_refs": {}}, "路径越界"),
+    ):
+        _write_manifest(entry, payload)
+        code = run.main(["--restore", str(entry), "--dry-run", "--data-dir", str(tmp_path / "restore-data")])
+        err = capsys.readouterr().err
+        assert code == 2 and needle in err, (payload, err)
+
+
+def test_plan_prints_op(tmp_path, capsys):
+    entry = _entry(tmp_path)
+    code = run.main(["--restore", str(entry), "--dry-run", "--data-dir", str(tmp_path / "restore-data")])
+    out = capsys.readouterr().out
+    assert code == 0 and "op=delete_file" in out, out

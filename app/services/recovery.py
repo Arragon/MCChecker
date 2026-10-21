@@ -173,16 +173,27 @@ def plan_restore(entry: str) -> Dict[str, Any]:
     manifest = fsutil.read_json(manifest_path, None)
     if not isinstance(manifest, dict):
         raise AppError(INVALID_INPUT, "manifest.json 不是 JSON 对象")
+    moved = manifest.get("moved") or []
+    if not isinstance(moved, list):
+        raise AppError(INVALID_INPUT, "manifest.json 的 moved 必须是数组")
+    removed_refs = manifest.get("removed_refs")
+    if removed_refs is None:
+        removed_refs = {}
+    if not isinstance(removed_refs, dict):
+        raise AppError(INVALID_INPUT, "manifest.json 的 removed_refs 必须是对象")
     steps = []
-    for item in manifest.get("moved") or []:
+    for item in moved:
         if not isinstance(item, dict):
-            continue
-        source = os.path.join(entry_path, str(item.get("to") or ""))
-        destination = os.path.join(storage.DATA_DIR, str(item.get("from") or ""))
+            raise AppError(INVALID_INPUT, "manifest.json 的 moved 条目必须是对象")
+        try:
+            source = fsutil.resolve_within(entry_path, str(item.get("to") or ""))
+            destination = fsutil.resolve_within(storage.DATA_DIR, str(item.get("from") or ""))
+        except AppError as exc:
+            raise AppError(INVALID_INPUT, "manifest.json 的路径越界：%s" % exc.message) from exc
         steps.append(
             {
-                "from": source,
-                "to": destination,
+                "source": source,
+                "destination": destination,
                 "exists": os.path.exists(source),
             }
         )
@@ -190,7 +201,7 @@ def plan_restore(entry: str) -> Dict[str, Any]:
         "entry": entry_path,
         "op": manifest.get("op"),
         "steps": steps,
-        "removed_refs": manifest.get("removed_refs") or {},
+        "removed_refs": removed_refs,
     }
 
 def move_profile_to_recovery(
