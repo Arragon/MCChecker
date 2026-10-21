@@ -3,13 +3,14 @@
 用于为站点核心配置提供“机型维度”的隔离与切换。
 """
 
-import json
+from __future__ import annotations
+
 import os
 import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from . import storage
+from . import fsutil, locks, storage
 
 DEFAULT_MODEL_ID = storage.DEFAULT_PROFILE
 DEFAULT_MODEL_NAME = "默认机型"
@@ -19,38 +20,32 @@ def _models_file() -> str:
     return os.path.join(storage.DATA_DIR, "device_models.json")
 
 
-def _load_json(path: str, default):
-    if not os.path.exists(path):
-        return default
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return default
-
-
-def _save_json(path: str, data) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
 def _ensure_default(models: List[Dict[str, str]]) -> List[Dict[str, str]]:
     if any(m.get("id") == DEFAULT_MODEL_ID for m in models):
         return models
     return [{"id": DEFAULT_MODEL_ID, "name": DEFAULT_MODEL_NAME}] + models
 
 
-def load_models() -> List[Dict[str, str]]:
-    models = _load_json(_models_file(), [])
+def _load_models_unlocked() -> List[Dict[str, str]]:
+    """读取机型清单（调用方已持注册表锁）。
+
+    损坏的 JSON 交给 `fsutil.read_json` 抛 `CorruptDataError`：把注册表读成空表
+    再写回等于静默丢掉所有机型（§5.4）。`default` 由本函数保证一定出现在结果里。
+    """
+    models = fsutil.read_json(_models_file(), [])
     if not isinstance(models, list):
         models = []
     models = [m for m in models if isinstance(m, dict) and m.get("id")]
-    models = _ensure_default(models)
-    return models
+    return _ensure_default(models)
 
 
-def save_models(models: List[Dict[str, str]]) -> None:
+def load_models() -> List[Dict[str, str]]:
+    with locks.registry_lock:
+        return _load_models_unlocked()
+
+
+def _save_models_unlocked(models: List[Dict[str, str]]) -> None:
+    """写机型清单（调用方已持注册表锁），走原子写。"""
     models = _ensure_default(models)
     unique: Dict[str, Dict[str, str]] = {}
     for m in models:
@@ -59,7 +54,12 @@ def save_models(models: List[Dict[str, str]]) -> None:
         if mid:
             unique[mid] = {"id": mid, "name": name}
     ordered = [unique[DEFAULT_MODEL_ID]] + [v for k, v in unique.items() if k != DEFAULT_MODEL_ID]
-    _save_json(_models_file(), ordered)
+    fsutil.atomic_write_json(_models_file(), ordered)
+
+
+def save_models(models: List[Dict[str, str]]) -> None:
+    with locks.registry_lock:
+        _save_models_unlocked(models)
 
 
 def model_options() -> Dict[str, str]:
@@ -90,12 +90,14 @@ def _unique_id(base: str, existing: set) -> str:
 
 
 def add_model(name: str, copy_from: Optional[str] = None) -> str:
-    models = load_models()
-    existing = {m["id"] for m in models}
-    mid = _unique_id(_slugify(name), existing)
-    models.append({"id": mid, "name": (name or "").strip() or mid})
-    save_models(models)
+    with locks.registry_lock:
+        models = _load_models_unlocked()
+        existing = {m["id"] for m in models}
+        mid = _unique_id(_slugify(name), existing)
+        models.append({"id": mid, "name": (name or "").strip() or mid})
+        _save_models_unlocked(models)
 
+    # 复制数据放在注册表锁之外：那是重 I/O，§3.5 要求锁内不做大操作。
     if copy_from:
         storage.copy_profile_data(copy_from, mid)
 
@@ -107,11 +109,12 @@ def remove_model(model_id: str, delete_data: bool = False) -> bool:
     if mid == DEFAULT_MODEL_ID:
         return False
 
-    models = load_models()
-    new_models = [m for m in models if m.get("id") != mid]
-    if len(new_models) == len(models):
-        return False
-    save_models(new_models)
+    with locks.registry_lock:
+        models = _load_models_unlocked()
+        new_models = [m for m in models if m.get("id") != mid]
+        if len(new_models) == len(models):
+            return False
+        _save_models_unlocked(new_models)
 
     if delete_data:
         storage.delete_profile_data(mid)
@@ -125,16 +128,17 @@ def rename_model(model_id: str, new_name: str) -> bool:
     if not mid or not name:
         return False
 
-    models = load_models()
-    changed = False
-    for m in models:
-        if m.get("id") == mid:
-            m["name"] = name
-            changed = True
-            break
-    if not changed:
-        return False
-    save_models(models)
+    with locks.registry_lock:
+        models = _load_models_unlocked()
+        changed = False
+        for m in models:
+            if m.get("id") == mid:
+                m["name"] = name
+                changed = True
+                break
+        if not changed:
+            return False
+        _save_models_unlocked(models)
     return True
 
 

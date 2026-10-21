@@ -3,13 +3,162 @@
 基于 difflib 实现配置文件版本对比，支持变量绑定标注。
 """
 
+from __future__ import annotations
+
 import difflib
 import json
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import parser
-from .storage import get_bound_paths
+
+#: 结构化对比口径版本，参与 §6.6 的 `cache/diff_v2/` 缓存键。
+DIFFER_VERSION = 1
+
+#: §6.6：任一侧超过这么多行就不算文本差异（difflib 是 O(n·m)）。
+TEXT_DIFF_MAX_LINES = 20000
+DEFAULT_TEXT_LIMIT = 2000
+
+
+def compare_documents(
+    base_nodes: Dict[str, List[Any]],
+    target_nodes: Dict[str, List[Any]],
+    base_name: str,
+    target_name: str,
+    bindings: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """结构化差异（§6.6）。
+
+    * 比较键是 `loc`，同名兄弟逐个比较，不互相覆盖（C11）。
+    * `bindings` 由调用方传快照——本模块不再 import `storage`（去掉循环依赖）。
+    * 只有真正变化的条目才进 `items`；命中绑定的条目带 `bound_group`，其余为 `None`。
+    """
+    base = index_value_nodes(base_nodes)
+    target = index_value_nodes(target_nodes)
+    bound_ref = bound_reference(bindings, base_name, target_name)
+
+    summary = {"added": 0, "removed": 0, "modified": 0, "bound": 0}
+    items: List[Dict[str, Any]] = []
+    for loc in sorted(set(base) | set(target)):
+        before = base.get(loc)
+        after = target.get(loc)
+        if before is None:
+            op = "added"
+        elif after is None:
+            op = "removed"
+        elif before[0] != after[0]:
+            op = "modified"
+        else:
+            continue
+        summary[op] += 1
+        entry = after or before
+        group = bound_ref.get(entry[2]) if entry else None
+        if group:
+            summary["bound"] += 1
+        items.append(
+            {
+                "op": op,
+                "loc": loc,
+                "path": entry[1] if entry else "",
+                "old": before[0] if before else None,
+                "new": after[0] if after else None,
+                "bound_group": group or None,
+            }
+        )
+    return {"type": "structural", "summary": summary, "items": items}
+
+
+def summarize_documents(
+    base_nodes: Dict[str, List[Any]],
+    target_nodes: Dict[str, List[Any]],
+    base_name: str,
+    target_name: str,
+    bindings: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """统计级结构化差异（§6.6）——历史列表只需要计数，不算条目（M2-07）。"""
+    return {
+        "type": "structural",
+        "summary": compare_documents(
+            base_nodes, target_nodes, base_name, target_name, bindings
+        )["summary"],
+    }
+
+
+def unified_diff_text(
+    base_text: str,
+    target_text: str,
+    base_name: str,
+    target_name: str,
+    text_limit: int = DEFAULT_TEXT_LIMIT,
+) -> Dict[str, Any]:
+    """`difflib.unified_diff` 的 §6.6 包装：超大直接跳过，返回前按 `text_limit` 截断。"""
+    base_lines = base_text.splitlines()
+    target_lines = target_text.splitlines()
+    if len(base_lines) > TEXT_DIFF_MAX_LINES or len(target_lines) > TEXT_DIFF_MAX_LINES:
+        return {"lines": [], "total": 0, "truncated": True, "too_large": True}
+
+    lines = list(
+        difflib.unified_diff(
+            base_lines, target_lines, fromfile=base_name, tofile=target_name, lineterm=""
+        )
+    )
+    limit = max(0, int(text_limit))
+    return {
+        "lines": lines[:limit],
+        "total": len(lines),
+        "truncated": len(lines) > limit,
+        "too_large": False,
+    }
+
+
+def _paths(parents: List[Any], labels: List[Any], index: int) -> Tuple[str, str]:
+    """`(display_path, value_path)`：都去掉文件名节点（§6.6 第 1 步）。"""
+    parts: List[str] = []
+    i = index
+    while i > 0:
+        parts.append(str(labels[i]))
+        i = parents[i]
+    parts.reverse()
+    return " › ".join(parts), "/".join(parts)
+
+
+def index_value_nodes(nodes: Dict[str, List[Any]]) -> Dict[str, Tuple[str, str, str]]:
+    """`loc -> (value, display_path, value_path)`，只取有值节点。
+
+    键是 `loc` 而不是标签路径，所以同名兄弟不会互相覆盖（C11）。
+    """
+    parents = nodes["p"]
+    labels = nodes["l"]
+    values = nodes["v"]
+    locs = nodes["loc"]
+    out: Dict[str, Tuple[str, str, str]] = {}
+    for i in range(len(labels)):
+        value = values[i]
+        if value is None:
+            continue
+        display, value_path = _paths(parents, labels, i)
+        out[locs[i]] = (value, display, value_path)
+    return out
+
+
+def bound_reference(
+    bindings: List[Dict[str, Any]], base_name: str, target_name: str
+) -> Dict[str, str]:
+    """把绑定表展平成 `value_path -> 组名`，只收本次对比涉及的两个逻辑文件。
+
+    绑定里的 `path` 第一段是文件名（v1 格式），去掉之后才和 `value_path` 同形（§6.6 第 3 步）。
+    """
+    ref: Dict[str, str] = {}
+    for group in bindings or []:
+        wanted = str(group.get("group_name") or "")
+        for var in group.get("variables") or []:
+            if str(var.get("file") or "") not in (base_name, target_name):
+                continue
+            parts = str(var.get("path") or "").split("/")
+            if len(parts) <= 1:
+                continue
+            ref["/".join(parts[1:])] = wanted
+    return ref
 
 
 def compare_versions(
@@ -92,6 +241,10 @@ def _structural_diff(
     # 归一化路径
     norm_old = {_normalize_path(k): (k, v) for k, v in values_old.items()}
     norm_new = {_normalize_path(k): (k, v) for k, v in values_new.items()}
+
+    # 旧接口继续从 storage 取绑定；模块级 import 会造成 `storage ↔ differ` 循环，
+    # 所以留在这里，等 v1 页面（M4-07/M4-08）删除时一起消失。
+    from .storage import get_bound_paths
 
     bound_paths = get_bound_paths() if use_bindings else {}
 

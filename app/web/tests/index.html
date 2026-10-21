@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>MCChecker 前端单元测试</title>
+    <link rel="stylesheet" href="../assets/css/tokens.css" />
+    <link rel="stylesheet" href="../assets/css/base.css" />
+    <style>
+      body { padding: 24px; background: #fff; }
+      li { font-family: var(--font-mono); font-size: 13px; padding: 2px 0; }
+      .pass { color: var(--c-success-text); }
+      .fail { color: var(--c-danger-text); font-weight: 600; }
+      #summary { margin: 12px 0; font-size: 16px; font-weight: 600; }
+      #host { position: absolute; left: -9999px; width: 600px; height: 400px; display: flex; }
+    </style>
+  </head>
+  <body>
+    <h1>MCChecker 前端单元测试</h1>
+    <p class="muted small">无依赖测试页：打开即运行。全部通过时标题下显示 “ALL PASSED”。</p>
+    <div id="summary">运行中…</div>
+    <ol id="out"></ol>
+    <div id="host"></div>
+
+    <script>window.MC = { config: { mock: true } };</script>
+    <script src="../assets/js/core/util.js"></script>
+    <script src="../assets/js/ui/icons.js"></script>
+    <script src="../assets/js/core/api.js"></script>
+    <script src="../assets/js/ui/components.js"></script>
+    <script src="../assets/js/ui/tree.js"></script>
+    <script src="../assets/js/views/shell.js"></script>
+    <script src="../assets/js/mock/docparse.js"></script>
+    <script src="../assets/js/mock/dlmath.js"></script>
+    <!-- M3-06：mock-api 一并加载，用「mock 契约同步」用例钉住它与后端 §7.10 的一致性（R19）。 -->
+    <script src="../assets/js/mock/fixtures.js"></script>
+    <script src="../assets/js/mock/mock-api.js"></script>
+    <script src="../assets/js/views/fileview.js"></script>
+    <script src="../assets/js/views/importer.js"></script>
+    <script src="../assets/js/views/settings.js"></script>
+    <script src="tests.js"></script>
+  </body>
+</html>

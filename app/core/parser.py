@@ -4,14 +4,25 @@
 树形结构格式: {"id": str, "label": str, "value": Optional[str], "children": list, "attrs": dict}
 """
 
+from __future__ import annotations
+
 import json
 import os
 import io
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from .errors import PARSE_FAILED, TOO_LARGE, AppError
 
 _LARGE_XML_BYTES_THRESHOLD = 200_000
 _LARGE_XML_ATTR_ALLOWLIST = {"description", "editPrivilege", "default", "min", "max", "incMin", "incMax"}
+
+#: compact 文档的解析器版本（§6.1）。缓存 schema 变化时必须递增。
+PARSER_VERSION = 2
+
+#: §6.1 安全上限（超限返回 `TOO_LARGE`）。
+MAX_NODES = 2_000_000
+MAX_DEPTH = 512
 
 
 def parse_file(content: bytes, filename: str) -> Dict[str, Any]:
@@ -319,3 +330,313 @@ def _collect_values(node: Dict[str, Any], prefix: str, result: Dict[str, str]):
         result[path] = node["value"]
     for child in node.get("children", []):
         _collect_values(child, path, result)
+
+
+# ===========================================================================
+# compact 文档（§6.1、§6.2）——前端结构树/详情/差异统一消费的先序扁平格式
+#
+# 与旧树接口（`parse_file`）的关系：旧接口保留不动（收藏/绑定/旧建议用的
+# 旧节点 ID 由这里同样生成），新功能一律用 `loc`。
+# ===========================================================================
+
+
+class _Nodes:
+    """compact 文档的 6 个并行数组（§6.2）。
+
+    各列等长，节点用下标引用；`p[i]` 是父节点下标（根为 -1）。
+    """
+
+    __slots__ = ("p", "t", "l", "v", "id", "loc")
+
+    def __init__(self) -> None:
+        self.p: List[int] = []
+        self.t: List[str] = []
+        self.l: List[str] = []
+        self.v: List[Optional[str]] = []
+        self.id: List[str] = []
+        self.loc: List[str] = []
+
+    def push(
+        self,
+        parent: int,
+        node_type: str,
+        label: str,
+        value: Optional[str],
+        node_id: str,
+        loc: str,
+    ) -> int:
+        if len(self.p) >= MAX_NODES:
+            raise AppError(TOO_LARGE, "文档节点数超过上限（%d）" % MAX_NODES)
+        self.p.append(parent)
+        self.t.append(node_type)
+        self.l.append(label)
+        self.v.append(value)
+        self.id.append(node_id)
+        self.loc.append(loc)
+        return len(self.p) - 1
+
+    def to_dict(self) -> Dict[str, List[Any]]:
+        return {"p": self.p, "t": self.t, "l": self.l, "v": self.v, "id": self.id, "loc": self.loc}
+
+
+def to_compact(content: bytes, filename: str) -> Dict[str, Any]:
+    """解析为 compact 文档（§6.1）。
+
+    返回 `{"format": "xml"|"json", "warnings": [...], "nodes": {...}}`。
+
+    与旧 `parse_file` 的差别：**始终完整解析**，不再按 200 KB 丢弃白名单外的
+    属性（C04）。节点数 > 2 000 000 或深度 > 512 → `TOO_LARGE`；无法解析、
+    含实体声明 → `PARSE_FAILED`。遍历用显式栈，深文档不会触发 RecursionError。
+    """
+    fmt = _detect_format(content, filename)
+    if fmt == "json":
+        nodes = _compact_json(content, filename)
+        warnings: List[str] = []
+    else:
+        nodes, warnings = _compact_xml(content, filename)
+    return {"format": fmt, "warnings": warnings, "nodes": nodes.to_dict()}
+
+
+def _detect_format(content: bytes, filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "json":
+        return "json"
+    if ext == "xml":
+        return "xml"
+    try:
+        json.loads(content.decode("utf-8-sig"))
+        return "json"
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    try:
+        _xml_root_from(content)
+        return "xml"
+    except ET.ParseError:
+        pass
+    raise AppError(PARSE_FAILED, "无法解析文件 %s：不支持的格式或内容无效" % filename)
+
+
+def _format_compact_value(value: Any) -> str:
+    """标量格式化（§6.2）：`None→"null"`、`True/False` 小写、其余 `str(value)`。"""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _pointer_escape(key: str) -> str:
+    """JSON Pointer 转义（RFC 6901，§6.2）：`~`→`~0`、`/`→`~1`。"""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
+def pointer_unescape(token: str) -> str:
+    """JSON Pointer 反转义（RFC 6901）：`~1`→`/`、`~0`→`~`。
+
+    与 `_pointer_escape` 严格互逆；**顺序不能颠倒**：必须先 `~1`→`/`、再 `~0`→`~`，
+    否则 `~01`（真键名是 `~1`）会被还原成 `/`。`core.reviewing.apply_edits` 靠它把
+    `loc` 还原成真实键名，所以只能由本模块提供，避免第二套转义规则。
+    """
+    return token.replace("~1", "/").replace("~0", "~")
+
+
+def _compact_json(content: bytes, filename: str) -> _Nodes:
+    try:
+        data = json.loads(content.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AppError(PARSE_FAILED, "JSON 解析失败：%s" % exc)
+
+    nodes = _Nodes()
+    root = nodes.push(-1, "json", filename, None, "root", "")
+    if not isinstance(data, (dict, list)):
+        # 标量文档：与模板一致，只有根节点
+        return nodes
+
+    # 显式栈先序：容器子项逆序入栈，弹出即处理；容器在弹出时才展开自己的子项，
+    # 因此子树一定排在下一个同级之前（与 mock/docparse.js 的顺序一致）。
+    stack: List[Tuple[Any, int, str, str, str, int]] = [
+        (value, root, child_id, child_loc, label, 1)
+        for value, child_id, child_loc, label in reversed(_json_children(data, "root", ""))
+    ]
+    while stack:
+        value, parent, pid, ploc, label, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            raise AppError(TOO_LARGE, "文档嵌套超过上限（%d 层）" % MAX_DEPTH)
+        if isinstance(value, (dict, list)):
+            index = nodes.push(
+                parent,
+                "array" if isinstance(value, list) else "object",
+                label,
+                None,
+                pid,
+                ploc,
+            )
+            stack.extend(
+                (child, index, child_id, child_loc, child_label, depth + 1)
+                for child, child_id, child_loc, child_label in reversed(
+                    _json_children(value, pid, ploc)
+                )
+            )
+        else:
+            nodes.push(
+                parent,
+                type(value).__name__,
+                label,
+                _format_compact_value(value),
+                pid,
+                ploc,
+            )
+    return nodes
+
+
+def _json_children(container: Any, pid: str, ploc: str) -> List[Tuple[Any, str, str, str]]:
+    """按源顺序列出容器的直接子项：`(值, 旧ID, loc, 显示标签)`（§6.2）。"""
+    children: List[Tuple[Any, str, str, str]] = []
+    if isinstance(container, dict):
+        for key, item in container.items():
+            name = str(key)
+            children.append((item, pid + "." + name, ploc + "/" + _pointer_escape(name), name))
+    else:
+        for index, item in enumerate(container):
+            label = "[%d]" % index
+            children.append((item, "%s[%d]" % (pid, index), "%s/%d" % (ploc, index), label))
+    return children
+
+
+def _xml_root_from(data: bytes) -> ET.Element:
+    """一次性解析为元素树，丢弃注释（§6.1 第 1 步）。"""
+    parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=False))
+    return ET.fromstring(data, parser=parser)
+
+
+def _collect_ns_prefixes(data: bytes) -> Dict[str, str]:
+    """`uri → prefix`（首次出现者），用于显示标签（§6.1 第 3 步）。"""
+    mapping: Dict[str, str] = {}
+    for _event, payload in ET.iterparse(io.BytesIO(data), events=("start-ns",)):
+        prefix, uri = payload
+        if uri and uri not in mapping:
+            mapping[uri] = prefix
+    return mapping
+
+
+def collect_ns_prefixes(content: bytes) -> Dict[str, str]:
+    """`uri → prefix`（首次出现者），§6.1 第 3 步的公开入口。
+
+    `_collect_ns_prefixes` 的薄封装：`core.reviewing.apply_edits` 要用它把原文的
+    前缀注册回去（§6.7 第 5 步），必须与显示标签**同源**，所以这里不复制实现、
+    也不让别的 core 模块跨文件调私有函数。
+    """
+    return _collect_ns_prefixes(content)
+
+
+def _display_label(tag: str, ns_prefix: Dict[str, str]) -> str:
+    """显示标签：有前缀用 `prefix:local`；无前缀用 local；未知 uri 用 ET 原始 tag（§6.2）。"""
+    if not tag.startswith("{"):
+        return tag
+    uri, _, local = tag[1:].partition("}")
+    prefix = ns_prefix.get(uri)
+    return prefix + ":" + local if prefix else tag
+
+
+def _parse_xml_root(content: bytes) -> Tuple[ET.Element, List[str], Dict[str, str]]:
+    """解析 XML 根元素，保留旧容错（unbound prefix / junk after document element）。"""
+    upper = content.upper()
+    if b"<!DOCTYPE" in upper and b"<!ENTITY" in upper:
+        raise AppError(PARSE_FAILED, "文件包含实体声明，出于安全原因不予解析")
+
+    data = content
+    warnings: List[str] = []
+    try:
+        root = _xml_root_from(data)
+    except ET.ParseError as exc:
+        message = str(exc)
+        if "junk after document element" in message:
+            # 截到报错位置（= 文档元素结束处）再重试。用 expat 给的 position 而不是
+            # "最后一个 >"：尾部若还有 `/>`，后者会截到残余内容之后，等于没截。
+            offset = _position_offset(data, getattr(exc, "position", None))
+            if offset <= 0:
+                raise
+            data = data[:offset]
+            warnings.append(
+                "文件末尾有多余内容，已截取到文档元素结束处解析（仅影响显示，原文未修改）"
+            )
+            root = _xml_root_from(data)
+        elif "unbound prefix" in message:
+            text = _preprocess_xml_namespaces(data.decode("utf-8-sig"))
+            data = text.encode("utf-8")
+            warnings.append(
+                "文件包含未声明的命名空间前缀，已自动补全后解析（仅影响显示，原文未修改）"
+            )
+            root = _xml_root_from(data)
+        else:
+            raise
+    return root, warnings, _collect_ns_prefixes(data)
+
+
+def _position_offset(data: bytes, position: Optional[Tuple[int, int]]) -> int:
+    """把 expat 的 `(line, column)`（1 起）换算成字节偏移。"""
+    if not position:
+        return -1
+    line, column = position
+    offset = 0
+    for _ in range(max(line - 1, 0)):
+        newline = data.find(b"\n", offset)
+        if newline < 0:
+            return len(data)
+        offset = newline + 1
+    return min(offset + max(column, 0), len(data))
+
+
+def _compact_xml(content: bytes, filename: str) -> Tuple[_Nodes, List[str]]:
+    try:
+        root_elem, warnings, ns_prefix = _parse_xml_root(content)
+    except ET.ParseError as exc:
+        raise AppError(PARSE_FAILED, "XML 解析失败：%s" % exc)
+
+    nodes = _Nodes()
+    root = nodes.push(-1, "xml", filename, None, "root", "")
+
+    # 显式栈先序：元素行 → 属性行（源顺序，跳过 xmlns*）→ `#text` 行 → 子元素
+    stack: List[Tuple[ET.Element, int, str, str, int, int]] = [
+        (root_elem, root, "root", "", 1, 1)
+    ]
+    while stack:
+        elem, parent, pid, ploc, occurrence, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            raise AppError(TOO_LARGE, "文档嵌套超过上限（%d 层）" % MAX_DEPTH)
+
+        tag = elem.tag
+        node_id = pid + "/" + tag
+        node_loc = "%s/%s[%d]" % (ploc, tag, occurrence)
+        has_child_elements = len(elem) > 0
+        text = (elem.text or "").strip()
+        value = None if (has_child_elements or not text) else text
+
+        index = nodes.push(
+            parent, "element", _display_label(tag, ns_prefix), value, node_id, node_loc
+        )
+
+        for attr_name, attr_value in elem.attrib.items():
+            if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
+                continue
+            # id/loc 用 ET 原始属性名；显示标签与元素一致，已知 uri 时用 prefix:local
+            nodes.push(
+                index,
+                "attribute",
+                "@" + _display_label(attr_name, ns_prefix),
+                attr_value,
+                node_id + "@" + attr_name,
+                node_loc + "/@" + attr_name,
+            )
+
+        if has_child_elements and text:
+            nodes.push(index, "text", "#text", text, node_id + "#text", node_loc + "/#text")
+
+        counters: Dict[str, int] = {}
+        children: List[Tuple[ET.Element, int, str, str, int, int]] = []
+        for child in elem:
+            counters[child.tag] = counters.get(child.tag, 0) + 1
+            children.append((child, index, node_id, node_loc, counters[child.tag], depth + 1))
+        stack.extend(reversed(children))
+
+    return nodes, warnings

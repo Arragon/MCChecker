@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-MCChecker 是一个基于 Python + NiceGUI 的内网配置文件解析检查工具，支持 XML/JSON 配置的在线解析、搜索、对比与版本归档。
+MCChecker 是一个基于 Python 标准库 HTTP 服务的内网配置文件解析检查工具，支持 XML/JSON 配置的在线解析、搜索、对比与版本归档。
 
 ## 2. 环境准备
 
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-默认监听：`0.0.0.0:50001`
+默认监听：`0.0.0.0:50002`
 
 停止：
 
@@ -53,13 +53,9 @@ python main.py
 
 ## 6. 配置项
 
-### 6.1 NICEGUI_STORAGE_SECRET（可选）
+### 6.1 端口与数据目录
 
-用于启用 NiceGUI 的用户级持久化能力（如记住当前机型选择）。可通过环境变量注入：
-
-- `NICEGUI_STORAGE_SECRET`: 任意随机字符串
-
-未设置时，应用会自动生成并写入到 `data/nicegui_storage_secret.txt`，以保证刷新页面或重启服务后仍能正确读取此前的机型选择。
+默认端口 50002；`python run.py --port <端口> --data-dir <目录>` 可覆盖。v2 不再使用 NiceGUI，`data/nicegui_storage_secret.txt` 不再读取或删除（部署机上的旧文件可保留）。
 
 ## 7. 数据目录说明
 
@@ -87,3 +83,11 @@ python main.py
 - 右上角会显示当前访问者的身份标签：未命中管理员名单显示“游客”，命中后显示“管理员”。
 - “审阅修改”页仅对管理员开放，管理员必须对每个待审节点明确选择一条通过项或“不通过”。
 - 审阅通过后，系统会按时间戳生成新的目标文件，保存到当前机型的 `configs` 目录，并自动出现在左侧文件列表中。
+
+## 14.6 恢复区手工恢复（v2）
+
+1. 停止 MCChecker（前台 Ctrl+C），确认单实例锁已删除。
+2. 在 `data/recovery/` 下找到目标条目，读取 `manifest.json` 的 `moved`（`from` 是原位置、`to` 是恢复区内副本）与 `removed_refs`。
+3. 先运行 `python run.py --restore data/recovery/<条目> --dry-run --data-dir data` 复核计划；该命令只打印、不写任何文件。
+4. 手工把 `to` 指向的副本复制回 `from`，逐文件比对 sha256；引用（收藏/绑定/建议）按 `removed_refs` 手工回填。
+5. 重启服务，复核文件列表、对比与修订号；恢复区条目保留，不自动清理。
