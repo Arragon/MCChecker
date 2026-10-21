@@ -495,6 +495,76 @@ class TestExtract:
         statuses = {f["field"]: f["status"] for f in body["fields"]}
         assert statuses == {"m1": "ok", "m2": "invalid"}
 
+    def test_json_binding_path_matches_node_id(self):
+        """详情面板复制的绑定路径（文件名/标签/…）与旧节点 ID 指到同一节点。"""
+        pid = seed_roles("dlextractjsonpath")
+        write_target(pid, "dl.json", b'{"a": {"m1": 3.5, "m2": "x"}}')
+        binding = {
+            "source_file": "dl.json",
+            "variable_path": "dl.json/a",
+            "field_map": {"m1": "k1"},
+        }
+        with make_server() as server:
+            status, _h, body = as_role(server, "member").json(
+                "POST", EXTRACT_URL % (pid, "rp_width"), {"binding": binding}
+            )
+        assert status == 200, body
+        assert body["coeffs"] == {"k1": 3.5}
+
+    def test_xml_binding_path_locator_display_path_and_bare_attribute(self):
+        """XML 可以用绑定路径、定位符或显示路径定位；属性名可以不写 @。"""
+        pid = seed_roles("dlextractxml")
+        self._seed(pid)
+        paths = (
+            "dl_source.xml/R/PPParams",
+            "/R[1]/PPParams[1]",
+            "R › PPParams",
+        )
+        with make_server() as server:
+            for variable_path in paths:
+                binding = {
+                    "source_file": SOURCE,
+                    "variable_path": variable_path,
+                    "field_map": {"m1": "k1", "min": "k4", "absent": "k5"},
+                }
+                status, _h, body = as_role(server, "visitor").json(
+                    "POST", EXTRACT_URL % (pid, "rp_energy"), {"binding": binding}
+                )
+                assert status == 200, (variable_path, body)
+                assert body["coeffs"] == {"k1": 2.0, "k4": 0.0}, (variable_path, body)
+                fields = {f["field"]: f for f in body["fields"]}
+                assert fields["min"]["status"] == "ok" and fields["min"]["value"] == 0.0
+                assert fields["absent"]["status"] == "missing"
+
+    def test_xml_element_text_is_extracted_by_binding_path(self):
+        """机型 XML 的系数在子元素文本里，绑定路径要能直接取到科学计数法。"""
+        pid = seed_roles("dlextractxmltext")
+        write_target(
+            pid,
+            "scenario.xml",
+            (
+                '<?xml version="1.0"?>'
+                "<CONFIG_ROOT><SCENARIO_BLOCK><input>"
+                '<param_10 type="double">5.00e+00</param_10>'
+                "<param_11>bad</param_11>"
+                "</input></SCENARIO_BLOCK></CONFIG_ROOT>"
+            ).encode("utf-8"),
+        )
+        binding = {
+            "source_file": "scenario.xml",
+            "variable_path": "scenario.xml/CONFIG_ROOT/SCENARIO_BLOCK/input",
+            "field_map": {"param_10": "k1", "param_11": "k2"},
+        }
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "POST", EXTRACT_URL % (pid, "rp_width"), {"binding": binding}
+            )
+        assert status == 200, body
+        assert body["coeffs"] == {"k1": 5.0}, body
+        fields = {f["field"]: f for f in body["fields"]}
+        assert fields["param_11"]["status"] == "invalid"
+        assert fields["param_11"]["raw"] == "bad"
+
     def test_all_four_roles_may_extract(self):
         pid = seed_roles("dlextract6")
         self._seed(pid)

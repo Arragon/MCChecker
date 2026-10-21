@@ -37,12 +37,371 @@
     return isFinite(v) ? v : NaN;
   }
 
+  var PLOT_KEYS = ["k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8"];
+
+  function finiteNum(v) {
+    if (v === null || v === undefined || v === "") return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  function evalCurveY(item, id, x) {
+    var c = item.coeffs || {};
+    var y = Number(c.b || 0);
+    var p = 1;
+    for (var i = 0; i < PLOT_KEYS.length; i++) {
+      p *= x;
+      var k = Number(c[PLOT_KEYS[i]] || 0);
+      if (k) y += k * p;
+    }
+    if (id === "pp_energy") {
+      var den = Number(item.power_conv_coeff);
+      var num = Number(item.trans_coeff);
+      if (!isFinite(den) || den === 0 || !isFinite(num)) return NaN;
+      y *= num / den;
+    }
+    return y;
+  }
+
+  function curveReady(item, id) {
+    if (id !== "pp_energy") return true;
+    var den = Number(item.power_conv_coeff);
+    var num = Number(item.trans_coeff);
+    return isFinite(den) && den !== 0 && isFinite(num);
+  }
+
+  function collectMarks(item, id, mode, text, entry) {
+    var parsed = parseNumbers(text).values;
+    var rs = entry && entry.res && entry.res.results;
+    var same = !!(rs && rs.length === parsed.length);
+    if (same) {
+      for (var i = 0; i < rs.length; i++) {
+        var got = mode === "forward" ? rs[i].x : rs[i].y;
+        if (got !== parsed[i]) { same = false; break; }
+      }
+    }
+    var marks = [];
+    if (same && mode === "forward") {
+      rs.forEach(function (r) {
+        var y = r.y;
+        if (y === undefined || y === null) y = evalCurveY(item, id, r.x);
+        if (!isFinite(r.x) || !isFinite(y)) return;
+        marks.push({ x: r.x, y: y, status: r.status || "ok", label: String(r.input_index + 1) });
+      });
+      return marks;
+    }
+    if (same && mode === "reverse") {
+      rs.forEach(function (r) {
+        if (!isFinite(r.y)) return;
+        var xs = r.x_values || [];
+        var chosen = entry.choice && entry.choice[r.input_index];
+        if (r.status === "multiple" && chosen !== undefined) xs = [chosen];
+        xs.forEach(function (x) {
+          if (!isFinite(x)) return;
+          marks.push({ x: x, y: r.y, status: r.status || "single", label: String(r.input_index + 1) });
+        });
+      });
+      return marks;
+    }
+    if (mode === "forward") {
+      parsed.forEach(function (x, index) {
+        var y = evalCurveY(item, id, x);
+        if (!isFinite(y)) return;
+        marks.push({ x: x, y: y, status: "preview", label: String(index + 1) });
+      });
+    }
+    return marks;
+  }
+
+  function cssColor(name, fallback) {
+    var v = "";
+    try { v = getComputedStyle(document.documentElement).getPropertyValue(name) || ""; } catch (e) { v = ""; }
+    return String(v).replace(/^\s+|\s+$/g, "") || fallback;
+  }
+
+  function niceStep(span, count) {
+    if (!(span > 0) || !isFinite(span)) return 1;
+    var raw = span / Math.max(count, 1);
+    var pow = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    if (!isFinite(pow) || pow === 0) return raw;
+    var err = raw / pow;
+    var step = 10;
+    if (err < 1.5) step = 1;
+    else if (err < 3.5) step = 2;
+    else if (err < 7.5) step = 5;
+    return step * pow;
+  }
+
+  function paintPlot(canvas, summaryEl, item, id, marks) {
+    var yName = id === "pp_energy" ? "PP" : "y";
+    function say(text) {
+      if (summaryEl) summaryEl.textContent = text;
+      canvas.setAttribute("aria-label", text);
+    }
+    if (!curveReady(item, id)) {
+      say("功率转换系数不能为 0，暂时无法绘制曲线。");
+      var ctx0 = canvas.getContext("2d");
+      if (ctx0) {
+        ctx0.setTransform(1, 0, 0, 1, 0, 0);
+        ctx0.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
+    var parent = canvas.parentNode;
+    var cssW = parent && parent.clientWidth ? parent.clientWidth : 640;
+    if (cssW < 280) cssW = 280;
+    var cssH = 280;
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = "100%";
+    canvas.style.height = cssH + "px";
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    var xmin = finiteNum(item.x_min);
+    var xmax = finiteNum(item.x_max);
+    var yminB = finiteNum(item.y_min);
+    var ymaxB = finiteNum(item.y_max);
+    var xs = [];
+    marks.forEach(function (m) { xs.push(m.x); });
+    if (xmin !== null) xs.push(xmin);
+    if (xmax !== null) xs.push(xmax);
+    var xLo = 0;
+    var xHi = 10;
+    if (xmin !== null && xmax !== null && xmin < xmax) {
+      xLo = xmin;
+      xHi = xmax;
+    } else if (xs.length) {
+      xLo = Math.min.apply(null, xs);
+      xHi = Math.max.apply(null, xs);
+    }
+    marks.forEach(function (m) {
+      if (m.x < xLo) xLo = m.x;
+      if (m.x > xHi) xHi = m.x;
+    });
+    if (xLo === xHi) {
+      var pad0 = Math.max(Math.abs(xLo) * 0.1, 1);
+      xLo -= pad0;
+      xHi += pad0;
+    } else {
+      var pad = (xHi - xLo) * 0.06;
+      xLo -= pad;
+      xHi += pad;
+    }
+
+    var samples = [];
+    var steps = 240;
+    for (var si = 0; si <= steps; si++) {
+      var sx = xLo + (xHi - xLo) * (si / steps);
+      samples.push({ x: sx, y: evalCurveY(item, id, sx) });
+    }
+    var finiteYs = [];
+    samples.forEach(function (s) { if (isFinite(s.y)) finiteYs.push(s.y); });
+    var anchors = [];
+    if (yminB !== null) anchors.push(yminB);
+    if (ymaxB !== null) anchors.push(ymaxB);
+    marks.forEach(function (m) { if (isFinite(m.y)) anchors.push(m.y); });
+    var yPool = anchors.slice();
+    if (anchors.length) {
+      var aLo = Math.min.apply(null, anchors);
+      var aHi = Math.max.apply(null, anchors);
+      var aSpan = Math.max(aHi - aLo, Math.abs(aLo) * 0.05, 1);
+      finiteYs.forEach(function (y) {
+        if (y >= aLo - aSpan * 3 && y <= aHi + aSpan * 3) yPool.push(y);
+      });
+    } else if (finiteYs.length) {
+      var sorted = finiteYs.slice().sort(function (a, b) { return a - b; });
+      var i10 = Math.floor(sorted.length * 0.08);
+      var i90 = Math.min(sorted.length - 1, Math.max(Math.ceil(sorted.length * 0.92) - 1, 0));
+      yPool.push(sorted[i10], sorted[i90]);
+    }
+    if (yPool.length < 2 && finiteYs.length) yPool.push(Math.min.apply(null, finiteYs), Math.max.apply(null, finiteYs));
+    if (!yPool.length) {
+      say("当前系数在此范围内数值过大，无法绘制曲线。");
+      ctx.fillStyle = cssColor("--c-surface-2", "#f9fafb");
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.fillStyle = cssColor("--c-text-3", "#5d6676");
+      ctx.font = "13px sans-serif";
+      ctx.fillText("当前系数在此范围内数值过大，无法绘制曲线。", 16, 40);
+      return;
+    }
+    var yLo = Math.min.apply(null, yPool);
+    var yHi = Math.max.apply(null, yPool);
+    if (yLo === yHi) {
+      var ypad0 = Math.max(Math.abs(yLo) * 0.15, 1);
+      yLo -= ypad0;
+      yHi += ypad0;
+    } else {
+      var ypad = (yHi - yLo) * 0.12;
+      yLo -= ypad;
+      yHi += ypad;
+    }
+
+    var plotL = 56;
+    var plotR = 16;
+    var plotT = 16;
+    var plotB = 32;
+    var plotW = Math.max(cssW - plotL - plotR, 10);
+    var plotH = Math.max(cssH - plotT - plotB, 10);
+    function X(x) { return plotL + ((x - xLo) / (xHi - xLo)) * plotW; }
+    function Y(y) { return plotT + ((yHi - y) / (yHi - yLo)) * plotH; }
+
+    var grid = cssColor("--c-guide", "#e4e7ec");
+    var text = cssColor("--c-text-3", "#5d6676");
+    var primary = cssColor("--c-primary", "#2563eb");
+    var warning = cssColor("--c-warning", "#d97706");
+    var danger = cssColor("--c-danger", "#dc2626");
+    var surface = cssColor("--c-surface", "#ffffff");
+
+    ctx.fillStyle = cssColor("--c-surface-2", "#f9fafb");
+    ctx.fillRect(0, 0, cssW, cssH);
+    ctx.strokeStyle = grid;
+    ctx.lineWidth = 1;
+    ctx.font = "11px sans-serif";
+    ctx.fillStyle = text;
+    var xStep = niceStep(xHi - xLo, 5);
+    var xStart = Math.ceil(xLo / xStep) * xStep;
+    var drawn = 0;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (var xt = xStart; xt <= xHi + xStep * 1e-6 && drawn < 8; xt += xStep) {
+      drawn++;
+      var px = X(xt);
+      ctx.beginPath();
+      ctx.moveTo(px, plotT);
+      ctx.lineTo(px, plotT + plotH);
+      ctx.stroke();
+      ctx.fillText(util.formatNumber(xt), px, plotT + plotH + 6);
+    }
+    var yStep = niceStep(yHi - yLo, 4);
+    var yStart = Math.ceil(yLo / yStep) * yStep;
+    drawn = 0;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (var yt = yStart; yt <= yHi + yStep * 1e-6 && drawn < 8; yt += yStep) {
+      drawn++;
+      var py = Y(yt);
+      ctx.beginPath();
+      ctx.moveTo(plotL, py);
+      ctx.lineTo(plotL + plotW, py);
+      ctx.stroke();
+      ctx.fillText(util.formatNumber(yt), plotL - 6, py);
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotL, plotT, plotW, plotH);
+    ctx.clip();
+    ctx.beginPath();
+    var pen = false;
+    samples.forEach(function (s) {
+      if (!isFinite(s.y)) { pen = false; return; }
+      var cx = X(s.x);
+      var cy = Y(s.y);
+      if (!pen) { ctx.moveTo(cx, cy); pen = true; }
+      else ctx.lineTo(cx, cy);
+    });
+    ctx.strokeStyle = primary;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    function vline(x, label) {
+      if (x === null || x < xLo || x > xHi) return;
+      var lx = X(x);
+      ctx.save();
+      ctx.strokeStyle = warning;
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(lx, plotT);
+      ctx.lineTo(lx, plotT + plotH);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = warning;
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = lx > plotL + plotW - 52 ? "right" : "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(label, lx > plotL + plotW - 52 ? lx - 4 : lx + 4, plotT + 4);
+    }
+    function hline(y, label) {
+      if (y === null || y < yLo || y > yHi) return;
+      var ly = Y(y);
+      ctx.save();
+      ctx.strokeStyle = danger;
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(plotL, ly);
+      ctx.lineTo(plotL + plotW, ly);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = danger;
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = ly < plotT + 18 ? "top" : "bottom";
+      ctx.fillText(label, plotL + 6, ly < plotT + 18 ? ly + 2 : ly - 2);
+    }
+    vline(xmin, "x 下限");
+    vline(xmax, "x 上限");
+    hline(yminB, yName + " 下限");
+    hline(ymaxB, yName + " 上限");
+
+    marks.forEach(function (m) {
+      if (m.x < xLo || m.x > xHi || m.y < yLo || m.y > yHi) return;
+      var mx = X(m.x);
+      var my = Y(m.y);
+      var out = m.status === "out_of_x_range" || m.status === "out_of_y_range";
+      ctx.beginPath();
+      ctx.arc(mx, my, 5, 0, Math.PI * 2);
+      ctx.fillStyle = surface;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = out ? warning : primary;
+      ctx.stroke();
+      if (!out) {
+        ctx.beginPath();
+        ctx.arc(mx, my, 2.2, 0, Math.PI * 2);
+        ctx.fillStyle = primary;
+        ctx.fill();
+      }
+      ctx.fillStyle = text;
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(m.label, mx + 6, my - 4);
+    });
+
+    var outCount = 0;
+    marks.forEach(function (m) {
+      if (m.status === "out_of_x_range" || m.status === "out_of_y_range") outCount++;
+    });
+    var summary = "曲线表示当前系数下 x 与 " + yName + " 的关系。竖虚线是 x 边界，横虚线是 " + yName + " 边界。";
+    if (marks.length) summary += "已标出 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）。" : "。");
+    else summary += "在下方输入数值后，计算点会标在曲线上。";
+    say(summary);
+  }
+
   MC.views.dl = function (app, route) {
     var S = { rev: null, saved: null, draft: null, item: (route.query && route.query.item) || "pp_energy", mode: "forward", inputs: { forward: "", reverse: "" }, results: {}, multi: {} };
     var el = h("div");
     var header = h("div.view-header");
     var bodyEl = h("div.view-body");
     el.append(header, bodyEl);
+    var plotCanvas = null;
+    var plotSummary = null;
+    function drawPlot() {
+      if (!plotCanvas || !plotCanvas.isConnected) return;
+      var id = S.item;
+      var item = S.draft && S.draft[id];
+      if (!item) return;
+      paintPlot(plotCanvas, plotSummary, item, id, collectMarks(item, id, S.mode, S.inputs[S.mode], S.results[id + ":" + S.mode]));
+    }
+    function onPlotResize() { drawPlot(); }
+    window.addEventListener("resize", onPlotResize);
 
     function clone(x) { return JSON.parse(JSON.stringify(x)); }
     function itemDirty(id) { return S.saved && JSON.stringify(S.saved[id]) !== JSON.stringify(S.draft[id]); }
@@ -74,6 +433,7 @@
       var item = S.draft[id];
       util.replace(bodyEl, h("div.container", { style: "max-width:1240px" }, dirtyBar(id), h("div.dl-layout", paramsPanel(id, item), calcPanel(id, item))));
       scheduleMultiCheck(id);
+      requestAnimationFrame(drawPlot);
     }
 
     function dirtyBar(id) {
@@ -242,7 +602,7 @@
       var item = S.draft[id];
       var b = item.binding || { source_file: "", variable_path: "", field_map: {} };
       var fileSel = h("select.select", h("option", { value: "" }, "请选择文件"), app.files.map(function (f) { return h("option", { value: f.name, selected: f.name === b.source_file }, f.name); }));
-      var pathInput = h("input.input.input-mono", { type: "text", value: b.variable_path || "", placeholder: "例如 root.device.laser.pp" });
+      var pathInput = h("input.input.input-mono", { type: "text", value: b.variable_path || "", placeholder: "例如 scenario_a.xml/CONFIG_ROOT/SCENARIO_BLOCK/input" });
       var mapInput = h("textarea.textarea.input-mono", { rows: 5, placeholder: "m1=k1\nm2=k2\nn=b" }, Object.keys(b.field_map || {}).map(function (k) { return k + "=" + b.field_map[k]; }).join("\n"));
       var mapField = MC.field({ label: "字段 → 系数映射", control: mapInput, help: "每行一条：字段名=系数名，系数名为 k1…k8 或 b" });
       MC.modal({
@@ -252,7 +612,7 @@
           "div.col",
           { style: "gap:12px" },
           MC.field({ label: "来源配置文件", control: fileSel }),
-          MC.field({ label: "变量路径", control: pathInput, help: "填写节点 ID（JSON 如 root.a.b，XML 如 root/ROOT/a）。可在文件详情面板「技术定位信息」中复制。" }),
+          MC.field({ label: "变量路径", control: pathInput, help: "可粘贴详情面板的绑定路径。XML 与 JSON 都支持，例如 config.xml/CONFIG_ROOT/input，也可填节点 ID 或定位符。属性写成 min 或 @min 都可以。" }),
           mapField
         ),
         footer: function (close) {
@@ -287,7 +647,7 @@
     function calcPanel(id, item) {
       var mode = S.mode;
       var ta = h("textarea.textarea.input-mono", { rows: 4, placeholder: mode === "forward" ? "输入 x 值，可用空格、逗号或换行分隔\n例如：10 20 35.5" : "输入目标 " + (id === "pp_energy" ? "PP 能量" : "y") + " 值\n例如：40 60", "aria-label": "输入值" }, S.inputs[mode]);
-      ta.addEventListener("input", function () { S.inputs[mode] = ta.value; });
+      ta.addEventListener("input", function () { S.inputs[mode] = ta.value; drawPlot(); });
       var runBtn = h("button.btn.btn-primary", { type: "button" }, icon(mode === "forward" ? "arrow-right" : "search"), mode === "forward" ? "计算" : "求解");
       var resHost = h("div");
       runBtn.addEventListener("click", function () {
@@ -322,7 +682,7 @@
             var cell;
             if (r.status === "multiple") {
               var sel = h("select.select.input-sm", { "aria-label": "选择第 " + (r.input_index + 1) + " 行采用的解", style: "width:auto" }, h("option", { value: "" }, "选择采用的解…"), r.x_values.map(function (x) { return h("option", { value: String(x), selected: entry.choice[r.input_index] === x }, util.formatNumber(x)); }));
-              sel.addEventListener("change", function () { entry.choice[r.input_index] = sel.value === "" ? undefined : Number(sel.value); });
+              sel.addEventListener("change", function () { entry.choice[r.input_index] = sel.value === "" ? undefined : Number(sel.value); drawPlot(); });
               cell = h("td", h("div.row", h("span.mono.multi", r.x_values.map(util.formatNumber).join(", ")), sel));
             } else cell = h("td.mono", r.x_values && r.x_values.length ? util.formatNumber(r.x_values[0]) : "—");
             return h("tr", h("td.num.muted", String(r.input_index + 1)), h("td.mono", util.formatNumber(r.y)), cell, h("td", r.status === "multiple" ? h("span.badge.badge-warning", r.x_values.length + " 个解") : STATUS[r.status] ? h("span.badge.badge-danger", STATUS[r.status]) : h("span.badge.badge-success", "唯一解")));
@@ -336,6 +696,7 @@
             return [r.y, x, r.status === "multiple" ? (entry.choice[r.input_index] !== undefined ? "已选定" : "多解") : STATUS[r.status] || "唯一解"].join(",");
           })).join("\n");
         }
+        drawPlot();
         util.replace(
           resHost,
           h("div.row", { style: "margin-bottom:8px" }, h("span.small.muted.grow", rs.length + " 条结果" + (mode === "reverse" ? " · 结果为在范围内检测到的候选根" : "")), MC.copyButton(csv, "复制为 CSV"), h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "下载 CSV", "data-tip": "下载 CSV", onclick: function () { util.downloadBlob("\uFEFF" + csv(), item.name + "_" + mode + ".csv", "text/csv;charset=utf-8"); } }, icon("download"))),
@@ -344,8 +705,24 @@
         );
       }
 
-      var seg = MC.segmented([{ value: "forward", label: "正向 x → " + (id === "pp_energy" ? "PP" : "y") }, { value: "reverse", label: "反向 " + (id === "pp_energy" ? "PP" : "y") + " → x" }], mode, function (v) { S.mode = v; render(); }, "计算方向");
-      var panel = h("section.panel", h("div.panel-header", h("h2", "计算"), seg), h("div.panel-body.col", { style: "gap:12px" }, MC.field({ label: mode === "forward" ? "输入 x" : "输入目标值", control: ta }), h("div.row", h("span.xsmall.muted.grow", itemDirty(id) ? "将使用未保存的草稿参数计算" : "使用已保存的参数计算"), runBtn), resHost));
+      var yName = id === "pp_energy" ? "PP" : "y";
+      plotCanvas = h("canvas.dl-plot", { role: "img", "aria-label": "当前数值关系图" });
+      plotSummary = h("p.dl-plot-summary", "正在绘制当前数值关系。");
+      var plotCard = h(
+        "div.dl-plot-card",
+        h("div.section-title", "数值关系"),
+        plotCanvas,
+        h(
+          "div.dl-plot-legend",
+          h("span", h("i.lg-curve"), "曲线"),
+          h("span", h("i.lg-x"), "x 边界"),
+          h("span", h("i.lg-y"), yName + " 边界"),
+          h("span", h("i.lg-pt"), "计算点")
+        ),
+        plotSummary
+      );
+      var seg = MC.segmented([{ value: "forward", label: "正向 x → " + yName }, { value: "reverse", label: "反向 " + yName + " → x" }], mode, function (v) { S.mode = v; render(); }, "计算方向");
+      var panel = h("section.panel", h("div.panel-header", h("h2", "计算"), seg), h("div.panel-body.col", { style: "gap:12px" }, plotCard, MC.field({ label: mode === "forward" ? "输入 x" : "输入目标值", control: ta }), h("div.row", h("span.xsmall.muted.grow", itemDirty(id) ? "将使用未保存的草稿参数计算" : "使用已保存的参数计算"), runBtn), resHost));
       renderResults();
       return panel;
     }
@@ -360,7 +737,7 @@
         if (it && it !== S.item && S.draft) { S.item = it; render(); }
       },
       isDirty: anyDirty,
-      destroy: function () { clearTimeout(multiTimer); },
+      destroy: function () { clearTimeout(multiTimer); window.removeEventListener("resize", onPlotResize); },
     };
   };
 })(window);

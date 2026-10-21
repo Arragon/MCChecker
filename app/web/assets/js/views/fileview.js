@@ -409,7 +409,8 @@
 
     function revealPending() {
       if (!S.pendingNode || !S.tree) return;
-      var i = S.idx.byLoc[S.pendingNode];
+      var i = S.idx.indexOfRef ? S.idx.indexOfRef(S.pendingNode, S.name) : undefined;
+      if (i === undefined) i = S.idx.byLoc[S.pendingNode];
       if (i === undefined) i = S.idx.byId[S.pendingNode];
       if (i !== undefined) {
         S.tree.reveal(i);

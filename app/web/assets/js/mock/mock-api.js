@@ -151,6 +151,35 @@
     return { N: N, byId: byId, byLoc: byLoc, sha: parse.hash(text), format: parsed.format, text: text };
   }
 
+  /** 与 services/dl.py::_locate_variable 同序：节点 ID、定位符、绑定路径。找不到返回 null。 */
+  function locateDlVariable(ix, sourceFile, variablePath) {
+    var path = String(variablePath || "").trim();
+    if (!path) return null;
+    var N = ix.N;
+    if (ix.byId[path] && ix.byId[path].length) return ix.byId[path][0];
+    if (ix.byLoc[path] !== undefined) return ix.byLoc[path];
+    if (path.charAt(0) !== "/" && ix.byLoc["/" + path] !== undefined) return ix.byLoc["/" + path];
+    var normalized = path.split(" › ").join("/").split("›").join("/");
+    var parts = normalized.split("/").filter(Boolean);
+    if (sourceFile && parts[0] === sourceFile) parts = parts.slice(1);
+    if (!parts.length) return null;
+    for (var i = 1; i < N.p.length; i++) {
+      var chain = [];
+      var k = i;
+      var guard = 0;
+      while (k > 0 && k < N.l.length && guard <= N.l.length) {
+        chain.unshift(N.l[k]);
+        k = N.p[k];
+        guard++;
+      }
+      if (chain.length !== parts.length) continue;
+      var same = true;
+      for (var j = 0; j < parts.length; j++) if (chain[j] !== parts[j]) same = false;
+      if (same) return i;
+    }
+    return null;
+  }
+
   function valuePath(N, i) {
     var parts = [];
     while (i > 0) {
@@ -1814,24 +1843,29 @@
     var variablePath = bnd.variable_path === undefined || bnd.variable_path === null ? "" : String(bnd.variable_path).trim();
     var ix = currentIndex(P, sourceFile);
     if (!ix) return fail(404, "NOT_FOUND", "绑定的配置文件不存在", { field: "source_file" });
-    var ids = ix.byId[variablePath];
-    if (!ids) return fail(404, "NOT_FOUND", "在 " + sourceFile + " 中未找到 " + variablePath, { field: "variable_path" });
+    var located = locateDlVariable(ix, sourceFile, variablePath);
+    if (located === null) return fail(404, "NOT_FOUND", "在 " + sourceFile + " 中未找到 " + variablePath, { field: "variable_path" });
     var fieldMap = bnd.field_map;
     if (fieldMap === undefined || fieldMap === null) fieldMap = {};
     else if (typeof fieldMap !== "object" || Array.isArray(fieldMap)) {
       return fail(400, "INVALID_INPUT", "field_map 必须是对象", { field: "binding" });
     }
     var N = ix.N;
-    var i = ids[0];
+    var i = located;
     var children = {};
     for (var c = i + 1; c < N.p.length; c++) if (N.p[c] === i) children[N.l[c]] = N.v[c];
     var fields = Object.keys(fieldMap).map(function (fld) {
       var coeff = fieldMap[fld];
       // 无值节点（XML 空元素）与缺失同判 missing；缺失/非数值都不进 coeffs、至少不返回 0（C15）。
-      if (!(fld in children) || children[fld] === null) return { field: fld, coeff: coeff, status: "missing" };
-      var num = dlNumber(children[fld]);
+      // XML 属性标签带 @；映射里写 min 或 @min 都认。
+      var raw = children[fld];
+      if ((!(fld in children) || raw === null) && fld.charAt(0) !== "@" && ("@" + fld) in children && children["@" + fld] !== null) {
+        raw = children["@" + fld];
+      }
+      if (raw === undefined || raw === null) return { field: fld, coeff: coeff, status: "missing" };
+      var num = dlNumber(raw);
       return num === null
-        ? { field: fld, coeff: coeff, status: "invalid", raw: children[fld] }
+        ? { field: fld, coeff: coeff, status: "invalid", raw: raw }
         : { field: fld, coeff: coeff, status: "ok", value: num };
     });
     var coeffs = {};

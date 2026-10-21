@@ -89,6 +89,7 @@
 
 ## 4. Testing Notes
 - 使用 pytest 运行测试，`pytest tests/ -v`
+- DL 系数绑定的 `variable_path` 不只认旧节点 ID。详情面板「复制绑定路径」得到的是 `文件名/标签/…`（XML 如 `scenario.xml/CONFIG_ROOT/SCENARIO_BLOCK/input`），提取接口和模板 mock 都按这个路径、定位符、节点 ID 三种写法解析；同名兄弟仍取第一个。XML 属性在树上的标签带 `@`，映射里写 `min` 会回落到 `@min`，已经写了 `@min` 的旧配置不受影响。
 - Python 3.9 兼容性不能只靠 `compileall`：函数注解里的 `X | None` 能编译，但在导入时求值才报 `TypeError`。验证方式是用 3.9 解释器实际导入模块（`python3.9 -c "import app.core.storage"`）；当前 v1.0.1 的 `storage.py`、`differ.py`、`dltool.py` 在 3.9.11 下导入即失败。
 - 前端模板（`app/web/`）的纯逻辑测试：**脚本化验收命令钉死为 HTTP 形态**（M3-06 第三轮 C1，`file://` 那一形态已作废，理由见下一条）——从 `/tmp` 起一个只服务 `app/web/` 的临时静态服务器（随机端口，**绝不要**拿仓库 `data/` 当服务根，用完关掉），然后
   `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:<port>/tests/index.html"`，检查 `<title>ALL PASSED (n)</title>`。人工调试仍然可以直接用浏览器打开 `app/web/tests/index.html`。

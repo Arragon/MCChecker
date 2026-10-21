@@ -14,9 +14,10 @@
   请求内使用。
 * `compute` 的响应形状严格按 §7.11：forward `{"results"}`、reverse
   `{"results", "exhaustive": false}`、multi_check `{"has_multi", "cases"}`。
-* `extract` 的 `variable_path` 是旧节点 ID；只从 compact 文档的直接子节点取值
-  （XML 子元素/属性标签、JSON 键）。`missing` 与 `invalid` **都不进 `coeffs`**，
-  更不返回 0（C15）——前端据此保留草稿里的原系数。
+* `extract` 的 `variable_path` 可以是旧节点 ID、定位符，或详情面板复制的绑定路径
+  （`文件名/标签/…`，也接受 `›` 分隔的显示路径）。只从该节点的直接子节点取值
+  （XML 子元素/属性标签、JSON 键）。XML 属性写成 `min` 或 `@min` 都能取到。
+  `missing` 与 `invalid` **都不进 `coeffs`**，更不返回 0（C15）——前端据此保留草稿里的原系数。
 * `PUT` 必须 `If-Match`。**缺失 → 409 `REVISION_CONFLICT`**：R17 已按
   `views/dltool.js:84`（永远带该头）与 `:94`（只处理 `REVISION_CONFLICT`）裁定，
   不走卡面里「前端未区分才回落 400」的分支。rev 比较与写入在**同一次机型锁**内完成，
@@ -159,10 +160,12 @@ def compute(
 def extract(pid: str, item: str, binding: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """`POST /p/{pid}/dl/{item}/extract`：从绑定源文件的 compact 文档取系数。
 
-    `variable_path` 是旧节点 ID（与 v1 绑定配置一致）。只取该节点的**直接子节点**：
-    XML 子元素的标签 / 属性的 `@name` 标签、JSON 键。字段缺失（或子节点没有值）→
-    `missing`；存在但转不成有限数 → `invalid` + `raw`。两种都**不进 `coeffs`**，
-    于是前端保留草稿里的原系数，绝不会被 0 覆盖（C15）。
+    `variable_path` 可以是旧节点 ID、定位符（`loc`），或详情面板复制的绑定路径
+    （`文件名/标签/标签`，也接受 `›`）。只取该节点的**直接子节点**：XML 子元素的
+    标签 / 属性的 `@name` 标签、JSON 键。字段写成不带 `@` 的属性名时，会再找同名
+    属性。字段缺失（或子节点没有值）→ `missing`；存在但转不成有限数 → `invalid`
+    + `raw`。两种都**不进 `coeffs`**，于是前端保留草稿里的原系数，绝不会被 0
+    覆盖（C15）。
     """
     _require_item(item)
     if not isinstance(binding, dict):
@@ -180,14 +183,13 @@ def extract(pid: str, item: str, binding: Optional[Dict[str, Any]]) -> Dict[str,
         raise
 
     nodes = document.get("nodes") or {}
-    ids = nodes.get("id") or []
-    if variable_path not in ids:
+    index = _locate_variable(nodes, source_file, variable_path)
+    if index is None:
         raise AppError(
             NOT_FOUND,
             "在 %s 中未找到 %s" % (source_file, variable_path),
             field="variable_path",
         )
-    index = ids.index(variable_path)  # 同名兄弟取第一个，与 v1 / mock 一致
     children = _direct_children(nodes, index)
 
     field_map = binding.get("field_map")
@@ -202,11 +204,11 @@ def extract(pid: str, item: str, binding: Optional[Dict[str, Any]]) -> Dict[str,
         field = str(raw_field)
         coeff = str(raw_coeff)
         entry: Dict[str, Any] = {"field": field, "coeff": coeff}
-        if field not in children or children[field] is None:
+        raw_value = _child_value(children, field)
+        if raw_value is None:
             entry["status"] = "missing"
             fields.append(entry)
             continue
-        raw_value = children[field]
         try:
             number = float(raw_value)
         except (TypeError, ValueError):
@@ -498,6 +500,56 @@ def _merged_item(
     return new_item
 
 
+def _locate_variable(
+    nodes: Dict[str, List[Any]], source_file: str, variable_path: str
+) -> Optional[int]:
+    """把绑定路径解析成 compact 下标。同名兄弟取第一个，与旧节点 ID 的口径一致。
+
+    依次尝试：旧节点 ID、定位符 `loc`（可带或不带前导 `/`）、详情面板的绑定路径。
+    绑定路径第一段如果就是来源文件名，会先去掉；`›` 与 `/` 都当分隔符。
+    """
+    path = str(variable_path or "").strip()
+    if not path:
+        return None
+    ids = nodes.get("id") or []
+    locs = nodes.get("loc") or []
+    if path in ids:
+        return ids.index(path)
+    loc_keys = [path]
+    if not path.startswith("/"):
+        loc_keys.append("/" + path)
+    for loc in loc_keys:
+        if loc in locs:
+            return locs.index(loc)
+
+    normalized = path.replace(" › ", "/").replace("›", "/")
+    parts = [part for part in normalized.split("/") if part]
+    if source_file and parts and parts[0] == source_file:
+        parts = parts[1:]
+    if not parts:
+        return None
+    wanted = tuple(parts)
+    parents = nodes.get("p") or []
+    labels = nodes.get("l") or []
+    for index in range(1, len(labels)):
+        if _label_chain(parents, labels, index) == wanted:
+            return index
+    return None
+
+
+def _label_chain(parents: List[Any], labels: List[Any], index: int) -> tuple:
+    """从节点走到文件根（不含文件名节点）的标签链。"""
+    parts: List[str] = []
+    i = index
+    guard = 0
+    while i > 0 and i < len(labels) and guard <= len(labels):
+        parts.append(str(labels[i]))
+        i = parents[i] if i < len(parents) else -1
+        guard += 1
+    parts.reverse()
+    return tuple(parts)
+
+
 def _direct_children(nodes: Dict[str, List[Any]], parent: int) -> Dict[str, Any]:
     """compact 文档里 `parent` 的直接子节点：`label → value`（同名后者覆盖，同 v1）。"""
     parents = nodes.get("p") or []
@@ -508,3 +560,14 @@ def _direct_children(nodes: Dict[str, List[Any]], parent: int) -> Dict[str, Any]
         if parents[index] == parent:
             children[labels[index]] = values[index]
     return children
+
+
+def _child_value(children: Dict[str, Any], field: str) -> Any:
+    """取字段值。XML 属性在树上的标签带 `@`；映射里写 `min` 或 `@min` 都认。"""
+    if field in children and children[field] is not None:
+        return children[field]
+    if not str(field).startswith("@"):
+        attr = "@" + str(field)
+        if attr in children and children[attr] is not None:
+            return children[attr]
+    return None

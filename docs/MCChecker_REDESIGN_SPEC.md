@@ -786,7 +786,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 | `POST /p/{pid}/dl/{item}/extract` | 全部 | `{"binding": {"source_file","variable_path","field_map"}}` → `{"coeffs": {成功提取的键}, "fields": [{"field","coeff","status": "ok\|missing\|invalid","value"\|"raw"}]}`（只预览，不保存） |
 | `POST /p/{pid}/dl/{item}/compute` | 全部 | `{"mode": "forward\|reverse\|multi_check","values": [number],"params": item}` → forward：`{"results": [{"input_index","x","y_base","y","status": "ok\|out_of_x_range\|out_of_y_range"}]}`；reverse：`{"results": [{"input_index","y","y_base","x_values","residuals","status": "single\|multiple\|none\|identity\|out_of_y_range"}],"exhaustive": false}`；multi_check：`{"has_multi","cases": [{"y","x_values"}]}` |
 
-`variable_path` 为旧节点 ID（与现有绑定配置一致）；提取子节点值作为字段（XML 子元素/属性标签、JSON 键），无法转为有限数 → `invalid`；缺失 → `missing`。**不再**用 0 替代失败字段（C15）。
+`variable_path` 可以是旧节点 ID、定位符，或详情面板复制的绑定路径（`文件名/标签/…`，也接受 `›` 分隔）。提取该节点的直接子节点作为字段（XML 子元素/属性标签、JSON 键）。XML 属性写成 `min` 或 `@min` 都能取到。无法转为有限数 → `invalid`；缺失 → `missing`。**不再**用 0 替代失败字段（C15）。
 
 ### 7.12 兼容旧路由（`server/legacy.py`）
 
@@ -1113,8 +1113,8 @@ MC.views[kind] = function (app, route) {
 #### 9.8.7 DL 计算（`views/dltool.js`）
 
 - 头部分段：PP 能量｜RP 能量｜RP 脉宽（有未保存修改的项显示“•”）。
-- 左“函数与参数”：公式预览（只显示非零项；PP 追加“PP = f(x) × 传输系数 ÷ 功率转换系数”）；系数 3×3 网格（k₁…k₈、b，等宽，失焦校验，非法值红框 + Toast，不写入）；PP 换算参数；有效范围 4 格（留空 = 不限制，保存为 `null`）；系数绑定（来源文件可点击定位、变量路径、字段映射；“从配置刷新系数”→ 预览表：字段｜系数｜当前｜提取值｜状态（将更新/未变化/字段缺失/非数值）→“应用到草稿”；“修改绑定”对话框：文件选择、变量路径、映射文本 `字段=系数`，逐行校验）；多解检测横幅（参数变化 300 ms 后由服务端检测）。
-- 右“计算”：分段 正向 x→y / 反向 y→x；多行输入（空格、逗号、分号、换行分隔，无法识别的片段 Toast 列出并忽略）；Ctrl+Enter 计算；结果表：序号（与输入顺序一一对应）｜输入｜（PP 正向：f(x)）｜输出｜状态（正常 / x 超出范围 / y 超出范围 / 唯一解 / n 个解 / 范围内无实数解 / 常数函数）；多解行提供下拉“选择采用的解”，复制 CSV / 下载 CSV 使用该选择；横幅说明“系统不会自动替你挑选”。反向结果标注“为在范围内检测到的候选根”。
+- 左“函数与参数”：公式预览（只显示非零项；PP 追加“PP = f(x) × 传输系数 ÷ 功率转换系数”）；系数 3×3 网格（k₁…k₈、b，等宽，失焦校验，非法值红框 + Toast，不写入）；PP 换算参数；有效范围 4 格（留空 = 不限制，保存为 `null`）；系数绑定（来源文件可点击定位、变量路径、字段映射；变量路径接受绑定路径、节点 ID 与定位符，XML/JSON 同一套，属性可写 `min` 或 `@min`；“从配置刷新系数”→ 预览表：字段｜系数｜当前｜提取值｜状态（将更新/未变化/字段缺失/非数值）→“应用到草稿”；“修改绑定”对话框：文件选择、变量路径、映射文本 `字段=系数`，逐行校验）；多解检测横幅（参数变化 300 ms 后由服务端检测）。
+- 右“计算”：上方为当前数值关系图（按草稿系数绘制曲线；已设置的 x 上下限画竖虚线，y 上下限画横虚线；输入或算出的计算点标在曲线上，超出边界的点为空心橙点）；分段 正向 x→y / 反向 y→x；多行输入（空格、逗号、分号、换行分隔，无法识别的片段 Toast 列出并忽略）；Ctrl+Enter 计算；结果表：序号（与输入顺序一一对应）｜输入｜（PP 正向：f(x)）｜输出｜状态（正常 / x 超出范围 / y 超出范围 / 唯一解 / n 个解 / 范围内无实数解 / 常数函数）；多解行提供下拉“选择采用的解”，复制 CSV / 下载 CSV 使用该选择；横幅说明“系统不会自动替你挑选”。反向结果标注“为在范围内检测到的候选根”。
 - 草稿与保存：任何参数修改进入本地草稿 → 黄色横幅“参数已修改，尚未保存”+“放弃修改”+“保存为配置”（仅部署者；`If-Match` 冲突时提示加载最新或保留草稿）。非部署者可用草稿试算。
 - 校验规则（前后端一致）：系数与换算参数必须是有限数；功率转换系数 ≠ 0；`x_min < x_max`、`y_min < y_max`（两者都设置时）；输入值必须有限。
 

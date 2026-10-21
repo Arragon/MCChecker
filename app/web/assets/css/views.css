@@ -1001,6 +1001,64 @@
   color: var(--c-warning-text);
 }
 
+.dl-plot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dl-plot {
+  width: 100%;
+  height: 280px;
+  display: block;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r);
+  background: var(--c-surface-2);
+}
+
+.dl-plot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
+.dl-plot-legend i {
+  display: inline-block;
+  width: 16px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.dl-plot-legend .lg-curve {
+  border-top: 2px solid var(--c-primary);
+}
+
+.dl-plot-legend .lg-x {
+  height: 10px;
+  border-left: 2px dashed var(--c-warning);
+}
+
+.dl-plot-legend .lg-y {
+  border-top: 2px dashed var(--c-danger);
+}
+
+.dl-plot-legend .lg-pt {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--c-primary);
+  border-radius: 50%;
+  background: var(--c-primary);
+}
+
+.dl-plot-summary {
+  margin: 0;
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+  line-height: var(--lh);
+}
+
 @media (max-width: 1180px) {
   .dl-layout,
   .calc-io {

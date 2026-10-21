@@ -98,6 +98,36 @@
         }
         return { l: lowerL, v: lowerV };
       },
+      /**
+       * 把节点 ID、定位符或绑定路径（文件名/标签/…，也接受 ›）解析成下标。
+       * 同名兄弟取第一个。找不到返回 undefined。
+       */
+      indexOfRef: function (raw, fileName) {
+        var path = String(raw || "").trim();
+        if (!path) return undefined;
+        if (byLoc[path] !== undefined) return byLoc[path];
+        if (path.charAt(0) !== "/" && byLoc["/" + path] !== undefined) return byLoc["/" + path];
+        if (byId[path] !== undefined) return byId[path];
+        var normalized = path.split(" › ").join("/").split("›").join("/");
+        var parts = normalized.split("/").filter(Boolean);
+        if (fileName && parts[0] === fileName) parts = parts.slice(1);
+        if (!parts.length) return undefined;
+        for (var i = 1; i < n; i++) {
+          var chain = [];
+          var k = i;
+          var guard = 0;
+          while (k > 0 && guard <= n) {
+            chain.unshift(N.l[k]);
+            k = N.p[k];
+            guard++;
+          }
+          if (chain.length !== parts.length) continue;
+          var same = true;
+          for (var j = 0; j < parts.length; j++) if (chain[j] !== parts[j]) same = false;
+          if (same) return i;
+        }
+        return undefined;
+      },
       /** 面向用户的路径：CONFIG_ROOT › SCENARIO_BLOCK › input › param_02 */
       displayPath: function (k, sep) {
         var parts = [];
