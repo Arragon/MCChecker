@@ -957,104 +957,406 @@
 }
 
 /* =================== DL calculator =================== */
-.dl-layout {
+.dl-header {
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
+}
+
+.dl-header .view-title {
+  min-width: 240px;
+}
+
+.dl-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.dl-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 1360px;
+  margin: 0 auto;
+}
+
+.dl-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-4);
   align-items: start;
 }
 
-.coeff-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px 10px;
+@media (min-width: 1360px) {
+  .dl-grid {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
 }
 
-.coeff-grid .field-label {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
+/* ---------- 变量标记 / 数字输入 ---------- */
+.dl-var {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-sm);
+  background: var(--c-primary-soft);
+  color: var(--c-primary-text);
+  font: 600 11px/1 var(--font-mono);
 }
 
-.formula {
-  padding: 8px 12px;
-  border-radius: var(--r);
-  background: var(--c-surface-2);
+.dl-var.is-y {
+  background: var(--c-surface-active);
   color: var(--c-text-2);
-  font-family: var(--font-mono);
+}
+
+.dl-num {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.dl-num .input {
+  height: 30px;
+  min-width: 0;
+  padding: 0 8px;
   font-size: var(--fs-xs);
-  overflow-x: auto;
-  white-space: normal;
-  line-height: 1.6;
 }
 
-.calc-io {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--sp-4);
+.dl-num.has-unit .input {
+  padding-right: 40px;
 }
 
-.dl-layout .panel-header {
+.dl-unit {
+  position: absolute;
+  right: 8px;
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+
+/* ---------- RP 脉宽：模式卡片 ---------- */
+.dl-modes-head {
+  display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: baseline;
+  gap: 4px var(--sp-3);
+  padding: 10px var(--sp-4) 0;
 }
 
-.result-table th {
-  white-space: normal;
+.dl-modes-head h2 {
+  font-size: var(--fs-md);
 }
 
-.result-table td.mono {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+.dl-modes-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: var(--sp-3);
+  align-items: stretch;
+  padding: 10px var(--sp-4) var(--sp-4);
 }
 
-.result-table .multi {
-  color: var(--c-warning-text);
+.dl-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  min-width: 0;
 }
 
-.dl-plot-card {
+.dl-tile {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.dl-tile:hover {
+  border-color: var(--c-primary-border);
+  background: var(--c-surface-2);
+}
+
+.dl-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.dl-tile.is-active {
+  border-color: var(--c-primary);
+  background: var(--c-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--c-primary);
+}
+
+.dl-tile-top {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 
+.dl-tile-mode {
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.dl-tile.is-active .dl-tile-mode {
+  color: var(--c-primary-text);
+}
+
+.dl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-warning);
+}
+
+.dl-tile-name {
+  color: var(--c-text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.dl-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+  min-width: 0;
+}
+
+.dl-name-main {
+  white-space: nowrap;
+}
+
+.dl-note,
+.dl-unit-tag {
+  color: var(--c-text-3);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+.dl-unit-tag {
+  padding: 0 6px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+}
+
+.dl-tile-fn {
+  overflow: hidden;
+  color: var(--c-text-3);
+  font: var(--fs-xs) var(--font-mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dl-sum {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface-2);
+}
+
+.dl-sum-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  color: var(--c-text-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.dl-sum-help {
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
+@media (max-width: 900px) {
+  .dl-modes-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .dl-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- 求解卡片 ---------- */
+.dl-solve-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.dl-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font-size: var(--fs-sm);
+}
+
+.dl-flow > .svg-icon {
+  flex: none;
+  color: var(--c-text-3);
+}
+
+.dl-flow-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dl-solve-top {
+  display: grid;
+  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .dl-solve-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.dl-input-pane,
+.dl-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dl-pane-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px var(--sp-3);
+  color: var(--c-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.dl-pane-sub {
+  min-width: 0;
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.dl-input {
+  min-height: 136px;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.dl-parse {
+  min-height: 16px;
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
+.dl-parse.is-warn {
+  color: var(--c-warning-text);
+}
+
+.dl-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.dl-actions .btn-primary {
+  flex: 1 1 auto;
+}
+
+.dl-kbd {
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+}
+
+.dl-kbd kbd {
+  padding: 0 4px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  font: 11px var(--font-mono);
+}
+
+.dl-plot-wrap {
+  min-width: 0;
+}
+
 .dl-plot {
-  width: 100%;
-  height: 280px;
   display: block;
+  width: 100%;
+  height: 240px;
   border: 1px solid var(--c-border);
   border-radius: var(--r);
   background: var(--c-surface-2);
 }
 
-.dl-plot-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
+.dl-plot-caption {
   color: var(--c-text-3);
   font-size: var(--fs-xs);
 }
 
-.dl-plot-legend i {
+.dl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  color: var(--c-text-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.dl-legend i {
   display: inline-block;
-  width: 16px;
-  margin-right: 6px;
+  width: 14px;
+  margin-right: 5px;
   vertical-align: middle;
 }
 
-.dl-plot-legend .lg-curve {
+.dl-legend .lg-curve {
   border-top: 2px solid var(--c-primary);
 }
 
-.dl-plot-legend .lg-x {
-  height: 10px;
+.dl-legend .lg-x {
+  height: 9px;
+  width: 0;
   border-left: 2px dashed var(--c-warning);
 }
 
-.dl-plot-legend .lg-y {
+.dl-legend .lg-y {
   border-top: 2px dashed var(--c-danger);
 }
 
-.dl-plot-legend .lg-pt {
+.dl-legend .lg-pt {
   width: 8px;
   height: 8px;
   border: 2px solid var(--c-primary);
@@ -1062,18 +1364,243 @@
   background: var(--c-primary);
 }
 
-.dl-plot-summary {
-  margin: 0;
-  color: var(--c-text-3);
-  font-size: var(--fs-xs);
-  line-height: var(--lh);
+/* ---------- 结果 ---------- */
+.dl-res {
+  min-width: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-border);
 }
 
-@media (max-width: 1180px) {
-  .dl-layout,
-  .calc-io {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.dl-res-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.dl-res-head h3 {
+  margin-right: 2px;
+  font-size: var(--fs-md);
+}
+
+.dl-res-note {
+  min-width: 0;
+}
+
+.dl-res-banner {
+  margin-bottom: 8px;
+}
+
+.dl-res-table {
+  max-height: 340px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r);
+}
+
+.dl-table th {
+  height: auto;
+  padding: 6px 10px;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.dl-table th.num,
+.dl-table td.num {
+  width: 36px;
+  text-align: right;
+}
+
+.dl-table td {
+  padding: 4px 10px;
+}
+
+.dl-th {
+  display: flex;
+  flex-direction: column;
+  min-width: 72px;
+  line-height: 1.3;
+}
+
+.dl-th small {
+  color: var(--c-text-3);
+  font-size: 11px;
+  font-weight: var(--fw-medium);
+}
+
+.dl-table td.mono {
+  font: 12.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-table .dl-out {
+  color: var(--c-primary-text);
+  font-weight: var(--fw-semibold);
+}
+
+.dl-multi {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.dl-multi .multi {
+  color: var(--c-warning-text);
+}
+
+.dl-pick {
+  width: auto;
+  max-width: 170px;
+}
+
+.dl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 26px 12px;
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--r);
+  color: var(--c-text-3);
+  text-align: center;
+}
+
+.dl-empty .svg-icon {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 4px;
+}
+
+.dl-empty-title {
+  color: var(--c-text-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- 参数卡片 ---------- */
+.dl-params-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.dl-formula {
+  padding: 8px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font: var(--fs-xs)/1.7 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.dl-multi-box:empty {
+  display: none;
+}
+
+.dl-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+}
+
+.dl-group {
+  min-width: 0;
+}
+
+.dl-coeffs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px 8px;
+}
+
+.dl-coeff {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dl-coeff-k {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--c-text-2);
+  font: var(--fs-xs) var(--font-mono);
+}
+
+.dl-coeff-k small {
+  color: var(--c-text-3);
+  font-size: 11px;
+}
+
+.dl-range {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.dl-range-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-text-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.dl-range-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.dl-range-sep {
+  color: var(--c-text-3);
+}
+
+.dl-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin-bottom: 6px;
+}
+
+.dl-bind-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+  font-size: var(--fs-xs);
+}
+
+.dl-bind-k {
+  color: var(--c-text-3);
+}
+
+.dl-bind-v {
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.dl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dl-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-pill);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font: 11.5px var(--font-mono);
 }
 
 /* =================== Settings =================== */

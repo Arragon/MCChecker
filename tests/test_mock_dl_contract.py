@@ -290,3 +290,58 @@ def test_put_validates_body_before_rev_and_reports_the_missing_header():
     ok = results["current-rev-valid-body"]
     assert ok["status"] == 200, ok
     assert ok["body"]["item"]["coeffs"]["k1"] == 4
+
+
+def test_rp_width_has_two_independent_sets_in_mock_like_the_backend():
+    """RP 脉宽的 `aom_width` 在 mock 里与后端同判：缺范围键 400、非对象 400、完整一套保存后互不影响。"""
+    def width_set(**coeffs):
+        merged = dict(FULL_COEFFS)
+        merged.update(coeffs)
+        return {
+            "coeffs": merged,
+            "binding": {"source_file": "", "variable_path": "", "field_map": {}},
+            "x_min": 5,
+            "x_max": 60,
+            "y_min": None,
+            "y_max": 90,
+        }
+
+    base = _item(k1=0.5)
+    base["name"] = "计算RP脉宽"
+    base["binding"] = {"source_file": "", "variable_path": "", "field_map": {}}
+    base["aom_sum"] = 120
+
+    missing = dict(base, aom_width={k: v for k, v in width_set().items() if k != "y_min"})
+    not_object = dict(base, aom_width=[1])
+    bad_coeff = dict(base, aom_width=dict(width_set(), coeffs=dict(FULL_COEFFS, k2="abc")))
+    good = dict(base, aom_width=width_set(k1=-0.5, b=120))
+
+    def put(name, body):
+        return {"name": name, "kind": "put", "route": "/dl/rp_width", "withRev": True, "body": body}
+
+    results = _mock(
+        [
+            put("missing-range", missing),
+            put("not-object", not_object),
+            put("bad-coeff", bad_coeff),
+            put("good", good),
+            {"name": "after", "kind": "get"},
+        ]
+    )
+
+    for name in ("missing-range", "not-object"):
+        error = results[name]["body"]["error"]
+        assert results[name]["status"] == 400, (name, results[name])
+        assert error["detail"]["field"] == "aom_width", (name, error)
+    assert results["bad-coeff"]["status"] == 400, results["bad-coeff"]
+    assert results["bad-coeff"]["body"]["error"]["message"] == "系数必须是有限数值"
+
+    assert results["good"]["status"] == 200, results["good"]
+    item = results["good"]["body"]["item"]
+    assert item["coeffs"]["k1"] == 0.5, "delay 这一套不受 width 影响"
+    assert item["aom_width"]["coeffs"]["k1"] == -0.5
+    assert item["aom_width"]["coeffs"]["b"] == 120
+    assert item["aom_width"]["x_max"] == 60 and item["aom_width"]["y_max"] == 90
+    assert item["aom_sum"] == 120
+    stored = results["after"]["body"]["items"]["rp_width"]
+    assert stored["aom_width"]["coeffs"]["k1"] == -0.5

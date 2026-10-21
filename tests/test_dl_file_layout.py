@@ -37,3 +37,10 @@ def test_file_view_segments():
     assert 'label: "对比"' in temp_line
     assert "历史版本" not in temp_line
     assert "修改记录" not in temp_line
+
+
+def test_rp_width_modes_have_their_own_parameter_set():
+    """RP 脉宽两种模式各用一套参数：页面必须按模式取 aom_width，而不是共用顶层系数。"""
+    assert "aom_width" in DL
+    assert "activeSet" in DL
+    assert "固定和" in DL

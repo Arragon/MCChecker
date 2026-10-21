@@ -59,10 +59,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "name": "计算RP能量",
             **deepcopy(DEFAULT_ITEM),
         },
+        # RP 脉宽有两套互相独立的参数：顶层的 coeffs / binding / 范围是 AOM2 delay
+        # 这一套（老配置原样兼容），`aom_width` 是 AOM2 width 这一套。`aom_sum` 是两项
+        # 之和（固定值），另一项 = aom_sum − y。
         "rp_width": {
             "name": "计算RP脉宽",
-            "aom_mode": "delay",
             "aom_sum": None,
+            "aom_width": deepcopy(DEFAULT_ITEM),
             **deepcopy(DEFAULT_ITEM),
         },
     },
@@ -105,8 +108,17 @@ def _ensure_defaults(cfg: dict):
                 it.setdefault("trans_coeff", 1.0)
                 it.setdefault("power_conv_coeff", 1.0)
             if item_id == "rp_width":
-                it.setdefault("aom_mode", "delay")
                 it.setdefault("aom_sum", None)
+                width = it.get("aom_width")
+                if not isinstance(width, dict):
+                    width = deepcopy(DEFAULT_ITEM)
+                    it["aom_width"] = width
+                width.setdefault("coeffs", dict(DEFAULT_COEFFS))
+                width.setdefault("binding", dict(DEFAULT_BINDING))
+                for key in ("x_min", "x_max", "y_min", "y_max"):
+                    width.setdefault(key, None)
+                for k in DEFAULT_COEFFS:
+                    width["coeffs"].setdefault(k, 0.0)
             # 确保所有系数键存在
             for k in DEFAULT_COEFFS:
                 it["coeffs"].setdefault(k, 0.0)

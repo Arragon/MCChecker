@@ -470,20 +470,34 @@ def _validated_binding(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _validated_aom(payload: Dict[str, Any], item: str) -> Optional[Dict[str, Any]]:
-    """RP 脉宽的 AOM2 模式与固定和。其它计算项忽略这两个键。
+    """RP 脉宽的 AOM2 固定和与 AOM2 width 这一套独立参数。其它计算项忽略这两个键。
 
-    没给的键保留磁盘原值。`aom_sum` 显式 null 表示清空。
+    顶层的 coeffs / 范围 / binding 是 AOM2 delay 这一套；`aom_width` 是 AOM2 width 这一套，
+    两套互不影响。没给的键保留磁盘原值。`aom_sum` 显式 null 表示清空。`aom_width` 给了
+    就必须是完整的一套（系数、四个范围键、可选 binding），范围键缺失 400，和顶层同口径，
+    免得部分 body 悄悄清空磁盘上的范围。
     """
     if item != "rp_width":
         return None
-    if "aom_mode" not in payload and "aom_sum" not in payload:
+    if "aom_width" not in payload and "aom_sum" not in payload:
         return None
     clean: Dict[str, Any] = {}
-    if "aom_mode" in payload:
-        mode = payload.get("aom_mode")
-        if mode not in ("delay", "width"):
-            raise AppError(INVALID_INPUT, "AOM2 模式只能是 delay 或 width", field="aom_mode")
-        clean["aom_mode"] = mode
+    if "aom_width" in payload:
+        raw_width = payload.get("aom_width")
+        if not isinstance(raw_width, dict):
+            raise AppError(INVALID_INPUT, "aom_width 必须是对象", field="aom_width")
+        missing = [field for field in _RANGE_FIELDS if field not in raw_width]
+        if missing:
+            raise AppError(
+                INVALID_INPUT,
+                "AOM2 width 参数必须提供完整的范围字段（缺少：%s）；不需要限制时请显式传 null"
+                % "、".join(missing),
+                field="aom_width",
+            )
+        clean["aom_width"] = {
+            "params": _validated_params(raw_width, item),
+            "binding": _validated_binding(raw_width),
+        }
     if "aom_sum" in payload:
         raw = payload.get("aom_sum")
         if raw is None or raw == "":
@@ -530,8 +544,30 @@ def _merged_item(
             merged[key] = deepcopy(value)
         new_item["binding"] = merged
     if aom:
-        for key, value in aom.items():
-            new_item[key] = value
+        if "aom_sum" in aom:
+            new_item["aom_sum"] = aom["aom_sum"]
+        if "aom_width" in aom:
+            width = new_item.get("aom_width")
+            if not isinstance(width, dict):
+                width = deepcopy(dltool.DEFAULT_ITEM)
+            width_coeffs = width.get("coeffs")
+            if not isinstance(width_coeffs, dict):
+                width_coeffs = {}
+                width["coeffs"] = width_coeffs
+            width_clean = aom["aom_width"]["params"]
+            for key in _COEFF_FIELDS:
+                width_coeffs[key] = width_clean["coeffs"][key]
+            for field in _RANGE_FIELDS:
+                width[field] = width_clean[field]
+            width_binding = aom["aom_width"]["binding"]
+            if width_binding is not None:
+                merged_width = width.get("binding")
+                if not isinstance(merged_width, dict):
+                    merged_width = {}
+                for key, value in width_binding.items():
+                    merged_width[key] = deepcopy(value)
+                width["binding"] = merged_width
+            new_item["aom_width"] = width
     return new_item
 
 

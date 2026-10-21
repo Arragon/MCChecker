@@ -1746,39 +1746,60 @@
   }
 
   /** 字段集合不变（只改值）：从现有 item 深拷贝，只覆盖已知键，忽略 payload 的未知键。 */
-  function mergeDlItem(existing, raw, clean, kind) {
+  function mergeDlSet(target, clean, rawBinding) {
+    if (!target.coeffs || typeof target.coeffs !== "object") target.coeffs = {};
+    Object.keys(clean.coeffs).forEach(function (k) { target.coeffs[k] = clean.coeffs[k]; });
+    ["x_min", "x_max", "y_min", "y_max"].forEach(function (k) { target[k] = clean[k]; });
+    if (rawBinding && typeof rawBinding === "object" && !Array.isArray(rawBinding)) {
+      var binding = target.binding && typeof target.binding === "object" ? clone(target.binding) : {};
+      ["source_file", "variable_path"].forEach(function (k) {
+        if (Object.prototype.hasOwnProperty.call(rawBinding, k)) {
+          binding[k] = rawBinding[k] === null || rawBinding[k] === undefined ? "" : String(rawBinding[k]);
+        }
+      });
+      if (rawBinding.field_map && typeof rawBinding.field_map === "object" && !Array.isArray(rawBinding.field_map)) {
+        binding.field_map = clone(rawBinding.field_map);
+      }
+      target.binding = binding;
+    }
+    return target;
+  }
+
+  /** RP 脉宽：顶层是 AOM2 delay 这一套，`aom_width` 是 AOM2 width 这一套，两套互相独立。 */
+  function mergeDlItem(existing, raw, clean, kind, widthClean) {
     var next = clone(existing);
-    if (!next.coeffs || typeof next.coeffs !== "object") next.coeffs = {};
-    Object.keys(clean.coeffs).forEach(function (k) { next.coeffs[k] = clean.coeffs[k]; });
-    ["x_min", "x_max", "y_min", "y_max"].forEach(function (k) { next[k] = clean[k]; });
+    mergeDlSet(next, clean, raw.binding);
     if (kind === "pp_energy") {
       next.trans_coeff = clean.trans_coeff;
       next.power_conv_coeff = clean.power_conv_coeff;
     }
     if (typeof raw.name === "string" && raw.name.trim()) next.name = raw.name;
     if (kind === "rp_width") {
-      if (raw.aom_mode === "delay" || raw.aom_mode === "width") next.aom_mode = raw.aom_mode;
       if (Object.prototype.hasOwnProperty.call(raw, "aom_sum")) {
         next.aom_sum = raw.aom_sum === null || raw.aom_sum === "" ? null : dlNumber(raw.aom_sum);
       }
-    }
-    if (raw.binding && typeof raw.binding === "object" && !Array.isArray(raw.binding)) {
-      var binding = next.binding && typeof next.binding === "object" ? clone(next.binding) : {};
-      ["source_file", "variable_path"].forEach(function (k) {
-        if (Object.prototype.hasOwnProperty.call(raw.binding, k)) {
-          binding[k] = raw.binding[k] === null || raw.binding[k] === undefined ? "" : String(raw.binding[k]);
-        }
-      });
-      if (raw.binding.field_map && typeof raw.binding.field_map === "object" && !Array.isArray(raw.binding.field_map)) {
-        binding.field_map = clone(raw.binding.field_map);
+      if (widthClean) {
+        if (!next.aom_width || typeof next.aom_width !== "object") next.aom_width = emptyDlSet();
+        mergeDlSet(next.aom_width, widthClean, raw.aom_width.binding);
       }
-      next.binding = binding;
     }
     return next;
   }
 
+  function emptyDlSet() {
+    var coeffs = {};
+    for (var i = 1; i <= 8; i++) coeffs["k" + i] = 0;
+    coeffs.b = 0;
+    return { coeffs: coeffs, binding: { source_file: "", variable_path: "", field_map: {} }, x_min: null, x_max: null, y_min: null, y_max: null };
+  }
+
   function dlConfig(P) {
     if (!P.dl) P.dl = clone(S.profiles["default"].dl);
+    var rp = P.dl.items && P.dl.items.rp_width;
+    if (rp) {
+      if (!Object.prototype.hasOwnProperty.call(rp, "aom_sum")) rp.aom_sum = null;
+      if (!rp.aom_width || typeof rp.aom_width !== "object") rp.aom_width = emptyDlSet();
+    }
     return P.dl;
   }
 
@@ -1825,8 +1846,27 @@
     if (nameErr) return fail(400, "INVALID_INPUT", nameErr, { field: "name" });
     var bindingErr = validateDlBinding(req.body);
     if (bindingErr) return fail(400, "INVALID_INPUT", bindingErr, { field: "binding" });
-    if (a.item === "rp_width" && Object.prototype.hasOwnProperty.call(req.body, "aom_mode") && req.body.aom_mode !== "delay" && req.body.aom_mode !== "width") {
-      return fail(400, "INVALID_INPUT", "AOM2 模式只能是 delay 或 width", { field: "aom_mode" });
+    var widthNorm = null;
+    if (a.item === "rp_width" && Object.prototype.hasOwnProperty.call(req.body, "aom_width")) {
+      var rawWidth = req.body.aom_width;
+      if (!rawWidth || typeof rawWidth !== "object" || Array.isArray(rawWidth)) {
+        return fail(400, "INVALID_INPUT", "aom_width 必须是对象", { field: "aom_width" });
+      }
+      var widthMissing = ["x_min", "x_max", "y_min", "y_max"].filter(function (k) {
+        return !Object.prototype.hasOwnProperty.call(rawWidth, k);
+      });
+      if (widthMissing.length) {
+        return fail(
+          400,
+          "INVALID_INPUT",
+          "AOM2 width 参数必须提供完整的范围字段（缺少：" + widthMissing.join("、") + "）；不需要限制时请显式传 null",
+          { field: "aom_width" }
+        );
+      }
+      widthNorm = normalizeDlParams(rawWidth, a.item);
+      if (widthNorm.error) return fail(400, "INVALID_INPUT", widthNorm.error);
+      var widthBindingErr = validateDlBinding(rawWidth);
+      if (widthBindingErr) return fail(400, "INVALID_INPUT", widthBindingErr, { field: "binding" });
     }
     if (a.item === "rp_width" && Object.prototype.hasOwnProperty.call(req.body, "aom_sum") && req.body.aom_sum !== null && req.body.aom_sum !== "" && dlNumber(req.body.aom_sum) === null) {
       return fail(400, "INVALID_INPUT", "AOM2 delay 与 width 的和必须是有限数值", { field: "aom_sum" });
@@ -1836,7 +1876,7 @@
     }
     if (!cfg.items[a.item]) return fail(404, "NOT_FOUND", "计算项不存在");
     cfg.editing = false;
-    cfg.items[a.item] = mergeDlItem(cfg.items[a.item], req.body, norm.item, a.item);
+    cfg.items[a.item] = mergeDlItem(cfg.items[a.item], req.body, norm.item, a.item, widthNorm ? widthNorm.item : null);
     bump(a.pid, "settings");
     return ok({ rev: dlRev(P), item: clone(cfg.items[a.item]) });
   });

@@ -3,6 +3,8 @@
 > v2 已移除 `MC.caps`/`WIRED`/`WIRED_SETTINGS`/`MC.unwired*` 与 NiceGUI；下文提到这些机制或旧页面的条目仅作历史参考，不要照旧流程改代码。
 
 ## 1. Common Problems
+- RP 脉宽的数据形状：顶层 `coeffs`/`x_min`…`y_max`/`binding` 是 AOM2 delay 这一套（老配置原样可读），`aom_width` 是 AOM2 width 这一套，`aom_sum` 是两项之和。**`compute` / `extract` 不认模式**：前端按当前模式把对应那一套拍平成 `params` / `binding` 发过去，所以服务端求根、多解检测没有任何分支。只有保存认 `aom_width`，且它必须带齐四个范围键（缺了 400，和顶层同口径，免得部分 body 悄悄清空磁盘上的范围）。「另一项 = 和 − y」纯前端展示，不进 `compute`。旧版曾短暂有过 `aom_mode` 字段，现已去掉；磁盘上若还留着，读取时被忽略。
+- DL 页面输入用 `input` 事件即时写草稿并轻量刷新（公式、模式卡片、曲线、结果列），**不要**改回 `change` 事件加整页重绘：整页重绘会在 Tab 切到下一个系数时把焦点弄丢，保存按钮也可能在点击途中被替换掉。头部的「保存」组只在脏状态变化时才重建（`headerKey`）。
 - Python 热更新是**换进程**，不是 `importlib.reload`。父进程监视 `app/**/*.py`、`run.py`、`main.py` 的 mtime，变化稳定 0.4 秒后对子进程发 SIGTERM，子进程走原来的有序停止（调度器 → 任务队列 → HTTP → 工作线程散尽才删单实例锁）再被拉起。`__pycache__`、`data/` 和 `app/web` 静态文件不触发重启。父进程用新会话启动子进程，这样 Ctrl+C 只打到父进程，再由它转发 SIGTERM；不要改成父子同一进程组，否则两边会同时进信号处理。子进程必须带 `MCCHECKER_RUN_CHILD=1`，否则会再套一层监视。`tests/test_api_tasks.py` 直接跑 `run.main()` 时要把 `Settings.reload` 设成 False，否则进的是父进程，假 server 不会被调用。
 - NiceGUI 的 `ui.tree` 组件需要特定的数据格式，需将解析结果转换为 `{id, label, children}` 结构
 - XML 属性需在树形视图中特殊处理，作为 `@attr_name` 子节点展示

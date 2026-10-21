@@ -1058,12 +1058,23 @@ class TestSaveItem:
 # ---------------------------------------------------------------------------
 
 
-    def test_rp_width_saves_aom_mode_and_sum(self):
+    def test_rp_width_has_two_independent_parameter_sets(self):
+        """AOM2 delay（顶层）与 AOM2 width（`aom_width`）各存各的系数、范围和绑定。"""
         pid = seed_roles("dlsaveaom")
         rev = _seed_config(pid)
         payload = _load_item(pid, "rp_width")
-        payload["aom_mode"] = "width"
+        payload["coeffs"]["k1"] = 0.5
+        payload["x_min"], payload["x_max"] = 0.0, 80.0
         payload["aom_sum"] = 120
+        payload["aom_width"]["coeffs"]["k1"] = -0.5
+        payload["aom_width"]["coeffs"]["b"] = 120.0
+        payload["aom_width"]["x_min"], payload["aom_width"]["x_max"] = 5.0, 60.0
+        payload["aom_width"]["y_max"] = 90.0
+        payload["aom_width"]["binding"] = {
+            "source_file": "m.xml",
+            "variable_path": "root/M/width",
+            "field_map": {"a": "k1"},
+        }
         with make_server() as server:
             status, _h, body = as_role(server, "deployer").json(
                 "PUT",
@@ -1072,17 +1083,24 @@ class TestSaveItem:
                 headers={"If-Match": rev},
             )
         assert status == 200, body
-        assert body["item"]["aom_mode"] == "width"
-        assert body["item"]["aom_sum"] == 120.0
+        item = body["item"]
+        assert item["aom_sum"] == 120.0
+        assert item["coeffs"]["k1"] == 0.5 and item["x_max"] == 80.0
+        assert item["aom_width"]["coeffs"]["k1"] == -0.5
+        assert item["aom_width"]["coeffs"]["b"] == 120.0
+        assert item["aom_width"]["x_min"] == 5.0 and item["aom_width"]["y_max"] == 90.0
+        assert item["aom_width"]["binding"]["variable_path"] == "root/M/width"
+        assert item["binding"]["variable_path"] == "", "delay 这一套的绑定不受 width 影响"
         saved = _load_item(pid, "rp_width")
-        assert saved["aom_mode"] == "width"
-        assert saved["aom_sum"] == 120.0
+        assert saved["aom_width"] == item["aom_width"]
+        assert "aom_mode" not in saved
 
-    def test_rp_width_rejects_unknown_aom_mode(self):
+    def test_rp_width_aom_width_range_keys_are_required(self):
         pid = seed_roles("dlsaveaom2")
         rev = _seed_config(pid)
         payload = _load_item(pid, "rp_width")
-        payload["aom_mode"] = "both"
+        del payload["aom_width"]["y_min"]
+        before = _file_state(pid)
         with make_server() as server:
             status, _h, body = as_role(server, "deployer").json(
                 "PUT",
@@ -1091,7 +1109,43 @@ class TestSaveItem:
                 headers={"If-Match": rev},
             )
         assert status == 400, body
-        assert body["error"]["detail"]["field"] == "aom_mode"
+        assert body["error"]["detail"]["field"] == "aom_width"
+        assert _file_state(pid) == before, "400 之后配置文件一个字节都不许动"
+
+    def test_rp_width_aom_width_is_validated_like_the_top_level(self):
+        pid = seed_roles("dlsaveaom3")
+        rev = _seed_config(pid)
+        payload = _load_item(pid, "rp_width")
+        payload["aom_width"]["coeffs"]["k2"] = "abc"
+        before = _file_state(pid)
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "rp_width"),
+                payload,
+                headers={"If-Match": rev},
+            )
+        assert status == 400, body
+        assert _file_state(pid) == before
+
+    def test_legacy_rp_width_without_aom_width_gets_defaults(self):
+        """老配置没有 `aom_width` / `aom_sum`：读出来自动补齐，原有 delay 系数不动。"""
+        pid = seed_roles("dlsaveaom4")
+
+        def strip(cfg):
+            cfg["items"]["rp_width"].pop("aom_width", None)
+            cfg["items"]["rp_width"].pop("aom_sum", None)
+            cfg["items"]["rp_width"]["coeffs"]["k1"] = 0.5
+
+        _seed_config(pid, mutate=strip)
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json("GET", DL_URL % pid)
+        assert status == 200, body
+        item = body["items"]["rp_width"]
+        assert item["coeffs"]["k1"] == 0.5
+        assert item["aom_sum"] is None
+        assert set(item["aom_width"]) == {"coeffs", "binding", "x_min", "x_max", "y_min", "y_max"}
+        assert item["aom_width"]["coeffs"]["k1"] == 0.0
 
 
 class TestTransCoeffZero:
