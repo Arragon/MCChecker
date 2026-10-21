@@ -164,7 +164,7 @@ class TestNoBump:
                 assert status in (200, 404), (path, body)
         assert _parts(self.pid) == before
 
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["visitor", "member"])
     def test_forbidden_writes_do_not_bump(self, role):
         before = _parts(self.pid)
         with make_server() as server:

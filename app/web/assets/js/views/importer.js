@@ -94,7 +94,7 @@
     function renderMode() {
       util.clear(modeGroup);
       [
-        { v: true, title: "保存到服务器", desc: "所有人可见；同名文件自动归档旧版本", disabled: !canSave, why: "仅部署者（服务器本机）可保存" },
+        { v: true, title: "保存到服务器", desc: "所有人可见；同名文件自动归档旧版本", disabled: !canSave, why: "仅管理员可保存" },
         { v: false, title: "临时查看", desc: "仅你自己可见，" + app.session.limits.temp_ttl_hours + " 小时后自动清除，不影响服务器文件" },
       ].forEach(function (o) {
         var input = h("input", { type: "radio", name: "imp-mode", checked: state.persist === o.v, disabled: !!o.disabled });

@@ -335,7 +335,7 @@ class TestPutSchedule:
 
 
 class TestRoles:
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["visitor", "member"])
     def test_non_deployer_put_is_403_and_changes_nothing(self, target_pid, running_scheduler, role):
         _seed(target_pid, {"enabled": False, "interval_hours": 24, "last_run": None})
         before = _raw(target_pid)

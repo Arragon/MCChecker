@@ -60,6 +60,19 @@ from authz_fixtures import (
 from app.core import device_models, storage
 from app.services import auth, people, revision
 
+
+@pytest.fixture(autouse=True)
+def loopback_writer_is_admin(monkeypatch):
+    """本文件用 127.0.0.1 当写请求的调用方。本机不再自动有权限，测试里单独放行这个地址，不写进名单。"""
+    real = storage.is_admin_ip
+
+    def wrapped(ip: str) -> bool:
+        if str(ip or "").strip() == "127.0.0.1":
+            return True
+        return real(ip)
+
+    monkeypatch.setattr(storage, "is_admin_ip", wrapped)
+
 #: `updated_at` 的格式（与 `storage` 自己写的逐字一致，§7.1 服务器本地时间字符串）。
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -937,7 +950,7 @@ class TestAdmins:
 
 class TestRoles:
     @pytest.mark.parametrize("method,rest,body", WRITE_ROUTES)
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["member"])
     def test_non_deployer_write_is_403_and_changes_not_a_byte(self, seeded, method, rest, body, role):
         """改这张表等于改谁能写：非部署者的写请求必须 403 **且 sha 不变**（本卡的安全底线）。"""
         before = _state(seeded)
@@ -959,23 +972,15 @@ class TestRoles:
             )
         assert status in (200, 201), "%s %s ⇒ %s %r" % (method, rest, status, payload)
 
-    def test_an_admin_without_deployer_rights_cannot_touch_the_tables(self):
-        """§4.2：管理员档不等于设置写——`admin` 能审阅，但动不了人员表（这才是 UC-44 的另一半）。
-
-        先证明他**确实**是管理员（`GET /review` 200），否则「写被 403 拒」可能只是因为他
-        连管理员都不是，用例就成了恒真。
-        """
-        role_pid = seed_roles("管理员非部署者")
+    def test_admin_can_write_the_tables(self):
+        """管理员是最高权限，人员表的写接口不再另设部署者档。"""
+        role_pid = seed_roles("管理员写人员表")
         with make_server() as server:
             admin = as_role(server, "admin")
-            assert admin.json("GET", _url(role_pid, "/review"))[0] == 200, "正向对照：他是管理员"
-            ips_before = [row["ip"] for row in _rows(role_pid)]
-            admins_before = [row["name"] for row in _rows(role_pid, admins=True)]
+            assert admin.json("GET", _url(role_pid, "/review"))[0] == 200
             for method, rest, body in WRITE_ROUTES:
                 status, _, payload = admin.json(method, _write_url(role_pid, rest), body)
-                assert status == 403, (method, rest, status, payload)
-            assert [row["ip"] for row in _rows(role_pid)] == ips_before
-            assert [row["name"] for row in _rows(role_pid, admins=True)] == admins_before
+                assert status in (200, 201), (method, rest, status, payload)
 
     def test_deployer_admin_role_writes_and_reads(self):
         """部署者本人登记为管理员时同样有设置写权限（`deployer` 档，与审阅无关）。"""

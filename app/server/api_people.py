@@ -85,7 +85,7 @@ def add_admin(
     # service 返回的就是**响应载荷**（`{"item": …}`，与 `list_*` 的 `{"items": …}` 同一口径），
     # 这里只补状态码，不再拆一遍重新拼（§7.1：201 = 创建）。
     authz.authorize(ctx, "settings_write")
-    return Response(status=201, payload=people.add_admin(params["pid"], json_body(body).get("name")))
+    return Response(status=201, payload=people.add_admin(params["pid"], json_body(body)))
 
 
 def remove_admin(

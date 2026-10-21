@@ -34,6 +34,24 @@ from data_guard import (  # noqa: E402
 
 # 真实数据根必须在任何 monkeypatch 发生之前采集，作为后续重绑定的基准。
 REAL_DATA_DIR = storage.DATA_DIR
+REAL_IS_ADMIN_IP = storage.is_admin_ip
+
+
+@pytest.fixture(autouse=True)
+def loopback_writer_in_tests(monkeypatch, request):
+    """既有用例用 127.0.0.1 充当有写权限的调用方。
+
+    产品里本机不再自动是管理员。带 `production_identity` 标记的用例看到真实规则。
+    """
+    if request.node.get_closest_marker("production_identity"):
+        return
+
+    def wrapped(ip):
+        if str(ip or "").strip() == "127.0.0.1":
+            return True
+        return REAL_IS_ADMIN_IP(ip)
+
+    monkeypatch.setattr(storage, "is_admin_ip", wrapped)
 
 #: H3 守卫在 pytest 生命周期里的**全部接线**（钩子名 + 夹具名）。
 #: `tests/test_data_guard_enforcement.py` 生成的临时 conftest 按这份清单原样重导出，

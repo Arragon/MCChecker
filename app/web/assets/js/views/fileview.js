@@ -220,7 +220,7 @@
           { label: "复制本页链接", icon: "link", onClick: function () { util.copyText(location.href).then(function () { MC.toast.success("已复制链接", "同事打开后会定位到同一文件与版本"); }); } },
         ];
         if (isTemp) {
-          items.push("sep", { label: "保存到服务器…", icon: "upload", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅部署者可保存", onClick: saveTempToServer });
+          items.push("sep", { label: "保存到服务器…", icon: "upload", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅管理员可保存", onClick: saveTempToServer });
         } else if (f) {
           items.push("sep", { label: "删除文件…", icon: "trash", danger: true, disabled: !app.can("admin"), title: app.can("admin") ? null : "仅管理员可删除文件", onClick: function () { app.deleteFile(f); } });
         }
@@ -237,7 +237,7 @@
 
     function saveTempToServer() {
       if (!app.can("deployer")) {
-        MC.toast.warning("仅部署者可保存", "请在服务器本机访问后再把临时文件保存到服务器");
+        MC.toast.warning("仅管理员可保存", "请让管理员把你的 IP 加入管理员列表");
         return;
       }
       var exists = app.files.some(function (f) { return f.name === S.name; });
@@ -933,7 +933,7 @@
       var res = S.records;
       // 「立即拉取」要 POST /tasks，属 M3-07 / M3-09；生产模式下禁用并说明原因，别打空接口。
       var mayFetch = app.can("deployer") && res.record_url;
-      var fetchTitle = !res.record_url ? "未配置修改记录链接" : !app.can("deployer") ? "仅部署者可手动拉取" : null;
+      var fetchTitle = !res.record_url ? "未配置修改记录链接" : !app.can("deployer") ? "仅管理员可手动拉取" : null;
       var refresh = h("button.btn.btn-sm", { type: "button", disabled: !mayFetch, title: fetchTitle }, icon("refresh"), "立即拉取");
       refresh.addEventListener("click", function () {
         MC.withBusy(refresh, function () {

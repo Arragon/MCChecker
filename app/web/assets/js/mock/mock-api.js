@@ -84,9 +84,9 @@
     var P = profile(pid) || profile("default");
     var person = P.people.filter(function (x) { return x.ip === preset.ip; })[0];
     var name = person ? person.name : preset.ip;
-    var admin = P.admins.some(function (a) { return a.name === name; });
-    var label = preset.deployer && admin ? "部署者 · 管理员" : preset.deployer ? "部署者" : admin ? "管理员" : person ? "成员" : "访客";
-    return { ip: preset.ip, name: name, registered: !!person, is_deployer: preset.deployer, is_admin: admin, role_label: label };
+    var admin = P.admins.some(function (a) { return (a.ip && a.ip === preset.ip) || (!a.ip && a.name === name); });
+    var label = admin ? "管理员" : person ? "成员" : "访客";
+    return { ip: preset.ip, name: name, registered: !!person, is_deployer: false, is_admin: admin, role_label: label };
   }
 
   function fileText(entry) {
@@ -600,7 +600,7 @@
   }
 
   function needDeployer(id) {
-    return id.is_deployer ? null : fail(403, "FORBIDDEN", "仅部署者（服务器本机）可执行该操作");
+    return id.is_admin ? null : fail(403, "FORBIDDEN", "仅管理员可执行该操作");
   }
   function needAdmin(id) {
     return id.is_admin ? null : fail(403, "FORBIDDEN", "仅管理员可执行该操作");

@@ -126,7 +126,7 @@ def list_ip_mapping(pid: str) -> Dict[str, Any]:
 
 
 def list_admins(pid: str) -> Dict[str, Any]:
-    """`GET /p/{pid}/admins` → `{"items": [{"name","updated_at"}]}`。全机型同一份名单。"""
+    """`GET /p/{pid}/admins` → `{"items": [{"ip","name","updated_at"}]}`。全机型同一份名单。"""
     del pid
     rows = storage.load_admin_users()
     return {"items": [_admin_row(row) for row in rows if isinstance(row, dict)]}
@@ -196,16 +196,36 @@ def delete_ip_mapping(pid: str, ip: Any) -> Dict[str, Any]:
     return {"removed": removed}
 
 
+def _add_admin_ip(pid: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """按 IP 添加管理员。姓名只写入对应表，当作助记。"""
+    ip = _validated_ip_key(_validated_ip(body.get(IP_FIELD)))
+    raw_name = body.get(NAME_FIELD)
+    if raw_name is not None and str(raw_name).strip():
+        mnemonic = _validated_name(raw_name)
+        storage.upsert_ip_mapping(ip, mnemonic)
+    else:
+        mnemonic = storage.resolve_person_by_ip(ip)
+    if storage.is_admin_ip(ip):
+        raise AppError(FILE_EXISTS, "该管理员已存在", ip=ip, field=IP_FIELD)
+    storage.upsert_admin_ip(ip, mnemonic)
+    _note_settings_changed(pid)
+    logger.info("管理员名单已新增（按 IP，全机型共用）：来自机型=%s %s", pid, ip)
+    for row in storage.load_admin_users():
+        if str(row.get("ip") or "").strip() == ip:
+            return {"item": _admin_row(row)}
+    return {"item": {"ip": ip, "name": mnemonic, "updated_at": _now()}}
+
+
 def add_admin(pid: str, name: Any) -> Dict[str, Any]:
-    """`POST /p/{pid}/admins` → 201 `{"item": {...}}`；重名 → 409 `FILE_EXISTS`。
+    """`POST /p/{pid}/admins`。
 
-    409 的错误码用 `FILE_EXISTS`（§7.1 表里唯一映射 409 的「同名已存在」，与
-    `updates.create_source` 同一只码），不是 mock 原先的 `INVALID_INPUT`（那只码按 §7.1
-    只能配 400）；本卡同 PR 把 mock 一起改过来。
-
-    姓名走 `_validated_admin_name`（含 `/`、`\\`，或字面的 `%2f` / `%5c` / `%00` ⇒ 400
-    `detail.field="name"`，**在碰磁盘之前**）。
+    载荷带 `ip` 时按地址授权，`name` 只是助记。只带 `name` 的旧调用仍按姓名写入，
+    是否生效取决于 IP 对应表里有没有这个姓名。
     """
+    if isinstance(name, dict):
+        if str(name.get(IP_FIELD) or "").strip():
+            return _add_admin_ip(pid, name)
+        name = name.get(NAME_FIELD)
     clean = _validated_admin_name(name)
     stamp = _now()
     with storage.people_write():
@@ -235,9 +255,19 @@ def remove_admin(pid: str, name: Any) -> Dict[str, Any]:
     看到这段想「统一两个入口」的人，请先让这三条红一遍再决定。
     """
     clean = _validated_name(name)
+    from . import auth as auth_mod
+
+    ip = auth_mod.normalize_ip(clean)
     with storage.people_write():
         rows = storage.load_admin_users()
-        kept = [row for row in rows if _row_name(row) != clean]
+        kept = []
+        for row in rows:
+            row_ip = str(row.get("ip") or "").strip()
+            if ip and row_ip == ip:
+                continue
+            if _row_name(row) == clean:
+                continue
+            kept.append(row)
         removed = len(kept) < len(rows)
         if removed:
             storage.save_admin_users(kept)
@@ -392,7 +422,11 @@ def _ip_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _admin_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {"name": _row_name(row), "updated_at": row.get("updated_at")}
+    item = {"name": _row_name(row), "updated_at": row.get("updated_at")}
+    ip = str(row.get("ip") or "").strip()
+    if ip:
+        item["ip"] = ip
+    return item
 
 
 def _now() -> str:

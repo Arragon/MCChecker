@@ -105,8 +105,7 @@
 
   App.prototype.can = function (cap) {
     var id = this.identity;
-    if (cap === "deployer") return !!id.is_deployer;
-    if (cap === "admin") return !!id.is_admin;
+    if (cap === "deployer" || cap === "admin") return !!id.is_admin;
     return true;
   };
 
@@ -179,9 +178,9 @@
     var idBtn = h(
       "button.identity-chip",
       { type: "button", "aria-haspopup": "dialog", "aria-label": "当前身份：" + shownName + "，" + id.role_label },
-      h("span.avatar" + (id.is_admin || id.is_deployer ? ".is-admin" : ""), util.initials(shownName)),
+      h("span.avatar" + (id.is_admin ? ".is-admin" : ""), util.initials(shownName)),
       h("span.identity-name", shownName),
-      h("span.badge" + (id.is_admin || id.is_deployer ? ".badge-primary" : ""), id.role_label)
+      h("span.badge" + (id.is_admin ? ".badge-primary" : ""), id.role_label)
     );
     idBtn.addEventListener("click", function () { self.openIdentity(idBtn); });
 
@@ -221,11 +220,10 @@
         { style: "list-style:none;margin:0;padding:0;font-size:13px" },
         cap(true, "查看、搜索、对比、下载配置"),
         cap(true, "收藏变量、提交修改建议"),
-        cap(id.is_admin, "审阅修改建议、删除文件（管理员）"),
-        cap(id.is_deployer, "保存上传文件、修改设置与机型（部署者）")
+        cap(id.is_admin, "审阅、删除文件、保存配置、修改设置与机型（管理员）")
       ),
       h("div.divider"),
-      h("div.xsmall.muted", "身份按访问地址识别。如需开通权限，请把下面的地址提供给部署者，在「设置 › 人员与权限」中登记。"),
+      h("div.xsmall.muted", "身份按访问 IP 识别，姓名只是助记。如需开通权限，请把下面的地址提供给管理员，在「设置 › 人员与权限」中登记。"),
       h("div.copyable", { style: "margin-top:8px" }, h("span.copy-text", id.ip), MC.copyButton(id.ip, "复制地址"))
     );
     MC.popover(anchor, body, { align: "end" });
@@ -334,7 +332,7 @@
         if (pending) meta = h("span.badge-count.nav-meta", { "aria-label": pending + " 条待审" }, String(pending));
       }
       var title = n.kind === "settings" && !self.can("deployer")
-        ? "可以查看。只有部署者（在服务器本机访问）可以修改这些设置"
+        ? "可以查看。只有管理员可以修改这些设置"
         : null;
       var btn = h(
         "button.nav-item",
@@ -452,7 +450,7 @@
     MC.confirm({
       title: "删除文件 " + f.name,
       message: "将同时删除该文件的 " + f.archive_count + " 个历史版本、" + f.record_count + " 条修改记录，以及相关的收藏与修改建议。",
-      detail: h("div.banner.banner-warning", icon("alert"), h("div.banner-body", "删除后文件会移入服务器恢复区，需部署者手动恢复。")),
+      detail: h("div.banner.banner-warning", icon("alert"), h("div.banner-body", "删除后文件会移入服务器恢复区，需管理员手工恢复。")),
       confirmText: "删除",
       danger: true,
       requireText: f.name,
@@ -460,7 +458,7 @@
       if (!ok) return;
       api.del(self.p("/files/" + api.seg(f.name))).then(
         function (r) {
-          MC.toast.success("已删除 " + f.name, "原文与历史已移入恢复区 " + r.recovery + "，需部署者在服务器上手工恢复");
+          MC.toast.success("已删除 " + f.name, "原文与历史已移入恢复区 " + r.recovery + "，需管理员在服务器上手工恢复");
           self.closeTab("f:" + f.name);
           self.syncRevision();
           self.refreshFiles();

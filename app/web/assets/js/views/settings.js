@@ -42,7 +42,7 @@
       });
     }
 
-    var RO_TITLE = "只有部署者（在服务器本机访问）可以修改";
+    var RO_TITLE = "只有管理员可以修改";
 
     function pageHead(sec, actions) {
       var locked = !app.can("deployer");
@@ -54,7 +54,7 @@
       }
       return [
         h("div.page-head", h("div.col", h("h1", sec.label), h("div.small.muted", sec.desc)), actions || null),
-        locked ? h("div.banner.banner-neutral", { style: "margin-bottom:16px" }, icon("lock"), h("div.banner-body", "只读：当前身份为「" + app.identity.role_label + "」，只有部署者（在服务器本机访问）可以修改这些设置。")) : null,
+        locked ? h("div.banner.banner-neutral", { style: "margin-bottom:16px" }, icon("lock"), h("div.banner-body", "只读：当前身份为「" + app.identity.role_label + "」，只有管理员可以修改这些设置。")) : null,
       ];
     }
 
@@ -99,7 +99,7 @@
             {
               type: "button",
               disabled: ro(),
-              title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null,
+              title: ro() ? "只有管理员可以修改" : null,
             },
             icon("refresh"),
             "更新"
@@ -109,7 +109,7 @@
               return app.startTask({ type: "update_source", name: it.name }).then(function () { MC.toast.info("已开始更新 " + it.name); }, function (err) { taskStartError(err); });
             });
           });
-          var more = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "更多操作", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, icon("more"));
+          var more = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "更多操作", disabled: ro(), title: ro() ? "只有管理员可以修改" : null }, icon("more"));
           more.addEventListener("click", function () {
             MC.menu(more, [
               { label: "编辑", icon: "edit", onClick: function () { sourceDialog(it); } },
@@ -182,12 +182,12 @@
     function schedule(sec) {
       return api.get(app.p("/schedule")).then(function (s) {
         var days = s.interval_hours % 24 === 0 && s.interval_hours >= 24;
-        var amount = h("input.input", { type: "number", min: "1", step: "1", value: days ? s.interval_hours / 24 : s.interval_hours, style: "width:120px", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null });
-        var unit = h("select.select", { style: "width:100px", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, h("option", { value: "h", selected: !days }, "小时"), h("option", { value: "d", selected: days }, "天"));
+        var amount = h("input.input", { type: "number", min: "1", step: "1", value: days ? s.interval_hours / 24 : s.interval_hours, style: "width:120px", disabled: ro(), title: ro() ? "只有管理员可以修改" : null });
+        var unit = h("select.select", { style: "width:100px", disabled: ro(), title: ro() ? "只有管理员可以修改" : null }, h("option", { value: "h", selected: !days }, "小时"), h("option", { value: "d", selected: days }, "天"));
         var sw = MC.switchEl("启用定时更新", s.enabled, null, ro());
-        if (ro()) sw.title = "只有部署者（在服务器本机访问）可以修改";
+        if (ro()) sw.title = "只有管理员可以修改";
         var amountField = MC.field({ label: "执行间隔", control: h("div.row", amount, unit) });
-        var save = h("button.btn.btn-primary", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null }, "保存");
+        var save = h("button.btn.btn-primary", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null }, "保存");
         save.addEventListener("click", function () {
           amountField.setError("");
           var n = Number(amount.value);
@@ -231,9 +231,14 @@
         var ppl = res[0].items;
         var admins = res[1].items;
         var adminSet = {};
-        admins.forEach(function (a) { adminSet[a.name] = 1; });
-        var addP = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { personDialog(null); } }, icon("plus"), "登记人员");
-        var addA = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { adminDialog(); } }, icon("plus"), "添加管理员");
+        admins.forEach(function (a) {
+          if (a.ip) adminSet[a.ip] = 1;
+        });
+        ppl.forEach(function (p) {
+          if (!adminSet[p.ip] && admins.some(function (a) { return !a.ip && a.name && a.name === p.name; })) adminSet[p.ip] = 1;
+        });
+        var addP = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { personDialog(null); } }, icon("plus"), "登记人员");
+        var addA = h("button.btn.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { adminDialog(); } }, icon("plus"), "添加管理员");
         var me = app.identity;
         return [
           pageHead(sec),
@@ -246,9 +251,9 @@
                     "tr",
                     h("td.mono", p.ip, p.ip === me.ip ? h("span.badge.badge-primary", { style: "margin-left:6px" }, "你") : null),
                     h("td.cell-strong", p.name),
-                    h("td", adminSet[p.name] ? h("span.badge.badge-primary", "管理员") : h("span.muted", "成员")),
+                    h("td", adminSet[p.ip] ? h("span.badge.badge-primary", "管理员") : h("span.muted", "成员")),
                     h("td.muted.num", util.formatTime(p.updated_at)),
-                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { personDialog(p); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removePerson(p); } }, "删除"))
+                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { personDialog(p); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removePerson(p); } }, "删除"))
                   );
                 }))))
               : MC.stateBlock({ kind: "empty", icon: "users", title: "尚未登记人员", desc: "未登记的访问者在建议中显示为其 IP 地址。" })
@@ -256,17 +261,17 @@
           h(
             "div.panel",
             { style: "margin-top:16px" },
-            h("div.panel-header", h("h3", "管理员列表"), h("span.small.muted", "按姓名匹配，需先在 IP 对应表登记"), addA),
+            h("div.panel-header", h("h3", "管理员列表"), h("span.small.muted", "按 IP 授权，姓名只是助记"), addA),
             admins.length
-              ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "姓名"), h("th", "已登记 IP"), h("th", "更新时间"), h("th.cell-actions", ""))), h("tbody", admins.map(function (a) {
-                  var ips = ppl.filter(function (p) { return p.name === a.name; }).map(function (p) { return p.ip; });
-                  return h("tr", h("td.cell-strong", a.name), h("td.mono", ips.length ? ips.join("、") : h("span", { style: "color:var(--c-warning-text);font-family:var(--font-ui)" }, "未登记 IP，暂不生效")), h("td.muted.num", util.formatTime(a.updated_at)), h("td.cell-actions", h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeAdmin(a); } }, "移除")));
+              ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "IP 地址"), h("th", "助记名"), h("th", "更新时间"), h("th.cell-actions", ""))), h("tbody", admins.map(function (a) {
+                  var label = a.name || (ppl.filter(function (p) { return p.ip === a.ip; })[0] || {}).name || "—";
+                  return h("tr", h("td.mono", a.ip || "—"), h("td.cell-strong", label), h("td.muted.num", util.formatTime(a.updated_at)), h("td.cell-actions", h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removeAdmin(a); } }, "移除")));
                 }))))
               : MC.stateBlock({ kind: "empty", title: "暂无管理员" })
           ),
           /* §11.1 的硬要求：这句「IP 识别不是强认证」必须出现在界面上，不许只写在文档里。
            * M3-13 之前这一段是「未接入分段」的只读横幅，等于没人看得见它。 */
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "IP 对应表只用于识别身份，不是强认证：适用于可信内网。共用电脑或不可信网络下，任何使用该地址的人都会被认成同一个人（包括管理员），需要另行评估；经反向代理部署还必须配置受信代理，否则所有请求都会被识别为代理地址（可能被当成部署者）。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "权限按 IP 识别，姓名只是助记，不是强认证：适用于可信内网。共用电脑或不可信网络下，任何使用该地址的人都会被认成同一个人（包括管理员），需要另行评估；经反向代理部署还必须配置受信代理，否则所有请求都会被识别为代理地址。"),
         ];
       });
     }
@@ -293,17 +298,22 @@
     }
 
     function adminDialog() {
-      var name = h("input.input", { type: "text", placeholder: "姓名（与 IP 对应表一致）" });
-      var F = { name: MC.field({ label: "管理员姓名", required: true, control: name }) };
+      var ip = h("input.input.input-mono", { type: "text", placeholder: "10.12.3.22" });
+      var name = h("input.input", { type: "text", placeholder: "可空，只用于显示" });
+      var F = {
+        ip: MC.field({ label: "IP 地址", required: true, control: ip }),
+        name: MC.field({ label: "助记名", control: name }),
+      };
       MC.modal({
         title: "添加管理员",
-        body: F.name,
+        body: h("div.col", { style: "gap:12px" }, F.ip, F.name),
         footer: function (close) {
           var save = h("button.btn.btn-primary", { type: "button" }, "添加");
           save.addEventListener("click", function () {
+            F.ip.setError("");
             F.name.setError("");
             MC.withBusy(save, function () {
-              return api.post(app.p("/admins"), { name: name.value.trim() }).then(function () { close(); MC.toast.success("已添加管理员"); app.syncRevision(); afterIdentityChange(); }, function (err) { fieldError(F, err); });
+              return api.post(app.p("/admins"), { ip: ip.value.trim(), name: name.value.trim() }).then(function () { close(); MC.toast.success("已添加管理员"); app.syncRevision(); afterIdentityChange(); }, function (err) { fieldError(F, err); });
             });
           });
           return [h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"), save];
@@ -312,14 +322,14 @@
     }
 
     function removePerson(p) {
-      MC.confirm({ title: "删除 " + p.name + "（" + p.ip + "）", message: "删除后该 IP 提交的新建议将只显示 IP；若此人是管理员，也会立即失去管理员权限。", confirmText: "删除", danger: true }).then(function (ok) {
+      MC.confirm({ title: "删除 " + p.name + "（" + p.ip + "）", message: "删除后该 IP 提交的新建议将只显示 IP。这只去掉助记名，不取消管理员权限。", confirmText: "删除", danger: true }).then(function (ok) {
         if (ok) api.del(app.p("/ip-mapping/" + api.seg(p.ip))).then(function () { MC.toast.success("已删除"); app.syncRevision(); afterIdentityChange(); }, function (err) { MC.toastError("删除失败", err); });
       });
     }
 
     function removeAdmin(a) {
-      MC.confirm({ title: "移除管理员 " + a.name, message: "移除后此人将无法审阅建议和删除文件，正在进行的审阅提交也会被拒绝。", confirmText: "移除", danger: true }).then(function (ok) {
-        if (ok) api.del(app.p("/admins/" + api.seg(a.name))).then(function () { MC.toast.success("已移除"); app.syncRevision(); afterIdentityChange(); }, function (err) { MC.toastError("移除失败", err); });
+      MC.confirm({ title: "移除管理员 " + (a.ip || a.name), message: "移除后该 IP 将失去管理员权限，正在进行的审阅提交也会被拒绝。", confirmText: "移除", danger: true }).then(function (ok) {
+        if (ok) api.del(app.p("/admins/" + api.seg(a.ip || a.name))).then(function () { MC.toast.success("已移除"); app.syncRevision(); afterIdentityChange(); }, function (err) { MC.toastError("移除失败", err); });
       });
     }
 
@@ -346,7 +356,7 @@
                     "tr",
                     h("td", h("span.badge.badge-bind", b.group_name)),
                     h("td", h("ul.binding-vars", b.variables.map(function (v) { return h("li", util.fmtTag(v.file), h("span.mono", v.path)); }))),
-                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { bindingDialog(b); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeBinding(b); } }, "删除"))
+                    h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { bindingDialog(b); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removeBinding(b); } }, "删除"))
                   );
                 }))))
               : MC.stateBlock({ kind: "empty", icon: "link", title: "暂无绑定组", desc: "例如把 A 文件的 timeout 与 B 文件的 time_out 绑定，对比时会同时标出。" })
@@ -408,7 +418,7 @@
             "div.panel",
             res.items.length
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "名称"), h("th", "说明"), h("th", "地址"), h("th.cell-actions", ""))), h("tbody", res.items.map(function (t) {
-                  return h("tr", h("td.cell-strong", t.name), h("td", t.description || h("span.muted", "—")), h("td.mono.xsmall.break-all", t.url), h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { toolDialog(t); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeTool(t); } }, "删除")));
+                  return h("tr", h("td.cell-strong", t.name), h("td", t.description || h("span.muted", "—")), h("td.mono.xsmall.break-all", t.url), h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { toolDialog(t); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removeTool(t); } }, "删除")));
                 }))))
               : MC.stateBlock({ kind: "empty", icon: "tool", title: "暂无工具" })
           ),
@@ -446,7 +456,7 @@
     /* ---------- 机型管理 ---------- */
     function profiles(sec) {
       return api.get("/session", { profile: app.pid }).then(function (s) {
-        var add = h("button.btn", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: profileDialog }, icon("plus"), "新增机型");
+        var add = h("button.btn", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: profileDialog }, icon("plus"), "新增机型");
         return [
           pageHead(sec, add),
           h(
@@ -460,8 +470,8 @@
                 h(
                   "td.cell-actions",
                   m.id !== app.pid ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.switchProfile(m.id); } }, "切换") : null,
-                  h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { renameProfile(m); } }, "重命名"),
-                  m.id !== "default" ? h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有部署者（在服务器本机访问）可以修改" : null, onclick: function () { removeProfile(m); } }, "删除") : null
+                  h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { renameProfile(m); } }, "重命名"),
+                  m.id !== "default" ? h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removeProfile(m); } }, "删除") : null
                 )
               );
             }))))

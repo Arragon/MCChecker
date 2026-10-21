@@ -126,7 +126,7 @@ class TestPermission:
 
     def test_non_admin_roles_are_rejected_and_nothing_moves(self):
         snapshot = self._snapshot()
-        for role in ("visitor", "member", "deployer"):
+        for role in ("visitor", "member"):
             with make_server() as server:
                 status, _h, body = as_role(server, role).request("DELETE", _url(self.pid, FILE_A))
                 assert status == 403, (role, body)

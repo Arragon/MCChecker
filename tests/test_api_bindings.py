@@ -143,7 +143,7 @@ class TestPermissions(Base):
             status, _h, body = _create(as_role(server, "deployer"), self.pid)
             assert status == 200, body
 
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["visitor", "member"])
     def test_non_deployers_cannot_write(self, role):
         sha_before = _digest(self.pid)
         rev_before = _settings_rev(self.pid)

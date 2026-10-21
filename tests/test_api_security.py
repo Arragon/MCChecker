@@ -1223,13 +1223,9 @@ class TestNoWriteEndpointBypassesRoleCheck:
     def test_privileged_endpoint_denies_the_roles_it_must_deny(self, method, template, action):
         from app.services import authz
 
-        level = authz.action_level(action)
         pid = seed_roles("sec5")
         write_target(pid, FILE_A, XML_V1)
-        # §4.2 脚注 1：审阅/删除只认管理员名单，部署者本人不在名单上同样 403。
-        denied = ["visitor", "member", "deployer"] if level == "admin" else [
-            "visitor", "member", "admin"
-        ]
+        denied = ["visitor", "member"]
         url = url_of(template, pid=pid)
         with make_server() as server:
             for role in denied:

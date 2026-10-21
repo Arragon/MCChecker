@@ -512,7 +512,7 @@
           var main2 = inst2.el.querySelector(".settings-main");
           var add2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("新增机型") >= 0; })[0];
           ok(add2 && add2.disabled, "非部署者的新增按钮必须禁用");
-          ok(/部署者/.test(add2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (add2 ? add2.getAttribute("title") : "<没有按钮>"));
+          ok(/管理员/.test(add2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (add2 ? add2.getAttribute("title") : "<没有按钮>"));
           var rename2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "重命名"; })[0];
           ok(rename2 && rename2.disabled, "非部署者的重命名按钮必须禁用");
           var del2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "删除"; })[0];
@@ -556,7 +556,7 @@
           var main2 = inst2.el.querySelector(".settings-main");
           var edit2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "编辑"; })[0];
           ok(edit2 && edit2.disabled, "非部署者的编辑按钮必须禁用");
-          ok(/部署者/.test(edit2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (edit2 ? edit2.getAttribute("title") : "<没有按钮>"));
+          ok(/管理员/.test(edit2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (edit2 ? edit2.getAttribute("title") : "<没有按钮>"));
         });
       });
     });
@@ -594,7 +594,7 @@
           var main2 = inst2.el.querySelector(".settings-main");
           var edit2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "编辑"; })[0];
           ok(edit2 && edit2.disabled, "非部署者的编辑按钮必须禁用");
-          ok(/部署者/.test(edit2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (edit2 ? edit2.getAttribute("title") : "<没有按钮>"));
+          ok(/管理员/.test(edit2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (edit2 ? edit2.getAttribute("title") : "<没有按钮>"));
         });
       });
     });
@@ -781,7 +781,7 @@
           /* 开关的 title 长在外层 label 上（`MC.switchEl` 把 title 给 wrapper），
            * 所以按「自己或被 titled 的祖先」取，别要求裸 input 自己带 title。 */
           var why = c.getAttribute("title") || (c.closest("[title]") || {}).title || "";
-          ok(why.indexOf("部署者") >= 0, "禁用要点名原因（是权限，不是没接入），实际：" + JSON.stringify(why));
+          ok(why.indexOf("管理员") >= 0, "禁用要点名原因（是权限，不是没接入），实际：" + JSON.stringify(why));
         });
       });
     });
@@ -795,8 +795,8 @@
     { ip: "10.12.3.22", name: "王强", updated_at: "2026-10-17 15:00:00" },
   ];
   var ADMIN_ROWS = [
-    { name: "王强", updated_at: "2026-10-17 15:00:00" },
-    { name: "没登记 IP 的人", updated_at: "2026-10-16 10:00:00" },
+    { ip: "10.12.3.22", name: "王强", updated_at: "2026-10-17 15:00:00" },
+    { ip: "10.9.9.9", name: "外网管理员", updated_at: "2026-10-16 10:00:00" },
   ];
   function peopleHandlers(extra) {
     var h = {
@@ -843,7 +843,7 @@
          * 只在管理员名单里没 IP 行的显示「未登记 IP，暂不生效」。 */
         eq([].slice.call(main.querySelectorAll("tbody tr")).length, 4, "IP 表 2 行 + 管理员表 2 行");
         ok(main.textContent.indexOf("你") >= 0, "当前访问者的 IP 行要标「你」");
-        ok(main.textContent.indexOf("未登记 IP，暂不生效") >= 0, "没有 IP 行的管理员要说明「暂不生效」");
+        ok(main.textContent.indexOf("10.9.9.9") >= 0, "管理员表要列出被授权的 IP");
         /* §11.1：这句提示必须在界面上，不许只写在文档里（本卡把它从「未接入横幅」后面救出来）。 */
         ok(main.textContent.indexOf("可信内网") >= 0, "§11.1 的「仅适用于可信内网」必须出现在分段文案里");
         ok(main.textContent.indexOf("强认证") >= 0, "要说清 IP 识别不是强认证");
@@ -907,13 +907,14 @@
           app.paints.nav = 0;
           var addA = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("添加管理员") >= 0; })[0];
           addA.click();
-          var nameF = modalField("管理员姓名");
-          nameF.control.value = "部署者甲";
-          nameF.button().click();
+          var ipF = modalField("IP 地址");
+          ipF.control.value = "10.12.3.22";
+          modalField("助记名").control.value = "王强";
+          ipF.button().click();
           return tick().then(tick);
         })
         .then(function () {
-          ok(spy.calls.indexOf('POST /p/default/admins {"name":"部署者甲"}') >= 0, "加管理员走 POST /admins：" + spy.calls.join(" | "));
+          ok(spy.calls.indexOf('POST /p/default/admins {"ip":"10.12.3.22","name":"王强"}') >= 0, "加管理员走 POST /admins：" + spy.calls.join(" | "));
           eq([app.paints.header, app.paints.nav], [1, 1], "第二次保存同样只重画，不整页刷新");
           eq(app.session.identity.role_label, "部署者 · 管理员", "顶栏身份取自重新拉到的 /session");
         });
@@ -927,7 +928,7 @@
        * 管理员重名 ⇒ 409 FILE_EXISTS + detail.field="name"。`detail.field` 就是前后端的字段契约。 */
       var spy = r.useApi(peopleHandlers({
         PUT: function () { return Promise.reject(new MC.ApiError(400, "INVALID_INPUT", "请输入合法的 IPv4/IPv6 地址", { field: "ip" })); },
-        POST: function () { return Promise.reject(new MC.ApiError(409, "FILE_EXISTS", "该管理员已存在", { field: "name", name: "王强" })); },
+        POST: function () { return Promise.reject(new MC.ApiError(409, "FILE_EXISTS", "该管理员已存在", { field: "ip", ip: "10.12.3.22" })); },
       }));
       var inst = r.mount(settingsApp(true), "people");
       var main, ipField, nameField;
@@ -948,13 +949,13 @@
           ok(ipField.control.getAttribute("aria-invalid") === "true", "读屏要听得到无效（§9.9）");
           [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("取消") >= 0; })[0].click();
           [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("添加管理员") >= 0; })[0].click();
-          nameField = modalField("管理员姓名");
-          nameField.control.value = "王强";
+          nameField = modalField("IP 地址");
+          nameField.control.value = "10.12.3.22";
           nameField.button().click();
           return tick().then(tick);
         })
         .then(function () {
-          ok(!nameField.error.classList.contains("hidden"), "409 必须显示在姓名下方而不是弹全局 toast");
+          ok(!nameField.error.classList.contains("hidden"), "409 必须显示在 IP 下方而不是弹全局 toast");
           ok(nameField.error.textContent.indexOf("已存在") >= 0, nameField.error.textContent);
           var toasts = [].slice.call(document.querySelectorAll(".toast"));
           ok(!toasts.some(function (x) { return x.className.indexOf("toast-error") >= 0; }), "字段级错误不许退化成「服务器故障」toast：" + toasts.map(function (x) { return x.textContent; }).join(" | "));
@@ -977,7 +978,7 @@
         controls.forEach(function (c) {
           ok(c.disabled, "非部署者 ⇒ 写控件一律 disabled");
           var why = c.getAttribute("title") || (c.closest("[title]") || {}).title || "";
-          ok(why.indexOf("部署者") >= 0, "禁用要点名原因（是权限，不是没接入），实际：" + JSON.stringify(why));
+          ok(why.indexOf("管理员") >= 0, "禁用要点名原因（是权限，不是没接入），实际：" + JSON.stringify(why));
           ok(why.indexOf("M3-") < 0, "分段已接入，不许再挂「将在 M3-xx 接入」的去向文案：" + why);
         });
         ok(main.textContent.indexOf("可信内网") >= 0, "只读身份同样要看得见 §11.1 的提示");
@@ -1344,12 +1345,12 @@
       return tick().then(function () {
         var main = inst.el.querySelector(".settings-main");
         ok(spy.calls.indexOf("GET /p/default/sources") >= 0, "读取仍允许（读接口全部角色可用）");
-        ok(main.textContent.indexOf("只读") >= 0 && main.textContent.indexOf("部署者") >= 0, "页级横幅要说清身份与原因：" + main.textContent.slice(0, 160));
+        ok(main.textContent.indexOf("只读") >= 0 && main.textContent.indexOf("管理员") >= 0, "页级横幅要说清身份与原因：" + main.textContent.slice(0, 160));
         var writeBtns = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return /新增|更新/.test(b.textContent); });
         ok(writeBtns.length >= 3, "覆盖面：新增、每行更新、全部立即更新都要在");
         writeBtns.forEach(function (b) {
           ok(b.disabled, "非部署者的写按钮必须禁用");
-          ok((b.getAttribute("title") || "").indexOf("部署者") >= 0, "禁用要说明原因");
+          ok((b.getAttribute("title") || "").indexOf("管理员") >= 0, "禁用要说明原因");
         });
       });
     });
@@ -1513,7 +1514,7 @@
     visitor.close();
     eq(vc.length, 2, "两种导入方式");
     ok(vc[0].text.indexOf("保存到服务器") >= 0 && vc[0].disabled === true, "访客的保存项必须禁用");
-    ok(/仅部署者|服务器本机/.test(vc[0].text), "禁用时要说明原因：" + vc[0].text);
+    ok(/仅管理员/.test(vc[0].text), "禁用时要说明原因：" + vc[0].text);
     ok(vc[1].checked === true, "访客默认落在「临时查看」");
 
     var deployer = MC.openImport(stub(true), { source: "local" });

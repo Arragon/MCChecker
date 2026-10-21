@@ -10,9 +10,9 @@ sha256 不变」与「允许时写真的发生」都可断言。
 |---|:-:|:-:|:-:|
 | visitor | 201 | 403 | 403 |
 | member | 201 | 403 | 403 |
-| admin | 201 | 403 | 201 |
-| deployer（本机，未登记管理员） | 201 | 201 | 403 |
-| deployer_admin（本机 + 管理员名单） | 201 | 201 | 201 |
+| admin | 201 | 201 | 201 |
+| deployer（本机，未登记管理员） | 201 | 403 | 403 |
+| deployer_admin（本机 IP 在管理员名单） | 201 | 201 | 201 |
 """
 
 from __future__ import annotations
@@ -47,11 +47,11 @@ CASES = [
     ("member", "settings_write", 403),
     ("member", "review", 403),
     ("admin", "remarks_submit", 201),
-    ("admin", "settings_write", 403),
+    ("admin", "settings_write", 201),
     ("admin", "review", 201),
     ("deployer", "remarks_submit", 201),
     ("deployer", "settings_write", 201),
-    ("deployer", "review", 403),
+    ("deployer", "review", 201),
     ("deployer_admin", "remarks_submit", 201),
     ("deployer_admin", "settings_write", 201),
     ("deployer_admin", "review", 201),
@@ -94,8 +94,8 @@ class TestFixtureSelfCheck:
             "visitor": ("访客", False, False),
             "member": ("成员", False, False),
             "admin": ("管理员", False, True),
-            "deployer": ("部署者", True, False),
-            "deployer_admin": ("部署者 · 管理员", True, True),
+            "deployer": ("管理员", False, True),
+            "deployer_admin": ("管理员", False, True),
         }
         for role, (label, is_deployer, is_admin) in expected.items():
             pid = pid_for(authz_env, role)
@@ -195,10 +195,10 @@ class TestEntryPoints:
             "favorites_write": authz.ANY,
             "remarks_submit": authz.ANY,
             "dl_compute": authz.ANY,
-            "upload_persist": authz.DEPLOYER,
-            "settings_write": authz.DEPLOYER,
-            "tasks_run": authz.DEPLOYER,
-            "profiles_write": authz.DEPLOYER,
+            "upload_persist": authz.ADMIN,
+            "settings_write": authz.ADMIN,
+            "tasks_run": authz.ADMIN,
+            "profiles_write": authz.ADMIN,
             "review": authz.ADMIN,
             "delete_file": authz.ADMIN,
         }

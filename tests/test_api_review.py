@@ -691,7 +691,7 @@ class TestReviewHttp:
         for role, expected in (
             ("visitor", 403),
             ("member", 403),
-            ("deployer", 403),
+            ("deployer", 200),
             ("admin", 200),
         ):
             status, _h, body = self._get(role)
@@ -702,7 +702,7 @@ class TestReviewHttp:
         """§16.3：403 时 `configs/` 与建议记录一字节不变。"""
         before = _read(XML_NAME, self.pid)
         statuses = _status_by_id(self.pid)
-        for role in ("visitor", "member", "deployer"):
+        for role in ("visitor", "member"):
             status, _h, body = self._post(role, self._payload(request_id="req-forbid-" + role))
             assert status == 403, (role, body)
             assert body["error"]["detail"]["action"] == "review"

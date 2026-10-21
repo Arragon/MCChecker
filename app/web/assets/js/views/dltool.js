@@ -545,12 +545,12 @@
       var id = S.item;
       var save = null;
       if (S.saved && itemDirty(id)) {
-        var saveBtn = h("button.btn.btn-primary.btn-sm", { type: "button", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅部署者可保存为共享配置" }, "保存为配置");
+        var saveBtn = h("button.btn.btn-primary.btn-sm", { type: "button", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅管理员可保存为共享配置" }, "保存为配置");
         saveBtn.addEventListener("click", function () { doSave(saveBtn); });
         save = h(
           "div.dl-save",
           h("span.badge.badge-warning", "有未保存的修改"),
-          app.can("deployer") ? null : h("span.xsmall.muted", "仅部署者可保存"),
+          app.can("deployer") ? null : h("span.xsmall.muted", "仅管理员可保存"),
           h("button.btn.btn-sm", { type: "button", onclick: function () { S.draft[id] = clone(S.saved[id]); S.results = {}; render(); } }, "放弃修改"),
           saveBtn
         );

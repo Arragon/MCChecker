@@ -40,10 +40,6 @@ class Actor:
     @property
     def role_label(self) -> str:
         """角色标签（§4.1）：本机访问不再显示「游客」。"""
-        if self.is_deployer and self.is_admin:
-            return "部署者 · 管理员"
-        if self.is_deployer:
-            return "部署者"
         if self.is_admin:
             return "管理员"
         return "成员" if self.registered else "访客"
@@ -113,16 +109,14 @@ def resolve_actor(ip: str, profile_id: str) -> Actor:
     `profile_id` 仍由调用方传入（路由都带机型），身份解析不再读机型目录。
     """
     del profile_id
-    deployer = ip in deployer_ips()
     registered_name = storage.resolve_person_by_ip(ip)
     name = registered_name or ip
-    admin = storage.is_admin_user(name)
     return Actor(
         ip=ip,
         name=name,
         registered=bool(registered_name),
-        is_deployer=deployer,
-        is_admin=admin,
+        is_deployer=False,
+        is_admin=storage.is_admin_ip(ip),
     )
 
 

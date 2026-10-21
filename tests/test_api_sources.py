@@ -1029,7 +1029,7 @@ class TestSourcesApi:
         sha_before = _file_sha(path)
         before = _parts(target)
         with make_server() as server:
-            for role in ("visitor", "member", "admin"):
+            for role in ("visitor", "member"):
                 status, _, body = as_role(server, role).json(
                     "POST",
                     "/api/v1/p/%s/sources" % target,
@@ -1184,21 +1184,17 @@ class TestSourcesApi:
         # 旧键不留下：文件只增不减的话，孤儿键迟早会被同名重建捡走
         assert _status_file(target) == {"renamed.xml": SAMPLE_RESULT}
 
-    def test_rename_by_admin_is_403(self):
-        """改名也是部署者的事：管理员（非部署者）同样 403（§4.2）。"""
+    def test_rename_by_admin_is_allowed(self):
+        """管理员可以改更新源名称。"""
         target = seed_roles("p1")
         _seed(target, url="http://example.invalid/a.xml")
-        path = _mapping_file(target)
-        sha_before = _file_sha(path)
         with make_server() as server:
             status, _, body = as_role(server, "admin").json(
                 "PATCH",
                 "/api/v1/p/%s/sources/%s" % (target, NAME),
                 {"name": "renamed.xml", "url": "http://example.invalid/x.xml"},
             )
-        assert status == 403
-        assert body["error"]["code"] == "FORBIDDEN"
-        assert _file_sha(path) == sha_before
+        assert status == 200, body
 
     def test_rename_without_migrate_files_keeps_local_file(self):
         target = seed_roles("p1")

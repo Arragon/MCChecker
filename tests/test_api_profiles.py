@@ -152,7 +152,7 @@ class TestPermissions:
         self.pid = seed_roles("prof-perm")
         _seed_source(self.pid)
 
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["visitor", "member"])
     def test_non_deployers_cannot_write(self, role):
         sha_before = _registry_digest()
         rev_before = _default_settings_rev()

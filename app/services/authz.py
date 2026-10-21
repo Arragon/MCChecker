@@ -10,8 +10,7 @@
 | action | 允许 |
 |---|---|
 | `read` / `temp_upload` / `favorites_write` / `remarks_submit` / `dl_compute` | 所有角色（含访客） |
-| `upload_persist` / `settings_write` / `tasks_run` / `profiles_write` | 部署者 |
-| `review` / `delete_file` | 管理员（部署者本人若不在管理员名单同样拒绝，§4.2 脚注 1） |
+| `upload_persist` / `settings_write` / `tasks_run` / `profiles_write` / `review` / `delete_file` | 管理员 |
 
 身份在每个请求重新解析（`http.py` 第 4 步），因此撤权后下一次请求即 403。
 """
@@ -34,10 +33,10 @@ ACTIONS: Dict[str, str] = {
     "favorites_write": ANY,
     "remarks_submit": ANY,
     "dl_compute": ANY,
-    "upload_persist": DEPLOYER,
-    "settings_write": DEPLOYER,
-    "tasks_run": DEPLOYER,
-    "profiles_write": DEPLOYER,
+    "upload_persist": ADMIN,
+    "settings_write": ADMIN,
+    "tasks_run": ADMIN,
+    "profiles_write": ADMIN,
     "review": ADMIN,
     "delete_file": ADMIN,
 }
@@ -57,8 +56,6 @@ def allowed(actor, action: str) -> bool:
         return True
     if actor is None:  # 没有身份即无权（例如后台任务误用请求上下文）
         return False
-    if level == DEPLOYER:
-        return bool(actor.is_deployer)
     return bool(actor.is_admin)
 
 

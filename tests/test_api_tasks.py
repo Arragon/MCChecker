@@ -1064,7 +1064,7 @@ class TestTasksApi:
             assert task["error"] is None
             _wait_state(pid, task["id"])
 
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["visitor", "member"])
     def test_non_deployer_post_is_403_and_creates_nothing(self, pid, role):
         """卡面验收：非部署者 POST → 403（四角色夹具）。"""
         _seed_mapping(pid, [{"name": NAME, "url": "http://example.invalid/a.xml", "record_url": ""}])

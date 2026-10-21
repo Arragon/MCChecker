@@ -14,7 +14,7 @@
 
 ## 0. 阅读与执行约定（给实现者）
 
-1. **术语**：见附录 C。文中 `pid` = 机型（profile）ID，`FileRef` = (机型, 文件名, 版本)，“部署者”= 从服务器本机访问的用户，“管理员”= 在管理员名单中的人员。
+1. **术语**：见附录 C。文中 `pid` = 机型（profile）ID，`FileRef` = (机型, 文件名, 版本)，“管理员”= IP 在管理员名单中的访问者。姓名只是助记。不再有“部署者”身份。
 2. **代码风格**：Python 必须能在 **3.9.11** 运行。禁止 `X | Y` 类型联合、`match`、`str.removeprefix` 以外的 3.10+ API（`removeprefix` 3.9 可用）、`dataclass(slots=True)`、`zip(strict=)`、`tomllib`。所有模块顶部加 `from __future__ import annotations`。
 3. **零运行时依赖**：运行只依赖 Python 标准库。`requirements.txt` 清空为注释说明；`pytest` 仅为开发依赖（§14.4）。
 4. **前端**：不引入任何框架、构建工具、CDN、Web 字体。使用经典 `<script>` 与 `window.MC` 命名空间（与模板一致）。动态内容一律用 `textContent`/`h()`，**禁止**把数据拼进 `innerHTML`。
@@ -308,14 +308,13 @@ def client_ip(handler) -> str:
     """直连取 socket 对端地址；仅当对端在 trusted_proxies 中时，取 X-Forwarded-For 最左侧合法 IP。"""
 
 def resolve_actor(ip: str, profile_id: str) -> Actor:
-    deployer = ip in deployer_ips()        # 127.0.0.1、::1、本机所有接口地址（启动时计算并缓存，同现有逻辑）
-    name = storage.resolve_person_by_ip(ip) or ip   # 人员表在数据根，不随机型
-    admin = storage.is_admin_user(name)
-    return Actor(ip, name, name != ip, deployer, admin)
+    name = storage.resolve_person_by_ip(ip) or ip   # 姓名只是助记
+    admin = storage.is_admin_ip(ip)                 # 权限只看 IP
+    return Actor(ip, name, name != ip, False, admin)
 ```
 
 - IP 对应表与管理员名单放在数据根，**全机型共用一套**。同一 IP 在任何机型上的姓名和管理员身份都相同；`/session?profile=` 里的机型只决定当前数据空间，不决定身份。
-- 角色标签：`部署者 · 管理员` / `部署者` / `管理员` / `成员`（已登记非管理员）/ `访客`（未登记）。修复“部署者显示为游客”。
+- 角色标签：`管理员` / `成员`（已登记姓名、不是管理员）/ `访客`（未登记）。本机 IP 没有额外身份。
 - IPv4 映射的 IPv6（`::ffff:10.1.2.3`）先规范化为 IPv4 再匹配。
 
 ### 4.2 权限矩阵（服务端强制；前端仅用于禁用按钮与解释）
@@ -327,14 +326,9 @@ def resolve_actor(ip: str, profile_id: str) -> Actor:
 | 收藏增删、收藏备注（共享，**保持现状**） | ✓ | ✓ | ✓ | ✓ | `/favorites` |
 | 提交修改建议 | ✓ | ✓ | ✓ | ✓ | `POST /remarks` |
 | DL 试算（用草稿参数计算） | ✓ | ✓ | ✓ | ✓ | `POST /dl/{item}/compute`、`/extract` |
-| 审阅建议 | | | ✓ | ✓¹ | `/review*` |
-| 删除文件 | | | ✓ | ✓¹ | `DELETE /files/{name}` |
-| 保存上传/链接文件到服务器 | | | | ✓ | `PUT /files/{name}`、`import-url {persist:true}` |
-| 更新源、定时、IP 表、管理员、绑定、工具、DL 保存 | | | | ✓ | 设置类写接口 |
-| 立即更新 / 拉取修改记录 | | | | ✓ | `POST /tasks` |
-| 机型新增/重命名/删除 | | | | ✓ | `/profiles` 写接口 |
+| 审阅建议、删除文件、保存上传、设置、任务、机型 | | | ✓ | | 写接口 |
 
-¹ 部署者需同时是管理员（与现状一致：审阅与删除只认管理员名单）。表中“部署者”列仅表示部署者身份本身可做的操作。
+管理员是唯一的高权限身份。原先“部署者”列的操作都并入管理员。
 
 **提交点再校验**：所有写接口在执行前重新解析 Actor（每个请求都是新解析，天然满足“撤权后旧页面的按钮也会被拒绝”）。
 

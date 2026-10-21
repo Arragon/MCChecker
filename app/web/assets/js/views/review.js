@@ -38,7 +38,7 @@
 
     function load(silent) {
       if (!app.can("admin")) {
-        util.replace(host, MC.stateBlock({ kind: "locked", title: "仅管理员可审阅", desc: "当前身份为「" + app.identity.role_label + "」。如需审阅权限，请联系部署者将你加入「管理员列表」。" }));
+        util.replace(host, MC.stateBlock({ kind: "locked", title: "仅管理员可审阅", desc: "当前身份为「" + app.identity.role_label + "」。如需审阅权限，请联系管理员把你的 IP 加入管理员列表。" }));
         renderHeader();
         return;
       }

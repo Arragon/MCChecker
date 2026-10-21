@@ -78,7 +78,7 @@
           kind: "empty",
           icon: "tool",
           title: "暂无外部工具",
-          desc: ro ? "由部署者添加后，这里会出现可打开的链接" : "点击「添加」放入常用的 http/https 地址",
+          desc: ro ? "由管理员添加后，这里会出现可打开的链接" : "点击「添加」放入常用的 http/https 地址",
         }));
         return;
       }

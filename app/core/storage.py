@@ -1550,6 +1550,68 @@ def is_admin_user(name: str) -> bool:
     return any((item.get("name") or "").strip() == name_text for item in load_admin_users())
 
 
+def upsert_admin_ip(ip: str, name: str = "") -> bool:
+    """按 IP 登记管理员。`name` 只是助记，不参与是否管理员的判断。"""
+    ip_text = str(ip or "").strip()
+    if not ip_text:
+        raise ValueError("管理员 IP 不能为空")
+    name_text = str(name or "").strip()
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with people_write():
+        users = load_admin_users()
+        for item in users:
+            if str(item.get("ip") or "").strip() == ip_text:
+                item["updated_at"] = stamp
+                if name_text:
+                    item["name"] = name_text
+                save_admin_users(users)
+                return True
+        row = {"ip": ip_text, "updated_at": stamp}
+        if name_text:
+            row["name"] = name_text
+        users.append(row)
+        save_admin_users(users)
+        return True
+
+
+def remove_admin_ip(ip: str) -> bool:
+    ip_text = str(ip or "").strip()
+    with people_write():
+        users = load_admin_users()
+        kept = [item for item in users if str(item.get("ip") or "").strip() != ip_text]
+        save_admin_users(kept)
+        return len(kept) < len(users)
+
+
+def is_admin_ip(ip: str) -> bool:
+    """这个 IP 是否管理员。
+
+    行里有 `ip` 时只认这一列。旧名单只有 `name` 时，用 IP 对应表里同名的地址补上，
+    这样已有的「姓名 + 对应表」数据在升级后仍然生效；姓名本身不再单独授权。
+    """
+    target = str(ip or "").strip()
+    if not target:
+        return False
+    legacy_names = set()
+    for item in load_admin_users():
+        row_ip = str(item.get("ip") or "").strip()
+        if row_ip:
+            if row_ip == target:
+                return True
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            legacy_names.add(name)
+    if not legacy_names:
+        return False
+    for item in load_ip_mapping():
+        if str(item.get("ip") or "").strip() != target:
+            continue
+        if str(item.get("name") or "").strip() in legacy_names:
+            return True
+    return False
+
+
 # ===================== 审阅备注 =====================
 
 EDIT_REMARKS_FILE = os.path.join(DATA_DIR, "edit_remarks.json")

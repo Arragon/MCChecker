@@ -788,7 +788,7 @@ class TestRecordsApi:
             assert raw_status == 200
             assert raw == RECORD_JUNK
 
-    @pytest.mark.parametrize("role", ["visitor", "member", "admin"])
+    @pytest.mark.parametrize("role", ["visitor", "member"])
     def test_non_deployer_cannot_start_a_pull(self, servers, role):
         """四角色（§4.2、§7.10：`POST /tasks` 属部署者）。
 

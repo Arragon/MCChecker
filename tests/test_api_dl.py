@@ -711,7 +711,7 @@ class TestSaveItem:
         before_parts = _parts(pid)
         payload = _valid_payload(pid, k1=5.0)
         with make_server() as server:
-            for role in ("visitor", "member", "admin"):
+            for role in ("visitor", "member"):
                 status, _h, body = as_role(server, role).json(
                     "PUT",
                     ITEM_URL % (pid, "rp_energy"),
