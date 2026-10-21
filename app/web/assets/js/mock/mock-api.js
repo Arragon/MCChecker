@@ -38,8 +38,8 @@
     if (people) sharedPeople = people;
     if (admins) sharedAdmins = admins;
     Object.keys(S.profiles).forEach(function (pid) {
-      S.profiles[pid].people = sharedPeople;
-      S.profiles[pid].admins = sharedAdmins;
+      if (people) S.profiles[pid].people = sharedPeople;
+      if (admins) S.profiles[pid].admins = sharedAdmins;
     });
   }
   function bumpPeopleSettings() {

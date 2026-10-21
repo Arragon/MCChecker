@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 45;
+  var EXPECTED_CASES = 46;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1118,7 +1118,10 @@
      * mock 只解一次，所以在 mock 里「删得出去」不能当成后端删得出去的证据。 */
     var rejected = ["王/强", "王%2F强"];
     MC.mock.setIdentity("deployer-admin");
-    P.admins = [{ name: "李/强", updated_at: "2026-10-18 09:00:00" }]; // v1 式存量行
+    P.admins = [
+      { ip: "127.0.0.1", name: "张伟", updated_at: "2026-10-18 09:00:00" },
+      { name: "李/强", updated_at: "2026-10-18 09:00:00" },
+    ];
     function expectRejected(name) {
       return call("POST", "/p/default/admins", { name: name }).then(function (res) {
         eq(res.status, 400, "不可管理的管理员姓名必须 400，实际 " + res.status + "：" + name);
@@ -1135,7 +1138,7 @@
     return expectRejected(rejected[0])
       .then(function () { return expectRejected(rejected[1]); })
       .then(function () {
-        eq(P.admins.length, 1, "两条被拒的姓名一条都不该进名单（失败写不落盘）");
+        eq(P.admins.length, 2, "两条被拒的姓名一条都不该进名单（失败写不落盘）");
         return call("PUT", "/p/default/ip-mapping/10.4.4.4", { ip: "10.4.4.4", name: "王/强" });
       })
       .then(function (res) {
@@ -1151,7 +1154,7 @@
       })
       .then(function (res) {
         eq(res.body, { removed: true }, "删除端不许跟着创建端收紧——v1 存量行全靠这一条出路");
-        eq(P.admins.map(function (x) { return x.name; }), ["100%达标"],
+        eq(P.admins.map(function (x) { return x.name; }), ["张伟", "100%达标"],
           "撤掉的是存量行那一条；放行侧那一条还在，被拒的两条从来没进过名单");
       })
       .finally(function () {
@@ -1640,6 +1643,63 @@
     ok(!window.__hl, "载荷不执行");
     eq(MC.util.highlight("PARAM_01", "param_0").childNodes.length >= 2, true, "大小写不敏感");
     eq(MC.util.highlight("ab", "cd").querySelectorAll("mark").length, 0, "不命中时没有 mark");
+  });
+
+  test("节点详情：XML 元素列出全部属性，param 节点也不把属性藏起来", function () {
+    var app = {
+      pid: "default",
+      files: [],
+      identity: { registered: true, name: "张三", role_label: "管理员", is_admin: true },
+      can: function () { return true; },
+      p: function (rest) { return "/api/v1/p/default" + rest; },
+      go: function () {},
+      setTabTitle: function () {},
+      renderTabbar: function () {},
+      downloadFile: function () {},
+      syncRevision: function () {},
+      refreshFiles: function () {},
+      openFile: function () {},
+      startTask: function () {},
+    };
+    var nodes = MC.mockParse.parse(XML, "x.xml").nodes;
+    var doc = {
+      format: "xml",
+      file: { name: "x.xml", version: "current", updated_at: "2026-10-18T00:00:00Z", size: 64, node_count: nodes.p.length, sha256: "0123456789abcdef" },
+      nodes: nodes,
+    };
+    var origGet = MC.api.get;
+    MC.api.get = function (path) {
+      if (/\/favorites$/.test(path)) return Promise.resolve({ groups: [] });
+      if (/\/remarks$/.test(path)) return Promise.resolve({ items: [] });
+      if (/\/archives$/.test(path) || /\/records$/.test(path)) return Promise.resolve({ items: [] });
+      return Promise.resolve(doc);
+    };
+    var stage = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0;width:800px;height:500px;display:flex" });
+    document.body.append(stage);
+    var inst = MC.views.f(app, { kind: "f", arg: "x.xml", query: { node: "/R[1]" } });
+    stage.append(inst.el);
+    function attrSection() {
+      return [...inst.el.querySelectorAll(".insp-section")].filter(function (s) {
+        var title = s.querySelector(".section-title");
+        return title && title.textContent.indexOf("属性") === 0;
+      })[0];
+    }
+    return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+      try {
+        var sec = attrSection();
+        ok(sec, "选中带属性的元素时，详情要有「属性」");
+        ok(sec.textContent.indexOf("a") >= 0 && sec.textContent.indexOf("1") >= 0, "要列出属性名和值，实际：" + sec.textContent);
+        inst.update({ kind: "f", arg: "x.xml", query: { node: "/R[1]/param_1[1]" } });
+        var paramSec = attrSection();
+        ok(paramSec, "param_ 节点不能因为有参数信息就省掉属性");
+        ok(paramSec.textContent.indexOf("min") >= 0 && paramSec.textContent.indexOf("0") >= 0, "min 要出现在属性里");
+        ok(paramSec.textContent.indexOf("type") >= 0 && paramSec.textContent.indexOf("int") >= 0, "未折叠进范围的 type 也要出现在属性里");
+      } finally {
+        inst.destroy();
+        stage.remove();
+        MC.api.get = origGet;
+      }
+    });
   });
 
   test("显示属性开关：关闭后属性行不渲染，但 compact 数组未被裁剪", function () {

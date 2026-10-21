@@ -512,10 +512,11 @@
             )
           )
         );
-      } else if (t === "element") {
+      }
+      if (t === "element") {
         var attrs = idx.attrsOf(i);
         if (attrs.length) {
-          parts.push(section("属性", h("dl.kv", attrs.map(function (a) { return [h("dt.mono", idx.l[a]), h("dd.mono", idx.v[a])]; }))));
+          parts.push(section("属性", h("dl.kv", attrs.map(function (a) { return [h("dt.mono", idx.l[a].replace(/^@/, "")), h("dd.mono", idx.v[a])]; }))));
         }
       }
 
