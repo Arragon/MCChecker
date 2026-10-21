@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 44;
+  var EXPECTED_CASES = 45;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -595,6 +595,42 @@
           var edit2 = [].slice.call(main2.querySelectorAll("button")).filter(function (b) { return b.textContent === "编辑"; })[0];
           ok(edit2 && edit2.disabled, "非部署者的编辑按钮必须禁用");
           ok(/部署者/.test(edit2.getAttribute("title") || ""), "禁用要说明原因，实际：" + (edit2 ? edit2.getAttribute("title") : "<没有按钮>"));
+        });
+      });
+    });
+  });
+
+  test("外部工具页：导航按钮对应的页面列出链接，部署者可编辑", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      var spy = r.useApi({
+        GET: function (path) {
+          if (/\/tools$/.test(path)) return Promise.resolve({
+            items: [
+              { name: "构建工具", description: "生成固件的脚本", url: "https://example.com/build?x=1", added_at: "2026-10-20 10:00:00" },
+              { name: "监控", description: "", url: "http://10.0.0.8/", added_at: "2026-10-20 10:00:00" },
+            ],
+          });
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var inst = r.mountView(MC.views.tools(settingsApp(true), { kind: "tools", query: {} }));
+      return tick().then(function () {
+        eq(spy.calls[0], "GET /p/default/tools", "打开外部工具页读取工具列表");
+        var links = [].slice.call(inst.el.querySelectorAll("a.tool-open"));
+        eq(links.length, 2, "每个工具一张可打开的卡片");
+        eq(links[0].getAttribute("target"), "_blank");
+        eq(links[0].getAttribute("rel"), "noopener noreferrer");
+        ok(links[0].href.indexOf("https://example.com/build") === 0, "地址用安全链接打开");
+        ok(inst.el.textContent.indexOf("构建工具") >= 0);
+        ok(inst.el.textContent.indexOf("生成固件的脚本") >= 0);
+        ok(inst.el.textContent.indexOf("example.com") >= 0, "卡片上显示主机，方便扫视");
+        var edit = inst.el.querySelector("button[aria-label='编辑 构建工具']");
+        ok(edit, "部署者可以编辑");
+        var guest = r.mountView(MC.views.tools(settingsApp(false), { kind: "tools", query: {} }));
+        return tick().then(function () {
+          ok(!guest.el.querySelector("button[aria-label='编辑 构建工具']"), "非部署者不显示编辑");
+          ok(!guest.el.querySelector(".btn-primary"), "非部署者没有添加按钮");
         });
       });
     });

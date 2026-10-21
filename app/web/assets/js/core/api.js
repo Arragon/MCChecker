@@ -159,9 +159,10 @@
    * #/p/{pid}/t/{token}?node=
    * #/p/{pid}/review
    * #/p/{pid}/dl?item=
+   * #/p/{pid}/tools
    * #/p/{pid}/settings/{section}
    */
-  var KINDS = { overview: 1, search: 1, f: 1, t: 1, review: 1, dl: 1, settings: 1 };
+  var KINDS = { overview: 1, search: 1, f: 1, t: 1, review: 1, dl: 1, tools: 1, settings: 1 };
 
   function parseHash(hash) {
     var raw = (hash || "").replace(/^#/, "");

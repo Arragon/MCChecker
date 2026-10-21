@@ -15,7 +15,7 @@
     { id: "schedule", label: "定时更新", icon: "clock", desc: "按固定间隔自动执行全量更新（含修改记录拉取）。" },
     { id: "people", label: "人员与权限", icon: "users", desc: "IP 对应表与管理员名单全机型共用。IP 对应表用于识别建议提交人；管理员可审阅修改建议、删除文件。" },
     { id: "bindings", label: "变量绑定", icon: "link", desc: "把不同文件中含义相同的变量绑定为一组，对比时会以紫色标出。" },
-    { id: "tools", label: "工具菜单", icon: "tool", desc: "维护侧栏「外部工具」中的常用链接。" },
+    { id: "tools", label: "工具菜单", icon: "tool", desc: "维护「外部工具」页面中的常用链接。点击后在新窗口打开。" },
     { id: "profiles", label: "机型管理", icon: "device", desc: "每个机型拥有独立的文件、历史、收藏、绑定与设置。" },
   ];
 
