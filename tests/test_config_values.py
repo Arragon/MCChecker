@@ -134,9 +134,24 @@ def test_string_max_length() -> None:
         cv.TypedValue("string", "abcdef").validate({"max_length": 3})
 
 
-def test_unknown_unit_is_rejected() -> None:
+def test_unknown_unit_is_not_convertible_but_kept() -> None:
+    """M6-11 改判：`validate()` 只管类型与约束，单位成员资格归 `convert()`。
+
+    原来的写法断言 `validate()` 拒 `furlong`，等价于"单位不在换算表里 ⇒ 这个值
+    非法"。这条在批准前复核上下界时把带 `mm/s`/`rpm` 的合法基线判成了坏数据
+    （`_validate_ranges` → `validate(constraints)` → 未知单位）。真正要守的性质
+    是"换不了"，不是"不许存在"，所以拆成两条：值本身合法，`check_unit()` 才拒。
+    """
+    value = cv.TypedValue("decimal", "1", "furlong")
+    value.validate()  # 类型合法就通过
+    assert value.unit == "furlong", "声明单位原样保留"
+    with pytest.raises(AppError) as error:
+        value.check_unit()
+    assert error.value.code == "INVALID_INPUT"
     with pytest.raises(AppError):
-        cv.TypedValue("decimal", "1", "furlong").validate()
+        cv.convert(value, "m")
+    # 表内单位照样通过
+    cv.TypedValue("decimal", "1", "s").check_unit()
 
 
 def test_parse_typed_rejects_float_and_mismatched_kind() -> None:
@@ -158,7 +173,13 @@ def test_yield_changes_reports_only_real_differences() -> None:
 
 
 def test_declared_unit_outside_table_is_kept_but_not_convertible() -> None:
-    """`mm/s` 这类派生单位照原样保留；能不能换算与"能不能存在"是两件事。"""
+    """`mm/s` 这类派生单位照原样保留；能不能换算与"能不能存在"是两件事。
+
+    M6-11 起分工更清楚了：`validate()` 只管**类型与约束**，单位成员资格只在
+    `convert()` 里判。此前 `validate()` 会拒 `mm/s`，于是变更单在批准前复核
+    上下界时，一份合法的带派生单位的基线会被判成"未知单位"——那等于让
+    "换不了"冒充"不合法"。
+    """
     value = cv.parse_with_unit("120", "decimal", "mm/s")
     assert value.to_json() == {"type": "decimal", "text": "120", "unit": "mm/s"}
     # 换算表里没有它，因此换算仍然拒绝（而不是悄悄当同单位处理）
@@ -167,5 +188,11 @@ def test_declared_unit_outside_table_is_kept_but_not_convertible() -> None:
 
     # 表内的单位照旧走严格解析
     assert cv.parse_with_unit("0.65", "decimal", "s").unit == "s"
+    # 声明单位在表外不再是"非法值"：解析成功、单位保留、仍不可换算
+    declared = cv.parse_typed("1", "decimal", "mm/s")
+    assert declared.unit == "mm/s"
     with pytest.raises(AppError):
-        cv.parse_typed("1", "decimal", "mm/s")
+        declared.check_unit()
+    # 类型错误照旧拦下，跟单位没关系
+    with pytest.raises(AppError):
+        cv.parse_typed("abc", "decimal", "mm/s")

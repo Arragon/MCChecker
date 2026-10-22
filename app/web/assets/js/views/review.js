@@ -14,7 +14,7 @@
 
   MC.views.review = function (app) {
     var draftKey = "mc.reviewDraft." + app.pid;
-    var S = { data: null, sel: null, draft: util.storageGet(draftKey, {}), lastResult: null };
+    var S = { data: null, sel: null, draft: util.storageGet(draftKey, {}), lastResult: null, seg: "remarks" };
     var el = h("div");
     var header = h("div.view-header");
     var host = h("div.view-body.is-flush");
@@ -30,13 +30,42 @@
       if (S.data) S.data.files.forEach(function (f) { f.nodes.forEach(function (n) { total++; if (S.draft[dkey(f.file, n.group_key)]) decided++; }); });
       util.replace(
         header,
-        h("div.view-title", h("h1", "审阅修改"), h("div.view-sub", "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
-        S.data ? h("span.small.muted", "已决定 " + decided + " / " + total) : null,
-        h("button.btn", { type: "button", onclick: function () { load(); } }, icon("refresh"), "刷新")
+        h("div.view-title", h("h1", "审阅修改"), h("div.view-sub", S.seg === "changes"
+          ? "配置变更单：草稿 → 提交 → 批准发布。批准即发布新基线修订，没有中间态。"
+          : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
+        S.seg === "remarks" && S.data ? h("span.small.muted", "已决定 " + decided + " / " + total) : null,
+        h("button.btn", { type: "button", onclick: function () { load(); } }, icon("refresh"), "刷新"),
+        segments()
       );
     }
 
+    /* 两个分段：修改建议（旧，按文件逐节点）/ 配置变更（M6-12）。
+     * 分段状态只活在内存里，切页回来默认回到"修改建议"。 */
+    function segments() {
+      function tab(value, label) {
+        var active = S.seg === value;
+        return h(
+          "button.btn.btn-sm" + (active ? ".btn-primary" : ""),
+          {
+            type: "button",
+            "aria-pressed": active ? "true" : "false",
+            onclick: function () {
+              if (S.seg === value) return;
+              S.seg = value;
+              load();
+            },
+          },
+          label
+        );
+      }
+      return h("div.row", { style: "gap:6px" }, tab("remarks", "修改建议"), tab("changes", "配置变更"));
+    }
+
     function load(silent) {
+      if (S.seg === "changes") {
+        render();
+        return;
+      }
       if (!app.can("admin")) {
         util.replace(host, MC.stateBlock({ kind: "locked", title: "仅管理员可审阅", desc: "当前身份为「" + app.identity.role_label + "」。如需审阅权限，请联系管理员把你的 IP 加入管理员列表。" }));
         renderHeader();
@@ -65,6 +94,17 @@
 
     function render() {
       renderHeader();
+      if (S.seg === "changes") {
+        var changeHost = h("div");
+        util.replace(host, h("div.view-body", h("div.container", MC.changesUi ? changeHost : MC.stateBlock({
+          kind: "empty",
+          icon: "settings",
+          title: "配置变更模块未加载",
+          desc: "请确认 changes.js 已在 index.html 中引入。",
+        }))));
+        if (MC.changesUi) MC.changesUi.render(app, changeHost);
+        return;
+      }
       var files = S.data.files;
       if (!files.length) {
         util.replace(
@@ -210,7 +250,7 @@
       title: "审阅修改",
       icon: "review",
       update: function () {},
-      onShow: function () { if (S.data) load(true); },
+      onShow: function () { if (S.seg === "changes" || S.data) load(true); },
       isDirty: function () { return false; },
       destroy: unsub,
     };

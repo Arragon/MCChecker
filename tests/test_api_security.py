@@ -147,6 +147,15 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/config/baselines"): "config_change_submit",
     ("POST", "/api/v1/config/baselines/{bid}/values"): "config_change_submit",
     ("POST", "/api/v1/config/baselines/{bid}/intent"): "config_change_submit",
+    # M6-11：变更单的提交面用 `config_change_submit`
+    ("POST", "/api/v1/p/{pid}/config/changes"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/submit"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/withdraw"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reopen"): "config_change_submit",
+    # M6-12：批准/驳回是**独立**的能力键，提交面拿不到
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/approve"): "config_change_approve",
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reject"): "config_change_approve",
 }
 
 ROUTE_VALUES = {
@@ -157,6 +166,7 @@ ROUTE_VALUES = {
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
     "pmid": "pm_000001", "did": "dr_000001", "dsid": "ds_000001",
     "oid": "ob_000001", "tpid": "tp_000001", "bid": "bl_000001",
+    "cid": "cs_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

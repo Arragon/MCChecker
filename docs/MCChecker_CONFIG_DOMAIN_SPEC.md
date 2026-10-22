@@ -254,15 +254,41 @@ deduplicated: bool, stale_capture: bool, status, reason
 ### 3.12 `ChangeSet`
 
 ```
-id, baseline_id, base_revision_id, 
-plan_ref: {algorithm: three_way|model_upgrade|device_rebase|promote, inputs:{...}, output_sha256},
-changes: [{parameter_id, from, to, intent, decision: use_new|inherit_old|manual|pin|clear_pin, reason}],
-state: draft|submitted|approved|rejected|withdrawn|stale,
-submitted_at, submitted_by, decided_at, decided_by, decide_note,
-previous_revision_id
+id, profile_id, baseline_id, baseline_revision, baseline_scope, definition_set_id,
+logical_file_id, observation_id, title, reason,
+plan_ref: {algorithm: reconcile|three_way|model_upgrade|device_rebase|promote,
+           inputs: {baseline_id, baseline_revision, definition_set_id,
+                    logical_file_id, observation_id},
+           output_sha256},
+changes: [{parameter_id, from, from_intent, to, to_intent,
+           decision: use_new|inherit_old|manual|pin|clear_pin,
+           reason, writes_value}],
+state: draft|submitted|approved|rejected|withdrawn,
+frozen_at, submitted_at, submitted_by, decided_at, decided_by, decide_note, decided_state,
+published_baseline_revision, previous_revision_id, reopened_from,
+created_by, created_at, updated_at, updated_by
 ```
 
-`stale` 是**计算标记**：目标 head 或定义集合变化即标记，不销毁历史。
+**状态机只有五条边**（`UNKNOWN` 之外的组合一律 `CHANGE_STATE_INVALID` 409）：
+
+| 从 | 到 | 谁 | 附带要求 |
+|---|---|---|---|
+| `draft` | `submitted` | `config_change_submit` | 必须写明理由；提交时**重新算过期**，stale 即 `PLAN_STALE` |
+| `draft` | `withdrawn` | 同上 | 必填撤回理由 |
+| `submitted` | `approved` | `config_change_approve` | 见 §6.3，批准即发布 |
+| `submitted` | `rejected` | 同上 | 必填驳回意见 |
+| `submitted` | `withdrawn` | `config_change_submit` | 必填理由 |
+| `rejected` / `withdrawn` | `draft` | `config_change_submit` | **新建对象**，`reopened_from` 指回原单 |
+
+`stale` 是**计算标记，不是状态**：目标基线 head 或定义集合变化即标记，不销毁历史。
+只对 `draft`/`submitted` 有意义——终态单的父修订号与当前 head 不同是历史的必然，
+不是"过期"。`staleness()` 返回 `{stale, applicable, reasons, baseline_head, baseline_revision}`，
+`reasons ∈ {baseline_missing, baseline_revision_changed, definition_set_changed, baseline_superseded}`。
+
+**`from` 一律由服务端取基线现值**：客户端传的 before 视同噪声。否则"改了什么"由提交方
+自己说了算，审阅的人看不到真差异。
+
+**重开是新建对象，不是把终态改回 draft**：否则"谁在什么时候批准/驳回过什么"再也说不清。
 
 ### 3.13 `Artifact`
 
@@ -390,9 +416,13 @@ data/config_management/
 | GET | `/api/v1/config/tracking/effective` | global | 有效策略 + 继承链 |
 | GET | `/api/v1/config/tracking/{id}/history` | global | 策略修订历史 |
 | GET | `/api/v1/p/{pid}/config/reconcile` | profile | 文件内三栏对账（§6.2） |
-| GET/POST | `/api/v1/p/{pid}/config/changes` | profile | 变更单 |
-| POST | `/api/v1/p/{pid}/config/changes/{id}/submit` | profile | 提交 |
-| POST | `/api/v1/p/{pid}/config/changes/{id}/approve` | profile | 批准并发布 |
+| GET/POST | `/api/v1/p/{pid}/config/changes` | profile | 变更单列表 / 建草稿 |
+| GET/POST | `/api/v1/p/{pid}/config/changes/{id}` | profile | 详情 / 改草稿（追加修订） |
+| POST | `/api/v1/p/{pid}/config/changes/{id}/submit` | profile | 提交（冻结） |
+| POST | `/api/v1/p/{pid}/config/changes/{id}/withdraw` | profile | 撤回（终态） |
+| POST | `/api/v1/p/{pid}/config/changes/{id}/reopen` | profile | 重开一版草稿 |
+| POST | `/api/v1/p/{pid}/config/changes/{id}/approve` | profile | 批准并发布（`config_change_approve`） |
+| POST | `/api/v1/p/{pid}/config/changes/{id}/reject` | profile | 驳回（同上） |
 | GET | `/api/v1/p/{pid}/config/artifacts` | profile | 产物 |
 | GET | `/api/v1/p/{pid}/config/artifacts/{id}/raw` | profile | 下载 |
 | GET | `/api/v1/p/{pid}/config/audit` | profile | 审计检索 |
@@ -417,6 +447,7 @@ data/config_management/
 | `OBSERVATION_UNKNOWN_RELEASE` | 422 | 未知版本禁止发布 |
 | `ARTIFACT_TEMPLATE_INCOMPATIBLE` | 422 | 模板与定义集合/变体不匹配 |
 | `IDEMPOTENCY_MISMATCH` | 409 | 同键异体 |
+| `CHANGE_STATE_INVALID` | 409 | 状态机不允许的流转（`detail.allowed` 给出可走的边） |
 
 未知单位没有独立错误码：`INVALID_INPUT` + 消息 `未知单位：<unit>`。区分点在于
 **"能不能换算"与"合不合法"是两件事**——`mm/s`、`rpm`、`%` 是合法声明但换不了，
@@ -468,6 +499,38 @@ data/config_management/
 `reconcileGroups` / `reconcileSummary` / `reconcileNotices` / `applyDraft` /
 `pendingChanges`。草稿只存 `{note, edits, adopt, filter}` 于内存（`MC.configApi.drafts`），
 **不落 localStorage，更不存整份 XML/JSON**；待提交行的判据是"勾了采纳 ∧ 有值 ∧ 与基线不同"。
+
+### 6.3 批准即发布（`POST /p/{pid}/config/changes/{cid}/approve`）
+
+批准在一个事务里同时写**新基线修订**与**变更单决议**，不存在 approved-but-unpublished
+中间态。批准前按顺序重新校验六项：
+
+1. 权限 —— `config_change_approve`（与 `config_change_submit` 是两个键，见 §7）；
+2. 状态 —— 必须 `submitted`，否则 `CHANGE_STATE_INVALID`；
+3. 目标 head —— `expected_baseline_revision` / 冻结的 `baseline_revision` 与当前 head 不一致即 `PLAN_STALE`；
+4. 定义集合 —— 与冻结值不一致即 `PLAN_STALE`（`reasons=["definition_set_changed"]`）；
+5. 参数范围 —— 逐项按定义集合的上下界/枚举复核，越界 `VALUE_OUT_OF_RANGE`（`detail.parameter_id`）；
+6. 未决冲突 —— 行上有 `unresolved` 即拒绝。
+
+**为什么批准要重算**：创建时的校验会过期。批准这一下才是真正生效的那次。
+
+并发双批准：第二个请求进状态机时对象已是 `approved`，直接 `CHANGE_STATE_INVALID`，
+基线不会被发布两次。CAS（`expected` 同时钉住 `change_set:{id}` 与 `baseline:{id}`）兜住
+"两个管理员同时点"的窗口。
+
+**`published_baseline_revision` 是预先算出的 `n+1`**：`Ref.revision` 要到 commit 才回填，
+而载荷在 commit 时已写盘；因为 `expected` 把基线 head CAS 死在旧修订上，下一个修订号
+只可能是 `n+1`。提交后立即回读校验，对不上就抛 `STORAGE_FAILURE`（宁可显式失败，
+也不要悄悄记错修订号）。
+
+**可见性**：通用层变更（`baseline.profile_id` 为空）在任一 `{pid}` 路径下可见可操作——
+它一改就影响所有继承它的机型；机型层变更只在自己机型下可见。路径只是坐标，权限仍是
+管理员那一层。
+
+**前端契约**（`MC.changesUi`，`views/changes.js`，挂在审阅页的「配置变更」分段）：
+`stateLabel` / `stateTone` / `changedCount` / `summary` / `groupByState` / `rowModel` /
+`approveBlockers` / `canApprove`。按钮禁用只是体验，服务端仍会 403；`409` 类错误一律
+提示 + 刷新，不停在旧状态。
 
 ---
 

@@ -107,15 +107,7 @@ class TypedValue:
         if not isinstance(kind, str) or not isinstance(text, str):
             raise AppError(INVALID_INPUT, "类型化值缺 type/text")
         unit = payload.get("unit")
-        declared = unit if isinstance(unit, str) else None
-        if declared and declared not in UNITS:
-            # 换算表之外的单位（`mm/s`、`rpm`…）是合法声明：只校验值本身，
-            # 不能因为"换不了"就判这份值非法。
-            probe = cls(kind, text, None)
-            probe.validate()
-            probe.unit = declared
-            return probe
-        value = cls(kind, text, declared)
+        value = cls(kind, text, unit if isinstance(unit, str) else None)
         value.validate()
         return value
 
@@ -125,7 +117,13 @@ class TypedValue:
     # -- 校验 ---------------------------------------------------------------
 
     def validate(self, constraints: Optional[Dict[str, Any]] = None) -> None:
-        """按类型与约束校验自身；约束为空时只校验类型。"""
+        """按**类型与约束**校验自身；**不校验单位能否换算**。
+
+        单位分两件事：`mm/s`、`rpm`、`%` 这类派生单位是合法声明，只是换不了；
+        `s`/`ms`/`deg` 这类才在换算表里。把"换不了"当成"不合法"，会让整份
+        带派生单位的配置无法保存——所以单位成员资格由 `convert()` 在**真的
+        需要换算时**判定，这里只管类型。
+        """
         if self.kind == "bool" and self.text not in ("true", "false"):
             raise AppError(INVALID_INPUT, "布尔值只能是 true/false")
         if self.kind == "int":
@@ -137,10 +135,14 @@ class TypedValue:
             number = self.decimal()
             if number is None:  # pragma: no cover - decimal() 已校验
                 raise AppError(INVALID_INPUT, "数值格式不合法：%s" % self.text)
-        if self.unit is not None and self.unit not in UNITS:
-            raise AppError(INVALID_INPUT, "未知单位：%s" % self.unit)
         if constraints:
             self._validate_constraints(constraints)
+
+    def check_unit(self) -> None:
+        """需要换算的场合显式调这个：表外单位在这里才被判非法。"""
+        if self.unit is not None and self.unit not in UNITS:
+            raise AppError(INVALID_INPUT, "未知单位：%s" % self.unit)
+
 
     def _validate_constraints(self, constraints: Dict[str, Any]) -> None:
         if self.kind in ("int", "decimal"):
@@ -237,12 +239,9 @@ def parse_with_unit(raw: Any, kind: str, unit: Optional[str] = None) -> TypedVal
 
     `mm/s`、`rpm`、`%` 这类派生单位在现场文件里到处都是。换算表只负责一件事——
     "这两个单位之间能不能无损换算"；它不负责"单位必须出现在这张表里"。
-    所以声明单位不在表内时，值仍然解析成功，只是不能 `convert`。
+    因此这里与 `parse_typed` 现已同义（校验分工见 `TypedValue.validate`），
+    保留这个名字是因为调用点想表达的是"我知道这个单位是定义里声明的"。
     """
-    if unit and unit not in UNITS:
-        value = parse_typed(raw, kind, None)
-        value.unit = unit
-        return value
     return parse_typed(raw, kind, unit)
 
 

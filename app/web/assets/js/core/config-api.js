@@ -58,6 +58,16 @@
   var drafts = {};
   function draftKey(pid, objectId) { return (pid || "-") + "::" + (objectId || "new"); }
 
+  /* 动作幂等键：每次**用户动作**一个新键。
+   *
+   * 不用"动作+对象"做固定键：同一对象的 approve 会因为备注不同而算出不同请求体，
+   * 固定键会把"改了理由再批一次"误判成 `IDEMPOTENCY_MISMATCH`。真正要防的重复
+   * 发布已经由状态机挡住（第二次 approve 拿到 `CHANGE_STATE_INVALID`），幂等键
+   * 在这里只负责"同一次点击的重试不要变成两次动作"。 */
+  function actionKey(action, cid) {
+    return "cfg-" + action + "-" + String(cid || "new") + "-" + MC.util.uid("k").slice(-8);
+  }
+
   var configApi = {
     /* ---- 只读 ---- */
     status: function () { return unwrap(api.get("/config/status")); },
@@ -78,6 +88,13 @@
     },
     observations: function (query) { return unwrap(api.get("/config/observations", query)); },
     baselines: function (query) { return unwrap(api.get("/config/baselines", query)); },
+    // 变更单（M6-11）：路径以机型为坐标，通用层变更在任一机型下可见
+    changeSets: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/changes"), query));
+    },
+    changeSet: function (pid, cid) {
+      return unwrap(api.get(api.p(pid, "/config/changes/" + api.seg(cid))));
+    },
 
     /* ---- 写（M6-04 起真实接入）---- */
     createParameter: function (payload, headers) {
@@ -98,6 +115,44 @@
     },
     createDefinitionSet: function (payload, headers) {
       return unwrap(api.post("/config/definition-sets", payload, null, headers));
+    },
+    createChangeSet: function (pid, payload, headers) {
+      return unwrap(api.post(api.p(pid, "/config/changes"), payload, null, headers));
+    },
+    updateChangeSet: function (pid, cid, payload, headers) {
+      return unwrap(api.post(api.p(pid, "/config/changes/" + api.seg(cid)), payload, null, headers));
+    },
+    /* `POST /submit` 等动作**必须**带幂等键：双击/重试不能变成"提交两次"。
+     * 调用方不传时这里补一个，同一次点击内复用同一个键。 */
+    submitChangeSet: function (pid, cid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/changes/" + api.seg(cid) + "/submit"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("submit", cid) }, headers || {}))
+      );
+    },
+    withdrawChangeSet: function (pid, cid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/changes/" + api.seg(cid) + "/withdraw"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("withdraw", cid) }, headers || {}))
+      );
+    },
+    reopenChangeSet: function (pid, cid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/changes/" + api.seg(cid) + "/reopen"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("reopen", cid) }, headers || {}))
+      );
+    },
+    approveChangeSet: function (pid, cid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/changes/" + api.seg(cid) + "/approve"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("approve", cid) }, headers || {}))
+      );
+    },
+    rejectChangeSet: function (pid, cid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/changes/" + api.seg(cid) + "/reject"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("reject", cid) }, headers || {}))
+      );
     },
 
     /* ---- 草稿 ---- */

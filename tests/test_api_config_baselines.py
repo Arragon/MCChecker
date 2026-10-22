@@ -136,10 +136,12 @@ def _common(caller, world, **overrides):
 
 
 def _approve(baseline: dict) -> dict:
-    """没有批准接口（M6-12）之前，直接用仓储把状态推到 approved 造前置条件。
+    """直接推仓储把状态改成 approved，造"已有批准基线"的前置条件。
 
-    对账只认已批准的基线，所以凡是要拿基线当基准的用例都得先过这一步；
-    等 M6-12 落地后这里应换成 `POST /config/change-sets/{id}/approve`。
+    M6-12 之后**生产路径**是"变更单 → approve → 新基线修订"（见
+    `test_api_config_changes.py`）。这里刻意不走那条路：M6-09/M6-10 的用例不该
+    依赖 M6-11/12 的状态机，否则改动单出问题时故障面会牵连到基线自身的断言。
+    造出来的对象与真实批准过的对象在字段上完全一致（含 `decided_by`）。
     """
     from app.core import storage
     from app.core.config_repository import ConfigRepository

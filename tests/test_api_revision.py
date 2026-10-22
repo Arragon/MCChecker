@@ -89,6 +89,14 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/config/baselines"): None,
     ("POST", "/api/v1/config/baselines/{bid}/values"): None,
     ("POST", "/api/v1/config/baselines/{bid}/intent"): None,
+    # 变更单（M6-11）与批准发布（M6-12）：发布写的是配置域基线，仍不动旧 5 段
+    ("POST", "/api/v1/p/{pid}/config/changes"): None,
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}"): None,
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/submit"): None,
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/withdraw"): None,
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reopen"): None,
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/approve"): None,
+    ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reject"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

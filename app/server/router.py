@@ -103,8 +103,10 @@ def build_router(settings: Settings) -> Router:
         api_bindings,
         api_compare,
         api_config,
+        api_config_approval,
         api_config_baselines,
         api_config_catalog,
+        api_config_changes,
         api_config_ingest,
         api_config_reconcile,
         api_config_registry,
@@ -171,4 +173,8 @@ def build_router(settings: Settings) -> Router:
     api_config_reconcile.register(router, settings)
     # 追踪策略（M6-05）：archive_only / managed 的类别级与机型级覆盖。
     api_config_tracking.register(router, settings)
+    # 变更单（M6-11）：draft/submit/withdraw/reopen 状态机。
+    api_config_changes.register(router, settings)
+    # 批准发布（M6-12）：单独的 `config_change_approve`，与提交严格分开。
+    api_config_approval.register(router, settings)
     return router

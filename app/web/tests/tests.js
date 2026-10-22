@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 66;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账纯函数 5 + 对账渲染 1（M6-10）
+  var EXPECTED_CASES = 71;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账 6（M6-10）+ 变更单 5（M6-11/M6-12）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -2355,6 +2355,177 @@
       })
       .catch(function (err) {
         restore();
+        throw err;
+      });
+  });
+
+  /* ---- M6-11 / M6-12：配置变更单 ---- */
+
+  test("配置变更：状态标签与分组顺序（要人动手的排前面）", function () {
+    var ui = MC.changesUi;
+    eq(ui.stateLabel("submitted"), "待批准");
+    eq(ui.stateLabel("approved"), "已发布");
+    eq(ui.stateLabel("nonsense"), "nonsense", "未知状态原样露出，不伪装成已知");
+    eq(ui.stateTone("approved"), "badge-success");
+    eq(ui.stateTone("rejected"), "badge-danger");
+    eq(ui.stateTone("draft"), "");
+
+    var groups = ui.groupByState([
+      { id: "c3", state: "approved" },
+      { id: "c1", state: "draft" },
+      { id: "c2", state: "submitted" },
+    ]);
+    eq(groups.map(function (g) { return g.state; }), ["draft", "submitted", "approved"]);
+    eq(ui.groupByState([]), []);
+    var extra = ui.groupByState([{ id: "c9", state: "archived" }]);
+    eq(extra[0].state, "archived", "后端加了新状态也不会被吞");
+  });
+
+  test("配置变更：改动行只算真正写入且变了的", function () {
+    var ui = MC.changesUi;
+    var v = function (text, unit) { return { type: "decimal", text: text, unit: unit || null }; };
+    eq(
+      ui.changedCount({
+        changes: [
+          { writes_value: true, from: v("650", "ms"), to: v("700", "ms") },
+          { writes_value: false, from: v("650", "ms"), to: v("650", "ms") },
+          {
+            writes_value: true,
+            from: v("650", "ms"),
+            to: v("650", "ms"),
+            from_intent: "override",
+            to_intent: "pin",
+          },
+          { writes_value: true, from: v("1", "mm/s"), to: v("1", "mm/s"), from_intent: "override", to_intent: "override" },
+        ],
+      }),
+      2,
+      "值变了算一条；只改意图（走 pin）也算；原样写回不算"
+    );
+    eq(ui.changedCount({}), 0);
+    eq(ui.changedCount(null), 0);
+  });
+
+  test("配置变更：逐项行模型把决议翻成人话", function () {
+    var ui = MC.changesUi;
+    var row = ui.rowModel({
+      parameter_id: "pm_1",
+      name: "脉冲宽度",
+      category: "时序",
+      known: true,
+      decision: "pin",
+      writes_value: true,
+      from: { type: "decimal", text: "650", unit: "ms" },
+      to: { type: "decimal", text: "700", unit: "ms" },
+      from_intent: "override",
+      to_intent: "pin",
+      reason: "产线要求",
+    });
+    eq(row.decisionLabel, "钉住");
+    eq(row.fromText, "650 ms");
+    eq(row.toText, "700 ms");
+    eq(row.changed, true);
+    eq(row.reason, "产线要求");
+    eq(ui.rowModel({ decision: "clear_pin" }).decisionLabel, "取消钉住");
+    eq(ui.rowModel({ decision: "weird" }).decisionLabel, "weird");
+  });
+
+  test("配置变更：批准阻碍逐条说清，全清才允许批", function () {
+    var ui = MC.changesUi;
+    var submitted = {
+      item: { state: "submitted" },
+      changed_rows: 2,
+      staleness: { stale: false, reasons: [] },
+    };
+    eq(ui.approveBlockers(submitted), []);
+    eq(ui.canApprove(submitted), true);
+
+    var draft = ui.approveBlockers({ item: { state: "draft" }, changed_rows: 1, staleness: { stale: false } });
+    eq(draft.length, 1);
+    ok(draft[0].text.indexOf("待批准") > 0, "要告诉用户只有待批准能批");
+
+    var stale = ui.approveBlockers({
+      item: { state: "submitted" },
+      changed_rows: 1,
+      staleness: { stale: true, reasons: ["baseline_revision_changed", "definition_set_changed"] },
+    });
+    eq(stale.length, 2);
+    ok(stale[0].text.indexOf("改过") > 0, "基线又改过要用人话说");
+    eq(stale[0].level, "warn");
+
+    eq(ui.canApprove({ item: { state: "submitted" }, changed_rows: 0, staleness: { stale: false } }), false);
+  });
+
+  test("配置变更：列表与详情按状态渲染，批准按钮受能力键控制", function () {
+    var item = {
+      id: "cs_000001",
+      title: "改脉冲宽度",
+      reason: "产线要求",
+      state: "submitted",
+      baseline_id: "bl_000001",
+      baseline_revision: "r1",
+      changes: [{ writes_value: true, from: { type: "decimal", text: "650", unit: "ms" }, to: { type: "decimal", text: "700", unit: "ms" } }],
+      submitted_by: "管理员乙",
+      submitted_at: "2026-10-20T10:00:00Z",
+      revision: "r2",
+    };
+    var detail = {
+      item: item,
+      rows: [
+        {
+          parameter_id: "pm_1",
+          name: "脉冲宽度",
+          category: "时序",
+          decision: "use_new",
+          writes_value: true,
+          from: { type: "decimal", text: "650", unit: "ms" },
+          to: { type: "decimal", text: "700", unit: "ms" },
+          reason: "产线要求",
+        },
+      ],
+      changed_rows: 1,
+      staleness: { stale: false, reasons: [] },
+      allowed: ["approved", "rejected", "withdrawn"],
+    };
+    var app = {
+      pid: "p1",
+      can: function (key) { return key === "config_change_approve" || key === "config_change_submit"; },
+    };
+    var origList = MC.configApi.changeSets;
+    var origDetail = MC.configApi.changeSet;
+    MC.configApi.changeSets = function () { return Promise.resolve({ items: [item] }); };
+    MC.configApi.changeSet = function () { return Promise.resolve(detail); };
+    var host = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0" });
+    document.body.append(host);
+    function tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    MC.changesUi.render(app, host);
+    return tick()
+      .then(function () {
+        ok(host.textContent.indexOf("待批准") > 0, "列表里要有状态徽标");
+        eq(host.querySelectorAll("tbody tr").length, 1);
+        var view = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent === "查看";
+        })[0];
+        ok(view, "每行都要能点开");
+        view.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        ok(host.textContent.indexOf("批准并发布") > 0, "管理员应看到批准按钮");
+        var approve = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent === "批准并发布";
+        })[0];
+        ok(approve, "批准按钮必须渲染出来");
+        eq(approve.disabled, false, "没有阻碍时按钮可用");
+        ok(host.textContent.indexOf("同一个事务") > 0, "要说清批准即发布");
+        MC.configApi.changeSets = origList;
+        MC.configApi.changeSet = origDetail;
+        host.remove();
+      })
+      .catch(function (err) {
+        MC.configApi.changeSets = origList;
+        MC.configApi.changeSet = origDetail;
+        host.remove();
         throw err;
       });
   });

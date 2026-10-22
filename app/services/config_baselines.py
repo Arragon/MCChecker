@@ -262,6 +262,24 @@ def _normalize_values(
     return out
 
 
+def normalize_values(
+    repo: ConfigRepository, raw: Any, *, definition_set_id: Optional[str]
+) -> Dict[str, Dict[str, Any]]:
+    """公开别名：变更单也要把值规整成同一形态。
+
+    共用这一份实现而不是复制规则——"裸文本按定义类型解释""拒绝浮点"这些细节
+    一旦两处各写一遍，迟早会出现同一次改动在两条入口上判得不一样。
+    """
+    return _normalize_values(repo, raw, definition_set_id=definition_set_id)
+
+
+def definitions_by_parameter(
+    repo: ConfigRepository, definition_set_id: Optional[str]
+) -> Dict[str, Dict[str, Any]]:
+    """公开别名：变更单在批准时要按同一份定义复核上下界。"""
+    return _definitions_by_parameter(repo, definition_set_id)
+
+
 def _definitions_by_parameter(
     repo: ConfigRepository, definition_set_id: Optional[str]
 ) -> Dict[str, Dict[str, Any]]:
