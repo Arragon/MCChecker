@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 47;
+  var EXPECTED_CASES = 48;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1728,6 +1728,67 @@
     eq(quad.xMax, 2);
     var blocked = MC.dlCurveExtrema({ coeffs: zero, x_min: 0, x_max: 1, y_min: null, y_max: null, trans_coeff: 1, power_conv_coeff: 0 }, "pp_energy");
     ok(blocked.ready === false, "功率转换系数为 0 时不算范围");
+  });
+
+  test("DL：缩放包住边界与计算点，并标出极值点", function () {
+    function coeffs(extra) {
+      var c = { k1: 0, k2: 0, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0, k8: 0, b: 0 };
+      Object.keys(extra || {}).forEach(function (k) { c[k] = extra[k]; });
+      return c;
+    }
+    function near(a, b, tol) { ok(Math.abs(a - b) <= (tol || 1e-3), a + " 与 " + b + " 相差过大"); }
+    var quad = { coeffs: coeffs({ k1: -6, k2: 1, b: 9 }), x_min: -10, x_max: 10, y_min: null, y_max: null };
+    var curve = MC.dlPlotFrame(quad, "rp_energy", []);
+    ok(curve.xLo < -10 && curve.xHi > 10, "x 上下界要留在画面内");
+    ok(curve.yLo < 0 && curve.yHi > 169, "没有计算点时按曲线本身取 y");
+    eq(curve.turns.length, 1);
+    near(curve.turns[0].x, 3);
+    near(curve.turns[0].y, 0);
+    eq(curve.turns[0].kind, "min");
+
+    var steep = { coeffs: coeffs({ k8: 1 }), x_min: 0, x_max: 2, y_min: 0, y_max: 10 };
+    var fit = MC.dlPlotFrame(steep, "rp_energy", [{ x: 5, y: 3, status: "out_of_x_range", label: "1" }]);
+    ok(fit.xLo < 0 && fit.xHi > 5, "x 上下界和越界计算点都要入画");
+    ok(fit.yLo < 0 && fit.yHi > 10 && fit.yLo < 3 && fit.yHi > 3, "y 上下界和计算点都要入画");
+    ok(fit.yHi < 30, "陡峭曲线不能把边界和计算点挤出画面，实际 yHi=" + fit.yHi);
+
+    var bare = { coeffs: coeffs({ k8: 1 }), x_min: 0, x_max: 2, y_min: null, y_max: null };
+    var onlyPoint = MC.dlPlotFrame(bare, "rp_energy", [{ x: 1, y: 2, label: "1" }]);
+    ok(onlyPoint.yLo < 2 && onlyPoint.yHi > 2 && onlyPoint.yHi < 20, "只有计算点时 y 围着点，不跟着 x^8 走");
+
+    var cubic = { coeffs: coeffs({ k3: 1 }), x_min: -2, x_max: 2, y_min: null, y_max: null };
+    eq(MC.dlPlotFrame(cubic, "rp_energy", []).turns.length, 0, "导数不变号的拐点不是极值");
+
+    var waved = { coeffs: coeffs({ k1: -1, k3: 1 / 3 }), x_min: -2, x_max: 2, y_min: null, y_max: null };
+    var waves = MC.dlPlotFrame(waved, "rp_energy", []).turns;
+    eq(waves.length, 2);
+    eq(waves[0].kind, "max");
+    eq(waves[1].kind, "min");
+    near(waves[0].x, -1);
+    near(waves[1].x, 1);
+    near(waves[0].y, 2 / 3);
+    near(waves[1].y, -2 / 3);
+
+    var flipped = { coeffs: coeffs({ k2: 1 }), x_min: -2, x_max: 2, y_min: null, y_max: null, trans_coeff: -1, power_conv_coeff: 1 };
+    var top = MC.dlPlotFrame(flipped, "pp_energy", []).turns;
+    eq(top.length, 1);
+    eq(top[0].kind, "max");
+    near(top[0].x, 0);
+    near(top[0].y, 0);
+
+    var nearVertex = MC.dlPlotFrame(
+      { coeffs: coeffs({ k2: 1 }), x_min: -4, x_max: 4, y_min: null, y_max: 20 },
+      "rp_energy",
+      [{ x: 3, y: 9, label: "1" }]
+    );
+    ok(nearVertex.yLo < 0 && nearVertex.yHi > 20, "顶点离计算点和 y 上限不远时要一起入画");
+    eq(nearVertex.turns.length, 1);
+    near(nearVertex.turns[0].x, 0);
+    near(nearVertex.turns[0].y, 0);
+
+    var farPeak = MC.dlPlotFrame({ coeffs: coeffs({ k2: -1, b: 1000 }), x_min: -2, x_max: 2, y_min: 0, y_max: 1 }, "rp_energy", []);
+    eq(farPeak.turns.length, 0, "离 y 上下界很远的极值不拉大画面");
+    ok(farPeak.yLo < 0 && farPeak.yHi > 1 && farPeak.yHi < 8, "y 上下界仍占住画面");
   });
 
   test("显示属性开关：关闭后属性行不渲染，但 compact 数组未被裁剪", function () {

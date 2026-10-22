@@ -237,7 +237,147 @@
     return step * pow;
   }
 
-  /** 画曲线、x/y 边界线、计算点。返回一句话摘要供图下方显示。 */
+  /** y 对 x 的导数。PP 能量乘上与曲线相同的换算系数，零点位置不变，极大小会随符号翻转。 */
+  function evalDeriv(set, id, x) {
+    var c = set.coeffs || {};
+    var d = 0;
+    var p = 1;
+    for (var n = 1; n <= PLOT_KEYS.length; n++) {
+      var k = Number(c[PLOT_KEYS[n - 1]] || 0);
+      if (k) d += n * k * p;
+      p *= x;
+    }
+    if (id === "pp_energy") {
+      var den = Number(set.power_conv_coeff);
+      var num = Number(set.trans_coeff);
+      if (!isFinite(den) || den === 0 || !isFinite(num)) return NaN;
+      d *= num / den;
+    }
+    return d;
+  }
+
+  function bisectDeriv(set, id, a, b) {
+    var da = evalDeriv(set, id, a);
+    for (var i = 0; i < 60; i++) {
+      var m = (a + b) / 2;
+      if (Math.abs(b - a) <= 1e-10 * (1 + Math.abs(m))) return m;
+      var dm = evalDeriv(set, id, m);
+      if (!isFinite(dm)) return m;
+      if (da === 0 || da * dm <= 0) b = m;
+      else { a = m; da = dm; }
+    }
+    return (a + b) / 2;
+  }
+
+  /**
+   * 开区间 (x0, x1) 内的极值点（导数变号）。纯拐点（导数碰到 0 但不变号）不标。
+   * 返回按 x 排序的 {x, y, kind:'min'|'max'}。
+   */
+  function curveTurns(set, id, x0, x1) {
+    if (!curveReady(set, id) || !(x1 > x0) || !isFinite(x0) || !isFinite(x1)) return [];
+    var steps = 480;
+    var prevX = x0;
+    var prevD = evalDeriv(set, id, x0);
+    var span = x1 - x0;
+    var found = [];
+    function push(root) {
+      var edge = span * 1e-6;
+      if (!(root > x0 + edge && root < x1 - edge)) return;
+      var eps = Math.max(span * 1e-4, 1e-8);
+      var yL = evalCurveY(set, id, root - eps);
+      var yM = evalCurveY(set, id, root);
+      var yR = evalCurveY(set, id, root + eps);
+      if (!isFinite(yL) || !isFinite(yM) || !isFinite(yR)) return;
+      var kind = null;
+      if (yM <= yL && yM <= yR && (yM < yL || yM < yR)) kind = "min";
+      else if (yM >= yL && yM >= yR && (yM > yL || yM > yR)) kind = "max";
+      if (!kind) return;
+      for (var j = 0; j < found.length; j++) {
+        if (Math.abs(found[j].x - root) <= 1e-5 * (1 + span)) return;
+      }
+      found.push({ x: root, y: yM, kind: kind });
+    }
+    for (var i = 1; i <= steps; i++) {
+      var x = i === steps ? x1 : x0 + span * (i / steps);
+      var d = evalDeriv(set, id, x);
+      if (isFinite(prevD) && prevD === 0) push(prevX);
+      else if (isFinite(prevD) && isFinite(d) && prevD * d < 0) push(bisectDeriv(set, id, prevX, x));
+      prevX = x;
+      prevD = d;
+    }
+    found.sort(function (a, b) { return a.x - b.x; });
+    return found.slice(0, 8);
+  }
+
+  function finitePush(arr, v) {
+    if (v !== null && v !== undefined && isFinite(v)) arr.push(v);
+  }
+
+  /** 单点或空跨度撑开一点，避免上下界叠在同一条线上。 */
+  function widenPair(lo, hi, rel, abs) {
+    if (hi > lo) return { lo: lo, hi: hi };
+    var p = Math.max(Math.abs(lo) * rel, abs);
+    return { lo: lo - p, hi: (hi > lo ? hi : lo) + p };
+  }
+
+  /**
+   * 取景：画面必须包住已填的 x/y 上下界和全部计算点，并在四周留白。
+   * 曲线本身可以画出界外被裁掉，不能反过来把边界和计算点挤出画面。
+   * 没有边界也没有计算点时，才按曲线本身取 y。
+   * turns 只保留落在这个画面里的极值点。
+   */
+  function plotFrame(set, id, marks) {
+    marks = marks || [];
+    var xs = [];
+    finitePush(xs, finiteNum(set.x_min));
+    finitePush(xs, finiteNum(set.x_max));
+    marks.forEach(function (m) { finitePush(xs, m.x); });
+    var xPair = xs.length ? widenPair(Math.min.apply(null, xs), Math.max.apply(null, xs), 0.1, 1) : { lo: 0, hi: 10 };
+    var ys = [];
+    finitePush(ys, finiteNum(set.y_min));
+    finitePush(ys, finiteNum(set.y_max));
+    marks.forEach(function (m) { finitePush(ys, m.y); });
+    var turns = curveTurns(set, id, xPair.lo, xPair.hi);
+    if (ys.length && turns.length) {
+      /* 极值点离边界/计算点不远时一并入画，避免抛物线顶点被裁掉；离得过远则不拉轴，免得把边界和计算点挤成一条线。 */
+      var yAnchorLo = Math.min.apply(null, ys);
+      var yAnchorHi = Math.max.apply(null, ys);
+      var yRoom = Math.max(yAnchorHi - yAnchorLo, Math.max(Math.abs(yAnchorLo), Math.abs(yAnchorHi), 1)) * 2;
+      turns.forEach(function (t) {
+        if (isFinite(t.y) && t.y >= yAnchorLo - yRoom && t.y <= yAnchorHi + yRoom) ys.push(t.y);
+      });
+    }
+    var yPair;
+    if (ys.length) {
+      yPair = widenPair(Math.min.apply(null, ys), Math.max.apply(null, ys), 0.15, 1);
+    } else if (curveReady(set, id)) {
+      var samples = [];
+      var steps = 240;
+      for (var i = 0; i <= steps; i++) {
+        var y = evalCurveY(set, id, xPair.lo + (xPair.hi - xPair.lo) * (i / steps));
+        if (isFinite(y)) samples.push(y);
+      }
+      turns.forEach(function (t) { if (isFinite(t.y)) samples.push(t.y); });
+      if (!samples.length) return null;
+      yPair = widenPair(Math.min.apply(null, samples), Math.max.apply(null, samples), 0.15, 1);
+    } else return null;
+    if (!isFinite(yPair.lo) || !isFinite(yPair.hi)) return null;
+    var xPad = (xPair.hi - xPair.lo) * 0.1;
+    var yPad = (yPair.hi - yPair.lo) * 0.14;
+    var xLo = xPair.lo - xPad;
+    var xHi = xPair.hi + xPad;
+    var yLo = yPair.lo - yPad;
+    var yHi = yPair.hi + yPad;
+    return {
+      xLo: xLo,
+      xHi: xHi,
+      yLo: yLo,
+      yHi: yHi,
+      turns: turns.filter(function (t) { return t.x >= xLo && t.x <= xHi && t.y >= yLo && t.y <= yHi; }),
+    };
+  }
+
+  /** 画曲线、x/y 边界线、计算点和极值。返回一句话摘要供图下方显示。 */
   function paintPlot(canvas, set, id, marks, axis, focus) {
     var xName = withUnit(axis.x, axis.xUnit);
     var yName = withUnit(axis.y, axis.yUnit);
@@ -273,32 +413,25 @@
     var xmax = finiteNum(set.x_max);
     var yminB = finiteNum(set.y_min);
     var ymaxB = finiteNum(set.y_max);
-    var xs = [];
-    marks.forEach(function (m) { xs.push(m.x); });
-    if (xmin !== null) xs.push(xmin);
-    if (xmax !== null) xs.push(xmax);
-    var xLo = 0;
-    var xHi = 10;
-    if (xmin !== null && xmax !== null && xmin < xmax) {
-      xLo = xmin;
-      xHi = xmax;
-    } else if (xs.length) {
-      xLo = Math.min.apply(null, xs);
-      xHi = Math.max.apply(null, xs);
-    }
-    marks.forEach(function (m) {
-      if (m.x < xLo) xLo = m.x;
-      if (m.x > xHi) xHi = m.x;
-    });
-    if (xLo === xHi) {
-      var pad0 = Math.max(Math.abs(xLo) * 0.1, 1);
-      xLo -= pad0;
-      xHi += pad0;
-    } else {
-      var pad = (xHi - xLo) * 0.06;
-      xLo -= pad;
-      xHi += pad;
-    }
+    var frame = plotFrame(set, id, marks);
+    if (!frame) return note("当前系数在此范围内数值过大，无法绘制曲线");
+
+    var plotL = 56;
+    var plotR = 18;
+    var plotT = 28;
+    var plotB = 40;
+    var plotW = Math.max(cssW - plotL - plotR, 10);
+    var plotH = Math.max(cssH - plotT - plotB, 10);
+    /* 再留出标记和坐标文字的像素边，避免贴着绘图区边缘被裁掉。 */
+    var gutter = 16;
+    var gx = (frame.xHi - frame.xLo) * (gutter / Math.max(plotW - gutter * 2, 1));
+    var gy = (frame.yHi - frame.yLo) * (gutter / Math.max(plotH - gutter * 2, 1));
+    var xLo = frame.xLo - gx;
+    var xHi = frame.xHi + gx;
+    var yLo = frame.yLo - gy;
+    var yHi = frame.yHi + gy;
+    function X(x) { return plotL + ((x - xLo) / (xHi - xLo)) * plotW; }
+    function Y(y) { return plotT + ((yHi - y) / (yHi - yLo)) * plotH; }
 
     var samples = [];
     var steps = 240;
@@ -306,53 +439,12 @@
       var sx = xLo + (xHi - xLo) * (si / steps);
       samples.push({ x: sx, y: evalCurveY(set, id, sx) });
     }
-    var finiteYs = [];
-    samples.forEach(function (s) { if (isFinite(s.y)) finiteYs.push(s.y); });
-    var anchors = [];
-    if (yminB !== null) anchors.push(yminB);
-    if (ymaxB !== null) anchors.push(ymaxB);
-    marks.forEach(function (m) { if (isFinite(m.y)) anchors.push(m.y); });
-    var yPool = anchors.slice();
-    if (anchors.length) {
-      var aLo = Math.min.apply(null, anchors);
-      var aHi = Math.max.apply(null, anchors);
-      var aSpan = Math.max(aHi - aLo, Math.abs(aLo) * 0.05, 1);
-      finiteYs.forEach(function (y) {
-        if (y >= aLo - aSpan * 3 && y <= aHi + aSpan * 3) yPool.push(y);
-      });
-    } else if (finiteYs.length) {
-      var sorted = finiteYs.slice().sort(function (a, b) { return a - b; });
-      var i10 = Math.floor(sorted.length * 0.08);
-      var i90 = Math.min(sorted.length - 1, Math.max(Math.ceil(sorted.length * 0.92) - 1, 0));
-      yPool.push(sorted[i10], sorted[i90]);
-    }
-    if (yPool.length < 2 && finiteYs.length) yPool.push(Math.min.apply(null, finiteYs), Math.max.apply(null, finiteYs));
-    if (!yPool.length) return note("当前系数在此范围内数值过大，无法绘制曲线");
-    var yLo = Math.min.apply(null, yPool);
-    var yHi = Math.max.apply(null, yPool);
-    if (yLo === yHi) {
-      var ypad0 = Math.max(Math.abs(yLo) * 0.15, 1);
-      yLo -= ypad0;
-      yHi += ypad0;
-    } else {
-      var ypad = (yHi - yLo) * 0.12;
-      yLo -= ypad;
-      yHi += ypad;
-    }
-
-    var plotL = 56;
-    var plotR = 16;
-    var plotT = 24;
-    var plotB = 40;
-    var plotW = Math.max(cssW - plotL - plotR, 10);
-    var plotH = Math.max(cssH - plotT - plotB, 10);
-    function X(x) { return plotL + ((x - xLo) / (xHi - xLo)) * plotW; }
-    function Y(y) { return plotT + ((yHi - y) / (yHi - yLo)) * plotH; }
 
     var grid = cssColor("--c-guide", "#e4e7ec");
     var primary = cssColor("--c-primary", "#2563eb");
     var warning = cssColor("--c-warning", "#d97706");
     var danger = cssColor("--c-danger", "#dc2626");
+    var turnColor = cssColor("--c-success", "#16a34a");
     var surface = cssColor("--c-surface", "#ffffff");
 
     ctx.strokeStyle = grid;
@@ -431,8 +523,8 @@
       ctx.font = "11px sans-serif";
       var right = lx > plotL + plotW - 60;
       ctx.textAlign = right ? "right" : "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(label, right ? lx - 4 : lx + 4, plotT + 4);
+      ctx.textBaseline = "bottom";
+      ctx.fillText(label, right ? lx - 4 : lx + 4, plotT + plotH - 4);
     }
     function hline(y, label) {
       if (y === null || y < yLo || y > yHi) return;
@@ -456,6 +548,44 @@
     vline(xmax, "x 上限");
     hline(yminB, "y 下限");
     hline(ymaxB, "y 上限");
+
+    frame.turns.forEach(function (t) {
+      if (t.x < xLo || t.x > xHi || t.y < yLo || t.y > yHi) return;
+      var tx = X(t.x);
+      var ty = Y(t.y);
+      ctx.beginPath();
+      ctx.moveTo(tx, ty - 3.5);
+      ctx.lineTo(tx + 3.5, ty);
+      ctx.lineTo(tx, ty + 3.5);
+      ctx.lineTo(tx - 3.5, ty);
+      ctx.closePath();
+      ctx.fillStyle = surface;
+      ctx.fill();
+      ctx.lineWidth = 1.25;
+      ctx.strokeStyle = turnColor;
+      ctx.stroke();
+      var label = util.formatNumber(t.x) + ", " + util.formatNumber(t.y);
+      ctx.font = "10px sans-serif";
+      ctx.fillStyle = turnColor;
+      ctx.textAlign = "left";
+      ctx.textBaseline = t.kind === "min" ? "top" : "bottom";
+      var lx = tx + 6;
+      var ly = t.kind === "min" ? ty + 5 : ty - 5;
+      var tw = ctx.measureText(label).width;
+      if (lx + tw > plotL + plotW - 2) lx = Math.max(plotL + 2, tx - 6 - tw);
+      if (t.kind === "min" && ly + 12 > plotT + plotH - 2) {
+        ctx.textBaseline = "bottom";
+        ly = ty - 5;
+      } else if (t.kind !== "min" && ly - 12 < plotT + 2) {
+        ctx.textBaseline = "top";
+        ly = ty + 5;
+      }
+      ctx.strokeStyle = surface;
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.strokeText(label, lx, ly);
+      ctx.fillText(label, lx, ly);
+    });
 
     marks.forEach(function (m) {
       if (m.x < xLo || m.x > xHi || m.y < yLo || m.y > yHi) return;
@@ -493,11 +623,13 @@
     marks.forEach(function (m) {
       if (m.status === "out_of_x_range" || m.status === "out_of_y_range") outCount++;
     });
-    if (!marks.length) return "输入数值后，计算点会标在曲线上";
-    return "已标出 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : "");
+    var summary = !marks.length ? "输入数值后，计算点会标在曲线上" : ("已标出 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : ""));
+    if (frame.turns.length) summary += "；" + frame.turns.length + " 个极值点已标出坐标";
+    return summary;
   }
 
   MC.dlCurveExtrema = curveExtrema;
+  MC.dlPlotFrame = plotFrame;
 
   MC.views.dl = function (app, route) {
     var q = route.query || {};
@@ -819,7 +951,7 @@
               h(
                 "div.dl-pane-title",
                 h("span", "数值关系"),
-                h("div.dl-legend", h("span", h("i.lg-curve"), "曲线"), h("span", h("i.lg-x"), "x 边界"), h("span", h("i.lg-y"), "y 边界"), h("span", h("i.lg-pt"), "计算点"))
+                h("div.dl-legend", h("span", h("i.lg-curve"), "曲线"), h("span", h("i.lg-x"), "x 边界"), h("span", h("i.lg-y"), "y 边界"), h("span", h("i.lg-pt"), "计算点"), h("span", h("i.lg-turn"), "极值"))
               ),
               S.ui.chartWrap,
               caption,
