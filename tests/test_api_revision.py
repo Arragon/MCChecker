@@ -99,6 +99,10 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reject"): None,
     # 产物（M6-14）：写 blob + 建对象，仍不动旧 5 段
     ("POST", "/api/v1/p/{pid}/config/artifacts"): None,
+    # 升级落地建的是**新对象**（草稿），没有"改哪个已有对象"的 CAS 目标
+    ("POST", "/api/v1/config/upgrade/common"): None,
+    ("POST", "/api/v1/p/{pid}/config/upgrade/model"): None,
+    ("POST", "/api/v1/p/{pid}/config/upgrade/rebase"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

@@ -426,6 +426,9 @@ data/config_management/
 | GET/POST | `/api/v1/p/{pid}/config/artifacts` | profile | 产物列表 / 生成（`?baseline_id=` 过滤；复用 200 / 新建 201） |
 | GET | `/api/v1/p/{pid}/config/artifacts/{id}` | profile | 产物详情（含 `edits`/`validation`/`delivery_status`） |
 | GET | `/api/v1/p/{pid}/config/artifacts/{id}/raw` | profile | 下载（`X-Content-Sha256` + `ETag`，**不重生成**） |
+| GET/POST | `/api/v1/config/upgrade/common` | global | 通用层升版计划 / 按决议建草稿 |
+| GET/POST | `/api/v1/p/{pid}/config/upgrade/model` | profile | 机型跨版本升级计划 / 落地 |
+| GET/POST | `/api/v1/p/{pid}/config/upgrade/rebase` | profile | 同版本刷新计划 / 落地 |
 | GET | `/api/v1/p/{pid}/config/audit` | profile | 审计检索 |
 
 **路径形态的选择**：基线与观测是**全局对象**（携带 `profile_id` 字段、共用全局修订号），
@@ -570,6 +573,69 @@ no-op（没有任何改动）时**直接字节拷贝模板**，不经解析器�
 `statusLabel` / `statusTone` / `statusHint` / `shortSha` / `editCount` / `rowModel` /
 `canGenerate` / `baselineOptions` / `deliveryNotice`。未知状态一律按最保守的 `unverified`
 呈现——把不认识的值显示成"已核验"是最坏的一种乐观。
+
+### 6.5 跨版本升级（M7-04）
+
+六个入口成对出现：`GET` 出计划（只读、幂等），`POST` 按决议建**草稿**。计划与落地的
+权限键不同（`config_read` / `config_change_submit`）；落地产物是基线草稿，发布仍走
+变更单（§6.3 的"批准即发布"）。
+
+**三方是谁**（合并算法见 `core/config_merge.py`，纯函数）：
+
+| 模式 | O 旧共同基准 | L 旧本地值 | N 新上游 |
+|---|---|---|---|
+| `common_release_upgrade` | 旧版本默认出口批次解析值 | 旧版本已批准通用基线 | 新版本默认出口批次 |
+| `model_release_upgrade` | 机型基线引用的 `upstream_ref` + `upstream_revision` | 旧机型基线 | 新版本**已批准**通用基线 |
+| `model_rebase` | 同上 | 旧机型基线 | 同一条通用基线的**新修订** |
+
+**三个不许**：
+
+1. **不随机选最新**：目标版本有多个模板变体时 `400`，`detail.candidates` 列全部候选。
+   跨版本靠 `variant.family_id` 认"同一个模板"。
+2. **不漂移共同基准**：O 取机型基线记录的 `upstream_revision`，不是上游 head。
+   只存 `upstream_ref`（id）的话，通用层一发新修订，O 就等于 N，合并退化成"全都没变"。
+3. **不自动传播**：通用层升版不触碰任何机型基线；机型必须显式调 `/upgrade/*` 才产生新对象。
+
+**响应形状**（前端只摆位置，不自己算）：
+
+```json
+{
+  "mode": "common_release_upgrade",
+  "target": {"release_id": "...", "variant_id": "...", "definition_set_id": "...", "batch_id": "..."},
+  "previous": {"release_id": "...", "baseline_id": "...", "baseline_revision": "r2"},
+  "sources": {
+    "base":   {"kind": "release_default", "present": true, "batch_id": "...", "snapshots": [{"sha256": "..."}]},
+    "ours":   {"kind": "baseline", "present": true, "baseline_id": "...", "revision": "r2"},
+    "theirs": {"kind": "release_default", "present": true, "batch_id": "...", "snapshots": [{"sha256": "..."}]}
+  },
+  "three_way": true,
+  "items": [{"parameter_id": "...", "action": "conflict", "decision": null,
+             "allowed": ["use_new", "inherit_old", "manual", "pin", "clear_pin"],
+             "base": {...}, "ours": {...}, "theirs": {...}, "candidate": {...},
+             "reasons": ["both_sides_changed"], "blockers": [], "evidence": []}],
+  "blockers": [], "warnings": [], "needs_decision": ["..."], "manual": [],
+  "can_apply": false, "publishable": false
+}
+```
+
+`publishable` **恒为 false**：升级接口从不发布。`three_way=false`（无共同基准）时
+`items` 全部 `reasons=["no_previous_source"]`，前端必须禁用"一键合并"，只能另走新建。
+
+**`POST` 的请求体**：`{release_id, variant_id?, decisions: {parameter_id: decision}, expected?, reason?}`。
+
+* `decisions` 缺项且该行是冲突/需人工 → `400`，`detail.pending` 点名；
+* 需人工项（拆分/合并、目标已退役却有本地 override 等）必须显式 `drop` 才放行；
+* `expected` 与计划不一致（`model_revision` / `parent_revision` / `previous_baseline_revision`）
+  → `409 PLAN_STALE`，`detail.drift` 给期望值与实际值；
+* 落地成功 `201`，返回 `{item, plan, applied}`，基线带 `upgrade_provenance`。
+
+**`upgrade_provenance`** 记三方来源（含每个快照的 SHA-256）、逐项决议、换算证据与
+`dropped` 列表——审计能回答"这一版为什么这么合"。
+
+**前端契约**（`MC.upgradeUi`，`views/upgrade.js`，审阅页「版本升级」分段）：
+`classify` / `matchFilter` / `countByFilter` / `rowModel` / `effectiveDecision` /
+`bulkResolve` / `pendingOf` / `canApply` / `summaryText`。两条界面规矩：
+**不以颜色替代文本**（每个状态都有字），**无共同基准不许一键合并**。
 
 ---
 

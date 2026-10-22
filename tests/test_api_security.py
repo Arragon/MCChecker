@@ -158,6 +158,10 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reject"): "config_change_approve",
     # M6-14：生成产物是独立的写动作，与提交/批准分开
     ("POST", "/api/v1/p/{pid}/config/artifacts"): "config_artifact_generate",
+    # M7-04：升级落地产出的是**基线草稿**，与建基线同一个能力键
+    ("POST", "/api/v1/config/upgrade/common"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/upgrade/model"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/upgrade/rebase"): "config_change_submit",
 }
 
 ROUTE_VALUES = {

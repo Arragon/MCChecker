@@ -32,7 +32,9 @@
         header,
         h("div.view-title", h("h1", "审阅修改"), h("div.view-sub", S.seg === "changes"
           ? "配置变更单：草稿 → 提交 → 批准发布。批准即发布新基线修订，没有中间态。"
-          : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
+          : S.seg === "upgrade"
+            ? "跨版本升级：旧共同基准 / 旧本地值 / 新上游 三方合并，落地产出基线草稿。"
+            : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
         S.seg === "remarks" && S.data ? h("span.small.muted", "已决定 " + decided + " / " + total) : null,
         h("button.btn", { type: "button", onclick: function () { load(); } }, icon("refresh"), "刷新"),
         segments()
@@ -58,11 +60,17 @@
           label
         );
       }
-      return h("div.row", { style: "gap:6px" }, tab("remarks", "修改建议"), tab("changes", "配置变更"));
+      return h(
+        "div.row",
+        { style: "gap:6px" },
+        tab("remarks", "修改建议"),
+        tab("changes", "配置变更"),
+        tab("upgrade", "版本升级")
+      );
     }
 
     function load(silent) {
-      if (S.seg === "changes") {
+      if (S.seg === "changes" || S.seg === "upgrade") {
         render();
         return;
       }
@@ -103,6 +111,17 @@
           desc: "请确认 changes.js 已在 index.html 中引入。",
         }))));
         if (MC.changesUi) MC.changesUi.render(app, changeHost);
+        return;
+      }
+      if (S.seg === "upgrade") {
+        var upgradeHost = h("div");
+        util.replace(host, h("div.view-body", h("div.container", MC.upgradeUi ? upgradeHost : MC.stateBlock({
+          kind: "empty",
+          icon: "settings",
+          title: "版本升级模块未加载",
+          desc: "请确认 upgrade.js 已在 index.html 中引入。",
+        }))));
+        if (MC.upgradeUi) MC.upgradeUi.render(app, upgradeHost, { pid: app.pid });
         return;
       }
       var files = S.data.files;
@@ -250,7 +269,7 @@
       title: "审阅修改",
       icon: "review",
       update: function () {},
-      onShow: function () { if (S.seg === "changes" || S.data) load(true); },
+      onShow: function () { if (S.seg === "changes" || S.seg === "upgrade" || S.data) load(true); },
       isDirty: function () { return false; },
       destroy: unsub,
     };

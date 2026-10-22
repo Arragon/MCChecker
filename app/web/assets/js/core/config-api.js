@@ -102,6 +102,17 @@
     artifact: function (pid, aid) {
       return unwrap(api.get(api.p(pid, "/config/artifacts/" + api.seg(aid))));
     },
+    /* 跨版本升级（M7-04）：计划是读、落地是写；候选值全部来自服务端 MergePlan，
+     * 前端不自己算合并。 */
+    upgradeCommonPlan: function (query) {
+      return unwrap(api.get("/config/upgrade/common", query));
+    },
+    upgradeModelPlan: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/upgrade/model"), query));
+    },
+    upgradeRebasePlan: function (pid) {
+      return unwrap(api.get(api.p(pid, "/config/upgrade/rebase")));
+    },
 
     /* ---- 写（M6-04 起真实接入）---- */
     createParameter: function (payload, headers) {
@@ -167,6 +178,24 @@
       return unwrap(
         api.post(api.p(pid, "/config/artifacts"), payload, null,
           Object.assign({ "Idempotency-Key": actionKey("artifact", payload && payload.baseline_id) }, headers || {}))
+      );
+    },
+    createCommonUpgrade: function (payload, headers) {
+      return unwrap(
+        api.post("/config/upgrade/common", payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("up-common", payload && payload.release_id) }, headers || {}))
+      );
+    },
+    createModelUpgrade: function (pid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/upgrade/model"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("up-model", payload && payload.release_id) }, headers || {}))
+      );
+    },
+    createRebase: function (pid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/upgrade/rebase"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("up-rebase", pid) }, headers || {}))
       );
     },
 

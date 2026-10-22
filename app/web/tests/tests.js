@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 77;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账 6（M6-10）+ 变更单 5（M6-11/M6-12）+ 交付产物 6（M6-14）
+  var EXPECTED_CASES = 84;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账 6（M6-10）+ 变更单 5（M6-11/M6-12）+ 交付产物 6（M6-14）+ 版本升级 7（M7-04）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -2697,6 +2697,239 @@
       .then(function () {
         ok(host.textContent.indexOf("逐字节保真") > 0, "告警要显示出来，不能只存着");
         ok(host.textContent.indexOf("/R[1]/P[1]") > 0, "落点要能对照");
+        restore();
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+  /* ---- M7-04：跨版本升级合并 ---- */
+
+  test("版本升级：状态标签与分类可多重，不以颜色替代文本", function () {
+    var ui = MC.upgradeUi;
+    eq(ui.ACTION_LABELS.conflict, "冲突");
+    eq(ui.ACTION_LABELS.from_new, "跟随新版");
+    var model = ui.rowModel({
+      parameter_id: "pm_1",
+      name: "脉冲宽度",
+      action: "conflict",
+      reasons: ["pin_needs_confirm"],
+      base: { value: { type: "decimal", text: "650", unit: "ms" } },
+      ours: { value: { type: "decimal", text: "700", unit: "ms" } },
+      theirs: { value: { type: "decimal", text: "0.7", unit: "s" } },
+    });
+    eq(model.actionLabel, "冲突");
+    eq(model.tagLabels.indexOf("冲突") >= 0, true);
+    eq(model.tagLabels.indexOf("固定值") >= 0, true, "pin 冲突要额外标出来");
+    eq(model.tagLabels.indexOf("单位") >= 0, true, "单位不同要能被筛出来");
+    eq(model.oursText, "700 ms");
+    eq(model.needsDecision, true);
+    // 分类是标签，不是颜色：删掉所有样式也读得懂
+    eq(ui.classify({ action: "drop" }).indexOf("removed") >= 0, true);
+    eq(ui.classify({ action: "from_new", theirs: { value: { type: "int", text: "1" } } }).indexOf("new") >= 0, true);
+  });
+
+  test("版本升级：过滤维度计数与命中", function () {
+    var ui = MC.upgradeUi;
+    var items = [
+      { parameter_id: "a", action: "conflict" },
+      { parameter_id: "b", action: "from_new", theirs: { value: { type: "int", text: "1" } } },
+      { parameter_id: "c", action: "keep", base: { value: {} }, ours: { value: {} }, theirs: { value: {} } },
+      { parameter_id: "d", action: "manual", blockers: [{ code: "unknown_parameter" }] },
+    ];
+    var counts = ui.countByFilter(items);
+    eq(counts.all, 4);
+    eq(counts.conflict, 1);
+    eq(counts.manual, 1);
+    eq(counts.new, 1);
+    eq(counts.same, 1);
+    eq(items.filter(function (i) { return ui.matchFilter(i, "conflict"); }).length, 1);
+    eq(items.filter(function (i) { return ui.matchFilter(i, "all"); }).length, 4);
+    eq(items.filter(function (i) { return ui.matchFilter(i, "pinned"); }).length, 0);
+  });
+
+  test("版本升级：批量只填无冲突项，冲突与需人工留着", function () {
+    var ui = MC.upgradeUi;
+    var items = [
+      { parameter_id: "a", action: "from_new", decision: "use_new" },
+      { parameter_id: "b", action: "keep", decision: null },
+      { parameter_id: "c", action: "conflict", decision: null },
+      { parameter_id: "d", action: "manual", decision: "manual" },
+    ];
+    var filled = ui.bulkResolve(items, {});
+    eq(filled.a, "use_new");
+    eq(filled.c, undefined, "冲突不许被批量决定");
+    eq(filled.d, undefined, "需人工的项不许被批量决定");
+    var pending = ui.pendingOf({ items: items }, filled);
+    eq(pending, ["c", "d"]);
+  });
+
+  test("版本升级：无共同基准时不许一键合并", function () {
+    var ui = MC.upgradeUi;
+    var blocked = ui.canApply(
+      { three_way: false, items: [], blockers: [] },
+      {}
+    );
+    eq(blocked.allowed, false);
+    eq(blocked.reason.indexOf("没有共同基准") >= 0, true);
+
+    var ready = ui.canApply(
+      {
+        three_way: true,
+        items: [{ parameter_id: "a", action: "conflict", decision: null }],
+        blockers: [],
+      },
+      {}
+    );
+    eq(ready.allowed, false);
+    eq(ready.reason.indexOf("1 项没有决议") >= 0, true);
+
+    var okPlan = ui.canApply(
+      { three_way: true, items: [{ parameter_id: "a", action: "from_new", decision: "use_new" }], blockers: [] },
+      {}
+    );
+    eq(okPlan.allowed, true, okPlan.reason);
+    eq(ui.canApply(null, {}).allowed, false, "没有计划就别提落地");
+  });
+
+  test("版本升级：阻断项可以显式 drop 化解", function () {
+    var ui = MC.upgradeUi;
+    var plan = {
+      three_way: true,
+      items: [{ parameter_id: "a", action: "manual", decision: "manual" }],
+      blockers: [{ parameter_id: "a", code: "unknown_parameter" }],
+    };
+    eq(ui.canApply(plan, {}).allowed, false);
+    eq(ui.canApply(plan, { a: "drop" }).allowed, true, "显式 drop 之后不再阻断");
+  });
+
+  test("版本升级：摘要只说非零项", function () {
+    var ui = MC.upgradeUi;
+    eq(ui.summaryText(null), "尚未计算");
+    eq(
+      ui.summaryText({
+        items: [
+          { action: "from_new" },
+          { action: "from_new" },
+          { action: "conflict" },
+        ],
+      }),
+      "跟随新版 2 · 冲突 1"
+    );
+    eq(ui.summaryText({ items: [{ action: "keep" }] }), "保持 1");
+    eq(ui.summaryText({ items: [] }), "没有需要处理的参数");
+  });
+
+  test("版本升级：真实渲染三栏 + 决议下拉 + 落地按钮受控", function () {
+    var host = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0" });
+    document.body.append(host);
+    var orig = {
+      releases: MC.configApi.releases,
+      common: MC.configApi.upgradeCommonPlan,
+      create: MC.configApi.createCommonUpgrade,
+    };
+    var created = [];
+    MC.configApi.releases = function () {
+      return Promise.resolve({ items: [{ id: "sr_000002", version_label: "2.0.0" }] });
+    };
+    MC.configApi.upgradeCommonPlan = function (query) {
+      return Promise.resolve({
+        mode: "common_release_upgrade",
+        three_way: true,
+        publishable: false,
+        target: { release_id: query.release_id, variant_id: "tv_000002" },
+        previous: { release_id: "sr_000001", baseline_revision: "r2" },
+        warnings: [],
+        items: [
+          {
+            parameter_id: "pm_1",
+            name: "脉冲宽度",
+            action: "conflict",
+            decision: null,
+            allowed: ["use_new", "inherit_old", "manual", "pin", "clear_pin"],
+            reasons: ["both_sides_changed"],
+            blockers: [],
+            base: { value: { type: "decimal", text: "650", unit: "ms" } },
+            ours: { value: { type: "decimal", text: "900", unit: "ms" } },
+            theirs: { value: { type: "decimal", text: "700", unit: "ms" } },
+            candidate: { type: "decimal", text: "900", unit: "ms" },
+          },
+          {
+            parameter_id: "pm_2",
+            name: "最大速度",
+            action: "from_new",
+            decision: "use_new",
+            allowed: [],
+            reasons: ["ours_unchanged"],
+            blockers: [],
+            base: { value: { type: "decimal", text: "100", unit: "mm/s" } },
+            ours: { value: { type: "decimal", text: "100", unit: "mm/s" } },
+            theirs: { value: { type: "decimal", text: "120", unit: "mm/s" } },
+            candidate: { type: "decimal", text: "120", unit: "mm/s" },
+          },
+        ],
+        blockers: [],
+      });
+    };
+    MC.configApi.createCommonUpgrade = function (payload) {
+      created.push(payload);
+      return Promise.resolve({ item: { id: "bl_000099" }, applied: { explicit: ["pm_1"] } });
+    };
+    var app = { pid: "p1", can: function () { return true; } };
+    function tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    function restore() {
+      MC.configApi.releases = orig.releases;
+      MC.configApi.upgradeCommonPlan = orig.common;
+      MC.configApi.createCommonUpgrade = orig.create;
+      host.remove();
+    }
+
+    MC.upgradeUi.render(app, host, { pid: "p1" });
+    return tick()
+      .then(function () {
+        ok(host.textContent.indexOf("版本升级") >= 0, "分段标题要在");
+        // 刚进来只有空态：必须先点「计算合并」才有计划
+        ok(host.textContent.indexOf("先选目标版本再计算") >= 0, "空态要说下一步");
+        var run = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent.indexOf("计算合并") >= 0;
+        })[0];
+        ok(run, "要有计算按钮");
+        run.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        ok(host.textContent.indexOf("650 ms") >= 0 && host.textContent.indexOf("900 ms") >= 0, "三栏要把三方值摆开");
+        eq(host.querySelectorAll("tbody tr").length, 2);
+        var apply = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent === "生成升级草稿";
+        })[0];
+        ok(apply, "要有落地按钮");
+        eq(apply.disabled, true, "冲突没决议时不许落地");
+        ok(host.textContent.indexOf("1 项没有决议") >= 0, "理由要说人话");
+        return null;
+      })
+      .then(function () {
+        // 逐行做决议：第一行保留本地，第二行已经按建议填好
+        var select = host.querySelectorAll("tbody tr")[0].querySelector("select");
+        select.value = "inherit_old";
+        select.dispatchEvent(new Event("change"));
+        return tick();
+      })
+      .then(function () {
+        var apply = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent === "生成升级草稿";
+        })[0];
+        eq(apply.disabled, false, "决议齐了就可以落地");
+        apply.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        eq(created.length, 1);
+        eq(created[0].release_id, "sr_000002");
+        eq(created[0].decisions.pm_1, "inherit_old");
+        eq(created[0].decisions.pm_2, "use_new", "无冲突项按建议带上");
         restore();
       })
       .catch(function (err) {
