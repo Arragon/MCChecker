@@ -65,7 +65,7 @@ def _sq_item(**over):
 
 class TestFindRoots:
     def test_multiple_roots_sorted_ascending_with_residuals(self):
-        """范围内多解：全部返回、升序、**不自动选绝对值最小**（卡面 + 横幅「系统不会自动替你挑选」）。"""
+        """范围内多解：全部返回、升序、**不自动选绝对值最小**（界面横幅为「系统不自动选取」）。"""
         res = dltool.find_roots(4.0, SQUAT_COEFFS, -10.0, 10.0)
         assert res["status"] == "ok"
         assert [r["x"] for r in res["roots"]] == [1.0, 5.0]

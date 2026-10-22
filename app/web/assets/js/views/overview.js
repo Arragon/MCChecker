@@ -14,7 +14,7 @@
     var el = h("div");
     var header = h(
       "div.view-header",
-      h("div.view-title", h("h1", "速览"), h("div.view-sub", "收藏的关键变量会实时读取当前版本的值；文件被删除或节点消失时会明确标出。"))
+      h("div.view-title", h("h1", "速览"), h("div.view-sub", "收藏变量按当前版本实时取值。源文件删除或节点缺失时予以标明。"))
     );
     var bodyEl = h("div.view-body");
     el.append(header, bodyEl);
@@ -53,7 +53,7 @@
                   kind: "empty",
                   icon: "star",
                   title: "还没有收藏变量",
-                  desc: "打开任意配置文件，点击节点前的 ☆（或选中后按 S）即可收藏。收藏对本机型的所有用户可见。",
+                  desc: "打开任意配置文件，点击节点前的星标，或选中节点后按 S，即可加入收藏。收藏对本机型的所有用户可见。",
                   actions: openFirst,
                 })
           )
@@ -67,7 +67,7 @@
           h(
             "div.panel.fav-group",
             h("div.panel-header", icon("alert"), h("h3", "源文件已不存在"), h("span.small.muted", deleted.reduce(function (s, g) { return s + g.items.length; }, 0) + " 项")),
-            h("div.panel-body", h("div.banner.banner-warning", icon("info"), h("div.banner-body", "以下收藏的源文件已被删除或改名，暂时移到这里；文件恢复后会自动回到原分组。")), h("div", { style: "margin-top:12px" }, deleted.map(function (g) { return groupTable(g, true); })))
+            h("div.panel-body", h("div.banner.banner-warning", icon("info"), h("div.banner-body", "下列收藏的源文件已删除或更名，暂列于此。文件恢复后将自动回到原分组。")), h("div", { style: "margin-top:12px" }, deleted.map(function (g) { return groupTable(g, true); })))
           )
         );
       }

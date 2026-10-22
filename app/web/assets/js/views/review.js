@@ -30,7 +30,7 @@
       if (S.data) S.data.files.forEach(function (f) { f.nodes.forEach(function (n) { total++; if (S.draft[dkey(f.file, n.group_key)]) decided++; }); });
       util.replace(
         header,
-        h("div.view-title", h("h1", "审阅修改"), h("div.view-sub", "为每个节点选择一条建议或“不通过”。通过的建议会生成一个新的配置文件（带时间戳），原文件保持不变。")),
+        h("div.view-title", h("h1", "审阅修改"), h("div.view-sub", "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
         S.data ? h("span.small.muted", "已决定 " + decided + " / " + total) : null,
         h("button.btn", { type: "button", onclick: function () { load(); } }, icon("refresh"), "刷新")
       );
@@ -142,7 +142,7 @@
         ),
         h(
           "div.panel",
-          h("div.panel-body.row.wrap", h("div.grow.small.muted", "可以只提交已决定的节点，未决定的节点保持待审。通过的建议会合并生成一个新文件，原文件不会被覆盖。"), submit)
+          h("div.panel-body.row.wrap", h("div.grow.small.muted", "可仅提交已审定的节点，未审定的节点保持待审。通过的建议将合并为新文件，原文件不被覆盖。"), submit)
         )
       );
     }

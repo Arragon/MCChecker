@@ -11,12 +11,12 @@
   var api = MC.api;
 
   var SECTIONS = [
-    { id: "sources", label: "更新源", icon: "link", desc: "为每个配置文件维护下载链接与修改记录链接，支持单条或全量立即更新。" },
-    { id: "schedule", label: "定时更新", icon: "clock", desc: "按固定间隔自动执行全量更新（含修改记录拉取）。" },
-    { id: "people", label: "人员与权限", icon: "users", desc: "IP 对应表与管理员名单全机型共用。IP 对应表用于识别建议提交人；管理员可审阅修改建议、删除文件。" },
-    { id: "bindings", label: "变量绑定", icon: "link", desc: "把不同文件中含义相同的变量绑定为一组，对比时会以紫色标出。" },
-    { id: "tools", label: "工具菜单", icon: "tool", desc: "维护「外部工具」页面中的常用链接。点击后在新窗口打开。" },
-    { id: "profiles", label: "机型管理", icon: "device", desc: "每个机型拥有独立的文件、历史、收藏、绑定与设置。" },
+    { id: "sources", label: "更新源", icon: "link", desc: "维护各配置文件的下载链接与修改记录链接，支持单条或全量立即更新。" },
+    { id: "schedule", label: "定时更新", icon: "clock", desc: "按设定间隔自动执行全量更新，包括修改记录的拉取。" },
+    { id: "people", label: "人员与权限", icon: "users", desc: "IP 对应表与管理员名单为全机型共用。IP 对应表用于识别建议提交人；管理员可审阅修改建议并删除文件。" },
+    { id: "bindings", label: "变量绑定", icon: "link", desc: "将不同文件中含义相同的变量编为一组，对比时以紫色标出。" },
+    { id: "tools", label: "工具菜单", icon: "tool", desc: "维护「外部工具」中的常用链接，点击后在新窗口打开。" },
+    { id: "profiles", label: "机型管理", icon: "device", desc: "各机型拥有独立的配置文件、历史版本、收藏、绑定与设置。" },
   ];
 
   function fieldError(fields, err) {
@@ -132,9 +132,9 @@
             "div.panel",
             res.items.length
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "文件"), h("th", "下载链接"), h("th", "最近结果"), h("th.cell-actions", "操作"))), h("tbody", rows)))
-              : MC.stateBlock({ kind: "empty", icon: "link", title: "还没有更新源", desc: "添加后可一键从链接拉取最新配置，旧版本自动归档。", actions: ro() ? null : [h("button.btn.btn-primary", { type: "button", onclick: function () { sourceDialog(null); } }, "新增更新源")] })
+              : MC.stateBlock({ kind: "empty", icon: "link", title: "还没有更新源", desc: "添加后可从链接拉取最新配置，原版本将自动归档。", actions: ro() ? null : [h("button.btn.btn-primary", { type: "button", onclick: function () { sourceDialog(null); } }, "新增更新源")] })
           ),
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "回读可以是 XML、JSON 或 zip/tar.gz。压缩包里的 XML/JSON 会解压进文件列表；若填写了正则关键词，文件名里匹配到的那段会成为新文件名，例如关键词 MachineConstant 会把 Default_MachineConstant_basics.xml 保存为 MachineConstant.xml。校验通过才替换当前版本；内容未变化不会产生新的历史版本。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "回读支持 XML、JSON 以及 zip、tar.gz。压缩包中的 XML 与 JSON 将解压进入文件列表。若填写正则关键词，文件名中的匹配片段将作为新文件名，例如关键词 MachineConstant 会将 Default_MachineConstant_basics.xml 保存为 MachineConstant.xml。校验通过后才替换当前版本；内容未变化时不生成新的历史版本。"),
         ];
       });
     }
@@ -201,7 +201,7 @@
           pageHead(sec),
           h(
             "div.panel",
-            h("div.panel-body.col", { style: "gap:16px;max-width:520px" }, sw, amountField, h("div.field-help", "保存后立即按新间隔重新计划。间隔以小时存储（“天”会换算为 24 小时的整数倍），与旧版配置文件兼容。")),
+            h("div.panel-body.col", { style: "gap:16px;max-width:520px" }, sw, amountField, h("div.field-help", "保存后按新间隔重新计划。间隔以小时存储（「天」换算为 24 小时的整数倍），与既有配置兼容。")),
             h("div.panel-footer", save)
           ),
           h(
@@ -271,7 +271,7 @@
           ),
           /* §11.1 的硬要求：这句「IP 识别不是强认证」必须出现在界面上，不许只写在文档里。
            * M3-13 之前这一段是「未接入分段」的只读横幅，等于没人看得见它。 */
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "权限按 IP 识别，姓名只是助记，不是强认证：适用于可信内网。共用电脑或不可信网络下，任何使用该地址的人都会被认成同一个人（包括管理员），需要另行评估；经反向代理部署还必须配置受信代理，否则所有请求都会被识别为代理地址。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "身份按 IP 识别，姓名仅作助记，不构成强认证，适用于可信内网。共用终端或不可信网络中，使用同一地址的访问者会被识别为同一身份（含管理员），须另行评估。经反向代理部署时必须配置受信代理，否则所有请求都会被识别为代理地址。"),
         ];
       });
     }
@@ -359,9 +359,9 @@
                     h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { bindingDialog(b); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removeBinding(b); } }, "删除"))
                   );
                 }))))
-              : MC.stateBlock({ kind: "empty", icon: "link", title: "暂无绑定组", desc: "例如把 A 文件的 timeout 与 B 文件的 time_out 绑定，对比时会同时标出。" })
+              : MC.stateBlock({ kind: "empty", icon: "link", title: "暂无绑定组", desc: "可将不同文件中含义相同的变量编为一组，对比时一并标出。" })
           ),
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "变量路径格式为「文件名/节点/节点…」，可在文件详情面板中点击「复制绑定路径」获得。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "变量路径格式为「文件名/节点/节点…」，可在文件详情中通过「复制绑定路径」获取。"),
         ];
       });
     }
@@ -476,7 +476,7 @@
               );
             }))))
           ),
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "机型是数据空间而不是权限边界：人员与管理员名单全机型共用一套。"),
+          h("p.xsmall.muted", { style: "margin-top:10px" }, "机型划分数据空间，不划分权限。人员与管理员名单为全机型共用。"),
         ];
       });
     }

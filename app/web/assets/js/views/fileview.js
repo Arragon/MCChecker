@@ -206,7 +206,7 @@
         nav(q);
       }, "文件视图");
       var staleBanner = S.stale
-        ? h("div.banner.banner-warning", icon("refresh"), h("div.banner-body", "此文件已被他人或定时任务更新，当前显示的是旧内容。"), h("button.btn.btn-sm", { type: "button", onclick: function () { S.doc = null; loadDoc(); app.syncRevision(); } }, "重新加载"))
+        ? h("div.banner.banner-warning", icon("refresh"), h("div.banner-body", "此文件已由其他用户或定时任务更新，当前显示的是更新前的内容。"), h("button.btn.btn-sm", { type: "button", onclick: function () { S.doc = null; loadDoc(); app.syncRevision(); } }, "重新加载"))
         : null;
       util.replace(header, title, h("div.row", seg), staleBanner);
     }
@@ -217,7 +217,7 @@
         var f = app.files.filter(function (x) { return x.name === S.name; })[0];
         var items = [
           { label: "复制文件名", icon: "copy", onClick: function () { util.copyText(S.name).then(function () { MC.toast.success("已复制文件名"); }); } },
-          { label: "复制本页链接", icon: "link", onClick: function () { util.copyText(location.href).then(function () { MC.toast.success("已复制链接", "同事打开后会定位到同一文件与版本"); }); } },
+          { label: "复制本页链接", icon: "link", onClick: function () { util.copyText(location.href).then(function () { MC.toast.success("已复制链接", "打开后将定位到同一文件与版本。"); }); } },
         ];
         if (isTemp) {
           items.push("sep", { label: "保存到服务器…", icon: "upload", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅管理员可保存", onClick: saveTempToServer });
@@ -472,7 +472,7 @@
       if (!box) return;
       var i = S.selected;
       if (i < 0 || !S.idx) {
-        util.replace(box, h("div.inspector-head", h("h3", "节点详情")), h("div.inspector-body", MC.stateBlock({ kind: "empty", icon: "info", title: "选择一个节点", desc: "点击左侧任意一行，查看完整值、参数范围、路径，并可收藏或提交修改建议。" })));
+        util.replace(box, h("div.inspector-head", h("h3", "节点详情")), h("div.inspector-body", MC.stateBlock({ kind: "empty", icon: "info", title: "选择一个节点", desc: "在左侧选择节点，以查看完整取值、参数范围与路径，并可收藏或提交修改建议。" })));
         return;
       }
       var idx = S.idx;
@@ -712,7 +712,7 @@
                     ? h("div.table-wrap", table)
                     : MC.stateBlock({ kind: "empty", icon: "history", title: "还没有历史版本", desc: "每次通过上传或更新源覆盖该文件时，旧版本会自动归档到这里。" })
                 ),
-                h("p.xsmall.muted", { style: "margin-top:10px" }, "勾选任意两个版本可直接对比；变更统计中 + 新增、− 删除、~ 修改，⛓ 为涉及绑定变量的条目。")
+                h("p.xsmall.muted", { style: "margin-top:10px" }, "勾选任意两个版本即可对比。变更统计：+ 新增，− 删除，~ 修改，⛓ 涉及绑定变量。")
               )
             )
           );
@@ -982,7 +982,7 @@
                     actions: !res.record_url && app.can("deployer") ? [h("button.btn", { type: "button", onclick: function () { app.go({ kind: "settings", arg: "sources" }); } }, "前往配置")] : null,
                   })
             ),
-            h("p.xsmall.muted", { style: "margin-top:10px" }, "修改记录由更新源服务器提供，与“历史版本”（本系统归档的配置文件）是两类不同的数据。")
+            h("p.xsmall.muted", { style: "margin-top:10px" }, "修改记录由更新源提供，与本系统归档的「历史版本」分属不同数据。")
           )
         )
       );

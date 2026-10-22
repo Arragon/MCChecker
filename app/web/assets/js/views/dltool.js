@@ -623,8 +623,8 @@
     marks.forEach(function (m) {
       if (m.status === "out_of_x_range" || m.status === "out_of_y_range") outCount++;
     });
-    var summary = !marks.length ? "输入数值后，计算点会标在曲线上" : ("已标出 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : ""));
-    if (frame.turns.length) summary += "；" + frame.turns.length + " 个极值点已标出坐标";
+    var summary = !marks.length ? "输入数值后，计算点将标注在曲线上。" : ("已标注 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : ""));
+    if (frame.turns.length) summary += "；已标注 " + frame.turns.length + " 个极值点坐标";
     return summary;
   }
 
@@ -725,7 +725,7 @@
       }
       util.replace(
         header,
-        h("div.view-title", h("h1", "DL 快捷计算"), h("div.view-sub", "八阶多项式 f(x)：正向由 x 求 y，反向由 y 求 x。改参数可直接试算，保存后才影响其他人。")),
+        h("div.view-title", h("h1", "DL 快捷计算"), h("div.view-sub", "以八阶多项式进行正向求值与反向求解。参数修改仅作用于当前会话，保存后对所有用户生效。")),
         seg,
         save
       );
@@ -752,7 +752,7 @@
           },
           function (err) {
             if (err.code === "REVISION_CONFLICT") {
-              MC.confirm({ title: "参数已被他人修改", message: "其他人在你编辑期间保存了新的计算参数。你可以放弃本地修改并加载最新参数，或保留草稿继续试算。", confirmText: "加载最新参数", cancelText: "保留草稿" }).then(function (ok) { if (ok) load(); });
+              MC.confirm({ title: "计算参数已被更新", message: "保存期间已有其他用户写入新的计算参数。可放弃本地修改并加载最新参数，或保留当前草稿继续计算。", confirmText: "加载最新参数", cancelText: "保留草稿" }).then(function (ok) { if (ok) load(); });
             } else MC.toastError("保存失败", err);
           }
         );
@@ -864,7 +864,7 @@
       );
       return h(
         "section.panel.dl-modes",
-        h("div.dl-modes-head", h("h2", "输出量"), h("span.xsmall.muted", "两种模式使用各自独立的系数、范围与绑定，切换后下面的参数、曲线和结果都会跟着换")),
+        h("div.dl-modes-head", h("h2", "输出量"), h("span.xsmall.muted", "两种模式各自维护系数、有效范围与系数绑定。切换模式后，参数、曲线与结果同步切换。")),
         h("div.dl-modes-body", S.ui.tiles, sum)
       );
     }
@@ -1161,19 +1161,19 @@
           multiRows ? badge("badge-warning", multiRows + " 多解") : null,
           bad ? badge("badge-warning", bad + " 需留意") : null,
           h("span.spacer"),
-          dir === "reverse" ? h("span.xsmall.muted.dl-res-note", "候选根：在范围内检测到，不保证穷尽") : null,
+          dir === "reverse" ? h("span.xsmall.muted.dl-res-note", "候选根为当前范围内的检测结果，不保证穷尽。") : null,
           MC.copyButton(csv, "复制为 CSV"),
           h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "下载 CSV", "data-tip": "下载 CSV", onclick: function () { util.downloadBlob("\uFEFF" + csv(), fileLabel, "text/csv;charset=utf-8"); } }, icon("download"))
         ),
-        multiRows ? h("div.banner.banner-warning.dl-res-banner", icon("info"), h("div.banner-body", "部分目标值有多个解。请在下拉框中为每行选择采用的解，复制或下载时会使用你的选择；系统不会自动替你挑选。")) : null,
+        multiRows ? h("div.banner.banner-warning.dl-res-banner", icon("info"), h("div.banner-body", "部分目标值存在多个解。请逐行指定采用的解。复制与下载将使用该指定，系统不自动选取。")) : null,
         h("div.table-wrap.dl-res-table", table)
       );
     }
 
     function extremaNodes(set, id, axis) {
       var got = curveExtrema(set, id);
-      if (!got.bounded) return h("div.dl-extrema-note", "填写 x 的上下限后，自动给出范围内 x、y 的最大最小值");
-      if (got.empty) return h("div.dl-extrema-note", "当前曲线在 x、y 范围内没有点");
+      if (!got.bounded) return h("div.dl-extrema-note", "填写 x 的上下限后，将给出该范围内曲线上 x 与 y 的最大值和最小值。");
+      if (got.empty) return h("div.dl-extrema-note", "当前曲线在给定的 x、y 范围内没有采样点。");
       function cell(label, value, unit) {
         return h("div.dl-ext", h("span.dl-ext-k", label), h("span.mono", util.formatNumber(value)), unit ? h("span.dl-ext-u", unit) : null);
       }
@@ -1295,7 +1295,7 @@
           h("div.row", h("button.btn.btn-sm", { type: "button", onclick: function (e) { extract(id, set, e.currentTarget); } }, icon("refresh"), "从配置刷新系数"), h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { bindingDialog(id); } }, "修改绑定"))
         );
       } else {
-        body = h("div.col", { style: "gap:8px" }, h("div.field-help", "未绑定。绑定后可从配置文件一键提取系数。"), h("div.row", h("button.btn.btn-sm", { type: "button", onclick: function () { bindingDialog(id); } }, icon("link"), "配置绑定")));
+        body = h("div.col", { style: "gap:8px" }, h("div.field-help", "尚未绑定。绑定后可从配置文件提取系数。"), h("div.row", h("button.btn.btn-sm", { type: "button", onclick: function () { bindingDialog(id); } }, icon("link"), "配置绑定")));
       }
       return h("div.dl-group", h("div.section-title", "系数绑定"), body);
     }
@@ -1335,7 +1335,7 @@
                   icon("alert"),
                   h(
                     "div.banner-body",
-                    h("div", h("strong", "存在一对多："), "当前系数在 x 范围内对部分 y 有多个解，反向结果可能不唯一，建议收窄 x 范围。"),
+                    h("div", h("strong", "存在一对多："), "当前系数在 x 范围内对部分 y 存在多个解，反向结果可能不唯一。建议收窄 x 范围。"),
                     h("div.xsmall", { style: "margin-top:4px" }, res.cases.slice(0, 3).map(function (c) { return "y=" + util.formatNumber(c.y) + " → x=" + c.x_values.map(util.formatNumber).join(", "); }).join("；"))
                   )
                 )
@@ -1511,7 +1511,7 @@
             "div.col",
             { style: "gap:12px" },
             MC.field({ label: "来源配置文件", control: fileSel }),
-            MC.field({ label: "变量路径", control: pathInput, help: "点选右侧变量，或直接填写、粘贴路径。" }),
+            MC.field({ label: "变量路径", control: pathInput, help: "可在右侧选择变量，或填写、粘贴路径。" }),
             mapField
           ),
           h(

@@ -223,7 +223,7 @@
         cap(id.is_admin, "审阅、删除文件、保存配置、修改设置与机型（管理员）")
       ),
       h("div.divider"),
-      h("div.xsmall.muted", "身份按访问 IP 识别，姓名只是助记。如需开通权限，请把下面的地址提供给管理员，在「设置 › 人员与权限」中登记。"),
+      h("div.xsmall.muted", "身份按访问 IP 识别，姓名仅作助记。如需开通权限，请将下列地址提供给管理员，并在「设置 › 人员与权限」中登记。"),
       h("div.copyable", { style: "margin-top:8px" }, h("span.copy-text", id.ip), MC.copyButton(id.ip, "复制地址"))
     );
     MC.popover(anchor, body, { align: "end" });
@@ -840,7 +840,7 @@
               h("dt", "提交时间"),
               h("dd", util.formatTime(t.created_at))
             ),
-            h("div.xsmall.muted", "每一项更新的业务结果在「设置 › 更新源」的最近结果列显示；这条任务结束后列表会自动刷新。")
+            h("div.xsmall.muted", "各项更新的结果见「设置 › 更新源」的最近结果列。任务结束后列表将自动刷新。")
           ),
           footer: function (close) {
             return [h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭")];

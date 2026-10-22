@@ -64,7 +64,7 @@
       var add = ro ? null : h("button.btn.btn-primary", { type: "button", onclick: function () { toolDialog(null); } }, icon("plus"), "添加");
       util.replace(
         header,
-        h("div.view-title", h("h1", "外部工具"), h("div.view-sub", items.length + " 个链接 · 新窗口打开")),
+        h("div.view-title", h("h1", "外部工具"), h("div.view-sub", "共 " + items.length + " 个链接，点击后在新窗口打开。")),
         filter,
         add
       );
@@ -78,12 +78,12 @@
           kind: "empty",
           icon: "tool",
           title: "暂无外部工具",
-          desc: ro ? "由管理员添加后，这里会出现可打开的链接" : "点击「添加」放入常用的 http/https 地址",
+          desc: ro ? "由管理员添加后，此处将列出可打开的链接。" : "请通过「添加」登记常用的 http 或 https 地址。",
         }));
         return;
       }
       if (!list.length) {
-        util.replace(body, MC.stateBlock({ kind: "empty", icon: "search", title: "没有匹配的工具", desc: "试试别的名称或地址" }));
+        util.replace(body, MC.stateBlock({ kind: "empty", icon: "search", title: "没有匹配的工具", desc: "请调整名称或地址后重新筛选。" }));
         return;
       }
       util.replace(body, h("div.tools-grid", { role: "list" }, list.map(function (t) { return tile(t, ro); })));

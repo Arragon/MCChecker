@@ -19,7 +19,7 @@
     var resultHost = h("div", { style: "margin-top:16px" });
     var el = h(
       "div",
-      h("div.view-header", h("div.view-title", h("h1", "全局搜索"), h("div.view-sub", "在当前机型全部配置文件的当前版本中查找；匹配变量名、值以及收藏备注（不区分大小写）。"))),
+      h("div.view-header", h("div.view-title", h("h1", "全局搜索"), h("div.view-sub", "在当前机型全部配置文件的当前版本中检索变量名、取值及收藏备注，不区分大小写。"))),
       h("div.view-body", h("div.container", h("div.search-bar", h("div.input-wrap", icon("search"), input), scope, go), resultHost))
     );
 
@@ -63,7 +63,7 @@
 
     function render() {
       if (!S.items.length) {
-        util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "search", title: "没有找到“" + S.q + "”", desc: "检查拼写，或缩短关键词再试。搜索只覆盖当前版本，历史版本请在文件的「对比」中查看。" })));
+        util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "search", title: "没有找到“" + S.q + "”", desc: "未找到匹配项。请核对拼写或缩短关键词。检索范围限于当前版本；历史版本请在文件的「对比」中查看。" })));
         return;
       }
       var groups = {};
