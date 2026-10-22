@@ -1,0 +1,17 @@
+{
+  "kind": "change_set",
+  "id": "cs_000021",
+  "baseline_id": "bl_000018",
+  "base_revision_id": "bl_000016",
+  "plan_ref": {"algorithm": "three_way", "inputs": {"old_common": "bl_000016", "old_model": "bl_000018", "new_common": "bl_000022"}, "output_sha256": "2222222222222222222222222222222222222222222222222222222222222222"},
+  "changes": [
+    {"parameter_id": "pm_000008", "from": {"type": "decimal", "text": "0.65"}, "to": {"type": "decimal", "text": "0.70"}, "intent": "override", "decision": "use_new", "reason": "新版默认放宽"}
+  ],
+  "state": "submitted",
+  "submitted_at": "2026-10-22T03:00:00Z",
+  "submitted_by": "127.0.0.1",
+  "decided_at": null,
+  "decided_by": null,
+  "decide_note": null,
+  "previous_revision_id": null
+}

@@ -1,0 +1,11 @@
+{
+  "AXIS1_VELOCITY": "200.0",
+  "AXIS1_ACCEL": "810",
+  "AXIS2_VELOCITY": "198.0",
+  "AXIS2_ACCEL": "800",
+  "PULSE": "700",
+  "ENABLE": true,
+  "MODE": "auto",
+  "RETRY": 3,
+  "NAME": "beta"
+}

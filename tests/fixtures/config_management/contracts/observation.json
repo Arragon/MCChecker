@@ -1,0 +1,21 @@
+{
+  "kind": "observation",
+  "id": "ob_000019",
+  "scope": "profile",
+  "profile_id": "A",
+  "logical_file_id": "lf_000020",
+  "release_ref": {"release_id": "sr_000003", "resolution": "confirmed"},
+  "blob_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "captured_at": "2026-10-22T02:00:00Z",
+  "capture_kind": "scheduled",
+  "source_name": "现场 10.20.1.30",
+  "completeness": "partial",
+  "mapping": {
+    "entries": [
+      {"parameter_id": "pm_000008", "raw_key": "PULSE_WIDTH", "status": "mapped", "value_ref": "/PULSE_WIDTH"},
+      {"parameter_id": null, "raw_key": "UNKNOWN_KEY", "status": "unmapped", "value_ref": "/UNKNOWN_KEY"}
+    ],
+    "unresolved_keys": ["UNKNOWN_KEY"]
+  },
+  "status": "parsed"
+}

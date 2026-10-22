@@ -1,0 +1,11 @@
+{
+  "kind": "delivery",
+  "id": "dl_000024",
+  "artifact_id": "ar_000023",
+  "target": {"profile_id": "A", "device_id": null},
+  "registered_by": "127.0.0.1",
+  "executed_at": "2026-10-22T05:00:00Z",
+  "result": "declared_ok",
+  "evidence": {"note": "现场同事导入后回报正常", "photo_ref": null},
+  "created_at": "2026-10-22T05:05:00Z"
+}

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MachineConfig xmlns="urn:mc:cfg:1" model="B">
+  <Axis id="1">
+    <Velocity unit="mm/s">200.0</Velocity>
+    <Acceleration unit="mm/s2">810</Acceleration>
+  </Axis>
+  <Axis id="2">
+    <Velocity unit="mm/s">198.0</Velocity>
+    <Acceleration unit="mm/s2">800</Acceleration>
+  </Axis>
+  <Pulse unit="ms">700</Pulse>
+  <Enable>true</Enable>
+  <Mode>auto</Mode>
+  <Retry>3</Retry>
+  <Name>beta</Name>
+</MachineConfig>

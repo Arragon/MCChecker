@@ -1,0 +1,15 @@
+{
+  "kind": "artifact",
+  "id": "ar_000023",
+  "baseline_id": "bl_000016",
+  "variant_id": "tv_000006",
+  "definition_set_id": "ds_000011",
+  "template_snapshot_id": "fs_000005",
+  "blob_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "filename": "轴参数_1.1.0_A.xml",
+  "byte_size": 520,
+  "created_at": "2026-10-22T04:00:00Z",
+  "created_by": "127.0.0.1",
+  "validation": {"ok": true, "checks": ["type", "unit", "range", "non_target_unchanged"], "warnings": []},
+  "determinism_key": "4444444444444444444444444444444444444444444444444444444444444444"
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "definition_revision",
+  "id": "dr_000009",
+  "parameter_id": "pm_000008",
+  "revision_no": 2,
+  "xml": {"name": "PulseWidth", "loc": {"path": [{"name": "PulseWidth", "occurrence": 1}], "attribute": null}},
+  "json": {"key": "PULSE_WIDTH", "pointer": "/PULSE_WIDTH"},
+  "type": "decimal",
+  "unit": "s",
+  "constraints": {"min": "0.0", "max": "10.0", "enum": [], "pattern": null, "max_length": null},
+  "remarks": "单位由 ms 改为 s，换算可逆",
+  "definition_set_id": null,
+  "created_at": "2026-10-22T00:00:00Z",
+  "created_by": "127.0.0.1",
+  "supersedes": "dr_000010",
+  "status": "active"
+}

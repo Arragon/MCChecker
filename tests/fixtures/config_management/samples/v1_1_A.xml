@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MachineConfig xmlns="urn:mc:cfg:1" model="A">
+  <Axis id="1">
+    <Velocity unit="mm/s">120.5</Velocity>
+    <Acceleration unit="mm/s2">800</Acceleration>
+  </Axis>
+  <Axis id="2">
+    <Velocity unit="mm/s">118.0</Velocity>
+    <Acceleration unit="mm/s2">790</Acceleration>
+  </Axis>
+  <PulseWidth unit="s">0.65</PulseWidth>
+  <Flags>
+    <Enable>true</Enable>
+    <Trace>false</Trace>
+  </Flags>
+  <Mode>auto</Mode>
+  <Retry>4</Retry>
+  <Name>alpha</Name>
+</MachineConfig>

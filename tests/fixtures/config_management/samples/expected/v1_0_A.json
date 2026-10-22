@@ -1,0 +1,17 @@
+{
+  "release": "1.0.0",
+  "model": "A",
+  "note": "脉冲宽度原始单位 ms，此处给出规范单位 s 的等价值",
+  "values": {
+    "pm_000030": {"type": "decimal", "text": "120.5", "unit": "mm/s", "source_key": "Velocity[1]"},
+    "pm_000031": {"type": "decimal", "text": "800", "unit": "mm/s2", "source_key": "Acceleration[1]"},
+    "pm_000032": {"type": "decimal", "text": "118.0", "unit": "mm/s", "source_key": "Velocity[2]"},
+    "pm_000033": {"type": "decimal", "text": "790", "unit": "mm/s2", "source_key": "Acceleration[2]"},
+    "pm_000008": {"type": "decimal", "text": "0.650", "unit": "s", "source_key": "Pulse", "source_unit": "ms", "source_text": "650"},
+    "pm_000034": {"type": "bool", "text": "true", "unit": null, "source_key": "Enable"},
+    "pm_000035": {"type": "enum", "text": "auto", "unit": null, "source_key": "Mode"},
+    "pm_000036": {"type": "int", "text": "3", "unit": null, "source_key": "Retry"},
+    "pm_000037": {"type": "string", "text": "alpha", "unit": null, "source_key": "Name"},
+    "pm_000038": {"type": "bool", "text": "false", "unit": null, "source_key": "Trace", "absent": true}
+  }
+}

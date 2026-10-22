@@ -1,0 +1,10 @@
+{
+  "kind": "release_batch",
+  "id": "rb_000014",
+  "release_id": "sr_000003",
+  "snapshot_ids": ["fs_000005", "fs_000015"],
+  "supersedes": null,
+  "created_at": "2026-10-22T00:00:00Z",
+  "created_by": "127.0.0.1",
+  "note": "1.1.0 首轮出口批次"
+}

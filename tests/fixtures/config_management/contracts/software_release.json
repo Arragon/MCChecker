@@ -1,0 +1,12 @@
+{
+  "kind": "software_release",
+  "id": "sr_000003",
+  "version_label": "1.1.0",
+  "build": "20260901",
+  "predecessor_id": "sr_000004",
+  "status": "active",
+  "source": "manual",
+  "notes": "合成样本：Pulse 改名为 PulseWidth，单位 ms → s",
+  "created_at": "2026-10-22T00:00:00Z",
+  "updated_at": "2026-10-22T00:00:00Z"
+}

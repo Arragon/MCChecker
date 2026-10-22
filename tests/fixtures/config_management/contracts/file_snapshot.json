@@ -1,0 +1,17 @@
+{
+  "kind": "file_snapshot",
+  "id": "fs_000005",
+  "release_id": "sr_000003",
+  "logical_file_id": "lf_000002",
+  "kind_detail": "xml_export",
+  "variant_id": "tv_000006",
+  "blob_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "original_filename": "轴参数.xml",
+  "byte_size": 512,
+  "captured_at": "2026-10-22T00:00:00Z",
+  "source": "archive",
+  "archive_ref": {"pid": "A", "filename": "轴参数.xml", "archive_name": "20260901_101500.xml"},
+  "batch_id": null,
+  "provenance": {"resolution": "exact", "note": "归档时间与版本发布日期一致"},
+  "status": "confirmed"
+}

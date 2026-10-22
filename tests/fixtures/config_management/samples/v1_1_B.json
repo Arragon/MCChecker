@@ -1,0 +1,12 @@
+{
+  "AXIS1_VELOCITY": "200.0",
+  "AXIS1_ACCEL": "810",
+  "AXIS2_VELOCITY": "198.0",
+  "AXIS2_ACCEL": "800",
+  "PULSE_WIDTH": "0.70",
+  "ENABLE": true,
+  "TRACE": false,
+  "MODE": "auto",
+  "RETRY": 4,
+  "NAME": "beta"
+}

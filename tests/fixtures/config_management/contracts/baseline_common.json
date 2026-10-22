@@ -1,0 +1,22 @@
+{
+  "kind": "baseline",
+  "id": "bl_000016",
+  "scope": "common",
+  "profile_id": null,
+  "device_id": null,
+  "release_id": "sr_000003",
+  "definition_set_id": "ds_000011",
+  "variant_id": "tv_000006",
+  "values": {
+    "pm_000008": {"value": {"type": "decimal", "text": "0.65"}, "intent": "pin", "source_ref": "fs_000005"}
+  },
+  "upstream_ref": null,
+  "previous_revision_id": "bl_000017",
+  "state": "approved",
+  "reason": "按 1.1.0 出口默认初始化",
+  "created_at": "2026-10-22T00:00:00Z",
+  "created_by": "127.0.0.1",
+  "decided_at": "2026-10-22T01:00:00Z",
+  "decided_by": "127.0.0.1",
+  "decide_note": "管理员批准"
+}

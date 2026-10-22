@@ -1,0 +1,13 @@
+{
+  "kind": "logical_file",
+  "id": "lf_000002",
+  "family_id": "cf_000001",
+  "role": "xml_export",
+  "display_name": "轴参数.xml",
+  "aliases": [
+    {"name": "轴参数.xml", "since": "2026-10-22T00:00:00Z", "until": null}
+  ],
+  "status": "active",
+  "created_at": "2026-10-22T00:00:00Z",
+  "updated_at": "2026-10-22T00:00:00Z"
+}

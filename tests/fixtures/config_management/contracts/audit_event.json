@@ -1,0 +1,13 @@
+{
+  "kind": "audit_event",
+  "seq": 128,
+  "at": "2026-10-22T01:00:00Z",
+  "actor": {"ip": "127.0.0.1", "name": "本机"},
+  "action": "baseline.approve",
+  "object": {"kind": "baseline", "id": "bl_000016", "revision": "r1"},
+  "before_sha": null,
+  "after_sha": "5555555555555555555555555555555555555555555555555555555555555555",
+  "reason": "管理员批准",
+  "idempotency_key": "approve-bl-000016-r1",
+  "detail": {"changes": 1}
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "parameter",
+  "id": "pm_000008",
+  "family_id": "cf_000001",
+  "name": "脉冲宽度",
+  "category": "时序",
+  "notes": "1.1.0 起单位改为秒",
+  "aliases": [{"name": "Pulse", "until": "2026-09-01T00:00:00Z"}],
+  "status": "active",
+  "created_at": "2026-10-22T00:00:00Z",
+  "updated_at": "2026-10-22T00:00:00Z"
+}

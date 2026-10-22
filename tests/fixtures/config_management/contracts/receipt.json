@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "idempotency_key": "approve-bl-000016-r1",
+  "request_hash": "6666666666666666666666666666666666666666666666666666666666666666",
+  "seq": 128,
+  "result_summary": {"baseline_id": "bl_000016", "state": "approved"},
+  "at": "2026-10-22T01:00:00Z"
+}

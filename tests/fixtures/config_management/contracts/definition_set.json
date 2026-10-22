@@ -1,0 +1,10 @@
+{
+  "kind": "definition_set",
+  "id": "ds_000011",
+  "release_id": "sr_000003",
+  "variant_id": "tv_000006",
+  "definition_ids": ["dr_000009", "dr_000012", "dr_000013"],
+  "created_at": "2026-10-22T00:00:00Z",
+  "created_by": "127.0.0.1",
+  "note": "1.1.0 / 机型 A 变体"
+}
