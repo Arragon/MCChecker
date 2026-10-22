@@ -114,7 +114,7 @@
     function toolDialog(t) {
       var name = h("input.input", { type: "text", value: t ? t.name : "" });
       var desc = h("input.input", { type: "text", value: t ? t.description : "" });
-      var url = h("input.input.input-mono", { type: "url", value: t ? t.url : "", placeholder: "http://…" });
+      var url = h("input.input.input-mono", { type: "url", value: t ? t.url : "", placeholder: "填写访问地址" });
       var F = {
         name: MC.field({ label: "名称", required: true, control: name }),
         description: MC.field({ label: "说明", control: desc }),
