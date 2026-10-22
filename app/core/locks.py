@@ -56,6 +56,11 @@ registry_lock = threading.RLock()
 #: 人员与管理员名单全机型共用一份文件，读改写用这一把，不用机型锁。
 people_lock = threading.RLock()
 
+#: 配置管理域（`data/config_management/`）的写锁（M5-03）。
+#: 锁序固定：`write_gate.write()` → `profile_lock`（如涉及）→ `management_lock`；
+#: 反向获取即死锁，测试 `test_config_transactions.py` 有对应守护。
+management_lock = threading.RLock()
+
 
 # ---------------------------------------------------------------------------
 # 维护态写闸门
