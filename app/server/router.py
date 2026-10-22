@@ -102,6 +102,7 @@ def build_router(settings: Settings) -> Router:
     from . import (
         api_bindings,
         api_compare,
+        api_config,
         api_delete,
         api_dl,
         api_documents,
@@ -149,4 +150,7 @@ def build_router(settings: Settings) -> Router:
     api_tools.register(router)
     api_profiles.register(router)
     router.add("GET", "/api/v1/p/{pid}/revision", api_revision.get_revision)
+    # 配置管理域（M5-08）：全局 `/api/v1/config/*` 与机型 `/api/v1/p/{pid}/config/*`。
+    # 门禁在 handler 入口判定（默认 off），因此注册顺序不影响旧接口。
+    api_config.register(router, settings)
     return router
