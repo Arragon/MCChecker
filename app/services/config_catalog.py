@@ -29,9 +29,11 @@ A/B 两个机型可能出现同名的同名文件，因此 `file_snapshot` 的�
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from xml.etree import ElementTree as ET
 
-from ..core import config_mapping
+from ..core import config_mapping, config_values
 from ..core.config_repository import ConfigRepository, now_iso, sha256_bytes
 from ..core.errors import (
     CORRUPT_DATA,
@@ -39,6 +41,7 @@ from ..core.errors import (
     INVALID_INPUT,
     NOT_FOUND,
     PARSE_FAILED,
+    REVISION_CONFLICT,
     AppError,
 )
 
@@ -953,5 +956,702 @@ def catalog_summary(repo: ConfigRepository) -> Dict[str, Any]:
         "logical_files": len(list_logical_files(repo)),
         "snapshots": len(list_snapshots(repo)),
         "variants": len(list_variants(repo)),
+        "parameters": len(list_parameters(repo)),
+        "definition_sets": len(list_definition_sets(repo)),
         "latest_release": releases[0] if releases else None,
     }
+
+
+# -- 参数主档（M6-03）-------------------------------------------------------
+
+#: 参数值类型。`enum` 必须同时给 `constraints.enum`。
+VALUE_TYPES = ("decimal", "int", "bool", "text", "enum")
+
+CONSTRAINT_KEYS = ("min", "max", "enum", "pattern", "max_length")
+
+
+def _normalize_constraints(raw: Any, value_type: str) -> Dict[str, Any]:
+    """约束一律补齐五个键，避免"有的参数有 min、有的没有"这种半结构化数据。"""
+    payload = raw if isinstance(raw, dict) else {}
+    unknown = set(payload) - set(CONSTRAINT_KEYS)
+    if unknown:
+        raise AppError(
+            INVALID_INPUT,
+            "未知的约束字段",
+            field="constraints",
+            unknown=sorted(unknown),
+            allowed=list(CONSTRAINT_KEYS),
+        )
+    result: Dict[str, Any] = {
+        "min": None,
+        "max": None,
+        "enum": [],
+        "pattern": None,
+        "max_length": None,
+    }
+    for key in ("min", "max"):
+        if payload.get(key) in (None, ""):
+            continue
+        text = _optional_text(payload[key])
+        if value_type not in ("decimal", "int"):
+            raise AppError(
+                INVALID_INPUT, "%s 只对数值类型有意义" % key, field="constraints", type=value_type
+            )
+        try:
+            number = Decimal(text)
+        except InvalidOperation:
+            raise AppError(
+                INVALID_INPUT, "%s 必须是十进制数" % key, field="constraints", value=text
+            )
+        result[key] = _format_decimal(number)
+    if result["min"] is not None and result["max"] is not None:
+        if Decimal(result["min"]) > Decimal(result["max"]):
+            raise AppError(
+                INVALID_INPUT,
+                "约束下界大于上界",
+                field="constraints",
+                min=result["min"],
+                max=result["max"],
+            )
+
+    enum_values = payload.get("enum") or []
+    if isinstance(enum_values, str) or not isinstance(enum_values, Iterable):
+        raise AppError(INVALID_INPUT, "constraints.enum 必须是字符串数组", field="constraints")
+    result["enum"] = [_optional_text(item) for item in enum_values if _optional_text(item)]
+    if value_type == "enum" and not result["enum"]:
+        raise AppError(INVALID_INPUT, "enum 类型必须给出可选值", field="constraints")
+
+    if payload.get("pattern") not in (None, ""):
+        pattern = _optional_text(payload["pattern"])
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise AppError(
+                INVALID_INPUT, "正则不合法", field="constraints", cause=str(exc)
+            )
+        result["pattern"] = pattern
+    if payload.get("max_length") not in (None, ""):
+        try:
+            length = int(payload["max_length"])
+        except (TypeError, ValueError):
+            raise AppError(INVALID_INPUT, "max_length 必须是整数", field="constraints")
+        if length <= 0:
+            raise AppError(INVALID_INPUT, "max_length 必须大于 0", field="constraints")
+        result["max_length"] = length
+    return result
+
+
+def _format_decimal(number: "Decimal") -> str:
+    """去掉尾零但不进科学计数法（与 `config_values` 的文本风格一致）。"""
+    normalized = number.normalize()
+    text = format(normalized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def list_parameters(
+    repo: ConfigRepository,
+    family_id: Optional[str] = None,
+    *,
+    include_retired: bool = True,
+) -> List[Dict[str, Any]]:
+    items = repo.list_objects("parameter")
+    if family_id is not None:
+        items = [item for item in items if str(item.get("family_id")) == str(family_id)]
+    if not include_retired:
+        items = [item for item in items if item.get("status") != LIFECYCLE_RETIRED]
+    return sorted(items, key=lambda item: (item.get("name") or "", item.get("id") or ""))
+
+
+def get_parameter(repo: ConfigRepository, parameter_id: str) -> Dict[str, Any]:
+    payload = repo.get("parameter", _optional_text(parameter_id))
+    if payload is None:
+        raise AppError(NOT_FOUND, "参数不存在", parameter_id=parameter_id)
+    return payload
+
+
+def _find_parameter_by_name(
+    repo: ConfigRepository, family_id: str, name: str
+) -> Optional[Dict[str, Any]]:
+    for item in list_parameters(repo, family_id):
+        if item.get("name") == name:
+            return item
+    return None
+
+
+def create_parameter(
+    repo: ConfigRepository,
+    actor: Any,
+    *,
+    family_id: str,
+    name: Any,
+    category: Any = "",
+    notes: Any = "",
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """新建参数主档。`name` 是**用户名称**，不是 XML/JSON 里的键。"""
+    family = get_family(repo, family_id)
+    parameter_name = _text(name, "参数名称")
+    existing = _find_parameter_by_name(repo, family["id"], parameter_name)
+    if existing is not None and not _replayed(repo, idempotency_key):
+        raise AppError(
+            DEFINITION_CONFLICT,
+            "该配置类别下已有同名参数",
+            name=parameter_name,
+            parameter_id=existing["id"],
+        )
+    stamp = now_iso()
+    tx = repo.transaction(
+        actor,
+        "新建参数 %s" % parameter_name,
+        action="parameter.create",
+        idempotency_key=idempotency_key,
+    )
+    ref = tx.put(
+        "parameter",
+        {
+            "family_id": family["id"],
+            "name": parameter_name,
+            "category": _optional_text(category),
+            "notes": _optional_text(notes),
+            "aliases": [],
+            "status": LIFECYCLE_ACTIVE,
+            "updated_at": stamp,
+        },
+    )
+    tx.commit()
+    return get_parameter(repo, str(ref.id))
+
+
+def _parameter_expected(parameter: Dict[str, Any], expected_revision: Optional[str]) -> Dict[str, str]:
+    """CAS 期望值：客户端给了就用它（真正的"读到哪版改哪版"），否则用刚读到的 revision。
+
+    只传服务器刚读到的 revision 等价于"永远成立"，那是弱 CAS；因此 API 层会把
+    表单里的 `expected_revision` 一路带下来，过期即 409 且草稿保留。
+    """
+    return {
+        "parameter:%s" % parameter["id"]: _optional_text(expected_revision)
+        or parameter.get("revision")
+    }
+
+
+def _rewrite_parameter(
+    repo: ConfigRepository,
+    actor: Any,
+    parameter: Dict[str, Any],
+    mutations: Dict[str, Any],
+    *,
+    action: str,
+    reason: str,
+    idempotency_key: Optional[str],
+    expected_revision: Optional[str] = None,
+) -> Dict[str, Any]:
+    payload = {
+        "family_id": parameter.get("family_id"),
+        "name": parameter.get("name"),
+        "category": parameter.get("category") or "",
+        "notes": parameter.get("notes") or "",
+        "aliases": [dict(item) for item in (parameter.get("aliases") or [])],
+        "status": parameter.get("status"),
+    }
+    payload.update(mutations)
+    payload["updated_at"] = now_iso()
+    tx = repo.transaction(
+        actor,
+        reason,
+        action=action,
+        expected=_parameter_expected(parameter, expected_revision),
+        idempotency_key=idempotency_key,
+    )
+    tx.put("parameter", payload, object_id=parameter["id"])
+    tx.commit()
+    return get_parameter(repo, parameter["id"])
+
+
+def rename_parameter(
+    repo: ConfigRepository,
+    actor: Any,
+    *,
+    parameter_id: str,
+    new_name: Any,
+    reason: Any = "",
+    idempotency_key: Optional[str] = None,
+    expected_revision: Optional[str] = None,
+) -> Dict[str, Any]:
+    """改名：稳定 ID 不变，旧名进入 `aliases`（带 `until`），旧名检索仍回同一 ID。"""
+    parameter = get_parameter(repo, parameter_id)
+    name = _text(new_name, "参数名称")
+    if name == parameter.get("name"):
+        raise AppError(INVALID_INPUT, "新旧名称相同", name=name)
+    clash = _find_parameter_by_name(repo, str(parameter.get("family_id")), name)
+    if clash is not None and clash["id"] != parameter["id"]:
+        raise AppError(
+            DEFINITION_CONFLICT,
+            "该配置类别下已有同名参数",
+            name=name,
+            parameter_id=clash["id"],
+        )
+    stamp = now_iso()
+    aliases = [dict(item) for item in (parameter.get("aliases") or [])]
+    aliases.append({"name": parameter.get("name"), "until": stamp})
+    return _rewrite_parameter(
+        repo,
+        actor,
+        parameter,
+        {"name": name, "aliases": aliases},
+        action="parameter.rename",
+        reason=_optional_text(reason) or "重命名参数 %s → %s" % (parameter.get("name"), name),
+        idempotency_key=idempotency_key,
+        expected_revision=expected_revision,
+    )
+
+
+def set_parameter_status(
+    repo: ConfigRepository,
+    actor: Any,
+    *,
+    parameter_id: str,
+    status: str,
+    reason: Any = "",
+    idempotency_key: Optional[str] = None,
+    expected_revision: Optional[str] = None,
+) -> Dict[str, Any]:
+    """退役 / 重新启用（`retired` / `active`）。历史修订与基线都不动。"""
+    if status not in (LIFECYCLE_ACTIVE, LIFECYCLE_RETIRED):
+        raise AppError(INVALID_INPUT, "参数状态非法", field="status")
+    parameter = get_parameter(repo, parameter_id)
+    if parameter.get("status") == status:
+        return parameter
+    return _rewrite_parameter(
+        repo,
+        actor,
+        parameter,
+        {"status": status},
+        action="parameter.retire" if status == LIFECYCLE_RETIRED else "parameter.reactivate",
+        reason=_optional_text(reason)
+        or ("%s参数 %s" % ("退役" if status == LIFECYCLE_RETIRED else "启用", parameter.get("name"))),
+        idempotency_key=idempotency_key,
+        expected_revision=expected_revision,
+    )
+
+
+def search_parameters(
+    repo: ConfigRepository,
+    text: Any = "",
+    *,
+    family_id: Optional[str] = None,
+    include_retired: bool = True,
+) -> List[Dict[str, Any]]:
+    """四种检索维度合一：用户名称 / 旧名（别名）/ XML 键 / JSON 键。
+
+    命中任一维度就返回该参数，并带回 `matched` 说明命中的是哪一维，
+    免得界面上"搜到了但看不出为什么"。
+    """
+    needle = _optional_text(text).lower()
+    results: List[Dict[str, Any]] = []
+    for parameter in list_parameters(repo, family_id, include_retired=include_retired):
+        dimension = []
+        if needle and needle in (parameter.get("name") or "").lower():
+            dimension.append("name")
+        for alias in parameter.get("aliases") or []:
+            if needle and needle in (alias.get("name") or "").lower():
+                dimension.append("alias")
+                break
+        definition = current_definition(repo, parameter["id"])
+        if definition is not None:
+            if needle and needle in (definition["xml"].get("name") or "").lower():
+                dimension.append("xml")
+            json_block = definition.get("json") or {}
+            if needle and needle in (json_block.get("key") or "").lower():
+                dimension.append("json")
+        if needle and not dimension:
+            continue
+        item = dict(parameter)
+        item["matched"] = dimension
+        item["current_definition_id"] = definition["id"] if definition else None
+        # 把命中用的键一并回传：前端做二次过滤时不必再猜 XML/JSON 名，
+        # 也不用为了一行数据额外拉一次详情（避免 N+1）。
+        keys = [parameter.get("name") or ""]
+        keys.extend(alias.get("name") or "" for alias in parameter.get("aliases") or [])
+        if definition is not None:
+            keys.append(definition["xml"].get("name") or "")
+            keys.append((definition.get("json") or {}).get("key") or "")
+        item["search_keys"] = [key for key in keys if key]
+        results.append(item)
+    return results
+
+
+# -- 定义修订（M6-03）-------------------------------------------------------
+
+DEFINITION_ACTIVE = "active"
+DEFINITION_RETIRED = "retired"
+
+
+def list_definitions(
+    repo: ConfigRepository, parameter_id: str, *, include_retired: bool = True
+) -> List[Dict[str, Any]]:
+    """某参数的全部定义修订，按 `revision_no` 从新到旧（历史不可覆盖，只能新增）。"""
+    items = [
+        item
+        for item in repo.list_objects("definition_revision")
+        if str(item.get("parameter_id")) == str(parameter_id)
+    ]
+    if not include_retired:
+        items = [item for item in items if item.get("status") == DEFINITION_ACTIVE]
+    return sorted(items, key=lambda item: (int(item.get("revision_no") or 0), item.get("id") or ""), reverse=True)
+
+
+def get_definition(repo: ConfigRepository, definition_id: str) -> Dict[str, Any]:
+    payload = repo.get("definition_revision", _optional_text(definition_id))
+    if payload is None:
+        raise AppError(NOT_FOUND, "定义修订不存在", definition_id=definition_id)
+    return payload
+
+
+def current_definition(
+    repo: ConfigRepository, parameter_id: str
+) -> Optional[Dict[str, Any]]:
+    """当前生效的定义修订（`revision_no` 最大的 active 那条）。"""
+    items = list_definitions(repo, parameter_id, include_retired=False)
+    return items[0] if items else None
+
+
+def _normalize_xml_block(xml_name: Any, xml_loc: Any) -> Dict[str, Any]:
+    name = _text(xml_name, "XML 名称")
+    loc = config_mapping.to_xml_loc(xml_loc)
+    if loc is None:
+        raise AppError(INVALID_INPUT, "缺少 XML 定位（loc）", field="loc")
+    return {"name": name, "loc": loc.to_json()}
+
+
+def _normalize_json_block(json_key: Any, json_pointer: Any) -> Optional[Dict[str, Any]]:
+    key = _optional_text(json_key)
+    pointer = _optional_text(json_pointer)
+    if not key and not pointer:
+        return None
+    if not pointer:
+        pointer = config_mapping.encode_pointer([key])
+    parts = config_mapping.parse_pointer(pointer)
+    if key and parts and parts[-1] != key:
+        raise AppError(
+            INVALID_INPUT,
+            "JSON 键与指针末段不一致",
+            field="json",
+            key=key,
+            pointer=pointer,
+        )
+    return {"key": key or (parts[-1] if parts else ""), "pointer": pointer}
+
+
+def define_parameter(
+    repo: ConfigRepository,
+    actor: Any,
+    *,
+    parameter_id: str,
+    xml_name: Any,
+    xml_loc: Any,
+    json_key: Any = None,
+    json_pointer: Any = None,
+    value_type: str = "decimal",
+    unit: Any = "",
+    constraints: Any = None,
+    remarks: Any = "",
+    idempotency_key: Optional[str] = None,
+    expected_definition_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """追加一条定义修订（**永不原地覆盖**）。
+
+    * `revision_no` 自增，`supersedes` 指向上一条，历史基线仍指向旧修订；
+    * XML 定位必须可解析，JSON 指针必须合法且末段与键一致；
+    * 类型/单位/约束在这里定型，发布前的"与 XML 元信息是否一致"由
+      `verify_definition_against_template` 判定。
+    """
+    parameter = get_parameter(repo, parameter_id)
+    if value_type not in VALUE_TYPES:
+        raise AppError(INVALID_INPUT, "参数类型非法", field="type", allowed=list(VALUE_TYPES))
+    xml_block = _normalize_xml_block(xml_name, xml_loc)
+    json_block = _normalize_json_block(json_key, json_pointer)
+    normalized = _normalize_constraints(constraints, value_type)
+    unit_text = _optional_text(unit)
+    if unit_text and value_type not in ("decimal", "int"):
+        raise AppError(INVALID_INPUT, "只有数值类型才有单位", field="unit")
+
+    # `revision_no` 取**全部历史**的最大值（退役的也算），否则会出现两条 r1；
+    # `supersedes` 只指向当前仍生效的那条——退役之后没有可承接的前驱。
+    history = list_definitions(repo, parameter["id"])
+    revision_no = max((int(item.get("revision_no") or 0) for item in history), default=0) + 1
+    previous = current_definition(repo, parameter["id"])
+    # 追加定义时，表单的 CAS 目标是**当前定义修订**（`expected_definition_id`）：
+    # 每条定义修订都是独立对象、版本号各自从 r1 起，拿 r1 比对没有意义。
+    # `expected_definition_id=""` 表示"我看到的时候还没有定义"，非空表示
+    # "我看到的是这一条"；两个并发请求都拿着同一条来追加，第二个必须 409。
+    if expected_definition_id is not None:
+        actual_id = previous["id"] if previous else None
+        wanted = _optional_text(expected_definition_id) or None
+        if wanted != actual_id:
+            raise AppError(
+                REVISION_CONFLICT,
+                "定义已被修改，请刷新后重试",
+                expected_definition_id=wanted,
+                actual_definition_id=actual_id,
+                parameter_id=parameter["id"],
+            )
+    stamp = now_iso()
+    tx = repo.transaction(
+        actor,
+        "追加定义修订 %s r%d" % (parameter.get("name"), revision_no),
+        action="definition.create",
+        expected=_parameter_expected(parameter, None),
+        idempotency_key=idempotency_key,
+    )
+    ref = tx.put(
+        "definition_revision",
+        {
+            "parameter_id": parameter["id"],
+            "revision_no": revision_no,
+            "xml": xml_block,
+            "json": json_block,
+            "type": value_type,
+            "unit": unit_text,
+            "constraints": normalized,
+            "remarks": _optional_text(remarks),
+            "definition_set_id": None,
+            "created_by": _label(actor),
+            "supersedes": previous["id"] if previous else None,
+            "status": DEFINITION_ACTIVE,
+            "updated_at": stamp,
+        },
+    )
+    tx.commit()
+    return get_definition(repo, str(ref.id))
+
+
+def retire_definition(
+    repo: ConfigRepository,
+    actor: Any,
+    *,
+    definition_id: str,
+    reason: Any = "",
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """退役一条定义修订（历史集合里它仍在，只是不再作为"当前定义"）。"""
+    definition = get_definition(repo, definition_id)
+    if definition.get("status") == DEFINITION_RETIRED:
+        return definition
+    payload = {
+        "parameter_id": definition.get("parameter_id"),
+        "revision_no": definition.get("revision_no"),
+        "xml": definition.get("xml"),
+        "json": definition.get("json"),
+        "type": definition.get("type"),
+        "unit": definition.get("unit"),
+        "constraints": definition.get("constraints"),
+        "remarks": definition.get("remarks") or "",
+        "definition_set_id": definition.get("definition_set_id"),
+        "created_by": definition.get("created_by"),
+        "supersedes": definition.get("supersedes"),
+        "status": DEFINITION_RETIRED,
+        "updated_at": now_iso(),
+    }
+    tx = repo.transaction(
+        actor,
+        _optional_text(reason) or "退役定义修订 %s" % definition["id"],
+        action="definition.retire",
+        expected={"definition_revision:%s" % definition["id"]: definition.get("revision")},
+        idempotency_key=idempotency_key,
+    )
+    tx.put("definition_revision", payload, object_id=definition["id"])
+    tx.commit()
+    return get_definition(repo, definition["id"])
+
+
+def definition_entries(repo: ConfigRepository, definition_ids: Iterable[str]) -> List[Any]:
+    """把定义修订转成 `MappingEntry`（供 `MappingTable` 做冲突检查）。"""
+    entries = []
+    for definition_id in definition_ids:
+        definition = get_definition(repo, definition_id)
+        xml_block = definition.get("xml") or {}
+        json_block = definition.get("json") or {}
+        entries.append(
+            config_mapping.MappingEntry(
+                str(definition.get("parameter_id")),
+                xml=config_mapping.to_xml_loc(xml_block.get("loc")),
+                json_pointer=(json_block or {}).get("pointer"),
+                json_key=(json_block or {}).get("key"),
+                unit=definition.get("unit") or None,
+                value_type=definition.get("type"),
+            )
+        )
+    return entries
+
+
+def check_definition_locations(
+    repo: ConfigRepository, definition_ids: Iterable[str]
+) -> None:
+    """一批定义里同一个 XML 节点/JSON 指针只能被一个参数占用，否则 `MAPPING_AMBIGUOUS`。"""
+    table = config_mapping.MappingTable(definition_entries(repo, definition_ids))
+    table.assert_unique()
+
+
+def verify_definition_against_template(
+    repo: ConfigRepository, definition: Dict[str, Any], snapshot_id: str
+) -> Dict[str, Any]:
+    """把定义与真实模板对一遍：节点是否存在、类型是否匹配、单位是否可无损换算。
+
+    发布前的闸门之一（M6-12 会再调一次）。这里只做判定，不写盘。
+    """
+    snapshot = get_snapshot(repo, snapshot_id)
+    data = snapshot_bytes(repo, snapshot["id"])
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise AppError(
+            PARSE_FAILED, "模板不是合法 XML", snapshot_id=snapshot["id"], cause=str(exc)
+        )
+    namespace = config_mapping.default_namespace(root)
+    loc = config_mapping.to_xml_loc((definition.get("xml") or {}).get("loc"))
+    node = config_mapping.resolve_xml(root, loc, namespace) if loc else None
+    if node is None:
+        raise AppError(
+            DEFINITION_CONFLICT,
+            "模板里找不到定义声明的定位",
+            definition_id=definition.get("id"),
+            loc=str(loc),
+            snapshot_id=snapshot["id"],
+        )
+    raw = node.attrib.get(loc.attribute, "") if loc.attribute else (node.text or "")
+    template_unit = node.attrib.get("unit")
+    declared_unit = definition.get("unit") or None
+    converted = None
+    if template_unit and declared_unit and template_unit != declared_unit:
+        try:
+            converted = config_values.convert(
+                config_values.TypedValue("decimal", raw.strip(), template_unit), declared_unit
+            ).text
+        except AppError as exc:
+            if exc.code == "VALUE_LOSSY_CONVERSION":
+                raise AppError(
+                    exc.code,
+                    "单位换算不可逆，阻断发布",
+                    definition_id=definition.get("id"),
+                    template_unit=template_unit,
+                    declared_unit=declared_unit,
+                    value=raw,
+                )
+            raise
+    return {
+        "snapshot_id": snapshot["id"],
+        "loc": str(loc),
+        "raw": raw,
+        "template_unit": template_unit,
+        "declared_unit": declared_unit,
+        "converted": converted,
+        "value_type": definition.get("type"),
+    }
+
+
+# -- 定义集合（M6-03）-------------------------------------------------------
+
+def list_definition_sets(
+    repo: ConfigRepository,
+    *,
+    release_id: Optional[str] = None,
+    variant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    items = repo.list_objects("definition_set")
+    if release_id is not None:
+        items = [item for item in items if str(item.get("release_id")) == str(release_id)]
+    if variant_id is not None:
+        items = [item for item in items if str(item.get("variant_id") or "") == str(variant_id)]
+    return sorted(items, key=lambda item: (item.get("created_at") or "", item.get("id") or ""))
+
+
+def get_definition_set(repo: ConfigRepository, set_id: str) -> Dict[str, Any]:
+    payload = repo.get("definition_set", _optional_text(set_id))
+    if payload is None:
+        raise AppError(NOT_FOUND, "定义集合不存在", definition_set_id=set_id)
+    return payload
+
+
+def latest_definition_set(
+    repo: ConfigRepository, release_id: str, variant_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """该版本（该变体）当前的定义集合。集合一旦创建就不可变：
+    "冻结"由**新集合 = 新对象**实现，已发布基线始终引用它当初那个 ID。"""
+    items = list_definition_sets(repo, release_id=release_id, variant_id=variant_id)
+    return items[-1] if items else None
+
+
+def create_definition_set(
+    repo: ConfigRepository,
+    actor: Any,
+    *,
+    release_id: str,
+    definition_ids: Any,
+    variant_id: Optional[str] = None,
+    note: Any = "",
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """为「版本 + 变体」冻结一份定义集合。
+
+    * 每个参数只能出现一次（两条定义指同一参数即 `DEFINITION_CONFLICT`）；
+    * 同一 XML 节点/JSON 指针只能被一个参数占用（`MAPPING_AMBIGUOUS`）；
+    * 只接受 `active` 的定义修订，退役修订不能进新集合。
+    """
+    release = get_release(repo, release_id)
+    variant = _optional_text(variant_id) or None
+    if variant is not None:
+        if repo.get("template_variant", variant) is None:
+            raise AppError(NOT_FOUND, "模板变体不存在", variant_id=variant)
+    ids = _id_list(definition_ids, "definition_ids")
+    if not ids:
+        raise AppError(INVALID_INPUT, "定义集合不能为空", field="definition_ids")
+
+    seen: Dict[str, str] = {}
+    for definition_id in ids:
+        definition = get_definition(repo, definition_id)
+        if definition.get("status") != DEFINITION_ACTIVE:
+            raise AppError(
+                DEFINITION_CONFLICT,
+                "退役的定义修订不能进入新集合",
+                definition_id=definition_id,
+            )
+        parameter_id = str(definition.get("parameter_id"))
+        if parameter_id in seen:
+            raise AppError(
+                DEFINITION_CONFLICT,
+                "同一参数在同一集合里出现了两条定义",
+                parameter_id=parameter_id,
+                definition_ids=[seen[parameter_id], definition_id],
+            )
+        seen[parameter_id] = definition_id
+    check_definition_locations(repo, ids)
+
+    stamp = now_iso()
+    tx = repo.transaction(
+        actor,
+        _optional_text(note) or "冻结定义集合 %s" % release.get("version_label"),
+        action="definition_set.create",
+        idempotency_key=idempotency_key,
+    )
+    ref = tx.put(
+        "definition_set",
+        {
+            "release_id": release["id"],
+            "variant_id": variant,
+            "definition_ids": ids,
+            "created_by": _label(actor),
+            "note": _optional_text(note),
+            "updated_at": stamp,
+        },
+    )
+    tx.commit()
+    return get_definition_set(repo, str(ref.id))
+
+
+def definition_set_detail(repo: ConfigRepository, set_id: str) -> Dict[str, Any]:
+    """集合 + 展开后的定义（前端一次拿全，避免 N+1 请求）。"""
+    definition_set = get_definition_set(repo, set_id)
+    definitions = [get_definition(repo, item) for item in definition_set.get("definition_ids") or []]
+    return {"definition_set": definition_set, "definitions": definitions}

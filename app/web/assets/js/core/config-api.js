@@ -65,15 +65,33 @@
     capabilities: function () { return unwrap(api.get("/config/capabilities")); },
     profileStatus: function (pid) { return unwrap(api.get(api.p(pid, "/config/status"))); },
     parameters: function (query) { return unwrap(api.get("/config/parameters", query)); },
+    parameter: function (parameterId) {
+      return unwrap(api.get("/config/parameters/" + api.seg(parameterId)));
+    },
+    definitionSets: function (query) { return unwrap(api.get("/config/definition-sets", query)); },
     releases: function () { return unwrap(api.get("/config/releases")); },
+    families: function () { return unwrap(api.get("/config/families")); },
     audit: function (pid, query) { return unwrap(api.get(api.p(pid, "/config/audit"), query)); },
 
-    /* ---- 写（M6 起逐张接入；未接入时服务端 404，由 failure() 归类为 notfound） ---- */
+    /* ---- 写（M6-04 起真实接入）---- */
     createParameter: function (payload, headers) {
-      return unwrap(api.put("/config/parameters", payload, headers));
+      return unwrap(api.post("/config/parameters", payload, null, headers));
+    },
+    patchParameter: function (parameterId, payload, headers) {
+      return unwrap(api.patch("/config/parameters/" + api.seg(parameterId), payload, headers));
     },
     addDefinition: function (parameterId, payload, headers) {
-      return unwrap(api.put("/config/parameters/" + api.seg(parameterId) + "/definitions", payload, headers));
+      return unwrap(
+        api.post("/config/parameters/" + api.seg(parameterId) + "/definitions", payload, null, headers)
+      );
+    },
+    retireDefinition: function (definitionId, payload, headers) {
+      return unwrap(
+        api.post("/config/definitions/" + api.seg(definitionId) + "/retire", payload, null, headers)
+      );
+    },
+    createDefinitionSet: function (payload, headers) {
+      return unwrap(api.post("/config/definition-sets", payload, null, headers));
     },
 
     /* ---- 草稿 ---- */

@@ -104,6 +104,7 @@ def build_router(settings: Settings) -> Router:
         api_compare,
         api_config,
         api_config_catalog,
+        api_config_registry,
         api_delete,
         api_dl,
         api_documents,
@@ -156,4 +157,6 @@ def build_router(settings: Settings) -> Router:
     api_config.register(router, settings)
     # 配置目录（M6-01/M6-02）：软件版本、出口批次、配置族、逻辑文件、快照、变体。
     api_config_catalog.register(router, settings)
+    # 参数登记（M6-03/M6-04）：参数主档、定义修订、定义集合。
+    api_config_registry.register(router, settings)
     return router

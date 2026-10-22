@@ -73,6 +73,13 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/config/files/{lid}/retire"): None,
     ("POST", "/api/v1/config/snapshots"): None,
     ("POST", "/api/v1/config/variants"): None,
+    # M6-03/M6-04：参数登记同样只递增全局 `config_revision`，不碰机型 5 段。
+    ("POST", "/api/v1/config/parameters"): None,
+    ("PATCH", "/api/v1/config/parameters/{pmid}"): None,
+    ("POST", "/api/v1/config/parameters/{pmid}/definitions"): None,
+    ("POST", "/api/v1/config/definitions/{did}/retire"): None,
+    ("POST", "/api/v1/config/definitions/{did}/verify"): None,
+    ("POST", "/api/v1/config/definition-sets"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

@@ -138,9 +138,11 @@
     seg: seg,
     p: profilePath,
     get: function (path, query) { return request("GET", path, { query: query }); },
-    post: function (path, body, query) { return request("POST", path, { body: body || {}, query: query }); },
+    post: function (path, body, query, headers) {
+      return request("POST", path, { body: body || {}, query: query, headers: headers });
+    },
     put: function (path, body, headers) { return request("PUT", path, { body: body, headers: headers }); },
-    patch: function (path, body) { return request("PATCH", path, { body: body }); },
+    patch: function (path, body, headers) { return request("PATCH", path, { body: body, headers: headers }); },
     del: function (path, query) { return request("DELETE", path, { query: query }); },
     upload: function (path, file, filename, query) {
       return request(path.indexOf("/temp") >= 0 ? "POST" : "PUT", path, {

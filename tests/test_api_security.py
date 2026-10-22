@@ -133,6 +133,13 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/config/files/{lid}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/snapshots"): "config_registry_write",
     ("POST", "/api/v1/config/variants"): "config_registry_write",
+    # M6-03/M6-04（INH-1948/1949）：参数登记写接口，同样只有管理员。
+    ("POST", "/api/v1/config/parameters"): "config_registry_write",
+    ("PATCH", "/api/v1/config/parameters/{pmid}"): "config_registry_write",
+    ("POST", "/api/v1/config/parameters/{pmid}/definitions"): "config_registry_write",
+    ("POST", "/api/v1/config/definitions/{did}/retire"): "config_registry_write",
+    ("POST", "/api/v1/config/definitions/{did}/verify"): "config_registry_write",
+    ("POST", "/api/v1/config/definition-sets"): "config_registry_write",
 }
 
 ROUTE_VALUES = {
@@ -141,6 +148,7 @@ ROUTE_VALUES = {
     # 配置域对象 ID（M6-01/02）：形状必须是 `<prefix>_<6 位>`，否则会先撞上 ID 校验
     # 而不是权限矩阵——这里要验的是"权限先于存在性"。
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
+    "pmid": "pm_000001", "did": "dr_000001", "dsid": "ds_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

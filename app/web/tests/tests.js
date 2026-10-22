@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 56;  // 49 + 配置管理 7 条（M5-09 / M5-11）
+  var EXPECTED_CASES = 60;  // 49 + 配置管理 7 条（M5-09 / M5-11）+ 定义表单 4 条（M6-04）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -2063,6 +2063,93 @@
     var rows = MC.configUi.buildRows([{ id: "a", definitions: [] }], []);
     eq(rows.length, 1);
     eq(rows[0].cells, {});
+  });
+
+  /* ---- M6-04：定义表单 ↔ 契约的互转与必填校验 ---- */
+
+  test("定义表单：定位文本与 {path, attribute} 双向可逆", function () {
+    eq(MC.configUi.textToLoc(""), null, "空文本不是定位");
+    eq(MC.configUi.textToLoc("PulseWidth"), { path: [{ name: "PulseWidth", occurrence: 1 }], attribute: null });
+    eq(
+      MC.configUi.textToLoc("Axis[2]/Velocity"),
+      { path: [{ name: "Axis", occurrence: 2 }, { name: "Velocity", occurrence: 1 }], attribute: null },
+      "同名节点用 [n] 标序号"
+    );
+    eq(
+      MC.configUi.textToLoc("PulseWidth@unit"),
+      { path: [{ name: "PulseWidth", occurrence: 1 }], attribute: "unit" },
+      "@ 后缀是属性名"
+    );
+    eq(MC.configUi.locToText({ path: [{ name: "Axis", occurrence: 2 }, { name: "Velocity", occurrence: 1 }], attribute: null }), "Axis[2]/Velocity");
+    eq(MC.configUi.locToText({ path: [{ name: "PulseWidth", occurrence: 1 }], attribute: "unit" }), "PulseWidth@unit");
+    eq(MC.configUi.locToText(null), "");
+  });
+
+  test("定义表单：草稿转请求体，缺名称/定位/理由一律拦下", function () {
+    var empty = MC.configUi.buildDefinitionPayload({});
+    ok(empty.errors.length >= 3, "三个必填项都要报出来");
+    ok(empty.payload === undefined, "校验失败不构造请求体");
+
+    var noReason = MC.configUi.buildDefinitionPayload({ xml_name: "PulseWidth", xml_loc: "PulseWidth" });
+    eq(noReason.errors.length, 1);
+    ok(noReason.errors[0].indexOf("理由") >= 0, "保存理由必填");
+
+    var okPayload = MC.configUi.buildDefinitionPayload({
+      xml_name: " PulseWidth ",
+      xml_loc: "PulseWidth",
+      json_key: "PULSE_WIDTH",
+      type: "decimal",
+      unit: "s",
+      min: "0",
+      max: "",
+      remarks: "单位改为秒",
+      reason: "1.1.0 起改为秒",
+    });
+    eq(okPayload.errors, undefined);
+    eq(okPayload.payload.xml_name, "PulseWidth", "名称去首尾空格");
+    eq(okPayload.payload.constraints, { min: "0", max: null });
+    eq(okPayload.payload.reason, "1.1.0 起改为秒");
+
+    var nonNumeric = MC.configUi.buildDefinitionPayload({ xml_name: "X", xml_loc: "X", reason: "r", type: "text", min: "1" });
+    ok(nonNumeric.errors[0].indexOf("数值") > 0, "非数值类型不许填上下界");
+  });
+
+  test("定义表单：修改前后摘要只列真正变化的字段", function () {
+    var before = MC.configUi.draftFromDefinition({
+      xml: { name: "Pulse", loc: { path: [{ name: "Pulse", occurrence: 1 }], attribute: null } },
+      json: { key: "PULSE" },
+      type: "decimal",
+      unit: "ms",
+      constraints: { min: "0", max: "10" },
+    });
+    eq(before.xml_loc, "Pulse");
+    eq(before.min, "0");
+    var changes = MC.configUi.diffSummary(before, Object.assign({}, before, { xml_name: "PulseWidth", unit: "s" }));
+    eq(changes.map(function (c) { return c.field; }), ["xml_name", "unit"]);
+    eq(changes[1].before, "ms");
+    eq(changes[1].after, "s");
+    eq(MC.configUi.diffSummary(before, before), [], "没改就没有摘要");
+    eq(MC.configUi.diffSummary({ max: "" }, { max: "" }), []);
+    eq(MC.configUi.diffSummary({}, { unit: "s" })[0].before, "（空）", "空值显示成占位而不是空白");
+  });
+
+  test("定义表单：带 CAS 期望值时一并进请求体", function () {
+    var built = MC.configUi.buildDefinitionPayload({
+      xml_name: "PulseWidth",
+      xml_loc: "PulseWidth",
+      reason: "并发保护",
+      expected_definition_id: "dr_000009",
+    });
+    eq(built.payload.expected_definition_id, "dr_000009");
+    var blank = MC.configUi.buildDefinitionPayload({
+      xml_name: "PulseWidth",
+      xml_loc: "PulseWidth",
+      reason: "首次定义",
+      expected_definition_id: "",
+    });
+    eq(blank.payload.expected_definition_id, "", "空串表示「我看到的时候还没有定义」");
+    var untouched = MC.configUi.buildDefinitionPayload({ xml_name: "X", xml_loc: "X", reason: "r" });
+    ok(!("expected_definition_id" in untouched.payload), "不传就不带这个键，避免误判");
   });
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链

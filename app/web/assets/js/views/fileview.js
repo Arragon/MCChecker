@@ -936,7 +936,7 @@
       loadRecords().then(null, function (err) { util.replace(body, MC.errorBlock(err, renderRecords)); });
     }
 
-    /* 配置管理分段（M5-10）：只显示服务端事实，关联关系随 M6-02 上线。 */
+    /* 配置管理分段（M5-10）：只显示服务端事实；现场对账随 M6-10 接入。 */
     function renderConfigSection() {
       if (S.tree) { S.tree.destroy(); S.tree = null; }
       if (!MC.configUi || !MC.configUi.renderFileSection) {
