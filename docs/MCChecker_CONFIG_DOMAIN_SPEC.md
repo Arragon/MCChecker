@@ -429,6 +429,11 @@ data/config_management/
 | GET/POST | `/api/v1/config/upgrade/common` | global | 通用层升版计划 / 按决议建草稿 |
 | GET/POST | `/api/v1/p/{pid}/config/upgrade/model` | profile | 机型跨版本升级计划 / 落地 |
 | GET/POST | `/api/v1/p/{pid}/config/upgrade/rebase` | profile | 同版本刷新计划 / 落地 |
+| GET/POST | `/api/v1/p/{pid}/config/promote/common` | profile | 经验上提计划 / 建变更单（§6.6） |
+| GET/POST | `/api/v1/p/{pid}/config/promote/model` | profile | 设备 → 机型：`400 DEVICE_LAYER_DISABLED`（§6.6） |
+| GET/POST | `/api/v1/config/baselines/{bid}/restore` | global | 回滚影响 / 回滚为新基线（§6.7） |
+| GET/POST | `/api/v1/config/baselines/{bid}/migrate` | global | 跨变体迁移计划 / 建草稿（§6.7） |
+| GET/POST | `/api/v1/config/baselines/{bid}/reissue` | global | 补发影响 / 按补发建草稿（§6.7） |
 | GET | `/api/v1/p/{pid}/config/audit` | profile | 审计检索 |
 
 **路径形态的选择**：基线与观测是**全局对象**（携带 `profile_id` 字段、共用全局修订号），
@@ -636,6 +641,96 @@ no-op（没有任何改动）时**直接字节拷贝模板**，不经解析器�
 `classify` / `matchFilter` / `countByFilter` / `rowModel` / `effectiveDecision` /
 `bulkResolve` / `pendingOf` / `canApply` / `summaryText`。两条界面规矩：
 **不以颜色替代文本**（每个状态都有字），**无共同基准不许一键合并**。
+
+### 6.6 现场经验上提（M7-05）
+
+把机型层验证过的值提到通用层。**上提永远是一次显式动作**，产出的是变更单，
+批准后才发布新通用修订。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET  | `/api/v1/p/{pid}/config/promote/common` | 上提计划（`?parameter_ids=a,b`、`?source_baseline_id=`） |
+| POST | `/api/v1/p/{pid}/config/promote/common` | 按计划建变更单（`submit` 默认 true） |
+| GET/POST | `/api/v1/p/{pid}/config/promote/model` | 设备 → 机型，**功能关闭**，恒 `400 DEVICE_LAYER_DISABLED` |
+
+**只上提"本地做出的决定"**，判据是值的 `intent` + `source_ref.kind`：
+
+| `intent` | `source_ref.kind` | 结论 |
+|---|---|---|
+| `inherit` | 任意 | 排除 `not_local`（本来就跟着上游走） |
+| `override`/`pin` | `manual` / `change_set` / `promote` | **可上提** |
+| 任意 | `observation` | 排除 `observation_sourced`（一次观测不是经验） |
+| 任意 | `device` / `calibration` | 排除 `device_calibration`（单机标定不进上层） |
+| 任意 | `snapshot` | 排除 `factory_default`（就是出口默认） |
+| 任意 | `baseline` 却写 override | 排除 `unknown_source`（标注与意图矛盾） |
+| 任意 | 与目标当前值相同 | 排除 `already_same` |
+
+**四约束**：
+
+1. **不自动**：出现多少次都不会自己变成通用默认；`publishable` 恒 `false`，
+   `POST` 建的是 `algorithm="promote"` 的变更单。
+2. **不猜来源**：`source_ref` 为空或标不通 → 排除，不"按 override 处理"。
+3. **不改写下级**：批准后只新增一条通用修订；机型基线的 `upstream_ref` 与
+   `upstream_revision` 一个字不动，要跟进必须显式走 §6.5 的 rebase。
+4. **证据撤销即过期**：来源对象已被删（`evidence_revoked`）或源/目标不在同一
+   版本（`release_mismatch`）→ `blockers` 非空，`POST` 直接 `409 PLAN_STALE`，
+   `detail.reasons` 给阻断码。
+
+响应形状：`{mode, profile_id, source, target, items[], eligible, excluded[], blockers,
+warnings, can_apply, publishable:false, algorithm:"promote"}`；每行含
+`{parameter_id, name, from, to, intent, source_ref, eligible, excluded_reason,
+excluded_message, decision}`。
+
+**设备层（M7-07/08）当前关闭**：这两个入口刻意保留，用来回答"为什么不能做"，
+而不是 404 让人误以为路径写错。`detail` 带 `device_id`、`device_baselines` 与一句
+`note`。前端（`MC.lifecycleUi`）直接写"未启用"，不画点了会 400 的按钮当摆设。
+
+### 6.7 历史回滚、跨变体迁移与出口补发（M7-06）
+
+六个入口全部挂在基线下面——这三件事的对象都是"某条基线的历史"。写入口一律
+`201`：它们**新增对象**，不改写任何已有对象。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET  | `/api/v1/config/baselines/{bid}/restore?revision=rN` | 回滚会改什么（只读） |
+| POST | `/api/v1/config/baselines/{bid}/restore` | 用历史内容建**新的已批准基线** |
+| GET  | `/api/v1/config/baselines/{bid}/migrate?target_variant_id=` | 跨变体迁移计划 |
+| POST | `/api/v1/config/baselines/{bid}/migrate` | 按计划建目标变体草稿 |
+| GET  | `/api/v1/config/baselines/{bid}/reissue` | 补发影响（模板是否还在当前批次） |
+| POST | `/api/v1/config/baselines/{bid}/reissue` | 按补发后的出口默认建草稿 |
+
+**回滚为什么新建对象**：修订链一旦被改写，"上周批准的是什么"就再也答不上来。
+`restore_baseline` 复制目标修订的内容建一条新对象，`state=approved`，
+`previous_revision_id` 指向原 head，并在 `restore_provenance` 里记
+`{mode, from_baseline_id, from_revision, head_revision_at_restore, restored_by,
+restored_at, changed}`。旧修订、旧对象、旧产物照旧可读（`artifact_bytes` 只读 blob，
+不重生成）。
+
+* 目标修订 == 当前 head → `400`（回滚没有意义）；
+* 修订不存在 → `404`，`detail.revisions` 给全部可用修订；
+* `expected_head` 不符 → `409 PLAN_STALE`，`detail.drift` 给期望/实际。
+
+**跨变体迁移**按 `parameter_id` 对齐（不按名字，也不按 XML 落点）：
+
+* 目标变体的定义集合里没有这个参数 → `unknown_parameter` 阻断；
+* 单位换不过去（量纲不同 / 源单位不在换算表内）→ `incomparable` 阻断；
+* 能换的换算后写 `to`，并标 `converted:true`；跨族迁移额外给 `warnings`；
+* 落地产出**目标变体的草稿**（`upgrade_provenance.mode="variant_migration"`），
+  源基线一个字不动。
+
+**出口补发**只报告影响，不改引用：
+
+* `template.in_current_batch`：基线引用的模板快照还在不在补发后的默认批次里；
+* `baseline_reference_unchanged` **恒 true**——补发只新增批次对象，不重指变体的
+  `template_snapshot_id`；这一项是把"确实没变"证明出来，而不是嘴上保证；
+* `create_reissue_refresh` 建的新草稿仍钉在**原版本 + 原变体**上（不会把旧软件
+  XML 当新版本下发）；与补发后的出口默认无差异 → `400`，不建空草稿。
+
+**前端契约**（`MC.lifecycleUi`，`views/lifecycle.js`，审阅页「经验与历史」分段）：
+`promoteRow` / `promoteSummary` / `blockerLines` / `deviceNotice` / `restoreRow` /
+`restoreSummary` / `migrationNotice` / `migrationRow` / `reissueNotice`。四条界面规矩：
+**不假装**（设备层写"未启用"）、**不吞阻断**（逐条列原因并禁用落地）、
+**不以颜色替代文本**、**回滚按钮写"回滚为新基线"**。
 
 ---
 

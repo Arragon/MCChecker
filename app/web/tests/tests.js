@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 84;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账 6（M6-10）+ 变更单 5（M6-11/M6-12）+ 交付产物 6（M6-14）+ 版本升级 7（M7-04）
+  var EXPECTED_CASES = 90;  // 84 + 经验与历史 6（M7-05/M7-06）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -2937,6 +2937,218 @@
         throw err;
       });
   });
+
+  /* ---- 经验与历史（M7-05 / M7-06）---- */
+
+  test("经验上提：可上提与排除都要说清理由", function () {
+    var ui = MC.lifecycleUi;
+    var yes = ui.promoteRow({
+      parameter_id: "pm_1",
+      name: "脉冲宽度",
+      eligible: true,
+      from: { type: "decimal", text: "650", unit: "ms" },
+      to: { type: "decimal", text: "900", unit: "ms" },
+      intent: "override",
+    });
+    ok(yes.eligible, "可上提标记要在");
+    eq(yes.from, "650 ms");
+    eq(yes.to, "900 ms");
+    eq(yes.stateText, "可上提");
+
+    var no = ui.promoteRow({
+      parameter_id: "pm_2",
+      name: "最大速度",
+      eligible: false,
+      excluded_reason: "device_calibration",
+      excluded_message: "值来自单台设备的标定，不能进机型/通用层",
+      from: null,
+      to: { type: "decimal", text: "110", unit: "mm/s" },
+    });
+    ok(no.stateText.indexOf("排除") === 0, "排除要带前缀");
+    ok(no.stateText.indexOf("单台设备") >= 0, "理由要照服务端的原文说");
+    eq(no.from, "—", "没有现值也要有占位，不能空白");
+  });
+
+  test("经验上提：摘要与阻断都不许含糊", function () {
+    var ui = MC.lifecycleUi;
+    var text = ui.promoteSummary({
+      items: [{ eligible: true }, { eligible: false }, { eligible: false }],
+      eligible: ["pm_1"],
+      blockers: [{ code: "evidence_revoked", message: "来源对象已经不存在" }],
+    });
+    ok(text.indexOf("共 3 项") >= 0 && text.indexOf("可上提 1 项") >= 0, "要有总数与可上提数");
+    ok(text.indexOf("排除 2 项") >= 0, "排除数要写出来");
+    ok(text.indexOf("1 个阻断项") >= 0, "阻断要明确说不能建单");
+
+    var lines = ui.blockerLines([
+      { code: "release_mismatch", message: "不在同一版本", parameter_id: "pm_9" },
+    ]);
+    eq(lines.length, 1);
+    ok(lines[0].indexOf("版本不一致") >= 0, "代号要翻成人话");
+    ok(lines[0].indexOf("pm_9") >= 0, "要指出哪个参数");
+    eq(ui.promoteSummary(null), "", "没有计划就不要编摘要");
+  });
+
+  test("经验上提：设备层如实写明未启用", function () {
+    var notice = MC.lifecycleUi.deviceNotice(3);
+    eq(notice.level, "warn");
+    ok(notice.text.indexOf("未启用") >= 0, "要直接说未启用");
+    ok(notice.text.indexOf("M7-07/08") >= 0, "要指向延期的卡号");
+    ok(notice.text.indexOf("3 条") >= 0, "有设备基线时要报数");
+    ok(MC.lifecycleUi.deviceNotice().text.indexOf("设备基线") < 0, "没给数字就不要瞎写");
+  });
+
+  test("历史回滚：行模型与摘要说的是'回滚到哪一版'", function () {
+    var ui = MC.lifecycleUi;
+    var row = ui.restoreRow({
+      parameter_id: "pm_1",
+      name: "脉冲宽度",
+      from: { type: "decimal", text: "1000", unit: "ms" },
+      to: { type: "decimal", text: "900", unit: "ms" },
+      from_intent: "override",
+      to_intent: "override",
+      value_changed: true,
+    });
+    eq(row.from, "1000 ms");
+    eq(row.to, "900 ms");
+    eq(row.stateText, "值变化");
+
+    var text = ui.restoreSummary({
+      changed: 2,
+      source: { revision: "r2" },
+      baseline: { head_revision: "r3" },
+    });
+    ok(text.indexOf("2 个参数") >= 0 && text.indexOf("r2") >= 0, "要说清改几个、回到哪一版");
+    ok(
+      ui.restoreSummary({ changed: 0, source: { revision: "r2" } }).indexOf("不会改变") >= 0,
+      "零差异要说'不会改变'"
+    );
+  });
+
+  test("迁移与补发：提示条不粉饰", function () {
+    var ui = MC.lifecycleUi;
+    var blocked = ui.migrationNotice({
+      items: [],
+      blockers: [{ code: "incomparable", parameter_id: "pm_2", message: "单位换不过去" }],
+    });
+    eq(blocked.level, "warn");
+    ok(blocked.text.indexOf("不能迁移") >= 0, "有阻断就要说不能迁");
+    ok(blocked.text.indexOf("pm_2") >= 0, "要点名参数");
+
+    var okPlan = ui.migrationNotice({ items: [{ parameter_id: "pm_1" }], blockers: [] });
+    eq(okPlan.level, "info");
+    ok(okPlan.text.indexOf("不覆盖源基线") >= 0, "要说清新建而不是覆盖");
+
+    var stale = ui.reissueNotice({
+      baseline_reference_unchanged: true,
+      current_batch: { batch_id: "rb_1" },
+      template: { in_current_batch: false },
+      changed: 2,
+    });
+    eq(stale.level, "warn");
+    ok(stale.text.indexOf("不在当前批次") >= 0, "模板被换掉要说出来");
+    ok(stale.text.indexOf("2 个参数不同") >= 0, "差异数要报");
+
+    var clean = ui.reissueNotice({
+      baseline_reference_unchanged: true,
+      current_batch: { batch_id: "rb_1" },
+      template: { in_current_batch: true },
+      changed: 0,
+    });
+    eq(clean.level, "info");
+    ok(clean.text.indexOf("仍在当前出口批次") >= 0, "没变化就照实说没变化");
+
+    var broken = ui.reissueNotice({ baseline_reference_unchanged: false });
+    eq(broken.level, "warn");
+    ok(broken.text.indexOf("不该发生") >= 0, "引用被改要当异常报");
+  });
+
+  test("经验与历史：四张卡都在，上提按钮出计划后受控", function () {
+    var host = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0" });
+    document.body.append(host);
+    var orig = {
+      baselines: MC.configApi.baselines,
+      variants: MC.configApi.variants,
+      detail: MC.configApi.baselineDetail,
+      plan: MC.configApi.promoteCommonPlan,
+    };
+    MC.configApi.baselines = function () {
+      return Promise.resolve({ items: [{ id: "bl_000001", scope: "model", revision: "r2" }] });
+    };
+    MC.configApi.variants = function () {
+      return Promise.resolve({ items: [{ id: "tv_000002", family_id: "cf_000001" }] });
+    };
+    MC.configApi.baselineDetail = function () {
+      return Promise.resolve({ item: { revision: "r2" }, revisions: ["r1", "r2"] });
+    };
+    MC.configApi.promoteCommonPlan = function () {
+      return Promise.resolve({
+        mode: "promote_to_common",
+        can_apply: false,
+        publishable: false,
+        items: [
+          {
+            parameter_id: "pm_1",
+            name: "脉冲宽度",
+            eligible: true,
+            from: { type: "decimal", text: "650", unit: "ms" },
+            to: { type: "decimal", text: "900", unit: "ms" },
+          },
+          {
+            parameter_id: "pm_2",
+            name: "最大速度",
+            eligible: false,
+            excluded_reason: "observation_sourced",
+            excluded_message: "值来自一次现场采集，属于单次观测而不是经验",
+          },
+        ],
+        eligible: ["pm_1"],
+        blockers: [{ code: "evidence_revoked", message: "来源对象已经不存在" }],
+      });
+    };
+    var app = { pid: "p1", can: function () { return true; } };
+    function tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    function restore() {
+      MC.configApi.baselines = orig.baselines;
+      MC.configApi.variants = orig.variants;
+      MC.configApi.baselineDetail = orig.detail;
+      MC.configApi.promoteCommonPlan = orig.plan;
+      host.remove();
+    }
+
+    MC.lifecycleUi.render(app, host, { pid: "p1" });
+    return tick()
+      .then(function () {
+        ok(host.textContent.indexOf("经验上提") >= 0, "上提卡要在");
+        ok(host.textContent.indexOf("设备 → 机型") >= 0, "设备卡要在");
+        ok(host.textContent.indexOf("未启用") >= 0, "设备层要写明未启用");
+        ok(host.textContent.indexOf("历史回滚") >= 0, "回滚卡要在");
+        ok(host.textContent.indexOf("跨变体迁移") >= 0, "迁移卡要在");
+        ok(host.textContent.indexOf("出口补发") >= 0, "补发卡要在");
+        var run = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent.indexOf("计算机型") >= 0;
+        })[0];
+        ok(run, "要有上提计划按钮");
+        run.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        eq(host.querySelectorAll("table")[0].querySelectorAll("tbody tr").length, 2, "两行都要列出来");
+        ok(host.textContent.indexOf("650 ms") >= 0 && host.textContent.indexOf("900 ms") >= 0, "要把现值与机型值摆开");
+        ok(host.textContent.indexOf("证据已撤销") >= 0, "阻断要翻成人话");
+        var create = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent === "生成上提变更单";
+        })[0];
+        ok(create, "要有建单按钮");
+        eq(create.disabled, true, "有阻断时不许建单");
+        restore();
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链
    * 清空之后——串行队列本身是一条长微任务链，不 flush 的话最后几条用例的迟到拒绝

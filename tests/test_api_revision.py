@@ -103,6 +103,12 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/config/upgrade/common"): None,
     ("POST", "/api/v1/p/{pid}/config/upgrade/model"): None,
     ("POST", "/api/v1/p/{pid}/config/upgrade/rebase"): None,
+    # 上提建变更单、回滚/迁移/刷新建新对象：都不改已有对象
+    ("POST", "/api/v1/p/{pid}/config/promote/common"): None,
+    ("POST", "/api/v1/p/{pid}/config/promote/model"): None,
+    ("POST", "/api/v1/config/baselines/{bid}/restore"): None,
+    ("POST", "/api/v1/config/baselines/{bid}/migrate"): None,
+    ("POST", "/api/v1/config/baselines/{bid}/reissue"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

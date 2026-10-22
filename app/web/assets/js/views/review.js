@@ -34,15 +34,17 @@
           ? "配置变更单：草稿 → 提交 → 批准发布。批准即发布新基线修订，没有中间态。"
           : S.seg === "upgrade"
             ? "跨版本升级：旧共同基准 / 旧本地值 / 新上游 三方合并，落地产出基线草稿。"
-            : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
+            : S.seg === "lifecycle"
+              ? "经验上提 / 历史回滚 / 跨变体迁移 / 出口补发：先看影响，再点落地；落地一律新增对象。"
+              : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
         S.seg === "remarks" && S.data ? h("span.small.muted", "已决定 " + decided + " / " + total) : null,
         h("button.btn", { type: "button", onclick: function () { load(); } }, icon("refresh"), "刷新"),
         segments()
       );
     }
 
-    /* 两个分段：修改建议（旧，按文件逐节点）/ 配置变更（M6-12）。
-     * 分段状态只活在内存里，切页回来默认回到"修改建议"。 */
+    /* 四个分段：修改建议（旧，按文件逐节点）/ 配置变更（M6-12）/ 版本升级（M7-04）/
+     * 经验与历史（M7-05、M7-06）。分段状态只活在内存里，切页回来默认回到"修改建议"。 */
     function segments() {
       function tab(value, label) {
         var active = S.seg === value;
@@ -65,12 +67,13 @@
         { style: "gap:6px" },
         tab("remarks", "修改建议"),
         tab("changes", "配置变更"),
-        tab("upgrade", "版本升级")
+        tab("upgrade", "版本升级"),
+        tab("lifecycle", "经验与历史")
       );
     }
 
     function load(silent) {
-      if (S.seg === "changes" || S.seg === "upgrade") {
+      if (S.seg === "changes" || S.seg === "upgrade" || S.seg === "lifecycle") {
         render();
         return;
       }
@@ -122,6 +125,17 @@
           desc: "请确认 upgrade.js 已在 index.html 中引入。",
         }))));
         if (MC.upgradeUi) MC.upgradeUi.render(app, upgradeHost, { pid: app.pid });
+        return;
+      }
+      if (S.seg === "lifecycle") {
+        var lifecycleHost = h("div");
+        util.replace(host, h("div.view-body", h("div.container", MC.lifecycleUi ? lifecycleHost : MC.stateBlock({
+          kind: "empty",
+          icon: "settings",
+          title: "经验与历史模块未加载",
+          desc: "请确认 lifecycle.js 已在 index.html 中引入。",
+        }))));
+        if (MC.lifecycleUi) MC.lifecycleUi.render(app, lifecycleHost, { pid: app.pid });
         return;
       }
       var files = S.data.files;

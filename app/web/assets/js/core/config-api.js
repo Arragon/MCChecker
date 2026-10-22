@@ -113,6 +113,28 @@
     upgradeRebasePlan: function (pid) {
       return unwrap(api.get(api.p(pid, "/config/upgrade/rebase")));
     },
+    /* 经验上提（M7-05）：计划只读；设备层入口会返回 `DEVICE_LAYER_DISABLED`，
+     * 由 UI 如实展示，不在这里吞掉。 */
+    promoteCommonPlan: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/promote/common"), query));
+    },
+    promoteModelPlan: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/promote/model"), query));
+    },
+    /* 历史回滚 / 跨变体迁移 / 出口补发（M7-06）：都挂在基线下面。 */
+    restorePlan: function (bid, query) {
+      return unwrap(api.get("/config/baselines/" + api.seg(bid) + "/restore", query));
+    },
+    migrationPlan: function (bid, query) {
+      return unwrap(api.get("/config/baselines/" + api.seg(bid) + "/migrate", query));
+    },
+    reissuePlan: function (bid) {
+      return unwrap(api.get("/config/baselines/" + api.seg(bid) + "/reissue"));
+    },
+    baselineDetail: function (bid) {
+      return unwrap(api.get("/config/baselines/" + api.seg(bid)));
+    },
+    variants: function (query) { return unwrap(api.get("/config/variants", query)); },
 
     /* ---- 写（M6-04 起真实接入）---- */
     createParameter: function (payload, headers) {
@@ -196,6 +218,37 @@
       return unwrap(
         api.post(api.p(pid, "/config/upgrade/rebase"), payload, null,
           Object.assign({ "Idempotency-Key": actionKey("up-rebase", pid) }, headers || {}))
+      );
+    },
+    /* 上提：产出的是**变更单**，不是直接发基线。 */
+    createPromoteCommon: function (pid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/promote/common"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("promote", pid) }, headers || {}))
+      );
+    },
+    createPromoteModel: function (pid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/promote/model"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("promote-model", pid) }, headers || {}))
+      );
+    },
+    restoreBaseline: function (bid, payload, headers) {
+      return unwrap(
+        api.post("/config/baselines/" + api.seg(bid) + "/restore", payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("restore", bid) }, headers || {}))
+      );
+    },
+    createMigration: function (bid, payload, headers) {
+      return unwrap(
+        api.post("/config/baselines/" + api.seg(bid) + "/migrate", payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("migrate", bid) }, headers || {}))
+      );
+    },
+    createReissue: function (bid, payload, headers) {
+      return unwrap(
+        api.post("/config/baselines/" + api.seg(bid) + "/reissue", payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("reissue", bid) }, headers || {}))
       );
     },
 

@@ -86,8 +86,9 @@ _WRITES_VALUE = frozenset((DECISION_USE_NEW, DECISION_MANUAL, DECISION_PIN))
 
 # --- 计划算法 ----------------------------------------------------------------
 
-#: `three_way` / `model_upgrade` / `device_rebase` / `promote` 随 M7 落地。
-#: 现在只有 `reconcile` 可算——它把现场采集与批准基线的差异当成计划输入。
+#: `three_way` / `model_upgrade` / `device_rebase` 随 M7 落地；
+#: `reconcile` 把现场采集与批准基线的差异当计划输入；`promote`（M7-05）把机型层
+#: 的本地决定当成计划输入。两者都只产出候选值，真正发布仍靠变更单批准。
 ALGORITHM_RECONCILE = "reconcile"
 ALGORITHMS = (
     ALGORITHM_RECONCILE,
@@ -96,7 +97,7 @@ ALGORITHMS = (
     "device_rebase",
     "promote",
 )
-SUPPORTED_ALGORITHMS = frozenset((ALGORITHM_RECONCILE,))
+SUPPORTED_ALGORITHMS = frozenset((ALGORITHM_RECONCILE, "promote"))
 
 
 def _text(value: Any, field: str) -> str:

@@ -162,6 +162,13 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/config/upgrade/common"): "config_change_submit",
     ("POST", "/api/v1/p/{pid}/config/upgrade/model"): "config_change_submit",
     ("POST", "/api/v1/p/{pid}/config/upgrade/rebase"): "config_change_submit",
+    # M7-05：上提产出的是**变更单**；设备层入口虽关闭，权限口径不能松
+    ("POST", "/api/v1/p/{pid}/config/promote/common"): "config_change_submit",
+    ("POST", "/api/v1/p/{pid}/config/promote/model"): "config_change_submit",
+    # M7-06：回滚/迁移/刷新都直接落对象
+    ("POST", "/api/v1/config/baselines/{bid}/restore"): "config_change_submit",
+    ("POST", "/api/v1/config/baselines/{bid}/migrate"): "config_change_submit",
+    ("POST", "/api/v1/config/baselines/{bid}/reissue"): "config_change_submit",
 }
 
 ROUTE_VALUES = {

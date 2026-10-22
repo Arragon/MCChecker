@@ -105,6 +105,8 @@ def build_router(settings: Settings) -> Router:
         api_config,
         api_config_approval,
         api_config_artifacts,
+        api_config_promote,
+        api_config_restore,
         api_config_upgrade,
         api_config_baselines,
         api_config_catalog,
@@ -181,5 +183,10 @@ def build_router(settings: Settings) -> Router:
     api_config_approval.register(router, settings)
     # 产物与下载（M6-13/M6-14）：只读已批准基线，下载不重生成。
     api_config_artifacts.register(router, settings)
+    # 跨版本升级（M7-02/03）：计划只读，落地建草稿。
     api_config_upgrade.register(router, settings)
+    # 经验上提（M7-05）：产出变更单；设备层入口明确报"未启用"。
+    api_config_promote.register(router, settings)
+    # 回滚 / 跨变体迁移 / 出口补发（M7-06）：一律新增对象，不改写历史。
+    api_config_restore.register(router, settings)
     return router

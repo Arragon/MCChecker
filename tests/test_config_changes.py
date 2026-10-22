@@ -137,12 +137,19 @@ def test_create_requires_real_change(repo, world) -> None:
 
 
 def test_unsupported_algorithm_is_rejected(repo, world) -> None:
-    """三方合并属于 M7：现在就说"没实现"，不假装按 reconcile 算了。"""
+    """没实现的算法要当场说"没实现"，不假装按 reconcile 算了。
+
+    `reconcile` 之后陆续接入了 `promote`（M7-05）等真实算法；断言写成
+    "必须包含 reconcile 且不含 three_way"，这样以后再加算法不会再误红，
+    而"未实现的算法被悄悄当成 reconcile"仍然会红。
+    """
     with pytest.raises(AppError) as err:
         _draft(repo, world, algorithm="three_way")
     assert err.value.code == INVALID_INPUT
     assert err.value.detail["algorithm"] == "three_way"
-    assert err.value.detail["supported"] == ["reconcile"]
+    supported = err.value.detail["supported"]
+    assert "reconcile" in supported
+    assert "three_way" not in supported
 
 
 def test_duplicate_parameter_is_rejected(repo, world) -> None:

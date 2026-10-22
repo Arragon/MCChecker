@@ -152,29 +152,56 @@ def push(repo, baseline: Dict[str, Any], **overrides) -> Dict[str, Any]:
     return bl.get_baseline(repo, str(ref.id), ref.revision)
 
 
-def approve_common(repo, world, *, values: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """建一条已批准的旧版本通用基线（`values` 是覆盖项）。"""
+def approve_common(
+    repo,
+    world,
+    *,
+    values: Optional[Dict[str, Any]] = None,
+    release: Optional[Dict[str, Any]] = None,
+    approved: bool = True,
+) -> Dict[str, Any]:
+    """建一条已批准的旧版本通用基线（`values` 是覆盖项）。
+
+    `release` 可换成 `world["new"]`，用来造"通用层在新版本、机型还在旧版本"
+    这类需要版本错位的前置条件。
+    """
+    chosen = release or world["old"]
     baseline = bl.create_baseline(
         repo,
         ACTOR,
         scope="common",
-        release_id=world["old"]["release"]["id"],
-        definition_set_id=world["old"]["definition_set"]["id"],
+        release_id=chosen["release"]["id"],
+        definition_set_id=chosen["definition_set"]["id"],
         values=values or {},
         reason="旧版本通用基线",
     )
+    if not approved:
+        return baseline
     return push(repo, baseline, state=bl.STATE_APPROVED, decided_by=ACTOR["name"])
 
 
-def approve_model(repo, world, *, profile_id: str, upstream: Dict[str, Any], values=None):
+def approve_model(
+    repo,
+    world,
+    *,
+    profile_id: str,
+    upstream: Dict[str, Any],
+    values=None,
+    release: Optional[Dict[str, Any]] = None,
+    approved: bool = True,
+):
+    chosen = release or world["old"]
     baseline = bl.create_baseline(
         repo,
         ACTOR,
         scope="model",
-        release_id=world["old"]["release"]["id"],
+        release_id=chosen["release"]["id"],
+        definition_set_id=chosen["definition_set"]["id"],
         profile_id=profile_id,
         upstream_baseline_id=upstream["id"],
         values=values or {},
         reason="旧版本机型基线",
     )
+    if not approved:
+        return baseline
     return push(repo, baseline, state=bl.STATE_APPROVED, decided_by=ACTOR["name"])
