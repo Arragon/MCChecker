@@ -362,6 +362,15 @@ def _seed_from_default_batch(
     return values, warnings
 
 
+def seed_from_default_batch(
+    repo: ConfigRepository,
+    release_id: str,
+    definition_set_id: Optional[str],
+) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+    """公开别名：跨版本升级也要按同一个口径解析出口默认值（M7-02）。"""
+    return _seed_from_default_batch(repo, release_id, definition_set_id)
+
+
 def _seed_from_upstream(
     repo: ConfigRepository, upstream: Dict[str, Any]
 ) -> Dict[str, Dict[str, Any]]:
@@ -509,8 +518,13 @@ def create_baseline(
     values: Any = None,
     reason: Any = "",
     idempotency_key: Optional[str] = None,
+    provenance: Any = None,
 ) -> Dict[str, Any]:
-    """建一条基线草稿。"""
+    """建一条基线草稿。
+
+    `provenance` 只在跨版本升级（M7-02/03）时给：记录三方来源、决议与证据。
+    普通创建留空——空字段不进载荷，免得每条基线都拖一串 null。
+    """
     target_scope = _text(scope, "scope")
     if target_scope not in SCOPES:
         raise AppError(
@@ -602,28 +616,33 @@ def create_baseline(
         action="baseline.create",
         idempotency_key=idempotency_key,
     )
-    ref = tx.put(
-        "baseline",
-        {
-            "scope": target_scope,
-            "profile_id": pid,
-            "device_id": did,
-            "release_id": release["id"],
-            "definition_set_id": set_id,
-            "variant_id": variant,
-            "values": seeded,
-            "upstream_ref": upstream["id"] if upstream is not None else None,
-            "previous_revision_id": previous["id"] if previous is not None else None,
-            "state": STATE_DRAFT,
-            "reason": _optional_text(reason),
-            "created_by": _label(actor),
-            "created_at": stamp,
-            "decided_at": None,
-            "decided_by": None,
-            "decide_note": None,
-            "seed_warnings": warnings,
-        },
-    )
+    payload: Dict[str, Any] = {
+        "scope": target_scope,
+        "profile_id": pid,
+        "device_id": did,
+        "release_id": release["id"],
+        "definition_set_id": set_id,
+        "variant_id": variant,
+        "values": seeded,
+        "upstream_ref": upstream["id"] if upstream is not None else None,
+        # **上游修订号必须落库**：机型升版要靠它取"当初引用的那一版"作共同基准。
+        # 只存 id 的话，通用层一发 r5，旧机型的共同基准就悄悄漂到 r5。
+        "upstream_revision": (upstream.get("revision") if upstream is not None else None),
+        "previous_revision_id": previous["id"] if previous is not None else None,
+        "state": STATE_DRAFT,
+        "reason": _optional_text(reason),
+        "created_by": _label(actor),
+        "created_at": stamp,
+        "decided_at": None,
+        "decided_by": None,
+        "decide_note": None,
+        "seed_warnings": warnings,
+    }
+    if provenance:
+        # 升级来源单独放一层：普通创建不出现这个键，免得多出一串 null；
+        # 也不能"先 put 再 put 一次改"，那样会额外产生一条修订。
+        payload["upgrade_provenance"] = provenance
+    ref = tx.put("baseline", payload)
     tx.commit()
     return get_baseline(repo, str(ref.id))
 
