@@ -55,6 +55,7 @@ KIND_PREFIX = {
     "tracking_policy": "tp",
     "baseline": "bl",
     "observation": "ob",
+    "capture_event": "ce",
     "change_set": "cs",
     "artifact": "ar",
     "delivery": "dl",
@@ -535,16 +536,25 @@ class ConfigRepository:
                     os.makedirs(os.path.dirname(path), exist_ok=True)
                     fsutil.atomic_write_bytes(path, data)
 
-            # 2) 对象修订（不可变）
-            result: List[Dict[str, str]] = []
+            # 2) 对象修订（不可变）。先把本次事务里所有对象的 ID 与修订号**定下来**
+            #    再统一落盘——同一事务内的对象因此可以互相引用（例如采集事件指向
+            #    刚建的观测），引用在落盘时解析成对方真实 ID，不需要第二次提交。
+            plan: List[Dict[str, Any]] = []
             stamp = now_iso()
             for ref in tx._refs:
                 object_id = ref.id or self._next_id(ref.kind, state)
                 self._check_object_id(ref.kind, object_id)
                 previous = (state["heads"].get(ref.kind) or {}).get(object_id)
                 number = int(previous[1:]) + 1 if previous else 1
-                revision = "r%d" % number
-                payload = dict(ref._payload)
+                ref.id = object_id
+                ref.revision = "r%d" % number
+                plan.append(ref)
+
+            result: List[Dict[str, str]] = []
+            for ref in plan:
+                object_id = str(ref.id)
+                revision = str(ref.revision)
+                payload = self._resolve_refs(dict(ref._payload), tx)
                 payload.update(
                     {
                         "kind": ref.kind,
@@ -561,8 +571,6 @@ class ConfigRepository:
                     raise AppError(STORAGE_FAILURE, "写入配置对象失败", cause=str(exc))
 
                 state["heads"].setdefault(ref.kind, {})[object_id] = revision
-                ref.id = object_id
-                ref.revision = revision
                 result.append({"kind": ref.kind, "id": object_id, "revision": revision})
 
             # 3) 指针（`Ref` 已在上一步拿到 ID）
@@ -621,6 +629,25 @@ class ConfigRepository:
             idempotency_key=tx.idempotency_key,
             replayed=False,
         )
+
+    @staticmethod
+    def _resolve_refs(value: Any, tx: Transaction) -> Any:
+        """把载荷里的 `Ref` 换成对方的真实 ID（同一事务内的对象互相引用）。
+
+        ID 在写盘前已全部定好，因此这里不会遇到"引用了还没编号的对象"。
+        """
+        if isinstance(value, Ref):
+            if value.id is None:
+                raise AppError(INVALID_INPUT, "对象引用了本次未分配 ID 的对象")
+            return value.id
+        if isinstance(value, dict):
+            return {
+                key: ConfigRepository._resolve_refs(item, tx)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [ConfigRepository._resolve_refs(item, tx) for item in value]
+        return value
 
     def _load_receipt(self, key: str) -> Optional[Dict[str, Any]]:
         path = self.receipt_path(key)

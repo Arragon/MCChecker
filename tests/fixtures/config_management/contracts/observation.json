@@ -4,7 +4,10 @@
   "scope": "profile",
   "profile_id": "A",
   "logical_file_id": "lf_000020",
-  "release_ref": {"release_id": "sr_000003", "resolution": "confirmed"},
+  "release_ref": {
+    "release_id": "sr_000003",
+    "resolution": "confirmed"
+  },
   "blob_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
   "captured_at": "2026-10-22T02:00:00Z",
   "capture_kind": "scheduled",
@@ -12,10 +15,45 @@
   "completeness": "partial",
   "mapping": {
     "entries": [
-      {"parameter_id": "pm_000008", "raw_key": "PULSE_WIDTH", "status": "mapped", "value_ref": "/PULSE_WIDTH"},
-      {"parameter_id": null, "raw_key": "UNKNOWN_KEY", "status": "unmapped", "value_ref": "/UNKNOWN_KEY"}
+      {
+        "parameter_id": "pm_000008",
+        "raw_key": "/PULSE_WIDTH",
+        "status": "mapped",
+        "value_ref": {
+          "type": "decimal",
+          "text": "0.65",
+          "unit": "s"
+        },
+        "reason": null
+      },
+      {
+        "parameter_id": null,
+        "raw_key": "/UNKNOWN_KEY",
+        "status": "unmapped",
+        "value_ref": null,
+        "reason": "文件中存在但未登记为参数"
+      }
     ],
-    "unresolved_keys": ["UNKNOWN_KEY"]
+    "unresolved_keys": [
+      "/UNKNOWN_KEY"
+    ],
+    "truncated": false,
+    "definition_set_id": "ds_000010"
   },
-  "status": "parsed"
+  "status": "parsed",
+  "family_id": "cf_000001",
+  "role": "field_json",
+  "variant_id": null,
+  "device_id": null,
+  "byte_size": 128,
+  "format": "json",
+  "structure_signature": null,
+  "captured_by": "采集员甲",
+  "filename": "axis_param.json",
+  "mapping_revision": 2,
+  "definition_set_id": "ds_000010",
+  "reason": "",
+  "stale_capture": false,
+  "remapped_at": "2026-10-22T03:00:00Z",
+  "remapped_by": "管理员乙"
 }

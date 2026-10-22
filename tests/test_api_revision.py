@@ -82,6 +82,9 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/config/definition-sets"): None,
     # M6-05：追踪策略同样只递增全局 config_revision。
     ("POST", "/api/v1/config/tracking"): None,
+    # 采集与观测（M6-07/M6-08）：观测不是基线，写它不动 5 段修订号
+    ("POST", "/api/v1/config/observations"): None,
+    ("POST", "/api/v1/config/observations/{oid}/remap"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

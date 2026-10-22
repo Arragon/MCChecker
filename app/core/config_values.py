@@ -230,7 +230,9 @@ def parse_typed(raw: Any, kind: str, unit: Optional[str] = None) -> TypedValue:
     elif isinstance(raw, bool):
         value = TypedValue("bool", "true" if raw else "false")
     elif isinstance(raw, int):
-        value = TypedValue("int", str(raw))
+        # 整数也要带上单位：JSON 里 `650` 与 `0.65` 都可能是同一个带单位参数，
+        # 单位丢了会让后续"同值不同单位"的判等与展示全错。
+        value = TypedValue("int", str(raw), unit if kind in ("int", "decimal") else None)
     elif isinstance(raw, Decimal):
         value = TypedValue("decimal", format(raw, "f"), unit)
     elif isinstance(raw, float):  # 只可能来自非严格解析，明确拒绝

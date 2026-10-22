@@ -55,7 +55,9 @@ class XmlLoc:
             name if occurrence == 1 else "%s[%d]" % (name, occurrence)
             for name, occurrence in self.steps
         )
-        return "@" + self.attribute if self.attribute else body
+        # 属性定位必须带上路径：只写 `@unit` 会让 `Axis/Velocity@unit` 与
+        # `Axis/Speed@unit` 撞成同一个字符串，查重时被误判成"两个参数抢同一个节点"。
+        return "%s@%s" % (body, self.attribute) if self.attribute else body
 
     def __repr__(self) -> str:  # pragma: no cover - 诊断用
         return "XmlLoc(%r)" % str(self)

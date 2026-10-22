@@ -55,7 +55,7 @@
 ### 2.2 ID 规则
 
 - 格式：`<prefix>_<6 位十进制全局序号>`，例如 `sr_000042`。
-- 前缀：`cf`(family) `lf`(logical file) `sr`(software release) `fs`(file snapshot) `rb`(release batch) `tv`(template variant) `pm`(parameter) `dr`(definition revision) `ds`(definition set) `bl`(baseline) `ob`(observation) `cs`(change set) `ar`(artifact) `dl`(delivery)。
+- 前缀：`cf`(family) `lf`(logical file) `sr`(software release) `fs`(file snapshot) `rb`(release batch) `tv`(template variant) `pm`(parameter) `dr`(definition revision) `ds`(definition set) `tp`(tracking policy) `bl`(baseline) `ob`(observation) `ce`(capture event) `cs`(change set) `ar`(artifact) `dl`(delivery)。
 - 序号来自 `state.seq`（单调递增，持久化），**由仓储分配**，调用方不得自造。
 - 实体内部修订号：`r1`、`r2`…；全局审计序号：`state.seq` 同源。
 - 改名、改单位、换文件**不改变** ID。ID 一经分配永不复用（退役对象保留 ID）。
@@ -207,15 +207,49 @@ reason, created_at, created_by, decided_at, decided_by, decide_note
 ### 3.11 `Observation`
 
 ```
-id, scope=profile, profile_id, logical_file_id,
+id, scope=profile, profile_id, logical_file_id, family_id, role,
 release_ref: {release_id|null, resolution: confirmed|unconfirmed|unknown},
-blob_sha256, captured_at, capture_kind: scheduled|manual|manual_import,
-source_name, completeness: full|partial,
-mapping: {entries:[{parameter_id|null, raw_key, status: mapped|unmapped|ambiguous|missing, value_ref}], unresolved_keys[]},
-status: parsed|parse_failed
+variant_id(可空), device_id(可空),
+blob_sha256, byte_size, format: xml|json, structure_signature,
+captured_at, captured_by, capture_kind: scheduled|manual|manual_import,
+source_name, filename,
+completeness: full|partial,
+mapping: {
+  entries: [{parameter_id|null, raw_key, status: mapped|unmapped|ambiguous|missing|invalid,
+             value_ref, reason}],
+  unresolved_keys: [], truncated: bool, definition_set_id
+},
+mapping_revision: 1..n,
+definition_set_id, status: parsed|parse_failed, reason,
+stale_capture: bool,
+remapped_at(可空), remapped_by(可空)
 ```
 
-**规则**：观测只读；重新映射写**新的** `mapping` 修订，不覆写原始字节与上次结果。`missing` 不等于删除。
+**规则**：
+
+- 观测只读；重新映射给**同一个对象**追加 `r<n>` 修订，`r1` 永远是采集那一刻的结论，
+  原始字节（blob）与上一次的 `mapping` 都不被覆写。
+- `missing` 不等于删除：节点不存在只说明"这次没看到值"，不是"该删掉这个参数"。
+- `unmapped` 的条目 `parameter_id` 必须为 `null`（文件里有、没人认领的键）；
+  同一目标被多个参数占用时**全部**标 `ambiguous`，不静默选一个。
+- `invalid` = 值在，但不符合定义的**类型或单位**，此时 `value_ref` 必须为 `null`——
+  不能给调用方一个"看起来能用"的值。
+- `completeness=full` 要求每条 entry 都是 `mapped` 且 `unresolved_keys` 为空；
+  解析失败一律 `partial`。
+- `captured_at/captured_by` 与 `remapped_at/remapped_by` 分离：重新映射不冒充"重新采集过"。
+- 解析失败也入库（`status=parse_failed`）：它不可能成为基线，但"现场给了错误页"本身要可追溯。
+
+### 3.11a `CaptureEvent`
+
+```
+id, observation_id, profile_id, logical_file_id, blob_sha256,
+captured_at, captured_by, capture_kind, source_name, filename,
+deduplicated: bool, stale_capture: bool, status, reason
+```
+
+**规则**：每次采集**必有一条**事件，即使内容与上次完全相同（`deduplicated=true` 指向
+既有观测）——"这个时间点它还是这个样子"本身是证据。事件与其指向的观测在**同一次事务**
+里公布，不存在"有事件没观测"的中间态。
 
 ### 3.12 `ChangeSet`
 
