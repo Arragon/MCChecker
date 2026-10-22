@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..core.config_repository import ConfigRepository
 from ..core.errors import INVALID_INPUT, NOT_FOUND, PLAN_STALE, AppError
 from . import config_baselines as baselines
-from . import config_catalog, config_changes
+from . import config_catalog, config_changes, config_device_layer
 
 MODE_TO_COMMON = "promote_to_common"
 MODE_TO_MODEL = "promote_to_model"
@@ -50,8 +50,9 @@ EXCLUDE_REASONS = {
     "already_same": "与目标基线当前值相同，无需上提",
 }
 
-#: 设备层关闭时的错误文案（M7-07/08 延期，见 M8-07 文档）。
-DEVICE_LAYER_DISABLED = "DEVICE_LAYER_DISABLED"
+#: 设备层关闭时的错误码。取值只在 `config_device_layer` 一处定，这里只是别名，
+#: 免得调用方为了一个字符串再 import 一层。
+DEVICE_LAYER_DISABLED = config_device_layer.DEVICE_LAYER_DISABLED
 
 
 def _text(value: Any, field: str) -> str:
@@ -377,13 +378,18 @@ def plan_promote_to_model(
     """设备 → 机型。**设备层当前功能关闭**（M7-07/08 延期）。"""
     _text(profile_id, "profile_id")
     devices = _device_baselines(repo)
-    raise AppError(
-        DEVICE_LAYER_DISABLED,
-        "设备层未启用（M7-07/08 按计划延期），无法从设备上提到机型",
+    # 开关只在 `config_device_layer` 一处：接口、状态页、这里读的是同一个值，
+    # 免得"某个入口开了、另一个还关着"这种自相矛盾的状态。
+    config_device_layer.require_enabled(
         field="device_id",
         device_id=_optional_text(device_id) or None,
         device_baselines=len(devices),
-        note="机型级配置完整可用；需要设备级例外时先启用设备目录",
+    )
+    raise AppError(
+        INVALID_INPUT,
+        "设备层已启用但设备上提尚未接入本版本",
+        field="device_id",
+        device_id=_optional_text(device_id) or None,
     )
 
 

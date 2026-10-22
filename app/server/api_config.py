@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 from .. import __version__
 from ..config import Settings
 from ..core.errors import INVALID_INPUT, AppError
-from ..services import authz, config_gate, config_revision, config_store
+from ..services import authz, config_device_layer, config_gate, config_revision, config_store
 from ..services.context import RequestContext
 from .router import Response
 
@@ -77,6 +77,9 @@ def get_status(
             "store_seq": summary["store_seq"],
             "counts": summary["counts"],
             "total": summary["total"],
+            # M7-07/08 按计划延期：开关状态在这里如实报，前端与验收读同一份；
+            # 关闭时连"关了什么、怎么开"一起给，避免被读成"整个配置域不能用"。
+            "device_layer": config_device_layer.describe(),
         }
     )
 

@@ -734,6 +734,42 @@ restored_at, changed}`。旧修订、旧对象、旧产物照旧可读（`artifa
 
 ---
 
+### 6.8 设备层：功能关闭（M7-07 / M7-08 延期声明）
+
+**设备级配置当前不提供**。这是《M5–M8 计划》里写明的延期判据落地，不是"还没写"：
+
+> 延期判据：业务侧无设备级需求 → M7-07/08 整体标注"功能关闭"，并在 M8-07 文档中
+> 显式声明，验收不虚报。
+
+单一事实源是 `app/services/config_device_layer.py`：`ENABLED = False`、`describe()`、
+`require_enabled()`。接口、状态页、上提入口读的都是这一份，不存在"某个入口开了、
+另一个还关着"。
+
+| 关闭（`unavailable`） | 仍然可用（`available`） |
+|---|---|
+| 设备目录（稳定设备 ID、机型归属、退役） | 全局/机型级配置目录 |
+| 设备例外（`DeviceOverride` / `DeviceBaseline` 派生） | 通用/机型基线、变更单、批准发布 |
+| `device_rebase` | 目标文件生成与交付产物 |
+| 设备 → 机型上提 | 跨版本升级、同版本刷新 |
+| 按设备区分的生成 XML | 经验上提、历史回滚、跨变体迁移、出口补发 |
+
+**行为约定**：
+
+* 关闭时一律 `400 DEVICE_LAYER_DISABLED`，`detail` 带 `deferred_cards`、`declared_in`、
+  `enable_checklist` 摘录与一句 `note`。不用 404（路径是对的），也不返回"空成功"
+  （那会把"根本没有设备这个概念"说成"设备没有例外"）。
+* `/api/v1/config/status` 的 `device_layer` 字段原样透出 `describe()`，前端与验收读同一份。
+* **不新增** `/config/devices`、`device_rebase` 之类入口：关着还留按钮，就是骗人点。
+  但 `/config/promote/model` 保留并明确报错——留着才能回答"为什么不能做"。
+* 前端（`MC.lifecycleUi`）的「设备 → 机型」卡只写"未启用"与延期卡号，**没有任何可点控件**。
+
+**启用顺序**（`CHECKLIST`，缺一条都不算启用）：业务确认存在真实设备身份且设备 ≠ 机型 →
+设备目录与归属表落地（`device_id` 不得由 IP 或某机型 JSON 反推）→ 设备例外只写
+`device` scope、上提机型另建审批提案 → 设备退役后历史可读、新写禁用 →
+M8-07 文档解除声明并把 `ENABLED` 置 `True`。
+
+---
+
 ## 7. 动作与能力
 
 | action | 最小角色 | 能力键 |
