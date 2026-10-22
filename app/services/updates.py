@@ -51,7 +51,7 @@ from ..core.errors import (
     TOO_LARGE,
     AppError,
 )
-from . import revision
+from . import config_policies, revision
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +383,21 @@ def delete_source(pid: str, name: Any) -> bool:
 
 
 def _commit_config(pid: str, name: str, content: bytes) -> Dict[str, Any]:
-    """校验并提交一份配置。不写状态文件、不递增修订号，由调用方汇总。"""
+    """校验并提交一份配置。不写状态文件、不递增修订号，由调用方汇总。
+
+    M6-06 的策略守卫在**最前面**：受管模式下未登记的文件不再直接落盘，而是回
+    `blocked`（单条结果），让整批任务继续跑完、由结果汇总体现，而不是整批失败。
+    """
+    try:
+        config_policies.guard_or_raise(
+            config_policies.repository(),
+            config_policies.ACTION_SCHEDULE_DOWNLOAD,
+            filename=name,
+            profile_id=pid,
+        )
+    except AppError as exc:
+        return _result(name, "blocked", exc.message)
+
     try:
         document = parser.to_compact(content, name)
     except AppError as exc:

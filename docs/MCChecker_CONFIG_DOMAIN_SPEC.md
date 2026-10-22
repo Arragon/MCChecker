@@ -24,6 +24,7 @@
 | 现场观测 | `Observation` | 从现场采集到的原始 JSON 字节及其解析投影，只读 | 不是基线，不能直接发布 |
 | 变更单 | `ChangeSet` | 从当前基线到目标基线的受控提案，有状态机 | 不是审计日志 |
 | 产物 | `Artifact` | 由已批准基线 + 模板编译出的不可变 XML 字节 | 不是模板，也不是快照 |
+| 跟踪策略 | `TrackingPolicyRevision` | 某个配置类别（可再按机型收窄）采用 `archive_only` 还是 `managed`，含理由 | 不是权限，也不是开关记录之外的配置 |
 | 交付记录 | `DeliveryRecord` | 某产物在某个目标上"人工导入"的事实登记 | 不是自动下发，不是设备确认 |
 | 审计事件 | `AuditEvent` | 一次提交的不可变证据（谁、何时、为何、前后哈希） | 不是普通运行日志 |
 
@@ -159,6 +160,30 @@ id, release_id, variant_id,
 definition_ids[](frozen, 按 parameter_id 唯一),
 created_at, created_by, note
 ```
+
+### 3.9a `TrackingPolicyRevision`
+
+```
+id, scope: family|model,
+family_id(scope=family 必填；scope=model 时可空=该机型全域),
+profile_id(scope=model 必填),
+mode: archive_only|managed,
+reason(非空,写审计), notes,
+created_by, created_at, updated_at
+```
+
+**规则**：
+
+- 同一 `(scope, family_id, profile_id)` 只有**一个对象**，改动追加 `r<n>` 修订，历史可查；
+- 有效策略优先级：机型-类别 > 机型 > 类别 > 默认 `archive_only`（默认档与旧行为完全一致）；
+- `managed` 只改变旧入口的**去向**（observation / candidate / change_source / reassociate），
+  任何旧入口都不可能直接发布基线（`may_publish_baseline()` 恒假）；
+- 关闭 `managed` 不删除、不隐藏任何已产生的对象与审计。
+
+**旧接口的可见性**：特性开启时，五个旧入口（上传、URL 导入、定时下载、旧审阅提交、
+删除）的响应体多出一个 `tracking: {route, mode}`；特性**未开启时不加该字段**，旧响应
+逐字节不变。定时下载是批量任务，被拦的单条回 `status="blocked"` 并继续跑完整批，
+不把整批判失败。
 
 ### 3.10 `BaselineRevision`
 

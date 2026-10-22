@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from ..services import authz, recovery
+from ..services import authz, config_policies, recovery
 from ..services.context import RequestContext
 from .router import Response, Router
 
@@ -26,12 +26,22 @@ def delete_file(
 ) -> Response:
     # DELETE /api/v1/p/{pid}/files/{name}
     authz.authorize(ctx, "delete_file")
+    # M6-06：受管模式下删除走 reassociate 通道——允许删，但必须保留稳定关联与审计，
+    # 不能因为删了文件就把"这个逻辑文件曾被哪些快照/基线引用"一起抹掉。
+    tracking = config_policies.guard_or_raise(
+        config_policies.repository(),
+        config_policies.ACTION_DELETE,
+        filename=params["name"],
+        profile_id=params["pid"],
+    )
     actor = ctx.actor
-    return Response(
-        payload=recovery.delete_file(
+    payload = dict(
+        recovery.delete_file(
             params["pid"],
             params["name"],
             ip=ctx.ip,
             actor_name=actor.name if actor is not None else "",
         )
     )
+    payload = config_policies.annotate(payload, tracking)
+    return Response(payload=payload)

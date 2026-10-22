@@ -140,6 +140,8 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/config/definitions/{did}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/definitions/{did}/verify"): "config_registry_write",
     ("POST", "/api/v1/config/definition-sets"): "config_registry_write",
+    # M6-05（INH-1950）：追踪策略是**独立的管理动作**，不复用旧的 settings_write。
+    ("POST", "/api/v1/config/tracking"): "config_tracking_admin",
 }
 
 ROUTE_VALUES = {

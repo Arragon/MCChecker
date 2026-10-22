@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ..services import authz, review
+from ..services import authz, config_policies, review
 from ..services.context import RequestContext
 from .router import Response, json_body
 
@@ -43,4 +43,16 @@ def submit_review(
     #   -> {"generated_file": str|null, "approved": int, "rejected": int}
     authz.authorize(ctx, "review")
     payload: Dict[str, Any] = json_body(body)
-    return Response(payload=review.submit_review(params["pid"], ctx.actor, payload))
+    # M6-06：受管模式下旧节点审阅只是**变更来源**，不能当成"直接发布新基线"。
+    # 这里不改变审阅本身的写回行为（它仍写自己的节点），只是把通道结论记进响应，
+    # 让调用方/审计能看出这次写回不属于基线发布。
+    tracking = config_policies.guard_or_raise(
+        config_policies.repository(),
+        config_policies.ACTION_REVIEW_SUBMIT,
+        filename=payload.get("file"),
+        profile_id=params["pid"],
+    )
+    result = config_policies.annotate(
+        dict(review.submit_review(params["pid"], ctx.actor, payload)), tracking
+    )
+    return Response(payload=result)

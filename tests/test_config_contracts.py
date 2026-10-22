@@ -41,6 +41,7 @@ ID_PREFIX = {
     "parameter": "pm_",
     "definition_revision": "dr_",
     "definition_set": "ds_",
+    "tracking_policy": "tp_",
     "baseline": "bl_",
     "observation": "ob_",
     "change_set": "cs_",
@@ -82,6 +83,15 @@ REQUIRED_KEYS = {
         "status",
     },
     "definition_set": {"id", "release_id", "variant_id", "definition_ids", "created_at"},
+    "tracking_policy": {
+        "id",
+        "scope",
+        "family_id",
+        "profile_id",
+        "mode",
+        "reason",
+        "created_by",
+    },
     "baseline": {
         "id",
         "scope",

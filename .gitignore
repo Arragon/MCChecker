@@ -8,3 +8,7 @@ __pycache__/
 dist/
 
 .nicegui/
+
+# 本地工具产物与工作区记忆，不进版本库
+.mimosa/
+.workbuddy/

@@ -105,6 +105,7 @@ def build_router(settings: Settings) -> Router:
         api_config,
         api_config_catalog,
         api_config_registry,
+        api_config_tracking,
         api_delete,
         api_dl,
         api_documents,
@@ -159,4 +160,6 @@ def build_router(settings: Settings) -> Router:
     api_config_catalog.register(router, settings)
     # 参数登记（M6-03/M6-04）：参数主档、定义修订、定义集合。
     api_config_registry.register(router, settings)
+    # 追踪策略（M6-05）：archive_only / managed 的类别级与机型级覆盖。
+    api_config_tracking.register(router, settings)
     return router

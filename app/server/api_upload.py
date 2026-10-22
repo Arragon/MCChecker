@@ -10,7 +10,7 @@ from functools import partial
 from typing import Dict, List, Optional
 
 from ..config import Settings
-from ..services import authz, upload
+from ..services import authz, config_policies, upload
 from ..services.context import RequestContext
 from .router import Response, Router, json_body, query_param
 
@@ -33,6 +33,13 @@ def save_file(
 ) -> Response:
     # PUT /api/v1/p/{pid}/files/{name}?overwrite=1   原文字节
     authz.authorize(ctx, "upload_persist")
+    # M6-06 策略守卫：受管模式下这次写入只能进 candidate/observation 通道（不发布基线）。
+    tracking = config_policies.guard_or_raise(
+        config_policies.repository(),
+        config_policies.ACTION_UPLOAD,
+        filename=params["name"],
+        profile_id=params["pid"],
+    )
     overwrite = query_param(query, "overwrite") == "1"
     outcome = upload.save_bytes(
         params["pid"],
@@ -42,7 +49,8 @@ def save_file(
         settings.upload_max_bytes,
         actor=getattr(ctx.actor, "name", "") or "",
     )
-    return Response(status=outcome.status, payload=outcome.payload)
+    payload = config_policies.annotate(dict(outcome.payload or {}), tracking)
+    return Response(status=outcome.status, payload=payload)
 
 
 def import_url(
@@ -56,6 +64,14 @@ def import_url(
     payload = json_body(body)
     persist = bool(payload.get("persist"))
     authz.authorize(ctx, "upload_persist" if persist else "temp_upload")
+    # M6-06：只有持久化分支才写本地文件，临时导入（persist=false）不算落盘，不设守卫。
+    if persist:
+        config_policies.guard_or_raise(
+            config_policies.repository(),
+            config_policies.ACTION_IMPORT,
+            filename=str(payload.get("name") or ""),
+            profile_id=params["pid"],
+        )
     return Response(
         payload=upload.import_url(
             params["pid"],

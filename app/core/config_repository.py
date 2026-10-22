@@ -52,6 +52,7 @@ KIND_PREFIX = {
     "parameter": "pm",
     "definition_revision": "dr",
     "definition_set": "ds",
+    "tracking_policy": "tp",
     "baseline": "bl",
     "observation": "ob",
     "change_set": "cs",
