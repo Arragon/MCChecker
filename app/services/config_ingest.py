@@ -352,7 +352,7 @@ def _typed(value: Any, definition: Dict[str, Any]) -> Tuple[Optional[Dict[str, A
     """把一个原始值转成 `TypedValue` 的传输形态；失败返回 `(None, 原因)`。"""
     kind = str(definition.get("type") or "decimal")
     try:
-        parsed = config_values.parse_typed(
+        parsed = config_values.parse_with_unit(
             value,
             _TYPE_ALIASES.get(kind, kind),
             definition.get("unit") or None,

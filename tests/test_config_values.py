@@ -155,3 +155,17 @@ def test_yield_changes_reports_only_real_differences() -> None:
     changes = list(cv.yield_changes(old, new))
     assert [item[0] for item in changes] == ["pm_2"]
     assert changes[0][1] is cv.MISSING
+
+
+def test_declared_unit_outside_table_is_kept_but_not_convertible() -> None:
+    """`mm/s` 这类派生单位照原样保留；能不能换算与"能不能存在"是两件事。"""
+    value = cv.parse_with_unit("120", "decimal", "mm/s")
+    assert value.to_json() == {"type": "decimal", "text": "120", "unit": "mm/s"}
+    # 换算表里没有它，因此换算仍然拒绝（而不是悄悄当同单位处理）
+    with pytest.raises(AppError):
+        cv.convert(value, "mm")
+
+    # 表内的单位照旧走严格解析
+    assert cv.parse_with_unit("0.65", "decimal", "s").unit == "s"
+    with pytest.raises(AppError):
+        cv.parse_typed("1", "decimal", "mm/s")

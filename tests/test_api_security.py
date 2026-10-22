@@ -144,6 +144,9 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/config/tracking"): "config_tracking_admin",
     ("POST", "/api/v1/config/observations"): "config_registry_write",
     ("POST", "/api/v1/config/observations/{oid}/remap"): "config_registry_write",
+    ("POST", "/api/v1/config/baselines"): "config_change_submit",
+    ("POST", "/api/v1/config/baselines/{bid}/values"): "config_change_submit",
+    ("POST", "/api/v1/config/baselines/{bid}/intent"): "config_change_submit",
 }
 
 ROUTE_VALUES = {
@@ -153,7 +156,7 @@ ROUTE_VALUES = {
     # 而不是权限矩阵——这里要验的是"权限先于存在性"。
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
     "pmid": "pm_000001", "did": "dr_000001", "dsid": "ds_000001",
-    "oid": "ob_000001", "tpid": "tp_000001",
+    "oid": "ob_000001", "tpid": "tp_000001", "bid": "bl_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

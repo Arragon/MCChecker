@@ -377,14 +377,29 @@ data/config_management/
 | GET/POST | `/api/v1/config/parameters/{id}/definitions` | global | 定义修订 |
 | GET/POST | `/api/v1/config/definition-sets` | global | 定义集合 |
 | GET | `/api/v1/p/{pid}/config/status` | profile | 机型管理域状态 |
-| GET/POST | `/api/v1/p/{pid}/config/baselines` | profile | 基线 |
-| GET | `/api/v1/p/{pid}/config/observations` | profile | 现场观测 |
+| GET/POST | `/api/v1/config/baselines` | global | 基线（`?profile_id=&scope=&state=` 过滤；**对象带 `profile_id`**） |
+| GET | `/api/v1/config/baselines/{id}` | global | 基线详情（`?revision=rN` 可读历史修订） |
+| POST | `/api/v1/config/baselines/{id}/values` | global | 改草稿值（仅 `draft`） |
+| POST | `/api/v1/config/baselines/{id}/intent` | global | 改 `inherit`/`override`/`pin` 意图 |
+| GET/POST | `/api/v1/config/observations` | global | 现场观测（`?profile_id=&logical_file_id=` 过滤） |
+| GET | `/api/v1/config/observations/{id}` | global | 观测详情（含逐项映射状态） |
+| GET | `/api/v1/config/observations/{id}/raw` | global | 原始字节下载（`Content-Disposition`） |
+| POST | `/api/v1/config/observations/{id}/remap` | global | 重新映射（追加修订，`r1` 不变） |
+| GET | `/api/v1/config/ingest/summary` | global | 采集概览（最近一次、按状态计数） |
+| GET/POST | `/api/v1/config/tracking` | global | 追踪策略（`archive_only`/`managed`） |
+| GET | `/api/v1/config/tracking/effective` | global | 有效策略 + 继承链 |
+| GET | `/api/v1/config/tracking/{id}/history` | global | 策略修订历史 |
+| GET | `/api/v1/p/{pid}/config/reconcile` | profile | 文件内三栏对账（§6.2） |
 | GET/POST | `/api/v1/p/{pid}/config/changes` | profile | 变更单 |
 | POST | `/api/v1/p/{pid}/config/changes/{id}/submit` | profile | 提交 |
 | POST | `/api/v1/p/{pid}/config/changes/{id}/approve` | profile | 批准并发布 |
 | GET | `/api/v1/p/{pid}/config/artifacts` | profile | 产物 |
 | GET | `/api/v1/p/{pid}/config/artifacts/{id}/raw` | profile | 下载 |
 | GET | `/api/v1/p/{pid}/config/audit` | profile | 审计检索 |
+
+**路径形态的选择**：基线与观测是**全局对象**（携带 `profile_id` 字段、共用全局修订号），
+所以接口放在 `/api/v1/config/*` 并用查询参数过滤，而不是嵌进 `/p/{pid}/` 前缀。
+只有"以机型为坐标系"的读模型（`status`、`reconcile`、`changes`、`audit`）才用 profile 前缀。
 
 **通用约定**：写请求必须带 `X-Requested-With: MCChecker`（`http.py` 既有）；可选 `Idempotency-Key`、`If-Match`（`expected_revision`）。分页 `?cursor=&limit=`（limit 默认 50，上限 200）。
 
@@ -402,6 +417,57 @@ data/config_management/
 | `OBSERVATION_UNKNOWN_RELEASE` | 422 | 未知版本禁止发布 |
 | `ARTIFACT_TEMPLATE_INCOMPATIBLE` | 422 | 模板与定义集合/变体不匹配 |
 | `IDEMPOTENCY_MISMATCH` | 409 | 同键异体 |
+
+未知单位没有独立错误码：`INVALID_INPUT` + 消息 `未知单位：<unit>`。区分点在于
+**"能不能换算"与"合不合法"是两件事**——`mm/s`、`rpm`、`%` 是合法声明但换不了，
+`TypedValue.from_json` 放行、`convert()` 抛错；`parse_with_unit()` 保留声明单位。
+
+### 6.2 文件内对账（`GET /p/{pid}/config/reconcile`）
+
+查询参数：`logical_file_id` 或 `filename`（二选一，前者优先）、`baseline_id`、
+`observation_id`。缺省时观测取该逻辑文件的**当前观测**，基线取"机型级 approved 优先、
+其次通用 approved"。
+
+响应（节选）：
+
+```json
+{
+  "logical_file": {"id": "lf_1", "display_name": "轴参数", "role": "observation", "family_id": "f1"},
+  "observation": {"id": "ob_1", "captured_at": "...", "status": "parsed", "completeness": "full",
+                  "release_ref": {...}, "unresolved_keys": [], "mapping_revision": "r1"},
+  "baseline": {"id": "bl_1", "scope": "model", "state": "approved", "revision": "r3"},
+  "rows": [{
+    "parameter_id": "pm_1", "name": "最大速度", "category": "运动", "unit": "m/s", "known": true,
+    "observed": {"status": "mapped", "value": {"type": "decimal", "text": "1.2", "unit": "m/s"},
+                 "raw_key": "MAX_SPEED", "reason": null, "observation_id": "ob_1", "captured_at": "..."},
+    "baseline": {"value": {"type": "decimal", "text": "1", "unit": "m/s"}, "baseline_id": "bl_1",
+                 "state": "approved", "intent": "inherit"},
+    "proposed": {"value": {"type": "decimal", "text": "1.2", "unit": "m/s"}, "source": "observed"},
+    "diff": "changed"
+  }],
+  "counts": {"same": 0, "changed": 1, "missing_observed": 0, "missing_baseline": 0,
+             "missing_both": 0, "unknown": 0},
+  "stale_observation": false,
+  "newer_observation_id": null,
+  "has_baseline": true,
+  "has_observation": true
+}
+```
+
+四条硬性约定：
+
+1. **`diff` 六态**：`same` / `changed` / `missing_observed`（基线有、现场没采到）/
+   `missing_baseline`（现场有、基线没覆盖）/ `missing_both`（谁都没说，**不等于一致**）/
+   `unknown`（`unmapped`/`ambiguous`/`invalid`）。
+2. **`proposed` 只是建议**，`source ∈ {observed, baseline, none}`；真正提交要走变更单（M6-11）。
+3. **`stale_observation` 用对象身份判定**，不用时间戳——同一秒两次采集时间戳会打平，
+   但"当前那条"确实换人了。前端据此提示，**不得静默替换**。
+4. 只接受 `state=approved` 的基线作为基准；传了草稿基线一律 `INVALID_INPUT`（`field="baseline_id"`）。
+
+**前端契约**（`MC.configUi`，`views/registry.js`）：`valueText` / `reconcileRow` /
+`reconcileGroups` / `reconcileSummary` / `reconcileNotices` / `applyDraft` /
+`pendingChanges`。草稿只存 `{note, edits, adopt, filter}` 于内存（`MC.configApi.drafts`），
+**不落 localStorage，更不存整份 XML/JSON**；待提交行的判据是"勾了采纳 ∧ 有值 ∧ 与基线不同"。
 
 ---
 

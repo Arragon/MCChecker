@@ -103,8 +103,10 @@ def build_router(settings: Settings) -> Router:
         api_bindings,
         api_compare,
         api_config,
+        api_config_baselines,
         api_config_catalog,
         api_config_ingest,
+        api_config_reconcile,
         api_config_registry,
         api_config_tracking,
         api_delete,
@@ -163,6 +165,10 @@ def build_router(settings: Settings) -> Router:
     api_config_registry.register(router, settings)
     # 现场采集与观测（M6-07/M6-08）：不可变 Observation + 重新映射。
     api_config_ingest.register(router, settings)
+    # 基线（M6-09）：通用/机型/设备草稿、继承意图与就绪度。
+    api_config_baselines.register(router, settings)
+    # 文件内现场对账（M6-10）：现场原值 / 批准基线 / 拟值三栏。
+    api_config_reconcile.register(router, settings)
     # 追踪策略（M6-05）：archive_only / managed 的类别级与机型级覆盖。
     api_config_tracking.register(router, settings)
     return router

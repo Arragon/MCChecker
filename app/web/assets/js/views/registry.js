@@ -207,6 +207,215 @@
     return changes;
   }
 
+  /* ===================== 现场对账三栏模型（M6-10） ===================== */
+
+  /* 差异状态的展示顺序：**要人决定的排前面，一致与双方皆无排后面**。
+   * 后端返回的顺序按 parameter_id 排，直接照搬会让"没变化"淹没"要处理"。 */
+  var DIFF_ORDER = ["changed", "missing_observed", "missing_baseline", "unknown", "same", "missing_both"];
+
+  var DIFF_LABELS = {
+    same: "一致",
+    changed: "已变更",
+    missing_observed: "现场未采到",
+    missing_baseline: "基线未覆盖",
+    missing_both: "双方皆无",
+    unknown: "无法判定",
+  };
+
+  /* 观测条目的五种状态（与 config_ingest 常量一一对应）。`missing`/`invalid`
+   * 都不是"值"，界面上必须说清是哪种，否则用户会以为参数被删了。 */
+  var ENTRY_LABELS = {
+    mapped: "已映射",
+    unmapped: "未映射",
+    ambiguous: "有歧义",
+    missing: "缺失",
+    invalid: "值不合法",
+  };
+
+  var SCOPE_LABELS = { common: "通用层", model: "机型层", device: "设备层" };
+
+  /** 类型化值 → 可读文本。`null` 类型显示 `null`，不当成空串（两者语义不同）。 */
+  function valueText(value) {
+    if (!value) return "—";
+    var type = String(value.type || "");
+    var text = value.text == null ? "" : String(value.text);
+    if (type === "null") return "null";
+    if (type === "string" || type === "text") return text === "" ? "（空串）" : text;
+    return value.unit ? text + " " + value.unit : text;
+  }
+
+  /** 把一行对账结果摊平成展示模型；`observed` 缺失时如实说"没采到"，不补值。 */
+  function reconcileRow(row) {
+    var source = row || {};
+    var observed = source.observed || null;
+    var baseline = source.baseline || null;
+    var proposed = source.proposed || {};
+    var status = String(source.diff || "unknown");
+    var observedLabel = observed ? ENTRY_LABELS[observed.status] || observed.status : "未采集";
+    return {
+      parameter_id: source.parameter_id,
+      name: source.name || source.parameter_id,
+      category: source.category || "",
+      unit: source.unit || "",
+      known: !!source.known,
+      diff: status,
+      label: DIFF_LABELS[status] || status,
+      needsDecision: status === "changed" || status === "missing_baseline" || status === "unknown",
+      observedText: valueText(observed && observed.value),
+      observedLabel: observedLabel,
+      observedReason: (observed && observed.reason) || "",
+      observedAt: (observed && observed.captured_at) || "",
+      baselineText: valueText(baseline && baseline.value),
+      baselineIntent: (baseline && baseline.intent) || "",
+      proposedText: valueText(proposed.value),
+      proposedSource: proposed.source || "none",
+    };
+  }
+
+  /** 按差异状态分组；空组不出现，顺序按 DIFF_ORDER 而不是对象键序。 */
+  function reconcileGroups(rows) {
+    var buckets = {};
+    (rows || []).forEach(function (row) {
+      var key = String(row.diff || "unknown");
+      (buckets[key] = buckets[key] || []).push(row);
+    });
+    var groups = [];
+    DIFF_ORDER.forEach(function (status) {
+      var items = buckets[status];
+      if (!items || !items.length) return;
+      groups.push({ status: status, label: DIFF_LABELS[status] || status, rows: items });
+      delete buckets[status];
+    });
+    // 后端将来加了新状态也不会被悄悄吞掉
+    Object.keys(buckets).forEach(function (status) {
+      groups.push({ status: status, label: status, rows: buckets[status] });
+    });
+    return groups;
+  }
+
+  /** 计数摘要：只列非零项，按展示顺序拼成一句话。 */
+  function reconcileSummary(counts) {
+    var source = counts || {};
+    var parts = DIFF_ORDER.filter(function (status) {
+      return Number(source[status] || 0) > 0;
+    }).map(function (status) {
+      return DIFF_LABELS[status] + " " + source[status];
+    });
+    return parts.length ? parts.join(" · ") : "暂无可对账的参数";
+  }
+
+  /**
+   * 顶部提示条：只报服务端给出的事实，不推断。
+   * `level` 取 `error|warn|info`——过期提醒必须是 warn 而不是悄悄换数据。
+   */
+  function reconcileNotices(payload) {
+    var data = payload || {};
+    var list = [];
+    var observation = data.observation || null;
+    var baseline = data.baseline || null;
+    if (data.stale_observation) {
+      list.push({
+        level: "warn",
+        key: "stale",
+        text:
+          "该文件已有更新的现场采集（" +
+          (data.newer_observation_id || "新观测") +
+          "）。本表仍按你在看的这条观测计算，不会静默替换；点「按最新重算」再走一次。",
+      });
+    }
+    if (!data.has_observation) {
+      list.push({
+        level: "info",
+        key: "no-observation",
+        text: "该逻辑文件还没有现场采集记录，现场列全空，拟值只能来自基线。",
+      });
+    } else if (observation && observation.status === "parse_failed") {
+      list.push({
+        level: "error",
+        key: "parse-failed",
+        text: "最近一次采集解析失败，参数值都拿不到；请先在观测详情里看失败原因（原文件已存档，不会丢）。",
+      });
+    }
+    if (!data.has_baseline) {
+      list.push({
+        level: "warn",
+        key: "no-baseline",
+        text: "没有已批准的基线可作为基准，基线列全空。拟值只是「按现场值建议」，先建基线再谈变更。",
+      });
+    } else if (baseline && baseline.scope && baseline.scope !== "model") {
+      list.push({
+        level: "info",
+        key: "scope-" + baseline.scope,
+        text:
+          "本次基准是「" +
+          (SCOPE_LABELS[baseline.scope] || baseline.scope) +
+          "」基线（" +
+          (baseline.id || "") +
+          "）" +
+          (baseline.scope === "common"
+            ? "，改动会影响所有继承它的机型。"
+            : "，只影响绑定到该设备的机型。"),
+      });
+    }
+    var unresolved = (observation && observation.unresolved_keys) || [];
+    if (unresolved.length) {
+      list.push({
+        level: "warn",
+        key: "unresolved",
+        text:
+          unresolved.length +
+          " 个键在参数主档里找不到对应参数（" +
+          unresolved.slice(0, 4).join("、") +
+          (unresolved.length > 4 ? " 等" : "") +
+          "），已列为未映射，不会进拟值。",
+      });
+    }
+    return list;
+  }
+
+  /**
+   * 把本地草稿叠到服务端结果上。草稿只存"用户改到一半的拟值文本"，
+   * **不是权威**：刷新一次服务端结果说了算，草稿只负责别把输入弄丢。
+   */
+  function applyDraft(payload, draft) {
+    var data = payload || {};
+    var saved = (draft && draft.edits) || {};
+    var adopt = (draft && draft.adopt) || {};
+    var rows = (data.rows || []).map(function (row) {
+      var model = reconcileRow(row);
+      var edited = saved[model.parameter_id];
+      model.editText = edited === undefined ? model.proposedText : String(edited);
+      model.adopted =
+        adopt[model.parameter_id] === undefined ? model.needsDecision : !!adopt[model.parameter_id];
+      model.changed = model.editText !== model.proposedText;
+      return model;
+    });
+    return { rows: rows, pending: pendingChanges(rows) };
+  }
+
+  /**
+   * 待提交行：勾了采纳、有值、**且与基线不同**。
+   *
+   * "与基线相同"的行勾了也不算待提交——把没变化的行塞进变更单，等于让审批人为
+   * 零改动签字。真正的提交在 M6-11（带理由与批准）。
+   */
+  function pendingChanges(rows) {
+    return (rows || [])
+      .filter(function (row) {
+        if (!row.adopted) return false;
+        if (!row.editText || row.editText === "—") return false;
+        return row.editText !== row.baselineText;
+      })
+      .map(function (row) {
+        return {
+          parameter_id: row.parameter_id,
+          before: row.baselineText,
+          after: row.editText,
+          diff: row.diff,
+        };
+      });
+  }
+
   MC.configUi = {
     filterParameters: filterParameters,
     versionColumns: versionColumns,
@@ -217,6 +426,15 @@
     draftFromDefinition: draftFromDefinition,
     buildDefinitionPayload: buildDefinitionPayload,
     diffSummary: diffSummary,
+    valueText: valueText,
+    reconcileRow: reconcileRow,
+    reconcileGroups: reconcileGroups,
+    reconcileSummary: reconcileSummary,
+    reconcileNotices: reconcileNotices,
+    applyDraft: applyDraft,
+    pendingChanges: pendingChanges,
+    DIFF_ORDER: DIFF_ORDER,
+    DIFF_LABELS: DIFF_LABELS,
   };
 
   /* ===================== 状态块 ===================== */
@@ -310,7 +528,18 @@
           "div.container",
           h("div.row", { style: "gap:10px;align-items:center" }, search, statusLine),
           toolbar,
-          S.file ? h("div.banner.banner-info", icon("file"), h("div.banner-body", "已按文件筛选：" + S.file + "（关联关系随 M6-10 上线，当前显示全部参数）")) : null,
+          S.file
+            ? h(
+                "div.banner.banner-neutral",
+                { style: "margin-top:10px" },
+                icon("file"),
+                h(
+                  "div.banner-body",
+                  "已按文件 " + S.file + " 进入检索。参数登记按配置类别展示该类别下的全部参数；" +
+                    "该文件的现场对账（原值 / 基线 / 拟值三栏）在文件页的「配置管理」分段。"
+                )
+              )
+            : null,
           body,
           editorHost,
           draftNote
@@ -699,11 +928,205 @@
     };
   };
 
-  /* ===================== 文件页配置管理分段（M5-10） ===================== */
+  /** 状态徽标：要人决定的用 warning，一致用 success，无法判定用 danger，其余中性。 */
+  function diffBadge(status) {
+    var cls =
+      status === "changed" ? ".badge-warning" : status === "same" ? ".badge-success" : status === "unknown" ? ".badge-danger" : "";
+    return h("span.badge" + cls, DIFF_LABELS[status] || status);
+  }
 
   /**
-   * 在文件页"配置管理"分段渲染关联状态。
-   * 关联关系本身属 M6-02，这里只显示服务端给出的事实，不猜、不补。
+   * 画三栏表（M6-10）。差异由服务端给，这里只做分组、筛选与草稿叠加。
+   *
+   * 拟值列可改：改了只进本地草稿（`MC.configApi.drafts`），
+   * **不改服务端任何对象**——真正的提交要等 M6-11 的变更单。
+   */
+  function drawReconcile(host, payload, draftOf, saveDraft) {
+    var data = payload || {};
+    var model = applyDraft(data, draftOf());
+    var filter = (draftOf().filter || "all");
+
+    var infoLine = h(
+      "p.small.muted",
+      "逻辑文件：" + ((data.logical_file && (data.logical_file.display_name || data.logical_file.id)) || "—") +
+        "（" + ((data.logical_file && data.logical_file.role) || "未标角色") + "）" +
+        " · 现场：" + (data.observation ? data.observation.id + (data.observation.captured_at ? "（" + util.formatTime(data.observation.captured_at) + "）" : "") : "未采集") +
+        " · 基线：" + (data.baseline ? data.baseline.id + "（" + (SCOPE_LABELS[data.baseline.scope] || data.baseline.scope || "—") + "）" : "无")
+    );
+
+    var notices = reconcileNotices(data).map(noticeBlock);
+
+    var chips = h("div.row", { style: "gap:6px;flex-wrap:wrap;margin-bottom:10px" });
+    var tableHost = h("div");
+    var pendingHost = h("div.small.muted", { style: "margin-top:8px" });
+
+    function setFilter(next) {
+      var draft = draftOf();
+      draft.filter = next;
+      saveDraft(draft);
+      filter = next;
+      drawChips();
+      drawTable();
+    }
+
+    function drawChips() {
+      var options = [{ status: "all", label: "全部 " + model.rows.length }].concat(
+        reconcileGroups(model.rows).map(function (group) {
+          return { status: group.status, label: group.label + " " + group.rows.length };
+        })
+      );
+      util.replace(
+        chips,
+        options.map(function (option) {
+          var active = filter === option.status;
+          return h(
+            "button.btn.btn-sm" + (active ? ".btn-primary" : ""),
+            {
+              type: "button",
+              "aria-pressed": active ? "true" : "false",
+              onclick: function () { setFilter(option.status); },
+            },
+            option.label
+          );
+        })
+      );
+    }
+
+    function updatePending() {
+      var pending = pendingChanges(model.rows);
+      var edited = model.rows.filter(function (row) { return row.changed; }).length;
+      util.replace(
+        pendingHost,
+        h(
+          "span",
+          "拟值 = 服务端建议，不是决定。当前待提交 " +
+            pending.length +
+            " 行（勾选且与基线不同）" +
+            (edited ? "，手工改过 " + edited + " 行" : "") +
+            "；变更单（含理由与批准）在 M6-11 接入后统一提交，这里不会写入任何对象。"
+        )
+      );
+    }
+
+    function drawTable() {
+      var rows = model.rows.filter(function (row) { return filter === "all" || row.diff === filter; });
+      if (!rows.length) {
+        util.replace(
+          tableHost,
+          MC.stateBlock({
+            kind: "empty",
+            icon: "settings",
+            title: "这一组没有参数",
+            desc: "换个状态筛选，或确认这个逻辑文件是否已登记参数。",
+          })
+        );
+        return;
+      }
+      util.replace(
+        tableHost,
+        h(
+          "table.table",
+          h(
+            "thead",
+            h(
+              "tr",
+              h("th", "参数"),
+              h("th", "现场原值"),
+              h("th", "批准基线"),
+              h("th", "拟值（可改）"),
+              h("th", "状态")
+            )
+          ),
+          h(
+            "tbody",
+            rows.map(function (row) { return drawRow(row, draftOf, saveDraft, updatePending); })
+          )
+        )
+      );
+    }
+
+    drawChips();
+    drawTable();
+    updatePending();
+    util.replace(host, h("div", infoLine, notices, chips, tableHost, pendingHost));
+  }
+
+  /** 单行：现场 / 基线两栏只读，拟值栏可改（只进草稿）。 */
+  function drawRow(row, draftOf, saveDraft, updatePending) {
+    var observedCell = h(
+      "td",
+      h("div", row.observedText),
+      h(
+        "div.small.muted",
+        row.observedLabel + (row.observedReason ? "：" + row.observedReason : "")
+      )
+    );
+
+    var input = h("input.input", {
+      type: "text",
+      value: row.editText === "—" ? "" : row.editText,
+      placeholder: "（不采纳）",
+      "aria-label": "拟值：" + row.name,
+      disabled: !row.known,
+      title: row.known ? "改这里只是本地草稿，不会写入服务端" : "该参数未在参数主档登记，改不了",
+    });
+    var mark = h("span.small.muted", row.changed ? "· 已改" : "");
+    input.addEventListener("input", function () {
+      var draft = draftOf();
+      draft.edits = draft.edits || {};
+      draft.edits[row.parameter_id] = input.value;
+      saveDraft(draft);
+      row.editText = input.value;
+      row.changed = input.value !== row.proposedText;
+      util.replace(mark, row.changed ? "· 已改" : "");
+      updatePending();
+    });
+
+    var adopt = h("input", { type: "checkbox", checked: row.adopted, disabled: !row.known, "aria-label": "采纳：" + row.name });
+    adopt.addEventListener("change", function () {
+      var draft = draftOf();
+      draft.adopt = draft.adopt || {};
+      draft.adopt[row.parameter_id] = adopt.checked;
+      saveDraft(draft);
+      row.adopted = adopt.checked;
+      updatePending();
+    });
+
+    var nameCell = h(
+      "td",
+      h("div", row.name),
+      h("div.small.muted", [row.category, row.parameter_id].filter(Boolean).join(" · ") + (row.known ? "" : " · 未登记"))
+    );
+
+    return h(
+      "tr",
+      nameCell,
+      observedCell,
+      h(
+        "td",
+        h("div", row.baselineText),
+        h("div.small.muted", row.baselineIntent ? "意图：" + row.baselineIntent : "")
+      ),
+      h("td", h("div.row", { style: "gap:6px;align-items:center" }, adopt, input, mark)),
+      h("td", diffBadge(row.diff))
+    );
+  }
+
+  /* ===================== 文件页配置管理分段（M5-10 / M6-10） ===================== */
+
+  /** 提示条：level → 现有视觉组件（.banner 的四种皮肤）。 */
+  function noticeBlock(notice) {
+    var cls = notice.level === "error" ? "banner-danger" : notice.level === "warn" ? "banner-warning" : "banner-neutral";
+    var glyph = notice.level === "error" ? "alert" : notice.level === "warn" ? "alert" : "info";
+    return h("div.banner." + cls, { style: "margin-bottom:10px" }, icon(glyph), h("div.banner-body", notice.text));
+  }
+
+  /**
+   * 在文件页"配置管理"分段渲染现场对账三栏（M6-10）。
+   *
+   * 服务端算差异、前端只摆位置：不猜、不补、不在本地重算相等性。
+   * 草稿（每行的拟值文本、勾选、筛选）存在 `MC.configApi.drafts` 里，
+   * 切标签回来还在；**权威数据永远来自服务端**，刷新即覆盖草稿的基线。
    */
   MC.configUi.renderFileSection = function (app, ctx, host) {
     var pid = (ctx && ctx.pid) || app.pid;
@@ -713,63 +1136,134 @@
 
     util.replace(host, MC.stateBlock({ kind: "loading", title: "正在读取配置关联…" }));
 
-    MC.configApi.profileStatus(pid).then(
-      function (status) {
-        var note = h("textarea.input", {
-          rows: "3",
-          placeholder: "记录这次现场核对的口径（例如：与 1.1.0 出口 XML 对照，脉冲宽度按秒计）",
-          "aria-label": "关联说明草稿",
-        });
-        var existing = MC.configApi.getDraft(pid, key);
-        if (existing) note.value = existing.note || "";
-        note.addEventListener("input", function () {
-          MC.configApi.setDraft(pid, key, { note: note.value, filename: name, version: revision });
-        });
+    function draftOf() {
+      var saved = MC.configApi.getDraft(pid, key);
+      return saved || { note: "", edits: {}, adopt: {}, filter: "all" };
+    }
+    function saveDraft(next) {
+      MC.configApi.setDraft(pid, key, next);
+    }
+
+    function load(query) {
+      var statusP = MC.configApi.profileStatus(pid);
+      var reconcileP = MC.configApi.reconcile(pid, query || { filename: name }).then(
+        function (body) { return { ok: true, body: body }; },
+        function (err) { return { ok: false, err: err }; }
+      );
+      return Promise.all([statusP, reconcileP]).then(function (pair) {
+        draw(pair[0], pair[1]);
+      });
+    }
+
+    function draw(status, result) {
+      var note = h("textarea.input", {
+        rows: "3",
+        placeholder: "记录这次现场核对的口径（例如：与 1.1.0 出口 XML 对照，脉冲宽度按秒计）",
+        "aria-label": "关联说明草稿",
+      });
+      var draft = draftOf();
+      note.value = draft.note || "";
+      note.addEventListener("input", function () {
+        var next = draftOf();
+        next.note = note.value;
+        next.filename = name;
+        next.version = revision;
+        saveDraft(next);
+      });
+
+      var footer = h("div.row", { style: "margin-top:10px;gap:8px;flex-wrap:wrap" });
+      var box = h(
+        "div.panel",
+        h(
+          "div.panel-header",
+          h("h2", "配置管理"),
+          h("span.muted.small", (status.baselines || 0) + " 条基线 / " + (status.observations || 0) + " 条观测")
+        ),
+        h("div", { style: "padding:14px 16px" }, h("div", { id: "cfg-reconcile" })),
+        h(
+          "div",
+          { style: "padding:0 16px 16px" },
+          h("p.small.muted", "核对说明只存在本机内存里，不会写入基线；切到别的分段再回来还在。"),
+          note,
+          footer
+        )
+      );
+
+      var inner = box.querySelector("#cfg-reconcile");
+
+      function redrawFooter() {
         util.replace(
-          host,
+          footer,
           h(
-            "div.panel",
-            h(
-              "div.panel-header",
-              h("h2", "配置管理"),
-              h("span.muted.small", status.baselines + " 条基线 / " + status.observations + " 条观测")
-            ),
-            h(
-              "div",
-              { style: "padding:14px 16px" },
-              h(
-                "p.small.muted",
-                "文件：" + name + " · 版本：" + revision + "。此文件的现场对账（原值/基线/拟值三栏）随 M6-10 上线；在此之前只能记录核对说明，不会写入基线。"
-              ),
-              note,
-              h(
-                "div.row",
-                { style: "margin-top:10px;gap:8px" },
-                h(
-                  "button.btn.btn-sm",
-                  {
-                    type: "button",
-                    onclick: function () {
-                      MC.configApi.clearDraft(pid, key);
-                      note.value = "";
-                      MC.toast.success("已清除本地草稿");
-                    },
-                  },
-                  "清除草稿"
-                ),
+            "button.btn.btn-sm",
+            {
+              type: "button",
+              onclick: function () {
+                MC.configApi.clearDraft(pid, key);
+                note.value = "";
+                MC.toast.success("已清除本地草稿");
+                load();
+              },
+            },
+            "清除草稿"
+          ),
+          h(
+            "button.btn.btn-sm",
+            {
+              type: "button",
+              onclick: function () {
+                util.replace(inner, MC.stateBlock({ kind: "loading", title: "正在按最新采集重算…" }));
+                load({ filename: name });
+              },
+            },
+            "按最新重算"
+          ),
+          h(
+            "a.btn.btn-sm",
+            { href: MC.router.format({ pid: pid, kind: "registry", query: { file: name } }) },
+            "在参数登记中查看"
+          )
+        );
+      }
+
+      util.replace(host, box);
+      redrawFooter();
+
+      if (!result.ok) {
+        var err = result.err || {};
+        if (err.kind === "disabled") {
+          util.replace(inner, stateFor({ kind: "disabled" }, app));
+        } else if (err.kind === "forbidden") {
+          util.replace(inner, stateFor({ kind: "forbidden" }, app));
+        } else if (err.kind === "notfound") {
+          // 没登记成逻辑文件不是错误，是"还没配"——给出下一步而不是红色报错
+          util.replace(
+            inner,
+            MC.stateBlock({
+              kind: "empty",
+              icon: "settings",
+              title: "该文件还没有登记为逻辑文件",
+              desc:
+                "配置管理按「逻辑文件 → 配置类别 → 参数主档」定位参数。" +
+                "先在配置类别里把这个文件登记成逻辑文件（含 role），这里才会出现三栏对账。",
+              actions: [
                 h(
                   "a.btn.btn-sm",
                   { href: MC.router.format({ pid: pid, kind: "registry", query: { file: name } }) },
-                  "在参数登记中查看"
-                )
-              )
-            )
-          )
-        );
-      },
-      function (info) {
-        util.replace(host, stateFor(info, app));
+                  "去参数登记"
+                ),
+              ],
+            })
+          );
+        } else {
+          util.replace(inner, stateFor(err, app));
+        }
+        return;
       }
-    );
+
+      drawReconcile(inner, result.body, draftOf, saveDraft);
+    }
+
+    load();
   };
 })(window);

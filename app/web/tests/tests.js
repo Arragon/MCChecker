@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 60;  // 49 + 配置管理 7 条（M5-09 / M5-11）+ 定义表单 4 条（M6-04）
+  var EXPECTED_CASES = 66;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账纯函数 5 + 对账渲染 1（M6-10）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -2150,6 +2150,213 @@
     eq(blank.payload.expected_definition_id, "", "空串表示「我看到的时候还没有定义」");
     var untouched = MC.configUi.buildDefinitionPayload({ xml_name: "X", xml_loc: "X", reason: "r" });
     ok(!("expected_definition_id" in untouched.payload), "不传就不带这个键，避免误判");
+  });
+
+  /* ---- M6-10：现场对账三栏（原值 / 基线 / 拟值） ---- */
+
+  test("现场对账：类型化值按类型渲染，null 不当空串", function () {
+    var v = MC.configUi.valueText;
+    eq(v(null), "—", "没有值就是没有，不编一个空串");
+    eq(v({ type: "null", text: "null", unit: null }), "null", "JSON null 与「没有这个参数」不是一回事");
+    eq(v({ type: "decimal", text: "1.5", unit: "ms" }), "1.5 ms");
+    eq(v({ type: "decimal", text: "1.5", unit: null }), "1.5");
+    eq(v({ type: "string", text: "", unit: null }), "（空串）", "空串与 null 要能分开看");
+    eq(v({ type: "bool", text: "false", unit: null }), "false");
+    eq(v({ type: "string", text: "快一点", unit: null }), "快一点");
+  });
+
+  test("现场对账：按差异分组，需要决定的排前面", function () {
+    var rows = [
+      { parameter_id: "pm_2", name: "脉冲宽度", diff: "same" },
+      { parameter_id: "pm_1", name: "最大速度", diff: "changed" },
+      { parameter_id: "pm_3", name: "未映射项", diff: "unknown" },
+      { parameter_id: "pm_4", name: "基线独有的", diff: "missing_observed" },
+    ].map(MC.configUi.reconcileRow);
+    var groups = MC.configUi.reconcileGroups(rows);
+    eq(groups.map(function (g) { return g.status; }), ["changed", "missing_observed", "unknown", "same"]);
+    eq(groups[0].label, "已变更");
+    eq(groups[0].rows[0].parameter_id, "pm_1");
+    ok(MC.configUi.reconcileRow({ diff: "changed" }).needsDecision, "已变更要人决定");
+    ok(MC.configUi.reconcileRow({ diff: "missing_baseline" }).needsDecision, "基线没覆盖也要人决定");
+    ok(!MC.configUi.reconcileRow({ diff: "same" }).needsDecision, "一致不用决定");
+    eq(MC.configUi.reconcileGroups([]), [], "没有行就没有组");
+    // 后端将来加了新状态：不能被分组悄悄吞掉
+    var extra = MC.configUi.reconcileGroups([MC.configUi.reconcileRow({ diff: "renamed" })]);
+    eq(extra.length, 1);
+    eq(extra[0].label, "renamed", "未知状态原样露出，不伪装成 known");
+  });
+
+  test("现场对账：计数摘要只列非零项", function () {
+    var sum = MC.configUi.reconcileSummary({ changed: 2, same: 3, unknown: 0, missing_observed: 1 });
+    eq(sum, "已变更 2 · 现场未采到 1 · 一致 3", "顺序按展示优先级，不按对象键序");
+    eq(MC.configUi.reconcileSummary({}), "暂无可对账的参数");
+    eq(MC.configUi.reconcileSummary({ same: 0 }), "暂无可对账的参数", "全零等于没有");
+  });
+
+  test("现场对账：过期观测要提醒而不是静默替换", function () {
+    var stale = MC.configUi.reconcileNotices({
+      stale_observation: true,
+      newer_observation_id: "ob_000009",
+      has_observation: true,
+      has_baseline: true,
+      observation: { id: "ob_000001", status: "parsed", unresolved_keys: [] },
+      baseline: { id: "bl_000001", scope: "model", state: "approved" },
+    });
+    eq(stale.length, 1);
+    eq(stale[0].level, "warn", "换数据这种事不能是 info");
+    ok(stale[0].text.indexOf("ob_000009") > 0, "要把新观测的 ID 说出来");
+    ok(stale[0].text.indexOf("不会静默替换") > 0);
+
+    var none = MC.configUi.reconcileNotices({ has_observation: false, has_baseline: false });
+    eq(none.map(function (n) { return n.key; }), ["no-observation", "no-baseline"]);
+    eq(none[1].level, "warn", "没基线时拟值只是建议，必须提示");
+
+    var failed = MC.configUi.reconcileNotices({
+      has_observation: true,
+      has_baseline: true,
+      observation: { id: "ob_1", status: "parse_failed", unresolved_keys: [] },
+      baseline: { id: "bl_1", scope: "model", state: "approved" },
+    });
+    eq(failed[0].key, "parse-failed");
+    eq(failed[0].level, "error");
+
+    var common = MC.configUi.reconcileNotices({
+      has_observation: true,
+      has_baseline: true,
+      observation: { id: "ob_1", status: "parsed", unresolved_keys: ["A", "B", "C", "D", "E"] },
+      baseline: { id: "bl_1", scope: "common", state: "approved" },
+    });
+    eq(common.map(function (n) { return n.key; }), ["scope-common", "unresolved"]);
+    ok(common[0].text.indexOf("所有继承它的机型") > 0, "选通用层前要说清影响范围");
+    ok(common[1].text.indexOf("5 个键") >= 0 && common[1].text.indexOf("等") > 0, "多于 4 个要省略");
+  });
+
+  test("现场对账：拟值只是草稿，待提交行必须与基线不同", function () {
+    var payload = {
+      rows: [
+        {
+          parameter_id: "pm_1",
+          name: "最大速度",
+          diff: "changed",
+          observed: { status: "mapped", value: { type: "decimal", text: "1.2", unit: "m/s" } },
+          baseline: { value: { type: "decimal", text: "1", unit: "m/s" }, intent: "override" },
+          proposed: { value: { type: "decimal", text: "1.2", unit: "m/s" }, source: "observed" },
+        },
+        {
+          parameter_id: "pm_2",
+          name: "脉冲宽度",
+          diff: "same",
+          observed: { status: "mapped", value: { type: "decimal", text: "1", unit: "ms" } },
+          baseline: { value: { type: "decimal", text: "1", unit: "ms" } },
+          proposed: { value: { type: "decimal", text: "1", unit: "ms" }, source: "baseline" },
+        },
+      ],
+    };
+    var fresh = MC.configUi.applyDraft(payload, null);
+    eq(fresh.rows[0].editText, "1.2 m/s", "默认带出服务端建议");
+    eq(fresh.rows[0].adopted, true, "要决定的默认勾上");
+    eq(fresh.rows[0].baselineIntent, "override");
+    eq(fresh.pending.length, 1, "一致的行即使勾上也不算待提交");
+    eq(fresh.pending[0].parameter_id, "pm_1");
+    eq(fresh.pending[0].before, "1 m/s");
+    eq(fresh.pending[0].after, "1.2 m/s");
+
+    var edited = MC.configUi.applyDraft(payload, { edits: { pm_1: "1.5 m/s" }, adopt: { pm_2: false } });
+    eq(edited.rows[0].editText, "1.5 m/s", "草稿覆盖服务端建议");
+    eq(edited.rows[0].changed, true, "改过要标出来");
+    eq(edited.pending[0].after, "1.5 m/s");
+    eq(
+      MC.configUi.applyDraft(payload, { adopt: { pm_1: false } }).pending.length,
+      0,
+      "取消勾选就不进待提交"
+    );
+  });
+
+  test("现场对账：文件页三栏真实渲染，切走再回来草稿还在", function () {
+    var payload = {
+      profile_id: "default",
+      logical_file: { id: "lf_000001", display_name: "轴参数", role: "observation", family_id: "f1" },
+      observation: { id: "ob_000001", captured_at: "2026-10-20T10:00:00Z", status: "parsed", unresolved_keys: [] },
+      baseline: { id: "bl_000001", scope: "model", state: "approved" },
+      rows: [
+        {
+          parameter_id: "pm_1",
+          name: "最大速度",
+          category: "运动",
+          known: true,
+          diff: "changed",
+          observed: { status: "mapped", value: { type: "decimal", text: "1.2", unit: "m/s" } },
+          baseline: { value: { type: "decimal", text: "1", unit: "m/s" }, intent: "inherit" },
+          proposed: { value: { type: "decimal", text: "1.2", unit: "m/s" }, source: "observed" },
+        },
+        {
+          parameter_id: "pm_2",
+          name: "脉冲宽度",
+          category: "信号",
+          known: true,
+          diff: "same",
+          observed: { status: "mapped", value: { type: "decimal", text: "1", unit: "ms" } },
+          baseline: { value: { type: "decimal", text: "1", unit: "ms" }, intent: "pin" },
+          proposed: { value: { type: "decimal", text: "1", unit: "ms" }, source: "baseline" },
+        },
+      ],
+      counts: { changed: 1, same: 1 },
+      stale_observation: true,
+      newer_observation_id: "ob_000009",
+      has_baseline: true,
+      has_observation: true,
+    };
+    var app = { pid: "default", can: function () { return true; } };
+    var origStatus = MC.configApi.profileStatus;
+    var origReconcile = MC.configApi.reconcile;
+    MC.configApi.profileStatus = function () { return Promise.resolve({ baselines: 1, observations: 2 }); };
+    MC.configApi.reconcile = function () { return Promise.resolve(payload); };
+    MC.configApi.clearDraft("default", "file:cfg.json");
+    var stage = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0" });
+    document.body.append(stage);
+    function tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    function restore() {
+      MC.configApi.profileStatus = origStatus;
+      MC.configApi.reconcile = origReconcile;
+      MC.configApi.clearDraft("default", "file:cfg.json");
+      stage.remove();
+    }
+    MC.configUi.renderFileSection(app, { pid: "default", name: "cfg.json", version: "current" }, stage);
+    return tick()
+      .then(function () {
+        eq(
+          [].map.call(stage.querySelectorAll("thead th"), function (t) { return t.textContent; }),
+          ["参数", "现场原值", "批准基线", "拟值（可改）", "状态"],
+          "三栏必须并列摆出来"
+        );
+        eq(stage.querySelectorAll("tbody tr").length, 2);
+        ok(stage.textContent.indexOf("不会静默替换") > 0, "过期观测要显式提醒");
+        eq(stage.querySelector(".badge.badge-warning").textContent, "已变更");
+
+        var input = stage.querySelector('input[aria-label="拟值：最大速度"]');
+        ok(input, "拟值栏要可编辑");
+        input.value = "1.5 m/s";
+        input.dispatchEvent(new Event("input"));
+        eq(MC.configApi.getDraft("default", "file:cfg.json").edits.pm_1, "1.5 m/s", "编辑落到草稿");
+        ok(stage.textContent.indexOf("待提交 1 行") > 0, "改完立刻反映待提交行数");
+
+        /* 切标签 = 视图被销毁后重新渲染：草稿必须还在 */
+        MC.configUi.renderFileSection(app, { pid: "default", name: "cfg.json", version: "current" }, stage);
+        return tick();
+      })
+      .then(function () {
+        eq(
+          stage.querySelector('input[aria-label="拟值：最大速度"]').value,
+          "1.5 m/s",
+          "切走再回来，没提交的输入还在"
+        );
+        ok(stage.textContent.indexOf("待提交 1 行") > 0, "重渲染后仍按草稿算待提交");
+        restore();
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
   });
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链

@@ -72,6 +72,12 @@
     releases: function () { return unwrap(api.get("/config/releases")); },
     families: function () { return unwrap(api.get("/config/families")); },
     audit: function (pid, query) { return unwrap(api.get(api.p(pid, "/config/audit"), query)); },
+    // 文件内现场对账（M6-10）：现场原值 / 批准基线 / 拟值三栏由服务端算好。
+    reconcile: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/reconcile"), query));
+    },
+    observations: function (query) { return unwrap(api.get("/config/observations", query)); },
+    baselines: function (query) { return unwrap(api.get("/config/baselines", query)); },
 
     /* ---- 写（M6-04 起真实接入）---- */
     createParameter: function (payload, headers) {

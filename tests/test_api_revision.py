@@ -85,6 +85,10 @@ WRITE_ROUTE_EXPECTATIONS = {
     # 采集与观测（M6-07/M6-08）：观测不是基线，写它不动 5 段修订号
     ("POST", "/api/v1/config/observations"): None,
     ("POST", "/api/v1/config/observations/{oid}/remap"): None,
+    # 基线草稿（M6-09）：基线是配置域自己的对象，不动旧 5 段修订号
+    ("POST", "/api/v1/config/baselines"): None,
+    ("POST", "/api/v1/config/baselines/{bid}/values"): None,
+    ("POST", "/api/v1/config/baselines/{bid}/intent"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

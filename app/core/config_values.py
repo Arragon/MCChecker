@@ -106,7 +106,16 @@ class TypedValue:
         text = payload.get("text")
         if not isinstance(kind, str) or not isinstance(text, str):
             raise AppError(INVALID_INPUT, "类型化值缺 type/text")
-        value = cls(kind, text, payload.get("unit"))
+        unit = payload.get("unit")
+        declared = unit if isinstance(unit, str) else None
+        if declared and declared not in UNITS:
+            # 换算表之外的单位（`mm/s`、`rpm`…）是合法声明：只校验值本身，
+            # 不能因为"换不了"就判这份值非法。
+            probe = cls(kind, text, None)
+            probe.validate()
+            probe.unit = declared
+            return probe
+        value = cls(kind, text, declared)
         value.validate()
         return value
 
@@ -223,6 +232,20 @@ def loads_strict(text: str) -> Any:
         raise AppError(INVALID_INPUT, "JSON 解析失败：%s" % exc)
 
 
+def parse_with_unit(raw: Any, kind: str, unit: Optional[str] = None) -> TypedValue:
+    """按**定义里声明的单位**解析：换算表之外的单位照原样保留。
+
+    `mm/s`、`rpm`、`%` 这类派生单位在现场文件里到处都是。换算表只负责一件事——
+    "这两个单位之间能不能无损换算"；它不负责"单位必须出现在这张表里"。
+    所以声明单位不在表内时，值仍然解析成功，只是不能 `convert`。
+    """
+    if unit and unit not in UNITS:
+        value = parse_typed(raw, kind, None)
+        value.unit = unit
+        return value
+    return parse_typed(raw, kind, unit)
+
+
 def parse_typed(raw: Any, kind: str, unit: Optional[str] = None) -> TypedValue:
     """把 JSON 原生值转成 `TypedValue`，并校验类型一致性。"""
     if raw is None:
@@ -270,6 +293,14 @@ def convert(value: TypedValue, to_unit: str) -> TypedValue:
         raise AppError(INVALID_INPUT, "该值没有单位，无法换算")
     if to_unit not in UNITS:
         raise AppError(INVALID_INPUT, "未知目标单位：%s" % to_unit)
+    if value.unit not in UNITS:
+        # 声明单位不在换算表里是合法状态（`mm/s` 之类），但**不能**换出去——
+        # 这里必须抛 AppError 而不是让 `UNITS[...]` 抛 KeyError 冒成 500。
+        raise AppError(
+            INVALID_INPUT,
+            "源单位不在换算表内，无法换算：%s" % value.unit,
+            from_unit=value.unit,
+        )
     from_kind, from_factor = UNITS[value.unit]
     to_kind, to_factor = UNITS[to_unit]
     if from_kind != to_kind:
