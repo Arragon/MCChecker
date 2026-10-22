@@ -104,6 +104,7 @@ def build_router(settings: Settings) -> Router:
         api_compare,
         api_config,
         api_config_approval,
+        api_config_artifacts,
         api_config_baselines,
         api_config_catalog,
         api_config_changes,
@@ -177,4 +178,6 @@ def build_router(settings: Settings) -> Router:
     api_config_changes.register(router, settings)
     # 批准发布（M6-12）：单独的 `config_change_approve`，与提交严格分开。
     api_config_approval.register(router, settings)
+    # 产物与下载（M6-13/M6-14）：只读已批准基线，下载不重生成。
+    api_config_artifacts.register(router, settings)
     return router

@@ -423,8 +423,9 @@ data/config_management/
 | POST | `/api/v1/p/{pid}/config/changes/{id}/reopen` | profile | 重开一版草稿 |
 | POST | `/api/v1/p/{pid}/config/changes/{id}/approve` | profile | 批准并发布（`config_change_approve`） |
 | POST | `/api/v1/p/{pid}/config/changes/{id}/reject` | profile | 驳回（同上） |
-| GET | `/api/v1/p/{pid}/config/artifacts` | profile | 产物 |
-| GET | `/api/v1/p/{pid}/config/artifacts/{id}/raw` | profile | 下载 |
+| GET/POST | `/api/v1/p/{pid}/config/artifacts` | profile | 产物列表 / 生成（`?baseline_id=` 过滤；复用 200 / 新建 201） |
+| GET | `/api/v1/p/{pid}/config/artifacts/{id}` | profile | 产物详情（含 `edits`/`validation`/`delivery_status`） |
+| GET | `/api/v1/p/{pid}/config/artifacts/{id}/raw` | profile | 下载（`X-Content-Sha256` + `ETag`，**不重生成**） |
 | GET | `/api/v1/p/{pid}/config/audit` | profile | 审计检索 |
 
 **路径形态的选择**：基线与观测是**全局对象**（携带 `profile_id` 字段、共用全局修订号），
@@ -531,6 +532,44 @@ data/config_management/
 `stateLabel` / `stateTone` / `changedCount` / `summary` / `groupByState` / `rowModel` /
 `approveBlockers` / `canApprove`。按钮禁用只是体验，服务端仍会 403；`409` 类错误一律
 提示 + 刷新，不停在旧状态。
+
+### 6.4 目标文件生成与交付产物（M6-13 / M6-14）
+
+**生成**（`config_export.generate`，只在服务端内部调用）：以**真实模板快照**为骨架，
+只对批准位置做 `apply_edits`，绝不重排/重格式化整份文档。四条硬性约束：
+
+| 约束 | 做法 | 失败时 |
+|---|---|---|
+| 只改批准位置 | 逐条按 `xml_loc` 定位后改写 | 定位不到 → `ARTIFACT_TEMPLATE_INCOMPATIBLE`（`loc`/`parameter_id`） |
+| 结构不变 | 生成后重新解析并与模板比对 `structure_signature` | 签名不一致 → 显式失败，不落盘 |
+| 落点值正确 | 逐落点读回比对目标值 | 不一致 → 显式失败 |
+| 不宣称逐字节保真 | `validation.warnings` 固定带这句话 | —— |
+
+no-op（没有任何改动）时**直接字节拷贝模板**，不经解析器重写——重写会改掉缩进与
+自闭合形态，"没改却变了字节"是最难解释的一类差异。
+
+定位串用**带命名空间花括号**的紧凑路径（`compact_path`），与 `parser.to_compact`
+同一口径：`apply_edits` 认的就是这个字符串。第一段是根元素自身，读值时跳过。
+
+**产物**（`config_artifacts`）：
+
+- **不可变**：生成一次即 `repo.put_blob(content)` 落成内容寻址 blob；`GET .../raw`
+  只 `read_blob`，**绝不重生成**。改值要走新的变更单 → 新的基线修订 → 新的产物。
+- **同输入同产物**：`determinism_key = sha256("config_export/v1|baseline_id|baseline_revision|variant_id|definition_set_id|template_sha256")`。
+  命中即返回既有产物（HTTP 200，`reused=true`），不新建对象。键里**必须**带基线修订号，
+  否则同一基线改了一版值还会命中旧产物。
+- **生成即自证**：`validation`（`checks` + `warnings`）随产物一起存，下载方与审计方
+  都能看到"这次生成做了什么检查"。
+- **生成权限独立**：`config_artifact_generate`（与提交/批准分开），前台按钮禁用只是体验。
+
+**已知缺口 D6**：没有真实系统的 XML 样本，"真实导入并记录操作者/环境/结果"这一步
+做不了，因此 `delivery_status` 恒为 `unverified`。前端在交付分段顶部明写这段缺口
+（`MC.deliveryUi.deliveryNotice`），**下载成功不等于验过**。D6 解除前 M6-14 不关闭。
+
+**前端契约**（`MC.deliveryUi`，`views/delivery.js`，挂在文件页配置管理下方的交付分段）：
+`statusLabel` / `statusTone` / `statusHint` / `shortSha` / `editCount` / `rowModel` /
+`canGenerate` / `baselineOptions` / `deliveryNotice`。未知状态一律按最保守的 `unverified`
+呈现——把不认识的值显示成"已核验"是最坏的一种乐观。
 
 ---
 

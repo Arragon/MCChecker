@@ -1229,6 +1229,14 @@
       util.replace(host, box);
       redrawFooter();
 
+      /* 交付分段（M6-14）：与对账并排，但**各自独立取数**——
+       * 对账失败不该让交付列表一起变成错误块，反之亦然。 */
+      if (MC.deliveryUi && MC.deliveryUi.render) {
+        var deliveryHost = h("div");
+        host.append(deliveryHost);
+        MC.deliveryUi.render(app, deliveryHost, { pid: pid });
+      }
+
       if (!result.ok) {
         var err = result.err || {};
         if (err.kind === "disabled") {

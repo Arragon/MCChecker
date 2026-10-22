@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 71;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账 6（M6-10）+ 变更单 5（M6-11/M6-12）
+  var EXPECTED_CASES = 77;  // 49 + 配置管理 7（M5-09/M5-11）+ 定义表单 4（M6-04）+ 对账 6（M6-10）+ 变更单 5（M6-11/M6-12）+ 交付产物 6（M6-14）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -2526,6 +2526,181 @@
         MC.configApi.changeSets = origList;
         MC.configApi.changeSet = origDetail;
         host.remove();
+        throw err;
+      });
+  });
+
+  /* ---- M6-14：交付产物 ---- */
+
+  test("交付产物：状态词表不把待验说成已验证", function () {
+    var ui = MC.deliveryUi;
+    eq(ui.statusLabel("unverified"), "待验");
+    eq(ui.statusLabel("verified"), "已核验");
+    eq(ui.statusLabel("failed"), "核验失败");
+    eq(ui.statusLabel("archived"), "待验", "后端加了新状态也按最保守的待验处理");
+    eq(ui.statusLabel(undefined), "待验", "缺字段不能变成已核验");
+    eq(ui.statusTone("verified"), "badge-success");
+    eq(ui.statusTone("failed"), "badge-danger");
+    eq(ui.statusTone("unverified"), "badge-warning");
+    ok(ui.statusHint("unverified").indexOf("结构") > 0, "待验要解释清楚它只保证了什么");
+  });
+
+  test("交付产物：行模型把字节、修订、改动数翻成人话", function () {
+    var ui = MC.deliveryUi;
+    var row = ui.rowModel({
+      id: "ar_000001",
+      filename: "axis.xml",
+      baseline_id: "bl_000001",
+      baseline_revision: "r3",
+      byte_size: 2048,
+      blob_sha256: "0123456789abcdef0123456789abcdef",
+      same_count: 5,
+      edits: [{ parameter_id: "pm_1" }, { parameter_id: "pm_2" }],
+      delivery_status: "unverified",
+      created_at: "2026-08-01 10:00:00",
+      created_by: "管理员乙",
+      validation: { ok: true },
+    });
+    eq(row.edits, 2);
+    eq(row.same, 5);
+    eq(row.revision, "r3");
+    eq(row.sizeText, "2.0 KB");
+    eq(row.shaShort, "0123456789ab");
+    eq(row.statusLabel, "待验");
+    eq(row.ok, true);
+    var bad = ui.rowModel({ id: "ar_2", validation: { ok: false } });
+    eq(bad.ok, false, "自检不通过要能看出来");
+    eq(bad.sizeText, "—", "没给字节数就明说没有，不编一个 0 B");
+    eq(ui.rowModel({}).statusLabel, "待验", "缺省对象也按待验");
+  });
+
+  test("交付产物：生成前置条件（没选/没批准/没权限都不许点）", function () {
+    var ui = MC.deliveryUi;
+    var admin = { can: function () { return true; } };
+    var member = { can: function () { return false; } };
+    eq(ui.canGenerate(admin, null).allowed, false);
+    eq(ui.canGenerate(admin, null).reason.indexOf("先选") >= 0, true);
+    eq(ui.canGenerate(admin, { id: "bl_1", state: "draft" }).allowed, false);
+    eq(ui.canGenerate(admin, { id: "bl_1", state: "approved" }).allowed, true);
+    eq(ui.canGenerate(member, { id: "bl_1", state: "approved" }).allowed, false);
+    eq(ui.canGenerate(member, { id: "bl_1", state: "approved" }).reason.indexOf("权限") >= 0, true);
+  });
+
+  test("交付产物：待验提示必须说清 D6 缺口，全验过才改口", function () {
+    var ui = MC.deliveryUi;
+    var warn = ui.deliveryNotice([{ status: "unverified" }, { status: "unverified" }]);
+    eq(warn.level, "warn");
+    ok(warn.text.indexOf("2 份") > 0, "要说清有几份待验");
+    ok(warn.text.indexOf("D6") > 0, "缺口的名字要露出来，不然没人追");
+    eq(ui.deliveryNotice([]).level, "info", "空列表不报缺口");
+    eq(ui.deliveryNotice([{ status: "verified" }]).level, "info");
+  });
+
+  test("交付产物：基线下拉区分层级，标签带修订号", function () {
+    var ui = MC.deliveryUi;
+    var options = ui.baselineOptions([
+      { id: "bl_1", scope: "common", revision: "r2" },
+      { id: "bl_2", scope: "model", revision: "r1", profile_id: "p1" },
+    ]);
+    eq(options.length, 2);
+    eq(options[0].label.indexOf("通用") === 0, true);
+    eq(options[0].label.indexOf("r2") > 0, true);
+    eq(options[1].label.indexOf("机型") === 0, true);
+    eq(options[1].label.indexOf("p1") > 0, true);
+    eq(ui.baselineOptions(null), []);
+  });
+
+  test("交付产物：文件页真实渲染，复用不冒充新建、待验说清", function () {
+    var host = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0" });
+    document.body.append(host);
+    var origArtifacts = MC.configApi.artifacts;
+    var origArtifact = MC.configApi.artifact;
+    var origBaselines = MC.configApi.baselines;
+    var origGen = MC.configApi.generateArtifact;
+    var calls = [];
+    MC.configApi.artifacts = function () {
+      return Promise.resolve({
+        items: [
+          {
+            id: "ar_000001",
+            filename: "axis.xml",
+            baseline_id: "bl_000001",
+            baseline_revision: "r2",
+            byte_size: 1024,
+            blob_sha256: "0123456789abcdef0123456789abcdef",
+            same_count: 3,
+            edits: [{ parameter_id: "pm_1", loc: "/R[1]/P[1]", from: "650", to: "700" }],
+            delivery_status: "unverified",
+            created_at: "2026-08-01 10:00:00",
+            created_by: "管理员乙",
+            generator: "config_export/v1",
+            template_sha256: "abcdef0123456789",
+            validation: { ok: true, checks: { structure_unchanged: true }, warnings: ["不宣称逐字节保真"] },
+          },
+        ],
+        total: 1,
+      });
+    };
+    MC.configApi.baselines = function () {
+      return Promise.resolve({ items: [{ id: "bl_000001", scope: "common", revision: "r2", state: "approved" }] });
+    };
+    MC.configApi.artifact = function () {
+      return Promise.resolve({
+        item: { template_sha256: "abcdef0123456789" },
+        edits: [{ parameter_id: "pm_1", loc: "/R[1]/P[1]", from: "650", to: "700" }],
+        validation: { ok: true, checks: { structure_unchanged: true }, warnings: ["不宣称逐字节保真"] },
+        delivery_status: "unverified",
+      });
+    };
+    MC.configApi.generateArtifact = function (pid, payload) {
+      calls.push(payload);
+      return Promise.resolve({ item: { id: "ar_000001" }, reused: true });
+    };
+    var app = { pid: "p1", can: function () { return true; } };
+    function tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+
+    function restore() {
+      MC.configApi.artifacts = origArtifacts;
+      MC.configApi.artifact = origArtifact;
+      MC.configApi.baselines = origBaselines;
+      MC.configApi.generateArtifact = origGen;
+      host.remove();
+    }
+
+    MC.deliveryUi.render(app, host, { pid: "p1" });
+    return tick()
+      .then(function () {
+        ok(host.textContent.indexOf("交付（目标文件）") >= 0, "分段标题要在");
+        eq(host.querySelectorAll("tbody tr").length, 1);
+        ok(host.textContent.indexOf("待验") > 0, "交付状态是待验");
+        ok(host.textContent.indexOf("D6") > 0, "缺口要在页面上说清");
+        var gen = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent.indexOf("生成目标文件") >= 0;
+        })[0];
+        ok(gen, "要能生成");
+        eq(gen.disabled, false, "已批准基线 + 有权限 → 可点");
+        gen.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        eq(calls.length, 1, "点一次只发一次请求");
+        eq(calls[0].baseline_id, "bl_000001");
+      })
+      .then(function () {
+        var detail = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent === "详情";
+        })[0];
+        ok(detail, "每行都要能看详情");
+        detail.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        ok(host.textContent.indexOf("逐字节保真") > 0, "告警要显示出来，不能只存着");
+        ok(host.textContent.indexOf("/R[1]/P[1]") > 0, "落点要能对照");
+        restore();
+      })
+      .catch(function (err) {
+        restore();
         throw err;
       });
   });

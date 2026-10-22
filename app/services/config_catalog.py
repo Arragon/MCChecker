@@ -946,6 +946,15 @@ def list_variants(
     return sorted(items, key=lambda item: (item.get("created_at") or "", item.get("id") or ""))
 
 
+def get_variant(repo: ConfigRepository, variant_id: str) -> Dict[str, Any]:
+    """按 ID 取模板变体；不存在抛 404（不返回 None，调用方不必自己判空）。"""
+    wanted = _text(variant_id, "variant_id")
+    payload = repo.get("template_variant", wanted)
+    if payload is None:
+        raise AppError(NOT_FOUND, "模板变体不存在", variant_id=wanted)
+    return payload
+
+
 def catalog_summary(repo: ConfigRepository) -> Dict[str, Any]:
     """目录规模摘要（前端首屏用；只读、不建目录）。"""
     releases = list_releases(repo)

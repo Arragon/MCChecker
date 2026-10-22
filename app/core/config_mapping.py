@@ -210,6 +210,32 @@ def read_xml_value(root: ET.Element, loc: XmlLoc, namespace: Optional[str] = Non
     return (node.text or "").strip()
 
 
+def compact_path(
+    root: ET.Element, loc: XmlLoc, namespace: Optional[str] = None
+) -> Optional[str]:
+    """把 `XmlLoc` 翻成 compact 文档的 loc 字符串（`/R[1]/A[2]/@unit`）。
+
+    写回（`reviewing.apply_edits`）认的是**节点 loc 字符串**，不是 `XmlLoc`；
+    这里按同一套编号规则（每个父节点下按原始标签计数，从 1 起）把路径算出来，
+    而不是拿 `XmlLoc` 的写法凑——两者对「同名序号」的理解必须一致，否则会把
+    值写到别的兄弟节点上。
+
+    节点不存在返回 None（与 `read_xml_value` 同口径：找不到就是找不到）。
+    """
+    ns = default_namespace(root) if namespace is None else namespace
+    parts: List[str] = ["%s[1]" % root.tag]
+    node = root
+    for name, occurrence in loc.steps:
+        wanted = _qualify(name, ns)
+        matches = [child for child in list(node) if child.tag == wanted]
+        if len(matches) < occurrence:
+            return None
+        node = matches[occurrence - 1]
+        parts.append("%s[%d]" % (node.tag, occurrence))
+    path = "/" + "/".join(parts)
+    return path + "/@" + loc.attribute if loc.attribute else path
+
+
 def structure_signature(xml_bytes: bytes) -> str:
     """结构指纹：所有元素的「路径 + 同名序号 + 命名空间」，与文本内容无关。
 

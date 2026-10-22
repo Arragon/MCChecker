@@ -156,6 +156,8 @@ WRITE_ROUTE_ACTIONS = {
     # M6-12：批准/驳回是**独立**的能力键，提交面拿不到
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/approve"): "config_change_approve",
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reject"): "config_change_approve",
+    # M6-14：生成产物是独立的写动作，与提交/批准分开
+    ("POST", "/api/v1/p/{pid}/config/artifacts"): "config_artifact_generate",
 }
 
 ROUTE_VALUES = {
@@ -166,7 +168,7 @@ ROUTE_VALUES = {
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
     "pmid": "pm_000001", "did": "dr_000001", "dsid": "ds_000001",
     "oid": "ob_000001", "tpid": "tp_000001", "bid": "bl_000001",
-    "cid": "cs_000001",
+    "cid": "cs_000001", "aid": "ar_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

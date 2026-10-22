@@ -97,6 +97,8 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reopen"): None,
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/approve"): None,
     ("POST", "/api/v1/p/{pid}/config/changes/{cid}/reject"): None,
+    # 产物（M6-14）：写 blob + 建对象，仍不动旧 5 段
+    ("POST", "/api/v1/p/{pid}/config/artifacts"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

@@ -95,6 +95,13 @@
     changeSet: function (pid, cid) {
       return unwrap(api.get(api.p(pid, "/config/changes/" + api.seg(cid))));
     },
+    // 交付产物（M6-14）：按机型路径列出；`baseline_id` 可选过滤
+    artifacts: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/artifacts"), query));
+    },
+    artifact: function (pid, aid) {
+      return unwrap(api.get(api.p(pid, "/config/artifacts/" + api.seg(aid))));
+    },
 
     /* ---- 写（M6-04 起真实接入）---- */
     createParameter: function (payload, headers) {
@@ -152,6 +159,14 @@
       return unwrap(
         api.post(api.p(pid, "/config/changes/" + api.seg(cid) + "/reject"), payload, null,
           Object.assign({ "Idempotency-Key": actionKey("reject", cid) }, headers || {}))
+      );
+    },
+    /* 生成产物：同基线修订 + 同模板 → 服务端返回既有产物（200 + reused）。
+     * 幂等键仍带着：同一次点击的重试不该变成第二次写动作。 */
+    generateArtifact: function (pid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/artifacts"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("artifact", payload && payload.baseline_id) }, headers || {}))
       );
     },
 
