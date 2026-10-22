@@ -103,6 +103,7 @@
       } else if (view === "history") renderHistory();
       else if (view === "compare") renderCompare();
       else if (view === "records") renderRecords();
+      else if (view === "config") renderConfigSection();
     }
 
     /* ---------------- data ---------------- */
@@ -200,6 +201,11 @@
             { value: "compare", label: "对比", icon: "compare" },
             { value: "records", label: "修改记录", icon: "records", count: f ? f.record_count : null },
           ];
+      // M5-10：配置管理分段只在具备 config_read 能力时出现；不具备时不渲染入口，
+      // 也不发请求（后端同样会 403，前端隐藏只是体验）。
+      if (!isTemp && app.can("config_read")) {
+        views.push({ value: "config", label: "配置管理", icon: "settings" });
+      }
       var seg = MC.segmented(views, S.view, function (v) {
         var q = { view: v };
         if (v === "tree" && S.version !== "current") q.version = S.version;
@@ -928,6 +934,16 @@
       if (S.tree) { S.tree.destroy(); S.tree = null; }
       util.replace(body, MC.stateBlock({ kind: "loading", title: "正在读取修改记录…" }));
       loadRecords().then(null, function (err) { util.replace(body, MC.errorBlock(err, renderRecords)); });
+    }
+
+    /* 配置管理分段（M5-10）：只显示服务端事实，关联关系随 M6-02 上线。 */
+    function renderConfigSection() {
+      if (S.tree) { S.tree.destroy(); S.tree = null; }
+      if (!MC.configUi || !MC.configUi.renderFileSection) {
+        util.replace(body, MC.stateBlock({ kind: "empty", icon: "settings", title: "配置管理模块未加载", desc: "请确认 registry.js 已在 index.html 中引入。" }));
+        return;
+      }
+      MC.configUi.renderFileSection(app, { pid: app.pid, name: S.name, version: S.version }, body);
     }
 
     function drawRecords() {

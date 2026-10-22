@@ -17,6 +17,7 @@
     { kind: "search", label: "全局搜索", icon: "search" },
     { kind: "review", label: "审阅修改", icon: "review", admin: true },
     { kind: "dl", label: "DL 计算", icon: "calc" },
+    { kind: "registry", label: "参数登记", icon: "list" },
     { kind: "tools", label: "外部工具", icon: "tool" },
     { kind: "settings", label: "设置", icon: "settings" },
   ];

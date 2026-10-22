@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 49;
+  var EXPECTED_CASES = 56;  // 49 + 配置管理 7 条（M5-09 / M5-11）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1988,6 +1988,82 @@
     sum.className = failed ? "fail" : "pass";
     document.title = sum.textContent;
   }
+
+  /* ===================== 配置管理（M5-09 / M5-11） ===================== */
+
+  test("config-api：错误码归类覆盖门禁/无权限/冲突/离线", function () {
+    var f = MC.configApi.failure;
+    eq(f({ code: "CONFIG_DISABLED", status: 503 }).kind, "disabled");
+    eq(f({ code: "FORBIDDEN", status: 403 }).kind, "forbidden");
+    eq(f({ code: "POLICY_BLOCKED", status: 403 }).kind, "forbidden");
+    eq(f({ code: "REVISION_CONFLICT", status: 409 }).kind, "conflict");
+    eq(f({ code: "PLAN_STALE", status: 409 }).kind, "conflict");
+    eq(f({ code: "IDEMPOTENCY_MISMATCH", status: 409 }).kind, "conflict");
+    eq(f({ code: "VALUE_OUT_OF_RANGE", status: 422 }).kind, "invalid");
+    eq(f({ code: "CORRUPT_DATA", status: 503 }).kind, "corrupt");
+    eq(f({ status: 0, message: "网络断了" }).kind, "network");
+    eq(f({ code: "SOMETHING_NEW", status: 418 }).kind, "server", "未知码不得当成冲突");
+  });
+
+  test("config-api：失败信息带 field，便于把错误落到输入框", function () {
+    var info = MC.configApi.failure({ code: "VALUE_OUT_OF_RANGE", status: 422, message: "太高", detail: { field: "pulse" } });
+    eq(info.field, "pulse");
+    eq(info.message, "太高");
+    ok(MC.configApi.isRetryable({ status: 0 }), "网络错误可重试");
+    ok(!MC.configApi.isRetryable({ code: "FORBIDDEN", status: 403 }), "403 不该提示重试");
+  });
+
+  test("config-api：草稿按机型隔离，can() 之外不影响服务端状态", function () {
+    MC.configApi.clearDraft("p1", "file:a.xml");
+    MC.configApi.clearDraft("p2", "file:a.xml");
+    ok(!MC.configApi.hasDraft("p1"), "初始无草稿");
+    MC.configApi.setDraft("p1", "file:a.xml", { note: "现场核对" });
+    ok(MC.configApi.hasDraft("p1"), "写入后应有草稿");
+    ok(!MC.configApi.hasDraft("p2"), "不得跨机型串草稿");
+    eq(MC.configApi.getDraft("p1", "file:a.xml").note, "现场核对");
+    eq(MC.configApi.getDraft("p1", "file:b.xml"), undefined);
+    MC.configApi.clearDraft("p1", "file:a.xml");
+    ok(!MC.configApi.hasDraft("p1"), "清除后应无草稿");
+  });
+
+  test("config-api：确认不了就明说，不当成成功", function () {
+    eq(MC.configApi.conflictMessage({ kind: "disabled" }), null);
+    ok(MC.configApi.conflictMessage({ kind: "conflict", code: "PLAN_STALE" }).indexOf("已保留") > 0);
+  });
+
+  test("参数登记：四种检索维度都能命中", function () {
+    var items = [
+      { id: "pm_000008", name: "脉冲宽度", category: "时序", aliases: [{ name: "Pulse" }], definitions: [{ release_id: "sr_2", xml_name: "PulseWidth", json_key: "PULSE_WIDTH", unit: "s" }] },
+      { id: "pm_000030", name: "轴1速度", category: "运动", definitions: [{ release_id: "sr_2", xml_name: "Velocity", json_key: "AXIS1_VELOCITY", unit: "mm/s" }] },
+    ];
+    eq(MC.configUi.filterParameters(items, "").length, 2, "空关键词返回全部");
+    eq(MC.configUi.filterParameters(items, "脉冲").map(function (x) { return x.id; }), ["pm_000008"]);
+    eq(MC.configUi.filterParameters(items, "pm_000030").map(function (x) { return x.id; }), ["pm_000030"]);
+    eq(MC.configUi.filterParameters(items, "PulseWidth").map(function (x) { return x.id; }), ["pm_000008"]);
+    eq(MC.configUi.filterParameters(items, "axis1_velocity").map(function (x) { return x.id; }), ["pm_000030"], "JSON 键不区分大小写");
+    eq(MC.configUi.filterParameters(items, "Pulse").map(function (x) { return x.id; }), ["pm_000008"], "历史名也算");
+    eq(MC.configUi.filterParameters(items, "不存在").length, 0);
+  });
+
+  test("参数登记：版本列去重排序、单元格含单位与修订号", function () {
+    var items = [
+      { id: "a", definitions: [{ release_id: "sr_2", release_label: "1.1.0", xml_name: "PulseWidth", unit: "s", revision_no: 2 }] },
+      { id: "b", definitions: [{ release_id: "sr_1", release_label: "1.0.0", xml_name: "Pulse", unit: "ms" }, { release_id: "sr_2", release_label: "1.1.0", xml_name: "PulseWidth" }] },
+    ];
+    var columns = MC.configUi.versionColumns(items);
+    eq(columns.map(function (c) { return c.label; }), ["1.0.0", "1.1.0"]);
+    eq(MC.configUi.cellText({ xml_name: "PulseWidth", json_key: "PULSE_WIDTH", unit: "s", revision_no: 2 }), "PulseWidth / PULSE_WIDTH (s, r2)");
+    eq(MC.configUi.cellText(null), "—");
+    var rows = MC.configUi.buildRows(items, columns);
+    eq(rows[1].cells.sr_1, "Pulse (ms)");
+    eq(rows[0].cells.sr_1, undefined, "缺定义时留空，由视图显示破折号");
+  });
+
+  test("参数登记：缺列不伪造数据", function () {
+    var rows = MC.configUi.buildRows([{ id: "a", definitions: [] }], []);
+    eq(rows.length, 1);
+    eq(rows[0].cells, {});
+  });
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链
    * 清空之后——串行队列本身是一条长微任务链，不 flush 的话最后几条用例的迟到拒绝
