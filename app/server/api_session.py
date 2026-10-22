@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from .. import __version__
 from ..config import Settings
 from ..core import device_models
-from ..services import auth, scheduler as services_scheduler
+from ..services import auth, authz, scheduler as services_scheduler
 from ..services.context import RequestContext
 from .router import Response
 
@@ -50,6 +50,9 @@ def get_session(
                 "is_deployer": actor.is_deployer,
                 "is_admin": actor.is_admin,
                 "role_label": actor.role_label,
+                # M5-07：能力矩阵随会话下发；前端 `can()` 按它判定，
+                # 未列出的键一律 False（deny-by-default）。
+                "capabilities": authz.capabilities(actor),
             },
             "profile": dict(profile),
             "profiles": [dict(model) for model in models],

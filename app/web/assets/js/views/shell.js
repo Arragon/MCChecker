@@ -104,9 +104,13 @@
   });
 
   App.prototype.can = function (cap) {
-    var id = this.identity;
+    var id = this.identity || {};
+    var caps = id.capabilities;
+    // 服务端下发能力矩阵时以它为准：未列出的键一律 false（deny-by-default）。
+    // 矩阵缺失（极旧响应）时退回角色判断，避免整页入口消失。
+    if (caps && Object.prototype.hasOwnProperty.call(caps, cap)) return !!caps[cap];
     if (cap === "deployer" || cap === "admin") return !!id.is_admin;
-    return true;
+    return false;
   };
 
   App.prototype.p = function (rest) {
