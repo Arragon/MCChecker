@@ -881,7 +881,7 @@ URL 永远携带 `pid`，从而修复“记录链接不带机型”；同事拿�
 | Toast | `MC.toast.success/error/warning/info(title, desc, {action, duration})` | 右下角堆叠；错误 8 s，其他 3.5 s；可带“重试/撤销”动作；`aria-live=polite` |
 | 错误文案 | `MC.errorText(err)`、`MC.toastError(title, err, opts)` | 只显示服务端 `message` 或错误码对照文案，不显示堆栈 |
 | Modal | `MC.modal({title, subtitle, body, footer(close), size: 'wide'\|'xwide', dismissible})` | Esc 关闭、焦点陷阱、关闭后焦点回到触发元素、点击遮罩关闭 |
-| Confirm | `MC.confirm({title, message, detail, confirmText, danger, requireText})` → `Promise<boolean>` | 删除文件/机型需输入名称确认 |
+| Confirm | `MC.confirm({title, message, detail, confirmText, danger, requireText})` → `Promise<boolean>` | 删除机型需输入标识确认；删除配置文件只确认影响范围 |
 | Popover / Menu | `MC.popover(anchor, node, {align})`、`MC.menu(anchor, items)` | ↑↓ 键导航、Esc 关闭、点击外部关闭；菜单项支持 `checked/disabled/title/danger/meta` |
 | 状态块 | `MC.stateBlock({kind: empty\|loading\|error\|locked, icon, title, desc, actions})`、`MC.errorBlock(err, retry)` | 四类状态视觉区分（§9.6） |
 | 表单 | `MC.field({label, required, help, control})` → `.setError(msg)`；`MC.switchEl(label, checked, onChange, disabled)` | label 与控件 `for/id` 关联；错误贴近字段并设 `aria-invalid` |
@@ -1148,8 +1148,8 @@ MC.views[kind] = function (app, route) {
 
 #### 9.8.11 导入对话框（`views/importer.js`）
 
-- 分段：本地文件（拖放区，支持点击/键盘，显示大小上限；选择后显示文件卡片可移除）｜从链接下载（URL，输入时自动推断文件名）。
-- 文件名（等宽，必填，校验非法字符）；导入方式单选：保存到服务器（仅部署者，否则禁用并说明）/ 临时查看（仅自己可见，n 小时后清除）。
+- 分段：本地文件（拖放区，支持点击/键盘，可一次选择多个文件，显示大小上限；选择后列出文件卡片，可逐个移除）｜从链接下载（URL，一次一个，输入时自动推断文件名）。
+- 只选择一个本地文件时，文件名可改（等宽，必填，校验非法字符）；多个文件各自使用原文件名。导入方式单选：保存到服务器（仅管理员，否则禁用并说明）/ 临时查看（仅当前会话可见，n 小时后清除）。多个文件保存到服务器后不逐个打开，临时查看则会逐个打开。
 - 同名且选择保存 → 黄色提示“保存后当前版本会自动归档”。
 - “导入并打开”：成功后打开文件标签（或临时标签）；内容与服务器版本相同 → “内容与服务器版本一致，未产生新的历史版本”。错误：同名 → 字段错误；解析失败 → “无法解析该文件”+ 原因；下载失败 → 原因。
 

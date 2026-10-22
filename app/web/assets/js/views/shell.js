@@ -453,7 +453,6 @@
       detail: h("div.banner.banner-warning", icon("alert"), h("div.banner-body", "删除后文件会移入服务器恢复区，需管理员手工恢复。")),
       confirmText: "删除",
       danger: true,
-      requireText: f.name,
     }).then(function (ok) {
       if (!ok) return;
       api.del(self.p("/files/" + api.seg(f.name))).then(

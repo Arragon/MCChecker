@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 48;
+  var EXPECTED_CASES = 49;
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1451,7 +1451,7 @@
       });
   });
 
-  test("删除确认：给出影响数量与恢复方式，并且必须敲对文件名才能确认（§9.8.11 / UC-11）", function () {
+  test("删除确认：说明影响数量与恢复方式，确认后直接删除，不要求输入文件名", function () {
     var calls = [];
     var origDel = MC.api.del;
     MC.api.del = function (path) { calls.push(path); return Promise.resolve({ deleted: true, recovery: "x" }); };
@@ -1461,31 +1461,26 @@
       refreshFiles: function () {},
       syncRevision: function () {},
     };
-    try {
-      MC.App.prototype.deleteFile.call(app, { name: "config.xml", archive_count: 3, record_count: 1 });
-      var backdrops = document.body.querySelectorAll(".modal-backdrop");
-      var backdrop = backdrops[backdrops.length - 1];
-      var dialog = backdrop.querySelector(".modal");
-      var text = dialog.textContent;
-      ok(/3 个历史版本/.test(text) && /1 条修改记录/.test(text), "确认框要说明影响数量：" + text);
-      ok(/恢复区/.test(text), "要说明删除后去哪里恢复：" + text);
-      var input = dialog.querySelector("input");
-      var okBtn = dialog.querySelector(".btn-danger");
-      ok(input && okBtn, "危险操作要有输入确认与红色按钮");
-      ok(/config\.xml/.test(text), "标题里带上被删的文件名");
-      ok(okBtn.disabled, "没敲文件名之前不能确认");
-      input.value = "configxm";
-      input.dispatchEvent(new Event("input"));
-      ok(okBtn.disabled, "打错文件名仍然禁用");
-      input.value = "config.xml";
-      input.dispatchEvent(new Event("input"));
-      ok(!okBtn.disabled, "敲对文件名后确认按钮解锁");
-      ok(calls.length === 0, "光打字不发请求，点了才发");
-    } finally {
+    MC.App.prototype.deleteFile.call(app, { name: "config.xml", archive_count: 3, record_count: 1 });
+    var backdrops = document.body.querySelectorAll(".modal-backdrop");
+    var backdrop = backdrops[backdrops.length - 1];
+    var dialog = backdrop.querySelector(".modal");
+    var text = dialog.textContent;
+    ok(/3 个历史版本/.test(text) && /1 条修改记录/.test(text), "确认框要说明影响数量：" + text);
+    ok(/恢复区/.test(text), "要说明删除后去哪里恢复：" + text);
+    ok(!dialog.querySelector("input"), "删除配置文件不要求输入文件名");
+    var okBtn = dialog.querySelector(".btn-danger");
+    ok(okBtn && !okBtn.disabled, "确认按钮可直接点击");
+    ok(/config\.xml/.test(text), "标题里带上被删的文件名");
+    ok(calls.length === 0, "打开确认框时不发请求");
+    okBtn.click();
+    return Promise.resolve().then(function () {
+      eq(calls.length, 1, "点确认后才删除");
+      ok(calls[0].indexOf("config.xml") >= 0, "请求打到该文件：" + calls[0]);
+    }).finally(function () {
       MC.api.del = origDel;
-      var left = document.body.querySelectorAll(".modal-backdrop");
-      if (left.length) left[left.length - 1].remove();
-    }
+      document.body.querySelectorAll(".modal-backdrop").forEach(function (n) { n.remove(); });
+    });
   });
 
   test("差异摘要统计：null 显示未计算，有值时给出 +/−/~ 与文字", function () {
@@ -1522,9 +1517,67 @@
 
     var deployer = MC.openImport(stub(true), { source: "local" });
     var dc = choices(deployer);
-    deployer.close();
     ok(dc[0].disabled === false && dc[0].checked === true, "部署者默认可保存");
     ok(/24 小时/.test(dc[1].text), "临时项要说明过期时间");
+    var input = deployer.el.querySelector('input[type="file"]');
+    ok(input && input.multiple, "本地导入可一次选择多个文件");
+    var dt = new DataTransfer();
+    dt.items.add(new File(["<R/>"], "a.xml"));
+    dt.items.add(new File(["{}"], "b.json"));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change"));
+    var chips = deployer.el.querySelectorAll(".file-chip");
+    eq(chips.length, 2, "两个文件都列出来");
+    ok(/导入 2 个文件/.test(deployer.el.textContent), "多个文件时按钮改为批量导入");
+    var nameField = [].slice.call(deployer.el.querySelectorAll(".field")).filter(function (f) { return f.querySelector("label") && f.querySelector("label").textContent.indexOf("文件名") === 0; })[0];
+    ok(nameField && nameField.parentNode.classList.contains("hidden"), "多个文件不再填写同一个文件名");
+    deployer.close();
+  });
+
+  test("本地导入：多个文件按各自文件名依次上传，已存在的先确认覆盖", function () {
+    var calls = [];
+    var orig = MC.api.upload;
+    MC.api.upload = function (path, file, filename, query) {
+      calls.push({ path: path, filename: filename, query: query || {} });
+      return Promise.resolve({ archived: filename === "a.xml" ? "a_old.xml" : null, unchanged: false });
+    };
+    var opened = [];
+    var app = {
+      can: function () { return true; },
+      session: { limits: { upload_max_bytes: 52428800, temp_ttl_hours: 24 } },
+      files: [{ name: "a.xml" }],
+      p: function (rest) { return "/api/v1/p/default" + rest; },
+      syncRevision: function () {},
+      refreshFiles: function () { return Promise.resolve(); },
+      openFile: function (name) { opened.push(name); },
+      go: function () {},
+    };
+    var m = MC.openImport(app, { source: "local" });
+    var input = m.el.querySelector('input[type="file"]');
+    var dt = new DataTransfer();
+    dt.items.add(new File(["<R/>"], "a.xml"));
+    dt.items.add(new File(["{}"], "b.json"));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change"));
+    var btn = [].slice.call(m.el.querySelectorAll("button")).filter(function (b) { return b.textContent.indexOf("导入 2 个文件") >= 0; })[0];
+    btn.click();
+    return Promise.resolve().then(function () {
+      var backs = document.body.querySelectorAll(".modal-backdrop");
+      var confirm = backs[backs.length - 1];
+      ok(/a\.xml/.test(confirm.textContent) && /覆盖/.test(confirm.textContent), "已存在的文件先确认覆盖");
+      confirm.querySelector(".btn-primary").click();
+      return new Promise(function (resolve) { setTimeout(resolve, 0); });
+    }).then(function () {
+      eq(calls.length, 2, "两个文件都要上传，实际 " + calls.length);
+      eq(calls[0].filename, "a.xml");
+      eq(calls[0].query.overwrite, "1");
+      eq(calls[1].filename, "b.json");
+      ok(!calls[1].query.overwrite, "新文件不带覆盖参数");
+      eq(opened.length, 0, "一次导入多个文件时不逐个打开");
+    }).finally(function () {
+      MC.api.upload = orig;
+      document.body.querySelectorAll(".modal-backdrop").forEach(function (n) { n.remove(); });
+    });
   });
 
   test("文件详情：null 值节点的提交建议输入框与按钮禁用并说明只读（§6.7 D1 / UC-13）", function () {

@@ -875,9 +875,22 @@
   background: var(--c-primary-soft);
 }
 
+.dropzone.is-compact {
+  min-height: 72px;
+  padding: var(--sp-3);
+}
+
 .dropzone .svg-icon {
   width: 22px;
   height: 22px;
+}
+
+.file-chip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
 }
 
 .file-chip {
