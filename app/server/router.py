@@ -103,6 +103,7 @@ def build_router(settings: Settings) -> Router:
         api_bindings,
         api_compare,
         api_config,
+        api_config_catalog,
         api_delete,
         api_dl,
         api_documents,
@@ -153,4 +154,6 @@ def build_router(settings: Settings) -> Router:
     # 配置管理域（M5-08）：全局 `/api/v1/config/*` 与机型 `/api/v1/p/{pid}/config/*`。
     # 门禁在 handler 入口判定（默认 off），因此注册顺序不影响旧接口。
     api_config.register(router, settings)
+    # 配置目录（M6-01/M6-02）：软件版本、出口批次、配置族、逻辑文件、快照、变体。
+    api_config_catalog.register(router, settings)
     return router

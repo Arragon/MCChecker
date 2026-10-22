@@ -62,6 +62,13 @@ KIND_PREFIX = {
 #: 承接不可变 blob 引用的字段名（一致性检查用）。
 BLOB_FIELDS = ("blob_sha256",)
 
+#: **服务端自动填充的时间戳**：不参与请求指纹。
+#:
+#: 幂等重放要求"同一请求"算出同一个指纹，而时间戳每次提交都会变；若让它们参与，
+#: 客户端重试同一请求会被误判成 `IDEMPOTENCY_MISMATCH`。语义上它们也不是输入
+#: （采集时间 `captured_at` 缺省时同样是服务端时钟），因此统一排除。
+VOLATILE_KEYS = frozenset(("created_at", "updated_at", "captured_at", "retired_at"))
+
 _HEX = set("0123456789abcdef")
 
 
@@ -431,12 +438,22 @@ class ConfigRepository:
     def _request_hash(self, tx: Transaction) -> str:
         """请求体指纹：只覆盖语义输入，不含时间与自增序号。
 
-        指针里若引用本次新建对象，用它在本次事务中的序号参与指纹（此时还没有 ID）。
+        指针里若引用本次新建对象，用它在本次事务中的序号参与指纹（此时还没有 ID）；
+        服务端自动填充的时间戳（`VOLATILE_KEYS`）一律剔除，否则同一次重试会算出
+        不同指纹、被误判成 `IDEMPOTENCY_MISMATCH`。
         """
 
         def normalize(value: Any) -> Any:
             if isinstance(value, Ref):
                 return {"$ref": tx._refs.index(value)}
+            if isinstance(value, dict):
+                return {
+                    key: normalize(item)
+                    for key, item in value.items()
+                    if key not in VOLATILE_KEYS
+                }
+            if isinstance(value, list):
+                return [normalize(item) for item in value]
             return value
 
         payload = {
@@ -444,7 +461,8 @@ class ConfigRepository:
             "reason": tx.reason,
             "action": tx.action,
             "ops": [
-                {"kind": ref.kind, "id": ref.id, "payload": ref._payload} for ref in tx._refs
+                {"kind": ref.kind, "id": ref.id, "payload": normalize(ref._payload)}
+                for ref in tx._refs
             ],
             "pointers": [(name, key, normalize(value)) for name, key, value in tx._pointers],
             "blobs": [digest for digest, _ in tx._blobs],
@@ -609,6 +627,16 @@ class ConfigRepository:
             return None
         data = fsutil.read_json(path, None)
         return data if isinstance(data, dict) else None
+
+    def receipt(self, key: str) -> Optional[Dict[str, Any]]:
+        """查持久回执（只读）。service 层用它区分"重试"与"重复登记"。
+
+        有回执说明这个幂等键已经提交过：此时不应再做"业务唯一性"检查，
+        直接让事务走到重放分支（同键异体仍会被 `IDEMPOTENCY_MISMATCH` 拦下）。
+        """
+        if not key:
+            return None
+        return self._load_receipt(str(key))
 
     @staticmethod
     def _discard(path: str) -> None:

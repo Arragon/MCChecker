@@ -61,6 +61,18 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/profiles"): "settings (default)",
     ("PATCH", "/api/v1/profiles/{pid}"): "settings (default)",
     ("DELETE", "/api/v1/profiles/{pid}"): "settings (default)",
+    # --- 配置管理域（M6-01/M6-02）：**不递增**旧 5 段，改用全局 `config_revision`（决策 D3）。
+    # 配置域的对象、审计与回执都在 `data/config_management/` 里，与机型文件的修订语义解耦；
+    # 因此这里逐条登记为 None，等于声明"它们绝不碰 models.rev.*"。
+    ("POST", "/api/v1/config/releases"): None,
+    ("POST", "/api/v1/config/releases/{rid}/default"): None,
+    ("POST", "/api/v1/config/releases/{rid}/retire"): None,
+    ("POST", "/api/v1/config/families"): None,
+    ("POST", "/api/v1/config/families/{fid}/files"): None,
+    ("PATCH", "/api/v1/config/files/{lid}"): None,
+    ("POST", "/api/v1/config/files/{lid}/retire"): None,
+    ("POST", "/api/v1/config/snapshots"): None,
+    ("POST", "/api/v1/config/variants"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

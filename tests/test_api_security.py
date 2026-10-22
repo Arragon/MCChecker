@@ -121,11 +121,26 @@ WRITE_ROUTE_ACTIONS = {
     ("PATCH", "/api/v1/profiles/{pid}"): "settings_write",
     ("DELETE", "/api/v1/profiles/{pid}"): "settings_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
+    # M6-01/M6-02（INH-1946/1947）：配置目录的写接口只有管理员（`config_registry_write`）。
+    # 这些 handler **先授权后门禁**，所以未授权身份得到的是 403（detail.action 可解释），
+    # 而不是把"特性是否开启"泄露出去的 503。
+    ("POST", "/api/v1/config/releases"): "config_registry_write",
+    ("POST", "/api/v1/config/releases/{rid}/default"): "config_registry_write",
+    ("POST", "/api/v1/config/releases/{rid}/retire"): "config_registry_write",
+    ("POST", "/api/v1/config/families"): "config_registry_write",
+    ("POST", "/api/v1/config/families/{fid}/files"): "config_registry_write",
+    ("PATCH", "/api/v1/config/files/{lid}"): "config_registry_write",
+    ("POST", "/api/v1/config/files/{lid}/retire"): "config_registry_write",
+    ("POST", "/api/v1/config/snapshots"): "config_registry_write",
+    ("POST", "/api/v1/config/variants"): "config_registry_write",
 }
 
 ROUTE_VALUES = {
     "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
     "item": "pp_energy", "group": "g1",
+    # 配置域对象 ID（M6-01/02）：形状必须是 `<prefix>_<6 位>`，否则会先撞上 ID 校验
+    # 而不是权限矩阵——这里要验的是"权限先于存在性"。
+    "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

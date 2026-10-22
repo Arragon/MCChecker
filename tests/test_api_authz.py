@@ -188,7 +188,11 @@ class TestRevocation:
 
 class TestEntryPoints:
     def test_action_matrix_snapshot(self):
-        """§4.2 的矩阵快照：档位改动必须是有意识的（不允许顺手放宽）。"""
+        """§4.2 的矩阵快照：档位改动必须是有意识的（不允许顺手放宽）。
+
+        配置域 6 个动作是 M5-07（INH-1941）有意新增的：读=全部角色，
+        其余 5 个一律管理员，**不引入回环特权**（决策 D4）。
+        """
         assert authz.ACTIONS == {
             "read": authz.ANY,
             "temp_upload": authz.ANY,
@@ -201,6 +205,12 @@ class TestEntryPoints:
             "profiles_write": authz.ADMIN,
             "review": authz.ADMIN,
             "delete_file": authz.ADMIN,
+            "config_read": authz.ANY,
+            "config_registry_write": authz.ADMIN,
+            "config_tracking_admin": authz.ADMIN,
+            "config_change_submit": authz.ADMIN,
+            "config_change_approve": authz.ADMIN,
+            "config_artifact_generate": authz.ADMIN,
         }
 
     def test_unknown_action_fails_fast(self):
