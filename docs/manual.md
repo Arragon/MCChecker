@@ -149,3 +149,83 @@ sudo ./add-admin.sh --data-dir /var/lib/mcchecker --name 张三 --ip 10.1.2.3
 3. 先运行 `python run.py --restore data/recovery/<条目> --dry-run --data-dir data` 复核计划；该命令只打印、不写任何文件。
 4. 手工把 `to` 指向的副本复制回 `from`，逐文件比对 sha256；引用（收藏/绑定/建议）按 `removed_refs` 手工回填。
 5. 重启服务，复核文件列表、对比与修订号；恢复区条目保留，不自动清理。
+
+## 15. 配置管理域（M5–M8）
+
+配置管理默认关闭。管理员在服务端设置 `MCHECKER_CONFIG_MANAGEMENT=on` 后重启；`readonly` 只允许读取，`off` 与旧版本行为一致。入口在“审阅修改”页的分段中：修改建议、配置变更、版本升级、经验与历史、审计与谱系。
+
+工作流：登记软件版本与参数定义 → 生成默认 XML/机型基线 → 采集现场 JSON 为不可变观测 → 文件内三栏对账 → 提交变更单 → 管理员批准并发布新基线 → 从已批准基线生成不可变 XML → 下载并在真实系统人工导入 → 在“交付”页登记操作者/时间/证据/结果 → 用新观测做回读核验。`已生成`、`已下载`、`已声明成功`、`已核验` 是四个不同状态，不能互相冒充。
+
+配置管理域的数据在 `data/config_management/`；原 `profiles/`、`configs/`、`archive/` 与人员表保持原位。管理域的写操作走事务与审计，设备层未启用时不会出现设备目录或设备例外入口。
+
+## 16. 旧数据预检、初始化与迁移
+
+先停服务，再对数据根做只读预检：
+
+```bash
+python scripts/inspect_config_management.py inspect --data-dir /var/lib/mcchecker
+```
+
+确认无 blocker 后，初始化必须先备份：
+
+```bash
+python scripts/inspect_config_management.py initialize \
+  --data-dir /var/lib/mcchecker \
+  --backup-dir /var/backups/mcc-before-config-init --yes
+```
+
+初始化只建立空的 `config_management` 域，不猜版本、不自动建基线。之后按 `plan.json` 迁移文件快照：
+
+```bash
+python scripts/inspect_config_management.py migrate \
+  --data-dir /var/lib/mcchecker --plan plan.json --apply
+```
+
+`plan.json` 每项至少包含 `filename`、`profile_id`、`decision`；只有显式给出 `release_id` 与 `logical_file_id` 且 `decision=link` 才会登记快照。缺版本、缺逻辑文件或哈希不一致的项写入 `config_management/imports/pending_links.json`，标记“待关联”，不会自动猜当前版本。重复执行是幂等的；换 plan 需显式 `--force-plan`。
+
+## 17. 全域备份、恢复与回滚
+
+```bash
+# 1) 停服务，确认单实例锁已释放
+./service.sh stop
+
+# 2) 备份 profiles、人员/管理员/机型表、config_management 与恢复区；cache 不入包
+python scripts/config_backup.py backup-full \
+  --data-dir /var/lib/mcchecker --out /var/backups/mcc-20261023
+
+# 3) 校验 manifest、逐文件 sha256
+python scripts/config_backup.py verify-full --backup /var/backups/mcc-20261023
+
+# 4) 先看计划，不写任何文件
+python scripts/config_backup.py restore-full \
+  --backup /var/backups/mcc-20261023 --data-dir /var/lib/mcchecker --dry-run
+
+# 5) 确认后显式执行；目标非空必须 --force，清理陈旧文件用 --prune
+python scripts/config_backup.py restore-full \
+  --backup /var/backups/mcc-20261023 --data-dir /var/lib/mcchecker \
+  --force --prune
+```
+
+恢复会在 `data/recovery/pre_restore_<时间>/` 留一份恢复前安全副本；中途失败按该副本回滚。同一备份重复恢复是幂等的，不会重复写审计。`--exclude-recovery` 可让备份不包含恢复区（包更小，但恢复后手工恢复区记录不回来）。
+
+也可以从启动入口执行；默认只打印计划：
+
+```bash
+python run.py --restore-backup /var/backups/mcc-20261023 --data-dir /var/lib/mcchecker
+python run.py --restore-backup /var/backups/mcc-20261023 --data-dir /var/lib/mcchecker --apply-restore
+```
+
+回滚原则：先恢复备份，再启动服务；不要让新业务数据在未备份的情况下被旧快照覆盖。若只需要恢复一个误删文件，仍走 §14.6 的恢复区手工流程，不要执行全域恢复。
+
+## 18. 发布与已知未验证项
+
+发布前依次执行：`.venv39/bin/python -m pytest -q`、`PYTHON=./.venv39/bin/python scripts/check_py39.sh`、前端 HTTP 验收页、`pytest -q tests/test_release.py`，再构建发布包。发布包不含 `data/`、mock、测试资产或私人样本。
+
+截至 2026-10-23，以下证据仍未取得，不得写成“已通过”：
+
+- M4-08 的逐 UC 真实浏览器人工记录、§16.5 脱敏旧数据副本、§16.7 物理断网；
+- M6-14 的真实系统 XML 导入、M7-10 的真实设备回读；
+- M8-03/M8-05 的真实浏览器完整业务流、真实设备与物理断网验收；
+- INH-1932 的 100 文件搜索性能决策。
+
+缺这些证据时，验收台账与 Linear 卡保持未关闭；M8-07 最终发布闸门不能签署“全部通过”。详见 `docs/MCChecker_ACCEPTANCE_LEDGER.md` 与 `docs/MCChecker_LEFTOVERS.md`。

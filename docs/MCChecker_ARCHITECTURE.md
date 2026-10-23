@@ -8,6 +8,16 @@ Linear：[MCChecker › Overview](https://linear.app/inhandy/project/mcchecker-9
 > **决策变更（2026-10-15）**：项目负责人决定采用“Python 标准库 HTTP + JSON API + 原生前端、零运行时依赖”的重构方案，取代本文 §1 与 §17 中“保留 NiceGUI 单体、不做独立前端重写”的结论。新目标设计见 [`MCChecker_REDESIGN_SPEC.md`](MCChecker_REDESIGN_SPEC.md)；本文其余的数据安全、原子写、定位符、审阅校验、离线发布原则继续有效，并已落入新设计。
 >
 > 本文件是架构事实源。`MCChecker_ARCHITECTURE_v2.md`、`docs/architecture.md` 和其他旧设计文档只作为历史记录或兼容入口；实现状态仍以实际代码与测试为准。
+>
+> **2026-10-23 实现状态（覆盖 §1 的历史结论）**：M0–M8 已按“Python 标准库 HTTP + JSON API + 原生 JS、零运行时第三方依赖”实现；§1 及以下关于 NiceGUI/APScheduler 的段落是 2026-10-15 之前的历史决策记录，不再描述当前运行代码（NiceGUI 页面已在 M4-07 移除）。当前运行结构：
+>
+> - 入口 `run.py` → `app/server/http.py`（标准库 `http.server`）→ `app/server/router.py` 注册的 API；
+> - 业务在 `app/services/**`，持久化在 `app/core/storage.py`（旧 JSON/文件）与 `app/core/config_repository.py`（`data/config_management/` 不可变对象、blob、审计、回执）；
+> - 前端在 `app/web/`，生产页只加载 `config.js` + 原生模块，不加载 mock/tests；
+> - 数据根：`profiles/<pid>/{configs,archive,records,cache}`、全局 `ip_mapping.json`/`admin_users.json`/`device_models.json`、`recovery/`、`config_management/`、发布与日志目录。人员表全机型共用，不再按机型分目录；
+> - 单进程 + 单写者：`WriteGate → profile_lock → management_lock`；配置域对象不可变、state 最后公布；备份/恢复与迁移 CLI 见 `docs/manual.md` §15–§18。
+>
+> 设备层 M7-07/08 按计划 Canceled，代码只保留“功能关闭”声明，不提供设备目录/设备例外入口。
 
 ## 1. 总体结论
 

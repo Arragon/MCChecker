@@ -5,12 +5,11 @@
 ## 快速启动
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动服务
+# 运行时零第三方依赖，不需要 pip install
 python main.py
 ```
+
+Python 要求 **3.9.11**；发布包内已带全部运行代码，目标机器无需联网安装依赖。
 
 服务默认在 `0.0.0.0:50003` 启动（`app/config.py` 的 `DEFAULT_PORT`），内网其他机器可通过 `http://<服务器IP>:50003` 访问；可通过环境变量 `MCHECKER_PORT` 或 `--port` 指定端口。
 
@@ -49,6 +48,31 @@ pytest tests/ -v
 - 标准库 `http.server` + JSON API
 - 原生 JavaScript 前端（`app/web/`），零运行时第三方依赖
 - 标准库进行 XML/JSON 解析、下载、定时调度与文件存储
+
+## 配置管理（M5–M8）
+
+配置管理域默认关闭；由管理员设置 `MCHECKER_CONFIG_MANAGEMENT=on` 并重启后启用。它提供参数登记、软件版本/定义集合、现场采集与对账、变更单批准发布、XML 产物下载、人工导入登记、回读核验、审计谱系和机型生命周期；设备层按计划延期，状态接口会明确返回“未启用”。
+
+常用运维命令（均在服务停止后执行，详细步骤见 `docs/manual.md`）：
+
+```bash
+# 预检旧 data/，只读
+python scripts/inspect_config_management.py inspect --data-dir data
+
+# 先备份，再初始化配置管理域
+python scripts/inspect_config_management.py initialize --data-dir data --backup-dir /tmp/mcc-before-init --yes
+
+# 全域备份 / 校验 / 恢复
+python scripts/config_backup.py backup-full --data-dir data --out /tmp/mcc-backup
+python scripts/config_backup.py verify-full --backup /tmp/mcc-backup
+python scripts/config_backup.py restore-full --backup /tmp/mcc-backup --data-dir data --dry-run
+
+# 或由启动入口执行（默认 dry-run，只有 --apply-restore 才写）
+python run.py --restore-backup /tmp/mcc-backup --data-dir data
+python run.py --restore-backup /tmp/mcc-backup --data-dir data --apply-restore
+```
+
+发布包与兼容性：`python scripts/make_release.py --out dist/`；`check_py39.sh` 覆盖 `app/`、`run.py`、`main.py` 与 `scripts/`。跨版本/真实设备/物理断网证据仍未全部取得，详见 `docs/MCChecker_LEFTOVERS.md` 与验收台账。
 
 ## 配置说明
 
