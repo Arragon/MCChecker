@@ -174,6 +174,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 因此 HTTP 层在下面按需导入。
     storage.configure_data_dir(settings.data_dir)
 
+    if settings.restore_backup:
+        configure_logging(settings.log_level)
+        import importlib.util
+
+        script = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "scripts", "config_backup.py"
+        )
+        spec = importlib.util.spec_from_file_location("config_backup_cli", script)
+        backup_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(backup_mod)
+        try:
+            plan = backup_mod.restore_full(
+                settings.restore_backup,
+                settings.data_dir,
+                dry_run=not settings.restore_apply,
+                force=settings.restore_apply,
+            )
+        except Exception as exc:
+            print("全域恢复失败：%s" % exc, file=sys.stderr)
+            return 2
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0
+
     if settings.restore_dir:
         configure_logging(settings.log_level)
         if not settings.dry_run:

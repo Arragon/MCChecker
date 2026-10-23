@@ -61,6 +61,9 @@ class Settings:
     max_workers: int = DEFAULT_MAX_WORKERS
     log_level: str = DEFAULT_LOG_LEVEL
     restore_dir: str = ""
+    #: 全域备份目录（M8-02）；与恢复区条目 `restore_dir` 是两条独立路径。
+    restore_backup: str = ""
+    restore_apply: bool = False
     dry_run: bool = False
     #: 默认开启：覆盖 `app/`、`run.py`、`main.py` 里的 `.py` 后重启进程。`--no-reload` 关掉。
     reload: bool = True
@@ -119,6 +122,8 @@ def _parse_cli(argv: List[str]) -> argparse.Namespace:
         help="数据根目录（默认 %s）" % DEFAULT_DATA_DIR,
     )
     parser.add_argument("--restore", dest="restore_dir", default=None, help="只打印恢复计划（必须配 --dry-run）")
+    parser.add_argument("--restore-backup", dest="restore_backup", default=None, help="从全域备份目录恢复（M8-02）")
+    parser.add_argument("--apply-restore", dest="restore_apply", action="store_true", help="真正执行 --restore-backup；缺省只打印计划")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="只读恢复计划，不写任何文件")
     reload_group = parser.add_mutually_exclusive_group()
     reload_group.add_argument(
@@ -143,8 +148,10 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
     传入 `argv` 便于测试；传 `None` 时读 `sys.argv[1:]`。
     """
     cli = _parse_cli(list(sys.argv[1:]) if argv is None else list(argv))
-    if cli.dry_run and not cli.restore_dir:
-        raise SettingsError("--dry-run 只能与 --restore 一起使用")
+    if cli.dry_run and not (cli.restore_dir or cli.restore_backup):
+        raise SettingsError("--dry-run 只能与 --restore 或 --restore-backup 一起使用")
+    if cli.restore_apply and not cli.restore_backup:
+        raise SettingsError("--apply-restore 必须与 --restore-backup 一起使用")
     env = os.environ
 
     host = DEFAULT_HOST
@@ -181,6 +188,7 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
     if cli.data_dir is not None:
         data_dir = _text(cli.data_dir, "--data-dir")
     restore_dir = _abs_dir(cli.restore_dir) if cli.restore_dir else ""
+    restore_backup = _abs_dir(cli.restore_backup) if cli.restore_backup else ""
     if cli.reload is not None:
         reload = bool(cli.reload)
 
@@ -193,6 +201,8 @@ def load_settings(argv: Optional[List[str]] = None) -> Settings:
         download_allow=download_allow,
         log_level=log_level,
         restore_dir=restore_dir,
+        restore_backup=restore_backup,
+        restore_apply=bool(cli.restore_apply),
         dry_run=bool(cli.dry_run),
         reload=reload,
     )
