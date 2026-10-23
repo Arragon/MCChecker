@@ -387,6 +387,52 @@ def test_second_approve_does_not_publish_twice(repo, world) -> None:
     assert repo.head_revision("baseline", world["baseline"]["id"]) == "r2"
 
 
+def test_threaded_double_approve_has_one_winner(repo, world) -> None:
+    """真并发：两个线程同时批准，只能有一个真正发布。"""
+    import threading
+
+    change = _draft(repo, world)
+    ch.submit_change_set(repo, ACTOR, change_id=change["id"], reason="报批")
+    outcomes = []
+
+    def worker():
+        try:
+            ch.approve_change_set(repo, ACTOR, change_id=change["id"], note="同意")
+            outcomes.append("ok")
+        except AppError as exc:
+            outcomes.append(exc.code)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert outcomes.count("ok") == 1
+    assert repo.head_revision("baseline", world["baseline"]["id"]) == "r2"
+
+
+def test_state_replace_failure_does_not_publish_or_keep_audit(repo, world, monkeypatch) -> None:
+    """state 替换失败时，head 不变，审计也不能留下一条“已批准”的假记录。"""
+    from app.core import fsutil
+
+    change = _draft(repo, world)
+    ch.submit_change_set(repo, ACTOR, change_id=change["id"], reason="报批")
+    audit_before = len(repo.audit_events(limit=200)["items"])
+    real_write = fsutil.atomic_write_json
+
+    def flaky(path, payload, *args, **kwargs):
+        if str(path).endswith("state.json"):
+            raise OSError("injected state write failure")
+        return real_write(path, payload, *args, **kwargs)
+
+    monkeypatch.setattr(fsutil, "atomic_write_json", flaky)
+    with pytest.raises(AppError):
+        ch.approve_change_set(repo, ACTOR, change_id=change["id"], note="同意")
+    monkeypatch.setattr(fsutil, "atomic_write_json", real_write)
+    assert repo.head_revision("baseline", world["baseline"]["id"]) == "r1"
+    assert len(repo.audit_events(limit=200)["items"]) == audit_before
+
+
 def test_approve_with_stale_expected_baseline_revision(repo, world) -> None:
     change = _draft(repo, world)
     ch.submit_change_set(repo, ACTOR, change_id=change["id"], reason="报批")
