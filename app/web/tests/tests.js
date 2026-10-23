@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 90;  // 84 + 经验与历史 6（M7-05/M7-06）
+  var EXPECTED_CASES = 93;  // 90 + 交付登记/回读核验 3（M7-09/M7-10）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -3147,6 +3147,67 @@
         restore();
         throw err;
       });
+  });
+
+
+  /* ---- 交付登记与回读核验（M7-09 / M7-10）---- */
+
+  test("交付登记：成功要证据、失败要原因、待导入不能登记", function () {
+    var ui = MC.deliveryUi;
+    eq(ui.resultLabel("pending"), "待导入");
+    eq(ui.resultLabel("something-new"), "待导入", "未知状态按最保守的待导入");
+    ok(ui.registrationIssues({ result: "pending" })[0].indexOf("待导入") >= 0);
+    ok(ui.registrationIssues({ result: "declared_ok" }).join(" ").indexOf("执行时间") >= 0);
+    ok(
+      ui.registrationIssues({ result: "declared_ok", executed_at: "2026-10-22T10:00:00Z" })
+        .join(" ").indexOf("证据") >= 0,
+      "成功没有证据必须拦下"
+    );
+    ok(ui.registrationIssues({ result: "failed" }).join(" ").indexOf("原因") >= 0);
+    ok(ui.registrationIssues({ result: "insufficient_evidence" }).join(" ").indexOf("缺什么") >= 0);
+    eq(
+      ui.registrationIssues({
+        result: "declared_ok",
+        executed_at: "2026-10-22T10:00:00Z",
+        evidence_note: "回读一致",
+      }),
+      [],
+      "证据和实际执行时间都有才放行"
+    );
+  });
+
+  test("交付摘要：设备层关闭时不许说所有设备完成", function () {
+    var ui = MC.deliveryUi;
+    ok(ui.deliverySummaryNotice(null).text.indexOf("待导入") >= 0, "没登记就明说是待导入");
+    var notice = ui.deliverySummaryNotice({
+      total: 2,
+      counts: { declared_ok: 1, failed: 1, insufficient_evidence: 0 },
+      result: "declared_ok",
+      can_claim_all_devices: false,
+    });
+    eq(notice.level, "warn", "有失败记录要提示");
+    ok(notice.text.indexOf("设备层未启用") >= 0, "要说明设备层没开");
+    ok(notice.text.indexOf("所有设备") >= 0, "要明确不能声称所有设备完成");
+  });
+
+  test("回读核验：逐参数状态与范围声明不宣传全量一致", function () {
+    var ui = MC.deliveryUi;
+    var text = ui.verifySummary({
+      aggregate: { matched: 2, missing: 1, mismatched: 0, unobservable: 0 },
+      conclusion: "incomplete",
+      scope_complete: true,
+    });
+    ok(text.indexOf("观测里没有 1") >= 0, "缺项要单列，不能当 0");
+    ok(text.indexOf("证据不完整") >= 0);
+    var limited = ui.verifySummary({
+      aggregate: { matched: 2, missing: 0, mismatched: 0, unobservable: 1 },
+      conclusion: "incomplete",
+      scope_complete: false,
+    });
+    ok(limited.indexOf("不能宣传全量一致") >= 0, "有未登记节点时必须收窄结论");
+    eq(ui.verifyRowModel({ status: "something-new" }).statusLabel, "观测里没有", "未知行的状态按最保守处理");
+    eq(ui.conclusionTone("verified"), "badge-success");
+    eq(ui.conclusionTone("version_mismatch"), "badge-warning");
   });
 
 

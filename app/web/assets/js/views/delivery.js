@@ -32,7 +32,127 @@
     failed: "真实系统导入后核验不通过",
   };
 
+  /* ---- 交付四态与回读核验（M7-09/M7-10）词表：与服务端 config_delivery /
+   * config_verify 的标签一一对应，前端不各自造词。 ---- */
+  var RESULT_LABELS = {
+    pending: "待导入",
+    declared_ok: "已声明成功",
+    failed: "失败",
+    insufficient_evidence: "证据不足",
+  };
+
+  var CONCLUSION_LABELS = {
+    verified: "核验通过",
+    mismatch: "值不一致",
+    incomplete: "证据不完整",
+    version_mismatch: "版本不一致",
+  };
+
+  var ROW_LABELS = {
+    matched: "一致",
+    missing: "观测里没有",
+    mismatched: "不一致",
+    unobservable: "无法核验",
+  };
+
   /* ===================== 纯函数（供测试与视图共用） ===================== */
+
+  function resultLabel(result) {
+    return RESULT_LABELS[result] || RESULT_LABELS.pending;
+  }
+
+  function resultTone(result) {
+    if (result === "declared_ok") return "badge-success";
+    if (result === "failed") return "badge-danger";
+    if (result === "insufficient_evidence") return "badge-warning";
+    return "badge-neutral";
+  }
+
+  /**
+   * 登记表单的本地预检：与服务端硬规矩同序（服务端仍是最终裁决）。
+   * 返回问题列表；空列表 = 可以提交。
+   */
+  function registrationIssues(form) {
+    var data = form || {};
+    var issues = [];
+    var result = data.result || "";
+    if (["declared_ok", "failed", "insufficient_evidence"].indexOf(result) < 0) {
+      issues.push("先选登记结果（「待导入」是推导出来的，不能登记）");
+      return issues;
+    }
+    if (result === "declared_ok" || result === "failed") {
+      if (!String(data.executed_at || "").trim()) issues.push("登记成功/失败必须给出实际执行时间");
+    }
+    if (result === "declared_ok") {
+      var hasEvidence =
+        String(data.evidence_note || "").trim() || String(data.evidence_ref || "").trim();
+      if (!hasEvidence) issues.push("登记成功必须带证据（说明或引用至少一项）；没有证据请登记为「证据不足」");
+    }
+    if (result === "failed" && !String(data.failure_reason || "").trim()) {
+      issues.push("登记失败必须写失败原因");
+    }
+    if (result === "insufficient_evidence" && !String(data.missing_evidence || "").trim()) {
+      issues.push("登记「证据不足」必须写清缺什么");
+    }
+    return issues;
+  }
+
+  /** 交付摘要 → 提示条：设备层关闭时"所有设备已完成"永远不可声称。 */
+  function deliverySummaryNotice(summary) {
+    if (!summary || !summary.total) {
+      return {
+        level: "info",
+        text: "还没有人登记过这份产物的导入结果：当前是「待导入」，下载过不等于打过。",
+      };
+    }
+    var counts = summary.counts || {};
+    var text =
+      "共登记 " + summary.total + " 次：成功 " + (counts.declared_ok || 0) +
+      " · 失败 " + (counts.failed || 0) +
+      " · 证据不足 " + (counts.insufficient_evidence || 0) +
+      "；最近一次：" + resultLabel(summary.result) + "。";
+    if (summary.can_claim_all_devices === false) {
+      text += "设备层未启用：只能就登记过的对象给结论，不能断言「所有设备已完成」。";
+    }
+    return { level: (counts.failed || 0) > 0 ? "warn" : "info", text: text };
+  }
+
+  function conclusionLabel(conclusion) {
+    return CONCLUSION_LABELS[conclusion] || "证据不完整";
+  }
+
+  function conclusionTone(conclusion) {
+    if (conclusion === "verified") return "badge-success";
+    if (conclusion === "mismatch") return "badge-danger";
+    return "badge-warning";
+  }
+
+  /** 核验报告 → 一行摘要：逐态计数 + 结论 + 范围声明。 */
+  function verifySummary(report) {
+    if (!report) return "";
+    var agg = report.aggregate || {};
+    var text =
+      "一致 " + (agg.matched || 0) +
+      " · 观测里没有 " + (agg.missing || 0) +
+      " · 不一致 " + (agg.mismatched || 0) +
+      " · 无法核验 " + (agg.unobservable || 0) +
+      "；结论：" + conclusionLabel(report.conclusion) + "。";
+    if (report.scope_complete === false) {
+      text += "观测里有节点没登记成参数，未纳入核验——不能宣传全量一致。";
+    }
+    return text;
+  }
+
+  function verifyRowModel(row) {
+    var data = row || {};
+    return {
+      id: data.parameter_id || "",
+      name: data.name || data.parameter_id || "",
+      status: data.status || "missing",
+      statusLabel: ROW_LABELS[data.status] || ROW_LABELS.missing,
+      reason: data.reason || "",
+    };
+  }
 
   function statusLabel(status) {
     return STATUS_LABELS[status] || STATUS_LABELS.unverified;
@@ -132,6 +252,9 @@
 
   MC.deliveryUi = {
     STATUS_LABELS: STATUS_LABELS,
+    RESULT_LABELS: RESULT_LABELS,
+    CONCLUSION_LABELS: CONCLUSION_LABELS,
+    ROW_LABELS: ROW_LABELS,
     statusLabel: statusLabel,
     statusHint: statusHint,
     statusTone: statusTone,
@@ -141,6 +264,14 @@
     canGenerate: canGenerate,
     baselineOptions: baselineOptions,
     deliveryNotice: deliveryNotice,
+    resultLabel: resultLabel,
+    resultTone: resultTone,
+    registrationIssues: registrationIssues,
+    deliverySummaryNotice: deliverySummaryNotice,
+    conclusionLabel: conclusionLabel,
+    conclusionTone: conclusionTone,
+    verifySummary: verifySummary,
+    verifyRowModel: verifyRowModel,
   };
 
   /* ===================== 视图 ===================== */
@@ -259,8 +390,220 @@
       );
     }
 
+    /* -- 交付登记（M7-09）：登记是人做的动作，不由下载触发 -- */
+    function drawDeliverySection(row, container) {
+      var summaryHost = h("div");
+      var formHost = h("div");
+      util.replace(
+        container,
+        h("h3", { style: "margin:16px 0 6px" }, "导入结果登记"),
+        h(
+          "p.small.muted",
+          "「下载了」不等于「打进去了」。成功要带证据、失败要写原因、说不清就登记「证据不足」；" +
+            "每次登记都是一条新记录（第几次、上次怎么挂的都留着），不改写旧记录。"
+        ),
+        summaryHost,
+        formHost
+      );
+
+      function refreshSummary() {
+        MC.configApi.deliverySummary(pid, { artifact_id: row.id }).then(
+          function (summary) {
+            var notice = deliverySummaryNotice(summary);
+            util.replace(
+              summaryHost,
+              h(
+                "div.banner." + (notice.level === "warn" ? "banner-warning" : "banner-neutral"),
+                { style: "margin:8px 0" },
+                icon(notice.level === "warn" ? "alert" : "info"),
+                h("div.banner-body", notice.text)
+              )
+            );
+          },
+          function () {
+            util.replace(summaryHost, null);
+          }
+        );
+      }
+      refreshSummary();
+
+      if (app && app.can && !app.can("config_artifact_generate")) {
+        util.replace(formHost, h("p.small.muted", "当前身份没有登记权限（需要生成产物的权限）。"));
+        return;
+      }
+
+      var resultSelect = h(
+        "select.input",
+        { "aria-label": "登记结果" },
+        h("option", { value: "declared_ok" }, "已声明成功（要带证据）"),
+        h("option", { value: "failed" }, "失败（要写原因）"),
+        h("option", { value: "insufficient_evidence" }, "证据不足（要写缺什么）")
+      );
+      var executedInput = h("input.input", { type: "text", placeholder: "实际执行时间（ISO，如 2026-10-22T15:30:00）", "aria-label": "实际执行时间" });
+      var evNoteInput = h("input.input", { type: "text", placeholder: "证据说明（如：现场回读截图三张）", "aria-label": "证据说明" });
+      var evRefInput = h("input.input", { type: "text", placeholder: "证据引用（照片/日志路径，可选）", "aria-label": "证据引用" });
+      var reasonInput = h("input.input", { type: "text", placeholder: "失败原因（登记失败时必填）", "aria-label": "失败原因" });
+      var missingInput = h("input.input", { type: "text", placeholder: "缺什么证据（登记证据不足时必填）", "aria-label": "缺失证据" });
+      var issuesHost = h("div");
+      var submitBtn = h("button.btn.btn-sm.btn-primary", { type: "button", disabled: true }, "登记导入结果");
+
+      function currentForm() {
+        return {
+          result: resultSelect.value,
+          executed_at: executedInput.value,
+          evidence_note: evNoteInput.value,
+          evidence_ref: evRefInput.value,
+          failure_reason: reasonInput.value,
+          missing_evidence: missingInput.value,
+        };
+      }
+
+      function refreshForm() {
+        var issues = registrationIssues(currentForm());
+        submitBtn.disabled = issues.length > 0;
+        util.replace(
+          issuesHost,
+          issues.length
+            ? h("ul.small.muted", { style: "margin:6px 0;padding-left:18px" }, issues.map(function (text) { return h("li", text); }))
+            : null
+        );
+      }
+      [resultSelect, executedInput, evNoteInput, evRefInput, reasonInput, missingInput].forEach(function (el) {
+        el.addEventListener("input", refreshForm);
+        el.addEventListener("change", refreshForm);
+      });
+
+      submitBtn.addEventListener("click", function () {
+        var form = currentForm();
+        if (registrationIssues(form).length) return;
+        var payload = {
+          artifact_id: row.id,
+          result: form.result,
+          executed_at: form.executed_at.trim(),
+          evidence: { note: form.evidence_note.trim(), ref: form.evidence_ref.trim() },
+          failure_reason: form.failure_reason.trim(),
+          missing_evidence: form.missing_evidence.trim() ? [form.missing_evidence.trim()] : [],
+        };
+        MC.withBusy(submitBtn, function () {
+          return MC.configApi.registerDelivery(pid, payload).then(
+            function (res) {
+              MC.toast.success(
+                "已登记：" + resultLabel(res.item.result),
+                "第 " + res.item.attempt + " 次尝试，旧记录照旧可读"
+              );
+              refreshSummary();
+              return res;
+            },
+            function (err) {
+              MC.toast.error("登记失败", (MC.configApi.failure(err) || {}).message || "");
+            }
+          );
+        });
+      });
+
+      util.replace(
+        formHost,
+        h("div.row", { style: "gap:8px;flex-wrap:wrap;margin:8px 0" }, resultSelect, executedInput),
+        h("div.row", { style: "gap:8px;flex-wrap:wrap;margin-bottom:8px" }, evNoteInput, evRefInput),
+        h("div.row", { style: "gap:8px;flex-wrap:wrap;margin-bottom:8px" }, reasonInput, missingInput),
+        issuesHost,
+        h("div.row", { style: "gap:8px;align-items:center" }, submitBtn, h("span.small.muted", "缺必填项时按钮不可用，原因列在上面"))
+      );
+      refreshForm();
+    }
+
+    /* -- 回读核验（M7-10）：每次核验落一份报告，旧结论照旧可读 -- */
+    function drawVerifySection(row, container) {
+      var listHost = h("div");
+      var runBtn = h("button.btn.btn-sm", { type: "button" }, icon("refresh"), "跑一次回读核验");
+      var canRun = !(app && app.can) || app.can("config_artifact_generate");
+      runBtn.disabled = !canRun;
+      runBtn.title = canRun ? "用该机型最新一次观测逐参数比对" : "当前身份没有核验权限";
+
+      function drawReports(items) {
+        if (!items.length) {
+          util.replace(listHost, h("p.small.muted", "还没有核验报告。核验比对新采集的观测与这份产物的基线值，逐参数给结论。"));
+          return;
+        }
+        util.replace(
+          listHost,
+          items.map(function (report) {
+            var rows = (report.rows || []).map(verifyRowModel);
+            return h(
+              "div.card",
+              { style: "margin:8px 0;padding:10px 12px" },
+              h(
+                "div.row",
+                { style: "gap:8px;align-items:center;flex-wrap:wrap" },
+                h("span.badge." + conclusionTone(report.conclusion), conclusionLabel(report.conclusion)),
+                h("span.small", util.formatTime(report.created_at)),
+                h("span.small.muted", report.created_by ? "由 " + report.created_by : "")
+              ),
+              h("p.small", { style: "margin:6px 0" }, verifySummary(report)),
+              h("p.small.muted", { style: "margin:0 0 6px" }, report.claim || ""),
+              rows.length
+                ? h(
+                    "details",
+                    h("summary.small", "逐参数结论（" + rows.length + " 项）"),
+                    h(
+                      "table.table",
+                      { style: "margin-top:6px" },
+                      h("thead", h("tr", h("th", "参数"), h("th", "结论"), h("th", "说明"))),
+                      h(
+                        "tbody",
+                        rows.map(function (r) {
+                          return h("tr", h("td", r.name), h("td", r.statusLabel), h("td", r.reason || "—"));
+                        })
+                      )
+                    )
+                  )
+                : null
+            );
+          })
+        );
+      }
+
+      function refresh() {
+        MC.configApi.verifications(pid, row.id).then(
+          function (body) { drawReports(body.items || []); },
+          function () { util.replace(listHost, h("p.small.muted", "核验报告读取失败。")); }
+        );
+      }
+
+      runBtn.addEventListener("click", function () {
+        MC.withBusy(runBtn, function () {
+          return MC.configApi.runVerification(pid, row.id, {}).then(
+            function (res) {
+              var item = res.item || {};
+              MC.toast.success("核验已落档：" + conclusionLabel(item.conclusion), item.claim || "");
+              refresh();
+              return res;
+            },
+            function (err) {
+              MC.toast.error("核验失败", (MC.configApi.failure(err) || {}).message || "");
+            }
+          );
+        });
+      });
+
+      util.replace(
+        container,
+        h("h3", { style: "margin:16px 0 6px" }, "回读核验"),
+        h(
+          "p.small.muted",
+          "观测不到的参数不算 0、未登记成参数的节点不进通过判定、采集早于导入不算数——" +
+            "满足不了这些，结论只会是「证据不完整」，不会是「核验通过」。"
+        ),
+        h("div.row", { style: "gap:8px;margin-bottom:6px" }, runBtn),
+        listHost
+      );
+      refresh();
+    }
+
     function showDetail(item) {
       var row = rowModel(item);
+      var deliveryHost = h("div");
+      var verifyHost = h("div");
       MC.configApi.artifact(pid, row.id).then(
         function (body) {
           var edits = body.edits || [];
@@ -305,10 +648,14 @@
                     )
                   : h("p.small", "本次生成没有改动任何位置，产物是模板的字节拷贝。"),
                 checks.length ? h("p.small.muted", "自检项：" + checks.join("、")) : null,
-                warnings.length ? h("div.banner.banner-warning", { style: "margin-top:10px" }, icon("alert"), h("div.banner-body", h("ul", { style: "margin:0;padding-left:18px" }, warnings))) : null
+                warnings.length ? h("div.banner.banner-warning", { style: "margin-top:10px" }, icon("alert"), h("div.banner-body", h("ul", { style: "margin:0;padding-left:18px" }, warnings))) : null,
+                deliveryHost,
+                verifyHost
               )
             )
           );
+          drawDeliverySection(row, deliveryHost);
+          drawVerifySection(row, verifyHost);
         },
         function (err) {
           util.replace(detailHost, h("p.small.muted", "详情读取失败：" + ((MC.configApi.failure(err) || {}).message || "")));

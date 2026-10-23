@@ -109,6 +109,9 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v1/config/baselines/{bid}/restore"): None,
     ("POST", "/api/v1/config/baselines/{bid}/migrate"): None,
     ("POST", "/api/v1/config/baselines/{bid}/reissue"): None,
+    # 交付登记与核验报告都是新增对象，不改已有对象
+    ("POST", "/api/v1/p/{pid}/config/deliveries"): None,
+    ("POST", "/api/v1/p/{pid}/config/artifacts/{aid}/verifications"): None,
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

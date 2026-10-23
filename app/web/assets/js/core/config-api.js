@@ -131,6 +131,20 @@
     reissuePlan: function (bid) {
       return unwrap(api.get("/config/baselines/" + api.seg(bid) + "/reissue"));
     },
+    /* 交付登记与回读核验（M7-09/M7-10）：登记与核验都是"人做的动作"，
+     * 下载不触发任何写路径。 */
+    deliveries: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/deliveries"), query));
+    },
+    deliverySummary: function (pid, query) {
+      return unwrap(api.get(api.p(pid, "/config/deliveries/summary"), query));
+    },
+    verifications: function (pid, aid) {
+      return unwrap(api.get(api.p(pid, "/config/artifacts/" + api.seg(aid) + "/verifications")));
+    },
+    verification: function (pid, vid) {
+      return unwrap(api.get(api.p(pid, "/config/verifications/" + api.seg(vid))));
+    },
     baselineDetail: function (bid) {
       return unwrap(api.get("/config/baselines/" + api.seg(bid)));
     },
@@ -249,6 +263,20 @@
       return unwrap(
         api.post("/config/baselines/" + api.seg(bid) + "/reissue", payload, null,
           Object.assign({ "Idempotency-Key": actionKey("reissue", bid) }, headers || {}))
+      );
+    },
+    /* 登记一次导入结果（新增对象，attempt 递增）：双击/重试不能变成"登记两次"。 */
+    registerDelivery: function (pid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/deliveries"), payload, null,
+          Object.assign({ "Idempotency-Key": actionKey("delivery", payload && payload.artifact_id) }, headers || {}))
+      );
+    },
+    /* 跑一次回读核验并落档：同一产物允许多次核验，但同一次点击的重试不该落两份。 */
+    runVerification: function (pid, aid, payload, headers) {
+      return unwrap(
+        api.post(api.p(pid, "/config/artifacts/" + api.seg(aid) + "/verifications"), payload || {}, null,
+          Object.assign({ "Idempotency-Key": actionKey("verify", aid) }, headers || {}))
       );
     },
 

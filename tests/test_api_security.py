@@ -169,6 +169,9 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/config/baselines/{bid}/restore"): "config_change_submit",
     ("POST", "/api/v1/config/baselines/{bid}/migrate"): "config_change_submit",
     ("POST", "/api/v1/config/baselines/{bid}/reissue"): "config_change_submit",
+    # M7-09/M7-10：交付登记与回读核验属于"交付这个动作"，与生成产物同一个键
+    ("POST", "/api/v1/p/{pid}/config/deliveries"): "config_artifact_generate",
+    ("POST", "/api/v1/p/{pid}/config/artifacts/{aid}/verifications"): "config_artifact_generate",
 }
 
 ROUTE_VALUES = {

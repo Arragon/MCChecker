@@ -59,6 +59,9 @@ KIND_PREFIX = {
     "change_set": "cs",
     "artifact": "ar",
     "delivery": "dl",
+    # 回读核验报告（M7-10）：一次核验一个对象，旧的结论照旧可读，
+    # 所以是"追加"而不是"覆盖上一次的结论"。
+    "verification": "vf",
 }
 
 #: 承接不可变 blob 引用的字段名（一致性检查用）。

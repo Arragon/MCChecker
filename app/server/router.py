@@ -105,6 +105,7 @@ def build_router(settings: Settings) -> Router:
         api_config,
         api_config_approval,
         api_config_artifacts,
+        api_config_delivery,
         api_config_promote,
         api_config_restore,
         api_config_upgrade,
@@ -189,4 +190,6 @@ def build_router(settings: Settings) -> Router:
     api_config_promote.register(router, settings)
     # 回滚 / 跨变体迁移 / 出口补发（M7-06）：一律新增对象，不改写历史。
     api_config_restore.register(router, settings)
+    # 交付记录与回读核验（M7-09/M7-10）：登记是人工的，核验结果逐次留档。
+    api_config_delivery.register(router, settings)
     return router
