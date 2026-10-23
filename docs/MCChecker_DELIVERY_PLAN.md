@@ -17,7 +17,7 @@
 
 **Linear 板 104 张 / 88 Done / 3 In Progress / 11 Backlog / 2 Canceled**：M0 9、M1 7、M2 12、M3 17 全 Done；**M4 8/9**（M4-08 In Progress）；**M5 11/11 Done**；**M6 13/14**（M6-14 压真实系统导入）；**M7 6 Done + 2 Canceled + 2 In Progress + 2 Backlog**（M7-09/10 In Progress，M7-11/12 Backlog）；**M8 0/7**（仅 M8-02a 最小备份/恢复子集落地）；INH-1932 Backlog。
 **M5 全部完成**；**M6 单版本闭环除 M6-14 的真实导入外全部落地**；**M7-01～06 Done；M7-07/08 已 Canceled 并按「功能关闭」交付；M7-09/10 已提交 `d2be668`，待评审/合并**；M8 的迁移、备份恢复、浏览器/安全/性能/离线验收尚未开始。
-**仓库实况**：`main@3a60746`；M5–M8 分支 `origin/mc-v2/m5-m8@d2be668`，比 main 多 21 个提交。**验证基线**：全量后端 **2513 passed**（Python 3.9.11）、H3 守卫「执法中：6 文件/8 目录」、前端 HTTP **`ALL PASSED (93)`**、`check_py39.sh` 通过。
+**仓库实况**：`main@3a60746`；M5–M8 集成分支 `origin/mc-v2/m5-m8`（独立于 main，tip 以远端为准）。**验证基线**：全量后端 **2513 passed**（Python 3.9.11）、H3 守卫「执法中：6 文件/8 目录」、前端 HTTP **`ALL PASSED (93)`**、`check_py39.sh` 通过。
 **下一件事**：提交 M7-09/10 → 评审/合并 → M7-11/12 → M8-01/02b → M8-03～07。阻塞项见 `docs/MCChecker_LEFTOVERS.md`：L1 M4-08、L2 INH-1932、L4 M6-14、L5 M7-10、L6 M8-02。
 
 ## 0.1 历史快照（2026-10-17，保留原文）

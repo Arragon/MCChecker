@@ -17,7 +17,7 @@
 ## 0. 一句话现状（2026-10-22 晚更新）
 
 - **Linear 板面**：104 张 / **88 Done / 3 In Progress / 11 Backlog / 2 Canceled**。按里程碑：M5 **11/11 Done**；M6 **13/14**（M6-14 Backlog）；M7 **6 Done + 2 Canceled + 2 In Progress + 2 Backlog**（M7-09/10 In Progress，M7-11/12 Backlog）；M8 **0/7**；M4 8/9（M4-08 In Progress）；INH-1932 Backlog。
-- **代码基线**：`main@3a60746`；M5–M8 分支 `origin/mc-v2/m5-m8@d2be668`（比 main 多 21 个提交）。
+- **代码基线**：`main@3a60746`；M5–M8 集成分支 `origin/mc-v2/m5-m8`（独立于 main，tip 以远端为准）。
 - **已完成代码**：M5-01～11；M6-01～14（M6-14 的真实导入仍缺 D6）；M7-01～06；M7-07/08 按 Canceled 交付「功能关闭」；M8-02a 最小备份/恢复子集。M7-09/10 的四态交付、回读核验、7 条路由与文件页分段已提交 `d2be668`，待评审/合并。
 - **测试基线**（2026-10-22）：全量 **2513 passed**（Python 3.9.11）、H3 守卫「执法中：6 文件/8 目录」、前端 HTTP **`ALL PASSED (93)`**、`check_py39.sh` 通过。
 - **仍未闭合**：M6-14 的真实系统 XML 导入（D6）、M7-10 的真实设备端到端、M4-08 的人工验收、INH-1932 的搜索预算、M8-01/02/03～07。详见 `docs/MCChecker_LEFTOVERS.md`。
