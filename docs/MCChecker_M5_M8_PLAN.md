@@ -14,12 +14,14 @@
 
 ---
 
-## 0. 一句话现状（2026-10-22 实测）
+## 0. 一句话现状（2026-10-22 晚更新）
 
-- **代码基线**：`main@3a60746`（本文实测 HEAD）。44 张卡**全部 Backlog**，M5 尚未开工。
-- **测试基线**：`.venv39/bin/python -m pytest -q` → **1885 passed, 3 failed**（152.58 s）。3 条失败全部来自 `tests/test_release.py`，根因单一：`app/web/assets/js/views/tools.js:117` 把输入框占位符写成 `http://…`，被 `scripts/make_release.py` 的离线外链扫描判为"未放行的外部主机引用"。
-- **M4 收口状态**：M4-01～07、09 Done；**M4-08（INH-1910）仍 In Progress**，缺口是真实浏览器逐 UC 证据、脱敏旧数据副本、物理断网三类人工验收（`docs/MCChecker_LEFTOVERS.md` L1）。
-- **结论**：M5 的**代码工作可以立即开始**（卡面明确允许隔离样本与代码实现），但**受管配置的生产写入不得开工**，直到 M8-02 的最小备份/恢复子集落地并通过演练。
+- **Linear 板面**：104 张 / **88 Done / 1 In Progress / 13 Backlog / 2 Canceled**。按里程碑：M5 **11/11 Done**；M6 **13/14**（M6-14 Backlog）；M7 **6 Done + 2 Canceled + 4 Backlog**；M8 **0/7**；M4 8/9（M4-08 In Progress）；INH-1932 Backlog。
+- **代码基线**：`main@3a60746`；M5–M8 分支 `origin/mc-v2/m5-m8@d2be668`（比 main 多 21 个提交）。
+- **已完成代码**：M5-01～11；M6-01～14（M6-14 的真实导入仍缺 D6）；M7-01～06；M7-07/08 按 Canceled 交付「功能关闭」；M8-02a 最小备份/恢复子集。M7-09/10 的四态交付、回读核验、7 条路由与文件页分段已提交 `d2be668`，待评审/合并。
+- **测试基线**（2026-10-22）：全量 **2513 passed**（Python 3.9.11）、H3 守卫「执法中：6 文件/8 目录」、前端 HTTP **`ALL PASSED (93)`**、`check_py39.sh` 通过。
+- **仍未闭合**：M6-14 的真实系统 XML 导入（D6）、M7-10 的真实设备端到端、M4-08 的人工验收、INH-1932 的搜索预算、M8-01/02/03～07。详见 `docs/MCChecker_LEFTOVERS.md`。
+- **结论**：M5/M6 的代码工作已经完成；M7 只剩 M7-09/10 的提交评审与 M7-11/12；M8 的迁移、恢复演练、真实浏览器/安全/性能/离线验收尚未开始，正式现网受管写入仍以 M8-02 为硬前置。
 
 ---
 
@@ -560,8 +562,9 @@ cd /Users/wangdongxin/projects/mcchecker
 # 3) 3.9 语法守护（H1）
 PYTHON=./.venv39/bin/python scripts/check_py39.sh
 
-# 4) 前端（涉及 web/ 的卡）
-open app/web/tests/index.html          # 期望 ALL PASSED (n)，n 只增不减
+# 4) 前端（涉及 web/ 的卡）：按 DELIVERY_PLAN §3 的 HTTP 形态
+#    从 /tmp 起临时静态服务 + headless Chrome dump-dom，只认 ALL PASSED (n)
+#    file:// 形态已作废（外部脚本的 Promise 拒绝在该协议下不派发）
 
 # 5) 发布门禁（涉及 web/、scripts/、根目录的卡）
 .venv39/bin/python -m pytest -q tests/test_release.py
