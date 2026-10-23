@@ -17,10 +17,11 @@
 
 ## 验证证据（本地，2026-10-23）
 
-- 全量后端：`2544 passed`（M7-12 收口时；M8 追加测试后以最终全量输出为准），Python 3.9.11。
-- 前端：HTTP 形态无头 Chrome，`ALL PASSED (96)`（M7-11 后；M8 文档不改变用例数）。
+- 全量后端：最终树（`493b3b4`）连续 **3 轮 2556 passed**（Python 3.9.11）；第三轮在主工作树、真实 `data/` 上执行，H3 守卫播报「执法中：6 文件/8 目录」。
+- 前端：HTTP 形态无头 Chrome，连续 3 次 `ALL PASSED (96)`（中间一次 dump 早于报告，已按判据重跑，不记为失败）。
 - `check_py39.sh`：通过（已包含 `scripts/`）。
-- 发布测试：`tests/test_release.py` 通过；真实仓库构建已包含备份/迁移脚本，成员集合与假树同步。
+- 发布测试：`tests/test_release.py` 169 passed；真实仓库构建已包含备份/迁移脚本，成员集合与假树同步；`python -S` 导入路由通过。
+- 恢复入口：`run.py --restore-backup` 的 dry-run 与 `--apply-restore` 在临时数据根实测通过（含 `safety_copy`）。
 - 备份/迁移：合成 v1/v2/mixed 树的 inspect 只读、先备份初始化、幂等迁移、pending 标记、全域备份校验/恢复/重复恢复幂等/注入失败回滚均有 pytest 证据。
 - 安全：新写路由登记四角色/CSRF；线程并发批准只产一份修订；state 替换失败不留下“审计有、状态无”。
 
