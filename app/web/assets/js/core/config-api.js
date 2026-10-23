@@ -82,6 +82,12 @@
     releases: function () { return unwrap(api.get("/config/releases")); },
     families: function () { return unwrap(api.get("/config/families")); },
     audit: function (pid, query) { return unwrap(api.get(api.p(pid, "/config/audit"), query)); },
+    auditGlobal: function (query) { return unwrap(api.get("/config/audit", query)); },
+    history: function (objectId, revision) {
+      var path = "/config/history/" + api.seg(objectId);
+      if (revision) path += "/" + api.seg(revision);
+      return unwrap(api.get(path));
+    },
     // 文件内现场对账（M6-10）：现场原值 / 批准基线 / 拟值三栏由服务端算好。
     reconcile: function (pid, query) {
       return unwrap(api.get(api.p(pid, "/config/reconcile"), query));

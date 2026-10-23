@@ -36,7 +36,9 @@
             ? "跨版本升级：旧共同基准 / 旧本地值 / 新上游 三方合并，落地产出基线草稿。"
             : S.seg === "lifecycle"
               ? "经验上提 / 历史回滚 / 跨变体迁移 / 出口补发：先看影响，再点落地；落地一律新增对象。"
-              : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
+              : S.seg === "audit"
+                ? "审计与谱系：按对象、参数、版本、机型、操作人与理由检索；退役对象默认仍可查。"
+                : "逐节点审阅修改建议。采纳的建议将生成带时间戳的新配置文件，原文件保持不变。")),
         S.seg === "remarks" && S.data ? h("span.small.muted", "已决定 " + decided + " / " + total) : null,
         h("button.btn", { type: "button", onclick: function () { load(); } }, icon("refresh"), "刷新"),
         segments()
@@ -68,12 +70,13 @@
         tab("remarks", "修改建议"),
         tab("changes", "配置变更"),
         tab("upgrade", "版本升级"),
-        tab("lifecycle", "经验与历史")
+        tab("lifecycle", "经验与历史"),
+        tab("audit", "审计与谱系")
       );
     }
 
     function load(silent) {
-      if (S.seg === "changes" || S.seg === "upgrade" || S.seg === "lifecycle") {
+      if (S.seg === "changes" || S.seg === "upgrade" || S.seg === "lifecycle" || S.seg === "audit") {
         render();
         return;
       }
@@ -136,6 +139,17 @@
           desc: "请确认 lifecycle.js 已在 index.html 中引入。",
         }))));
         if (MC.lifecycleUi) MC.lifecycleUi.render(app, lifecycleHost, { pid: app.pid });
+        return;
+      }
+      if (S.seg === "audit") {
+        var auditHost = h("div");
+        util.replace(host, h("div.view-body", h("div.container", MC.auditUi ? auditHost : MC.stateBlock({
+          kind: "empty",
+          icon: "settings",
+          title: "审计模块未加载",
+          desc: "请确认 audit.js 已在 index.html 中引入。",
+        }))));
+        if (MC.auditUi) MC.auditUi.render(app, auditHost, { pid: app.pid });
         return;
       }
       var files = S.data.files;

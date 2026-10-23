@@ -105,6 +105,7 @@ def build_router(settings: Settings) -> Router:
         api_config,
         api_config_approval,
         api_config_artifacts,
+        api_config_audit,
         api_config_delivery,
         api_config_promote,
         api_config_restore,
@@ -192,4 +193,6 @@ def build_router(settings: Settings) -> Router:
     api_config_restore.register(router, settings)
     # 交付记录与回读核验（M7-09/M7-10）：登记是人工的，核验结果逐次留档。
     api_config_delivery.register(router, settings)
+    # 审计检索与来源谱系（M7-11）：只读，退役对象默认仍可查。
+    api_config_audit.register(router, settings)
     return router
