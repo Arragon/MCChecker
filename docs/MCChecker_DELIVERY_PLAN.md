@@ -15,7 +15,7 @@
 
 ## 0. 一句话现状（2026-10-22）
 
-**Linear 板 104 张 / 88 Done / 3 In Progress / 11 Backlog / 2 Canceled**：M0 9、M1 7、M2 12、M3 17 全 Done；**M4 8/9**（M4-08 In Progress）；**M5 11/11 Done**；**M6 13/14**（M6-14 压真实系统导入）；**M7 6 Done + 2 Canceled + 2 In Progress + 2 Backlog**（M7-09/10 In Progress，M7-11/12 Backlog）；**M8 0/7**（仅 M8-02a 最小备份/恢复子集落地）；INH-1932 Backlog。
+**Linear 板 104 张 / 91 Done / 9 In Progress / 2 Backlog / 2 Canceled**：M0 9、M1 7、M2 12、M3 17 全 Done；**M4 8/9**（M4-08 In Progress）；**M5 11/11 Done**；**M6 13/14**（M6-14 压真实系统导入）；**M7 9 Done + 2 Canceled + 1 In Progress**（M7-10 等真实设备；M7-07/08 Canceled）；**M8 0 Done / 7 In Progress**（代码已落地，真实浏览器/设备/断网/演练证据待补）；INH-1932 Backlog。
 **M5 全部完成**；**M6 单版本闭环除 M6-14 的真实导入外全部落地**；**M7-01～12 代码已落地**（M7-07/08 按 Canceled 交付「功能关闭」；M7-09/10 评审修复 `6eb4c4d`；M7-11 `1f618e0`；M7-12 `2dfebc0`）；**M8-01/02/06 代码已落地，M8-03/04/05 的本地自动化已补，真实环境验收仍未完成**。
 **仓库实况**：`main@3a60746`；M5–M8 集成分支 `origin/mc-v2/m5-m8`（独立于 main，tip 以远端为准）。**验证基线**：M7-12 收口时全量 **2544 passed**（Python 3.9.11），M8 追加测试后以最终输出为准；前端 HTTP **`ALL PASSED (96)`**；`check_py39.sh` 通过；H3 需在带真实 `data/` 的主工作树重跑。
 **下一件事**：M8-03/04/05 的真实浏览器/设备/离线/性能验收与 M8-07 最终闸门；阻塞项见 `docs/MCChecker_LEFTOVERS.md`：L1 M4-08、L2 INH-1932、L4 M6-14、L5 M7-10、L6 M8-02。

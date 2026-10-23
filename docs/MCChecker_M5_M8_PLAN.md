@@ -16,7 +16,7 @@
 
 ## 0. 一句话现状（2026-10-22 晚更新）
 
-- **Linear 板面**：104 张 / **88 Done / 3 In Progress / 11 Backlog / 2 Canceled**。按里程碑：M5 **11/11 Done**；M6 **13/14**（M6-14 Backlog）；M7 **6 Done + 2 Canceled + 2 In Progress + 2 Backlog**（M7-09/10 In Progress，M7-11/12 Backlog）；M8 **0/7**；M4 8/9（M4-08 In Progress）；INH-1932 Backlog。
+- **Linear 板面**：104 张 / **91 Done / 9 In Progress / 2 Backlog / 2 Canceled**。按里程碑：M5 **11/11 Done**；M6 **13/14**（M6-14 Backlog）；M7 **9 Done + 2 Canceled + 1 In Progress**（M7-10 等真实设备；M7-07/08 Canceled）；M8 **0 Done / 7 In Progress**（代码已落地，真实证据待补）；M4 8/9（M4-08 In Progress）；INH-1932 Backlog。
 - **代码基线**：`main@3a60746`；M5–M8 集成分支 `origin/mc-v2/m5-m8`（独立于 main，tip 以远端为准）。
 - **已完成代码**：M5-01～11；M6-01～14（M6-14 的真实导入仍缺 D6）；M7-01～06；M7-07/08 按 Canceled 交付「功能关闭」；M7-09/10 四态交付与回读核验（`d2be668` + 评审修复 `6eb4c4d`）；M7-11 审计谱系（`1f618e0`）；M7-12 生命周期收口（`2dfebc0`）；M8-01 迁移 CLI、M8-02 全域备份恢复、M8-06 发布白名单/零依赖门禁已落代码与测试；M8-04 的并发/故障注入用例已补。
 - **测试基线**（2026-10-23）：M7-12 收口时全量 **2544 passed**（Python 3.9.11），M8 追加测试后以最终输出为准；H3 守卫在集成分支工作树未执法（无 `data/`），需在带真实数据的主工作树重跑；前端 HTTP **`ALL PASSED (96)`**、`check_py39.sh` 通过。
