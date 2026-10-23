@@ -18,13 +18,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ..core import config_values
 from ..core.config_repository import ConfigRepository, now_iso
 from ..core.errors import INVALID_INPUT, NOT_FOUND, AppError
 from . import config_artifacts, config_baselines as baselines, config_catalog
-from . import config_ingest
+from . import config_delivery, config_ingest
 
 CONCLUSION_VERIFIED = "verified"
 CONCLUSION_MISMATCH = "mismatch"
@@ -107,6 +108,7 @@ def _latest_observation(repo: ConfigRepository, profile_id: str, family_id: str)
         for item in config_ingest.list_observations(repo, profile_id=profile_id)
         if str(item.get("family_id") or "") == family_id
         and str(item.get("status") or "") == config_ingest.STATUS_PARSED
+        and not item.get("stale_capture")
     ]
     return candidates[-1] if candidates else None
 
@@ -119,9 +121,56 @@ def _compare(left: Any, right: Any) -> Optional[bool]:
     except AppError:
         return None
     try:
-        return config_values.compare(left_value, right_value) == "equal"
+        verdict = config_values.compare(left_value, right_value)
     except AppError:
         return None
+    if verdict == "equal":
+        return True
+    if verdict == "different":
+        return False
+    # `incomparable` / `missing` 都不是"不一致"，单列 unobservable 才不骗人
+    return None
+
+
+def _parse_time(value: Any, field: str) -> Optional[datetime]:
+    """ISO-8601 → aware UTC。带 `+08:00` 的时间不能按字符串直接比大小。"""
+    text = _optional_text(value)
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise AppError(INVALID_INPUT, "时间必须是 ISO-8601", field=field)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _import_threshold(
+    repo: ConfigRepository,
+    artifact: Dict[str, Any],
+    pid: str,
+    imported_after: Any,
+) -> tuple:
+    """核验的新鲜度基准：显式值 > 最近一次“已声明成功”的实际执行时间 > 产物生成时间。"""
+    explicit = _parse_time(imported_after, "imported_after") if imported_after else None
+    if explicit is not None:
+        return explicit, "request"
+    declared = config_delivery.list_deliveries(
+        repo,
+        artifact_id=str(artifact.get("id") or ""),
+        profile_id=pid,
+        result=config_delivery.RESULT_DECLARED_OK,
+    )
+    candidates = []
+    for item in declared:
+        stamp = _parse_time(item.get("executed_at"), "executed_at")
+        if stamp is not None:
+            candidates.append((stamp, item))
+    if candidates:
+        stamp, item = max(candidates, key=lambda pair: pair[0])
+        return stamp, "delivery:%s" % item.get("id")
+    return _parse_time(artifact.get("created_at"), "created_at"), "artifact.created_at"
 
 
 def _rows(
@@ -198,12 +247,19 @@ def _rows(
     return rows
 
 
-def _conclusion(rows: List[Dict[str, Any]], *, version_ok: bool, fresh: bool) -> str:
+def _conclusion(
+    rows: List[Dict[str, Any]],
+    *,
+    version_ok: bool,
+    fresh: bool,
+    stale: bool,
+    scope_ok: bool,
+) -> str:
     if not version_ok:
         return CONCLUSION_VERSION_MISMATCH
     if any(row["status"] == ROW_MISMATCHED for row in rows):
         return CONCLUSION_MISMATCH
-    if not fresh:
+    if not scope_ok or stale or not fresh:
         return CONCLUSION_INCOMPLETE
     if any(row["status"] in (ROW_MISSING, ROW_UNOBSERVABLE) for row in rows):
         return CONCLUSION_INCOMPLETE
@@ -272,12 +328,24 @@ def verify(
     base_release = _optional_text(baseline.get("release_id"))
     version_ok = bool(obs_release) and obs_release == base_release
 
+    obs_def = _optional_text(observation.get("definition_set_id"))
+    art_def = _optional_text(artifact.get("definition_set_id"))
+    definition_ok = not (obs_def and art_def and obs_def != art_def)
+    obs_variant = _optional_text(observation.get("variant_id"))
+    art_variant = _optional_text(artifact.get("variant_id"))
+    variant_ok = not (obs_variant and art_variant and obs_variant != art_variant)
+    scope_ok = definition_ok and variant_ok
+
     capture = _optional_text(observation.get("captured_at"))
-    threshold = _optional_text(imported_after) or _optional_text(artifact.get("created_at"))
+    threshold_dt, threshold_source = _import_threshold(repo, artifact, pid, imported_after)
+    capture_dt = _parse_time(capture, "captured_at")
     # 采集早于（或等于）导入时刻：这份观测看的是"导入之前"的机器状态
     fresh = True
-    if threshold and capture and capture <= threshold:
+    if capture_dt is None:
         fresh = False
+    elif threshold_dt is not None and capture_dt <= threshold_dt:
+        fresh = False
+    stale = bool(observation.get("stale_capture"))
 
     expected = dict(baseline.get("values") or {})
     rows = _rows(repo, expected, observation)
@@ -292,12 +360,26 @@ def verify(
         for entry in (observation.get("mapping") or {}).get("entries") or []
         if not entry.get("parameter_id")
     ]
-    scope_complete = not unregistered
-    conclusion = _conclusion(rows, version_ok=version_ok, fresh=fresh)
+    obs_format = _optional_text(observation.get("format"))
+    obs_role = _optional_text(observation.get("role"))
+    cross_format = (
+        _optional_text(artifact.get("format")) == "xml"
+        and (obs_format == "json" or obs_role == config_catalog.ROLE_FIELD_JSON)
+    )
+    scope_complete = not unregistered and not cross_format
+    conclusion = _conclusion(
+        rows, version_ok=version_ok, fresh=fresh, stale=stale, scope_ok=scope_ok
+    )
     reasons: List[str] = []
     if not version_ok:
         reasons.append("version_mismatch")
-    if not fresh:
+    if not scope_ok:
+        reasons.append("scope_mismatch")
+    if stale:
+        reasons.append("stale_source")
+    if capture_dt is None:
+        reasons.append("missing_capture_time")
+    elif not fresh:
         reasons.append("capture_before_import")
     if counts[ROW_MISSING]:
         reasons.append("missing")
@@ -307,10 +389,15 @@ def verify(
         reasons.append("mismatched")
 
     warnings: List[str] = []
-    if not scope_complete:
+    if unregistered:
         warnings.append(
             "观测里有 %d 个节点没有登记成参数，未纳入本次核验（结论只覆盖已登记参数）"
             % len(unregistered)
+        )
+    if cross_format:
+        warnings.append(
+            "产物是 XML 模板，但观测是 JSON：XML 独有节点没有对应观测，"
+            "本次不能宣称全量一致"
         )
     if conclusion == CONCLUSION_VERIFIED and not scope_complete:
         claim = "只能断言：已登记参数与观测量一致；其余节点未纳入核验"
@@ -355,16 +442,27 @@ def verify(
                 "profile_id": pid,
                 "release_id": base_release,
                 "observation_release_id": obs_release or None,
-                "definition_set_id": _optional_text(artifact.get("definition_set_id")) or None,
-                "variant_id": _optional_text(artifact.get("variant_id")) or None,
+                "definition_set_id": art_def or None,
+                "observation_definition_set_id": obs_def or None,
+                "variant_id": art_variant or None,
+                "observation_variant_id": obs_variant or None,
                 "parameters_in_baseline": len(expected),
                 "parameters_observed": sum(
                     1 for row in rows if row["status"] != ROW_MISSING
                 ),
             },
             "capture_time": capture,
-            "imported_after": threshold or None,
+            "imported_after": (
+                threshold_dt.isoformat().replace("+00:00", "Z")
+                if threshold_dt is not None
+                else None
+            ),
+            "imported_after_source": threshold_source,
             "fresh": fresh,
+            "stale_capture": stale,
+            "scope_cross_format": cross_format,
+            "definition_set_ok": definition_ok,
+            "variant_ok": variant_ok,
             "source_fingerprint": _optional_text(observation.get("blob_sha256")),
             "note": _optional_text(note),
             "created_at": now_iso(),

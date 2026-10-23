@@ -80,6 +80,20 @@ def _same_profile(owner: Any, pid: str, field: str, value: Any) -> None:
         raise AppError(NOT_FOUND, "对象不存在", **{field: value})
 
 
+def _body_profile(payload: Dict[str, Any], pid: str) -> str:
+    """写入永远以路径里的 pid 为准；body 里的 profile_id 只能与它相同。"""
+    wanted = str(payload.get("profile_id") or "").strip()
+    if wanted and wanted != str(pid):
+        raise AppError(
+            INVALID_INPUT,
+            "profile_id 与路径不一致",
+            field="profile_id",
+            path_profile_id=str(pid),
+            body_profile_id=wanted,
+        )
+    return str(pid)
+
+
 # -- 交付记录 ---------------------------------------------------------------
 
 
@@ -148,12 +162,13 @@ def register_delivery(
     # POST /api/v1/p/{pid}/config/deliveries
     _write(ctx)
     payload: Dict[str, Any] = json_body(body) if body else {}
+    pid = _body_profile(payload, _pid(ctx, params))
     item = config_delivery.register(
         _repo(settings),
         ctx.actor,
         artifact_id=payload.get("artifact_id"),
         result=payload.get("result"),
-        profile_id=payload.get("profile_id") or params.get("pid"),
+        profile_id=pid,
         device_id=payload.get("device_id"),
         executed_at=payload.get("executed_at"),
         executed_by=payload.get("executed_by") or "",
@@ -194,12 +209,13 @@ def run_verification(
     # POST /api/v1/p/{pid}/config/artifacts/{aid}/verifications
     _write(ctx)
     payload: Dict[str, Any] = json_body(body) if body else {}
+    pid = _body_profile(payload, _pid(ctx, params))
     item = config_verify.verify(
         _repo(settings),
         ctx.actor,
         artifact_id=params["aid"],
         observation_id=payload.get("observation_id"),
-        profile_id=payload.get("profile_id") or params.get("pid"),
+        profile_id=pid,
         imported_after=payload.get("imported_after"),
         note=payload.get("note") or "",
         idempotency_key=_idempotency(ctx),

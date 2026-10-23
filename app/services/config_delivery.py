@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core.config_repository import ConfigRepository, now_iso
 from ..core.errors import INVALID_INPUT, NOT_FOUND, AppError
+from ..core.locks import management_lock
 from . import config_artifacts, config_device_layer
 
 RESULT_PENDING = "pending"
@@ -199,6 +200,15 @@ def register(
         raise AppError(
             INVALID_INPUT, "登记成功但没有任何证据", field="evidence", hint=_EVIDENCE_HINT
         )
+    artifact_sha = _optional_text(artifact.get("blob_sha256"))
+    if proof.get("sha256") and artifact_sha and proof["sha256"] != artifact_sha:
+        raise AppError(
+            INVALID_INPUT,
+            "证据哈希与产物哈希不一致",
+            field="evidence.sha256",
+            artifact_sha256=artifact_sha,
+            evidence_sha256=proof["sha256"],
+        )
     reason = _optional_text(failure_reason)
     if chosen == RESULT_FAILED and not reason:
         raise AppError(INVALID_INPUT, "登记失败必须写失败原因", field="failure_reason")
@@ -210,42 +220,46 @@ def register(
             INVALID_INPUT, "登记「证据不足」必须写清缺什么", field="missing_evidence"
         )
 
-    attempt = attempt_of(repo, artifact_id=aid, profile_id=pid, device_id=did)
-    previous = [
-        item
-        for item in list_deliveries(repo, artifact_id=aid, profile_id=pid)
-        if _optional_text((item.get("target") or {}).get("device_id")) == did
-    ]
+    # 序号与"上一次"是同一条链上的派生值：必须在同一把管理锁内读取并提交，
+    # 否则两个并发登记会拿到同一个 attempt。
+    with management_lock:
+        attempt = attempt_of(repo, artifact_id=aid, profile_id=pid, device_id=did)
+        previous = [
+            item
+            for item in list_deliveries(repo, artifact_id=aid, profile_id=pid)
+            if _optional_text((item.get("target") or {}).get("device_id")) == did
+        ]
 
-    tx = repo.transaction(
-        actor,
-        "登记交付结果 %s（第 %d 次，%s）" % (aid, attempt, RESULT_LABELS[chosen]),
-        action="delivery.register",
-        idempotency_key=idempotency_key,
-    )
-    ref = tx.put(
-        "delivery",
-        {
-            "artifact_id": aid,
-            "artifact_sha256": _optional_text(artifact.get("blob_sha256")),
-            "baseline_id": _optional_text(artifact.get("baseline_id")),
-            "baseline_revision": _optional_text(artifact.get("baseline_revision")),
-            "target": {"profile_id": pid, "device_id": did or None},
-            "result": chosen,
-            "result_label": RESULT_LABELS[chosen],
-            "registered_by": _label(actor),
-            "registered_at": now_iso(),
-            "executed_at": stamp,
-            "executed_by": _optional_text(executed_by),
-            "evidence": proof,
-            "note": _optional_text(note),
-            "failure_reason": reason or None,
-            "missing_evidence": list(missing or []),
-            "attempt": attempt,
-            "previous_delivery_id": previous[0]["id"] if previous else None,
-        },
-    )
-    tx.commit()
+        # 重试时 attempt 会变，不能写进事务理由，否则同一幂等键会算出不同请求指纹。
+        tx = repo.transaction(
+            actor,
+            "登记交付结果 %s（%s）" % (aid, RESULT_LABELS[chosen]),
+            action="delivery.register",
+            idempotency_key=idempotency_key,
+        )
+        ref = tx.put(
+            "delivery",
+            {
+                "artifact_id": aid,
+                "artifact_sha256": artifact_sha,
+                "baseline_id": _optional_text(artifact.get("baseline_id")),
+                "baseline_revision": _optional_text(artifact.get("baseline_revision")),
+                "target": {"profile_id": pid, "device_id": did or None},
+                "result": chosen,
+                "result_label": RESULT_LABELS[chosen],
+                "registered_by": _label(actor),
+                "registered_at": now_iso(),
+                "executed_at": stamp,
+                "executed_by": _optional_text(executed_by),
+                "evidence": proof,
+                "note": _optional_text(note),
+                "failure_reason": reason or None,
+                "missing_evidence": list(missing or []),
+                "attempt": attempt,
+                "previous_delivery_id": previous[0]["id"] if previous else None,
+            },
+        )
+        tx.commit()
     return get_delivery(repo, str(ref.id))
 
 

@@ -16,7 +16,13 @@ import pytest
 
 from app.core import config_repository as cr
 from app.core.errors import INVALID_INPUT, NOT_FOUND, AppError
-from app.services import config_artifacts, config_catalog, config_ingest, config_verify
+from app.services import (
+    config_artifacts,
+    config_catalog,
+    config_delivery,
+    config_ingest,
+    config_verify,
+)
 
 from tests.test_config_export import ACTOR, TEMPLATE, _approve, world  # noqa: F401
 
@@ -99,6 +105,114 @@ def test_profile_is_derived_from_the_observation_when_not_given(repo, world, art
         repo, artifact_id=artifact["id"], profile_id="p1"
     )
     assert [item["id"] for item in listed] == [report["id"]]
+
+
+def test_import_time_defaults_to_latest_declared_delivery(repo, world, artifact) -> None:
+    """没有显式 imported_after 时，用最近一次“已声明成功”的实际执行时间。"""
+    observation = _capture(repo, world, _same_as_artifact(repo, artifact))
+    config_delivery.register(
+        repo,
+        ACTOR,
+        artifact_id=artifact["id"],
+        result="declared_ok",
+        profile_id="p1",
+        executed_at="2026-10-22T09:00:00Z",
+        evidence={"ref": "photo://late-import"},
+    )
+    report = config_verify.verify(
+        repo, ACTOR, artifact_id=artifact["id"], observation_id=observation["id"]
+    )
+    assert report["conclusion"] == config_verify.CONCLUSION_INCOMPLETE
+    assert "capture_before_import" in report["reasons"]
+    assert report["imported_after_source"].startswith("delivery:")
+
+
+def test_freshness_compares_absolute_time_not_string_order(repo, world, artifact) -> None:
+    """`+08:00` 的 20:00 是 UTC 12:00，不能因为字符串更大就被当成更晚。"""
+    observation = _capture(
+        repo, world, _same_as_artifact(repo, artifact),
+        captured_at="2026-10-20T20:00:00+08:00",
+    )
+    report = config_verify.verify(
+        repo, ACTOR, artifact_id=artifact["id"], observation_id=observation["id"],
+        imported_after="2026-10-20T18:00:00Z",
+    )
+    assert report["conclusion"] == config_verify.CONCLUSION_INCOMPLETE
+    assert "capture_before_import" in report["reasons"]
+
+
+def test_incomparable_units_are_unobservable_not_mismatched(repo, world) -> None:
+    observation = {
+        "mapping": {
+            "entries": [
+                {
+                    "parameter_id": world["pulse"]["id"],
+                    "status": config_ingest.ENTRY_MAPPED,
+                    "value_ref": {"type": "decimal", "text": "700", "unit": "kg"},
+                }
+            ]
+        }
+    }
+    rows = config_verify._rows(
+        repo,
+        {world["pulse"]["id"]: {"value": {"type": "decimal", "text": "700", "unit": "ms"}}},
+        observation,
+    )
+    assert rows[0]["status"] == config_verify.ROW_UNOBSERVABLE
+
+
+def test_stale_capture_is_never_verified(repo, world, artifact) -> None:
+    """旧任务晚到的观测可以留档，但不能拿来证明当前导入成功。"""
+    _capture(repo, world, _same_as_artifact(repo, artifact))
+    stale_content = _same_as_artifact(repo, artifact).replace(
+        b"</R>", b"<!-- stale probe --></R>", 1
+    )
+    stale = _capture(
+        repo, world, stale_content, captured_at=EARLY
+    )
+    assert stale["stale_capture"] is True
+    report = config_verify.verify(
+        repo, ACTOR, artifact_id=artifact["id"], observation_id=stale["id"],
+        imported_after="2026-10-19T00:00:00Z",
+    )
+    assert report["conclusion"] == config_verify.CONCLUSION_INCOMPLETE
+    assert "stale_source" in report["reasons"]
+
+
+def test_json_observation_does_not_claim_xml_full_coverage(repo, world, artifact) -> None:
+    tx = repo.transaction(ACTOR, "测试用 JSON 观测", action="observation.capture")
+    ref = tx.put(
+        "observation",
+        {
+            "scope": "profile",
+            "profile_id": "p1",
+            "logical_file_id": world["xml_file"]["id"],
+            "family_id": world["family"]["id"],
+            "role": "field_json",
+            "release_ref": {"release_id": world["release"]["id"]},
+            "variant_id": artifact.get("variant_id"),
+            "device_id": None,
+            "blob_sha256": "",
+            "format": "json",
+            "captured_at": LATE,
+            "captured_by": ACTOR["name"],
+            "mapping": {
+                "entries": [],
+                "definition_set_id": artifact.get("definition_set_id"),
+            },
+            "definition_set_id": artifact.get("definition_set_id"),
+            "status": config_ingest.STATUS_PARSED,
+            "stale_capture": False,
+        },
+    )
+    tx.commit()
+    observation = repo.get("observation", str(ref.id))
+    report = config_verify.verify(
+        repo, ACTOR, artifact_id=artifact["id"], observation_id=observation["id"],
+        imported_after=EARLY,
+    )
+    assert report["scope_cross_format"] is True
+    assert any("XML 独有节点" in text for text in report["warnings"])
 
 
 def test_unregistered_nodes_limit_the_claim(repo, world, artifact) -> None:

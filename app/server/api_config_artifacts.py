@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ..config import Settings
 from ..core.errors import INVALID_INPUT, NOT_FOUND, AppError
-from ..services import authz, config_artifacts, config_gate, config_store
+from ..services import authz, config_artifacts, config_delivery, config_gate, config_store
 from ..services.context import RequestContext
 from .api_documents import content_disposition
 from .router import Response, Router, json_body, query_param
@@ -65,6 +65,13 @@ def _same_profile(item: Dict[str, Any], pid: str) -> Dict[str, Any]:
     return item
 
 
+def _with_delivery(repo, item: Dict[str, Any]) -> Dict[str, Any]:
+    """把 M7-09 的登记四态挂到产物上；保留旧 `delivery_status` 供兼容读取。"""
+    enriched = dict(item)
+    enriched["delivery"] = config_delivery.effective_result(repo, item["id"])
+    return enriched
+
+
 def list_artifacts(
     ctx: RequestContext,
     params: Dict[str, str],
@@ -74,11 +81,13 @@ def list_artifacts(
 ) -> Response:
     # GET /api/v1/p/{pid}/config/artifacts?baseline_id=
     _read(ctx)
+    repo = _repo(settings)
     items = config_artifacts.list_artifacts(
-        _repo(settings),
+        repo,
         profile_id=params["pid"],
         baseline_id=_optional(query, "baseline_id"),
     )
+    items = [_with_delivery(repo, item) for item in items]
     return Response(payload={"items": items, "total": len(items)})
 
 
@@ -113,8 +122,11 @@ def get_artifact(
 ) -> Response:
     # GET /api/v1/p/{pid}/config/artifacts/{aid}
     _read(ctx)
-    detail = config_artifacts.detail(_repo(settings), params["aid"])
+    repo = _repo(settings)
+    detail = config_artifacts.detail(repo, params["aid"])
     _same_profile(detail["item"], params["pid"])
+    detail["item"] = _with_delivery(repo, detail["item"])
+    detail["delivery"] = detail["item"].get("delivery")
     return Response(payload=detail)
 
 

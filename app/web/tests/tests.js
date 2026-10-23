@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 93;  // 90 + 交付登记/回读核验 3（M7-09/M7-10）
+  var EXPECTED_CASES = 96;  // 94 + 审计筛选/渲染（M7-11）
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -3176,6 +3176,22 @@
     );
   });
 
+  test("交付状态：M7-09 登记四态优先于旧待验标记", function () {
+    var ui = MC.deliveryUi;
+    var row = ui.rowModel({
+      delivery: { result: "declared_ok", attempts: 2, label: "已声明成功" },
+      delivery_status: "unverified",
+    });
+    eq(row.statusLabel, "已声明成功");
+    eq(row.deliveryAttempts, 2);
+    eq(ui.deliveryNotice([row]).level, "info");
+    var failed = ui.rowModel({ delivery: { result: "failed", attempts: 1 } });
+    eq(failed.statusLabel, "失败");
+    eq(ui.deliveryNotice([failed]).level, "warn");
+    var pending = ui.rowModel({ delivery: { result: "pending", attempts: 0 } });
+    eq(pending.statusLabel, "待导入");
+  });
+
   test("交付摘要：设备层关闭时不许说所有设备完成", function () {
     var ui = MC.deliveryUi;
     ok(ui.deliverySummaryNotice(null).text.indexOf("待导入") >= 0, "没登记就明说是待导入");
@@ -3208,6 +3224,88 @@
     eq(ui.verifyRowModel({ status: "something-new" }).statusLabel, "观测里没有", "未知行的状态按最保守处理");
     eq(ui.conclusionTone("verified"), "badge-success");
     eq(ui.conclusionTone("version_mismatch"), "badge-warning");
+  });
+
+
+  /* ---- 审计与谱系（M7-11）---- */
+
+  test("审计：筛选只保留非空项，标题有回退", function () {
+    var ui = MC.auditUi;
+    eq(ui.buildQuery({ action: " baseline.approve ", category: "", actor: "管理员丁" }).action, "baseline.approve");
+    eq(ui.buildQuery({ action: "x" }).actor, undefined);
+    eq(ui.buildQuery({}).limit, 30);
+    eq(ui.eventTitle({ action: "artifact.generate" }), "artifact.generate");
+    eq(ui.eventTitle({ reason: "初始基线" }), "初始基线");
+    ok(ui.eventMeta({ actor_label: "管理员丁", at: "2026-10-22T10:00:00Z" }).indexOf("管理员丁") >= 0);
+    var rows = ui.revisionRows({ revisions: [{ revision: "r2", created_at: "t", created_by: "甲", state: "approved" }] });
+    eq(rows[0].revision, "r2");
+    eq(ui.provenanceGroups({ provenance: { related: { baseline: [{ kind_label: "基线", id: "bl_1" }] } } })[0].kind, "baseline");
+  });
+
+  test("审计：列表与来源抽屉走真实 API 形状", function () {
+    var host = MC.util.h("div", { style: "position:absolute;left:-9999px;top:0" });
+    document.body.append(host);
+    var origAudit = MC.configApi.audit;
+    var origHistory = MC.configApi.history;
+    var calls = [];
+    MC.configApi.audit = function (pid, query) {
+      calls.push({ pid: pid, query: query });
+      return Promise.resolve({
+        items: [
+          {
+            seq: 3,
+            at: "2026-10-22T10:00:00Z",
+            action: "baseline.approve",
+            reason: "初始基线",
+            actor_label: "管理员丁",
+            objects_detail: [
+              { kind: "baseline", kind_label: "基线", id: "bl_000001", revision: "r2", label: "通用 bl_000001" },
+            ],
+          },
+        ],
+        next_cursor: null,
+      });
+    };
+    MC.configApi.history = function (objectId, revision) {
+      return Promise.resolve({
+        object: { id: objectId, state: "approved" },
+        object_kind: "baseline",
+        object_kind_label: "基线",
+        revisions: [{ revision: "r2", created_at: "t", created_by: "管理员丁", state: "approved" }],
+        provenance: { related: { artifact: [{ id: "ar_1", kind_label: "交付产物", label: "axis.xml" }] } },
+        events: [],
+      });
+    };
+    var app = { pid: "p1" };
+    function tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    function restore() {
+      MC.configApi.audit = origAudit;
+      MC.configApi.history = origHistory;
+      host.remove();
+    }
+    MC.auditUi.render(app, host, { pid: "p1" });
+    return tick()
+      .then(function () {
+        eq(calls[0].pid, "p1");
+        eq(calls[0].query.limit, 30);
+        eq(host.querySelectorAll("tbody tr").length, 1);
+        ok(host.textContent.indexOf("初始基线") >= 0);
+        var target = [].filter.call(host.querySelectorAll("button"), function (b) {
+          return b.textContent.indexOf("基线") >= 0;
+        })[0];
+        ok(target, "对象要能点开谱系");
+        target.dispatchEvent(new Event("click"));
+        return tick();
+      })
+      .then(function () {
+        ok(host.textContent.indexOf("修订链") >= 0);
+        ok(host.textContent.indexOf("axis.xml") >= 0);
+        restore();
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
   });
 
 

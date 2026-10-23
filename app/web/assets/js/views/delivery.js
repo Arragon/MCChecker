@@ -8,8 +8,9 @@
  *    视图不提供"重新生成覆盖旧产物"——改值要走新的变更单，产出新的基线修订。
  * 2. **同输入同产物**：重复点"生成"拿到的是已有产物（服务端返回 200 + reused），
  *    前端如实提示"已复用"，不说"生成成功"来冒充新产物。
- * 3. **不宣称已核验**：真实系统导入的状态恒为 `unverified`（D6 缺口），
- *    页面上必须把"待验"说清楚，别让人以为下载过就等于验过了。
+ * 3. **不宣称已核验**：M6-14 的旧 `delivery_status` 仍以 `unverified` 为基线；
+ *    M7-09 的人工登记四态另行挂在 `delivery` 上，页面优先显示登记结果，
+ *    但「已声明成功」仍不等于「回读核验通过」。
  */
 (function (global) {
   "use strict";
@@ -181,6 +182,9 @@
   function rowModel(item) {
     var source = item || {};
     var size = Number(source.byte_size || 0);
+    var delivery = source.delivery || null;
+    var deliveryResult = delivery && delivery.result ? delivery.result : "";
+    var legacyStatus = source.delivery_status || "unverified";
     return {
       id: source.id,
       filename: source.filename || source.id || "（未命名产物）",
@@ -192,9 +196,12 @@
       sizeText: size ? util.formatBytes(size) : "—",
       sha: String(source.blob_sha256 || ""),
       shaShort: shortSha(source.blob_sha256),
-      status: source.delivery_status || "unverified",
-      statusLabel: statusLabel(source.delivery_status),
-      statusTone: statusTone(source.delivery_status),
+      status: deliveryResult || legacyStatus,
+      statusLabel: deliveryResult ? resultLabel(deliveryResult) : statusLabel(legacyStatus),
+      statusTone: deliveryResult ? resultTone(deliveryResult) : statusTone(legacyStatus),
+      delivery: delivery,
+      deliveryAttempts: delivery ? Number(delivery.attempts || 0) : 0,
+      deliveryLabel: deliveryResult ? resultLabel(deliveryResult) : statusLabel(legacyStatus),
       createdAt: source.created_at || "",
       createdBy: source.created_by || "",
       ok: !(source.validation && source.validation.ok === false),
@@ -235,10 +242,27 @@
       return { level: "info", text: "还没有交付产物，无从谈核验。" };
     }
     var pending = rows.filter(function (row) {
-      return row.status === "unverified";
+      return row.status === "unverified" || row.status === "pending";
     }).length;
+    var failed = rows.filter(function (row) {
+      return row.delivery && row.status === "failed";
+    }).length;
+    if (failed) {
+      return {
+        level: "warn",
+        text: "有 " + failed + " 份产物登记为导入失败：请查看失败原因并重新登记；失败记录不会被覆盖。",
+      };
+    }
     if (!pending) {
-      return { level: "info", text: "全部产物已完成真实系统导入核验。" };
+      var declared = rows.filter(function (row) {
+        return row.status === "declared_ok";
+      }).length;
+      return {
+        level: "info",
+        text: declared
+          ? "全部产物都已声明导入成功；「已声明成功」仍需回读核验报告作为最终结论。"
+          : "全部产物都已有导入结果登记。",
+      };
     }
     return {
       level: "warn",

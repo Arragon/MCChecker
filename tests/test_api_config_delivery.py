@@ -162,6 +162,13 @@ def test_register_and_list_and_summary(monkeypatch) -> None:
         assert status == 200
         assert body["item"]["failure_reason"] == "E-104 校验失败"
 
+        # 产物列表要带上登记四态，页面不能还显示旧的“待验”
+        status, _h, body = admin.json("GET", "/api/v1/p/%s/config/artifacts" % PROFILE)
+        assert status == 200
+        row = next(item for item in body["items"] if item["id"] == artifact["id"])
+        assert row["delivery"]["result"] == "declared_ok"
+        assert row["delivery"]["attempts"] == 2
+
 
 def test_other_profile_cannot_read_by_id(monkeypatch) -> None:
     """路径里的 pid 必须与对象归属一致；换个机型直读一律当不存在。"""
@@ -205,6 +212,28 @@ def test_other_profile_cannot_read_by_id(monkeypatch) -> None:
         assert status == 200
         assert body["total"] == 0
         assert body["result"] == "pending"
+
+        # 写路径也不能用 body 里的 profile_id 把记录写到别的机型
+        status, _h, body = admin.json(
+            "POST",
+            base + "/deliveries",
+            body={
+                "artifact_id": artifact["id"],
+                "result": "failed",
+                "executed_at": EARLY,
+                "failure_reason": "E-104",
+                "profile_id": PROFILE,
+            },
+        )
+        assert status == 400
+        assert body["error"]["detail"]["field"] == "profile_id"
+        status, _h, body = admin.json(
+            "POST",
+            base + "/artifacts/%s/verifications" % artifact["id"],
+            body={"observation_id": observation["id"], "profile_id": PROFILE},
+        )
+        assert status == 400
+        assert body["error"]["detail"]["field"] == "profile_id"
 
 
 def test_register_without_result_lands_on_the_field(monkeypatch) -> None:

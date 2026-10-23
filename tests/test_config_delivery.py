@@ -158,6 +158,30 @@ def test_executed_at_required_for_declared_states(repo, artifact) -> None:
     assert caught.value.detail["field"] == "executed_at"
 
 
+def test_same_idempotency_key_replays_one_delivery(repo, artifact) -> None:
+    first = _reg(
+        repo, artifact, result="failed", executed_at="2026-10-20T09:00:00Z",
+        failure_reason="E-104", idempotency_key="delivery-once",
+    )
+    second = _reg(
+        repo, artifact, result="failed", executed_at="2026-10-20T09:00:00Z",
+        failure_reason="E-104", idempotency_key="delivery-once",
+    )
+    assert second["id"] == first["id"]
+    assert second["attempt"] == 1
+    assert len(config_delivery.list_deliveries(repo, artifact_id=artifact["id"])) == 1
+
+
+def test_evidence_hash_must_match_artifact(repo, artifact) -> None:
+    with pytest.raises(AppError) as caught:
+        _reg(
+            repo, artifact, result="declared_ok",
+            executed_at="2026-10-20T09:00:00Z",
+            evidence={"ref": "photo://1", "sha256": "deadbeef"},
+        )
+    assert caught.value.detail["field"] == "evidence.sha256"
+
+
 def test_common_artifact_needs_explicit_profile(repo, artifact) -> None:
     """通用产物没有机型归属：不点名就不知道该登记到哪台机器上。"""
     with pytest.raises(AppError) as caught:

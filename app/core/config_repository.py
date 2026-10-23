@@ -72,7 +72,19 @@ BLOB_FIELDS = ("blob_sha256",)
 #: 幂等重放要求"同一请求"算出同一个指纹，而时间戳每次提交都会变；若让它们参与，
 #: 客户端重试同一请求会被误判成 `IDEMPOTENCY_MISMATCH`。语义上它们也不是输入
 #: （采集时间 `captured_at` 缺省时同样是服务端时钟），因此统一排除。
-VOLATILE_KEYS = frozenset(("created_at", "updated_at", "captured_at", "retired_at"))
+#: 交付登记的 `attempt` / `previous_delivery_id` 也由服务端在首次提交时推导，
+#: 重试同一幂等键时不能因为它们变化而误判成另一个请求。
+VOLATILE_KEYS = frozenset(
+    (
+        "created_at",
+        "updated_at",
+        "captured_at",
+        "retired_at",
+        "registered_at",
+        "attempt",
+        "previous_delivery_id",
+    )
+)
 
 _HEX = set("0123456789abcdef")
 
