@@ -43,6 +43,8 @@ EXPECTED_MEMBERS = {
     "app/web/assets/js/views/settings.js",
     "app/web/index.html",
     "docs/manual.md",
+    "scripts/config_backup.py",
+    "scripts/inspect_config_management.py",
     "main.py",
     "run.py",
     "start.bat",
@@ -153,6 +155,8 @@ def source_tree(tmp_path: Path) -> Path:
             'var url = h("input.input", { type: "url", placeholder: "http://…" });\n'
         ),
         "docs/manual.md": "# 使用手册\n\n启动：`python run.py`。\n",
+        "scripts/config_backup.py": '"""备份工具。"""\n',
+        "scripts/inspect_config_management.py": '"""迁移预检工具。"""\n',
         "docs/MCChecker_FEATURE_CHANGES.md": "# 变更\n\n" + FC_HEADINGS,
     }
     for rel, text in files.items():
@@ -997,7 +1001,7 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 22 个" in first.stdout, first.stdout
+    assert "成员 24 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
     assert "已放行 app/web/assets/js/ui/icons.js" in first.stdout, first.stdout
@@ -1053,6 +1057,8 @@ def test_real_repo_artifact_is_offline_clean(tmp_path: Path) -> None:
     assert "app/web/index.html" in names
     assert "app/server/http.py" in names
     assert "docs/manual.md" in names
+    assert "scripts/config_backup.py" in names
+    assert "scripts/inspect_config_management.py" in names
     assert not any(n.startswith("app/web/assets/js/mock/") for n in names)
     assert not any(n.startswith("app/web/tests/") for n in names)
     assert "app/web/template.html" not in names
@@ -1077,6 +1083,21 @@ def test_real_repo_every_listed_inert_entry_is_actually_present(tmp_path: Path) 
         % sorted(seen ^ listed)
     )
     assert not mr.find_stale_inert_entries(blob), "名单里有产物已经不再包含的条目"
+
+
+def test_runtime_imports_work_without_site_packages() -> None:
+    """发布包的运行入口不得依赖任何第三方包：禁用 site 后仍能导入路由。"""
+    import subprocess
+    import sys
+
+    completed = subprocess.run(
+        [sys.executable, "-S", "-c", "import app.server.router"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_real_repo_zip_is_deterministic_apart_from_timestamp(tmp_path: Path) -> None:

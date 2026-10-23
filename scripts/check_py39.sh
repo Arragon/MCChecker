@@ -11,14 +11,14 @@ cd "$(dirname "$0")/.."
 PY="${PYTHON:-python3.9}"
 
 echo "[1/2] compileall（$("$PY" --version 2>&1)）"
-"$PY" -m compileall -q app run.py main.py
+"$PY" -m compileall -q app run.py main.py scripts
 
 echo "[2/2] 禁止 3.10+ 专属写法"
 status=0
 
 check() {
   local pattern="$1" reason="$2" hits
-  hits="$(grep -rnE --include='*.py' -- "$pattern" app run.py main.py 2>/dev/null || true)"
+  hits="$(grep -rnE --include='*.py' -- "$pattern" app run.py main.py scripts 2>/dev/null || true)"
   if [ -n "$hits" ]; then
     printf '  ✗ %s\n%s\n' "$reason" "$hits" >&2
     status=1
