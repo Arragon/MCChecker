@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from . import fsutil, locks, storage
@@ -44,15 +44,25 @@ def load_models() -> List[Dict[str, str]]:
         return _load_models_unlocked()
 
 
-def _save_models_unlocked(models: List[Dict[str, str]]) -> None:
-    """写机型清单（调用方已持注册表锁），走原子写。"""
+_LIFECYCLE_FIELDS = ("status", "retired_at", "retired_by", "reason", "replaced_by")
+
+
+def _save_models_unlocked(models: List[Dict[str, Any]]) -> None:
+    """写机型清单（调用方已持注册表锁），走原子写。
+
+    生命周期字段必须原样保留：旧版本没有这些字段时缺省视为 active。
+    """
     models = _ensure_default(models)
-    unique: Dict[str, Dict[str, str]] = {}
+    unique: Dict[str, Dict[str, Any]] = {}
     for m in models:
         mid = str(m.get("id") or "").strip()
         name = str(m.get("name") or "").strip() or mid
         if mid:
-            unique[mid] = {"id": mid, "name": name}
+            entry: Dict[str, Any] = {"id": mid, "name": name}
+            for key in _LIFECYCLE_FIELDS:
+                if m.get(key) not in (None, ""):
+                    entry[key] = m.get(key)
+            unique[mid] = entry
     ordered = [unique[DEFAULT_MODEL_ID]] + [v for k, v in unique.items() if k != DEFAULT_MODEL_ID]
     fsutil.atomic_write_json(_models_file(), ordered)
 
@@ -69,6 +79,62 @@ def model_options() -> Dict[str, str]:
 def exists(model_id: str) -> bool:
     mid = str(model_id or "").strip()
     return any(m.get("id") == mid for m in load_models())
+
+
+def model_status(model_id: str) -> str:
+    mid = str(model_id or "").strip()
+    for model in load_models():
+        if model.get("id") == mid:
+            return str(model.get("status") or "active")
+    return ""
+
+
+def is_retired(model_id: str) -> bool:
+    return model_status(model_id) == "retired"
+
+
+def retire_model(
+    model_id: str,
+    *,
+    retired_by: str = "",
+    reason: str = "",
+    replaced_by: Optional[str] = None,
+) -> bool:
+    """软退役：保留清单条目与目录，历史对象仍可按稳定 ID 访问。"""
+    mid = str(model_id or "").strip()
+    if not mid or mid == DEFAULT_MODEL_ID:
+        return False
+    with locks.registry_lock:
+        models = _load_models_unlocked()
+        for model in models:
+            if model.get("id") == mid:
+                model["status"] = "retired"
+                model["retired_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                model["retired_by"] = retired_by
+                model["reason"] = reason
+                if replaced_by:
+                    model["replaced_by"] = replaced_by
+                _save_models_unlocked(models)
+                return True
+    return False
+
+
+def restore_model(model_id: str) -> bool:
+    mid = str(model_id or "").strip()
+    if not mid:
+        return False
+    with locks.registry_lock:
+        models = _load_models_unlocked()
+        for model in models:
+            if model.get("id") == mid:
+                if model.get("status") != "retired":
+                    return False
+                model["status"] = "active"
+                for key in ("retired_at", "retired_by", "replaced_by"):
+                    model.pop(key, None)
+                _save_models_unlocked(models)
+                return True
+    return False
 
 
 def _slugify(name: str) -> str:

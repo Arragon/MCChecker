@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core import device_models, storage
 from ..core.errors import FILE_EXISTS, INVALID_INPUT, NOT_FOUND, AppError
-from . import recovery, revision
+from . import config_gate, config_lifecycle, recovery, revision
 from . import scheduler as scheduler_service
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def list_profiles() -> Dict[str, Any]:
     return {"items": [dict(model) for model in device_models.load_models()]}
 
 
-def create_profile(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def create_profile(payload: Optional[Dict[str, Any]], actor: Any = None) -> Dict[str, Any]:
     """`POST /profiles` → 201 `{"profile": {"id","name"}}`。"""
     body = payload if isinstance(payload, dict) else {}
     name = _validated_name(body.get(NAME_FIELD))
@@ -73,6 +73,10 @@ def create_profile(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                 except Exception as exc:
                     logger.error("创建机型复制失败后的清理未完成 %s: %s", model_id, exc)
                 raise
+    if copy_from and config_gate.enabled():
+        config_lifecycle.record_copy(
+            config_lifecycle.repository(), actor, copy_from, model_id
+        )
     revision.bump(storage.DEFAULT_PROFILE, PART)
     _reload_scheduler()
     return {
@@ -112,6 +116,8 @@ def delete_profile(
     with _LOCK:
         if _model_index(device_models.load_models(), target) is None:
             raise AppError(NOT_FOUND, "机型不存在")
+        # 管理域有历史引用时，物理删除会把基线/产物/交付记录变成孤儿；只能退役。
+        config_lifecycle.assert_deletable(config_lifecycle.repository(), target)
         # 删除与运行中的任务写互斥：不取机型写锁的话，任务可能把字节写进一个正在被
         # 搬走的目录，恢复区里的副本就不是删除那一刻的完整状态。
         with storage.profile_write(target):
@@ -129,6 +135,33 @@ def delete_profile(
     revision.bump(storage.DEFAULT_PROFILE, PART)
     _reload_scheduler()
     return {"deleted": True, "recovery": entry}
+
+
+def retire_profile(
+    model_id: str, *, reason: str = "", replaced_by: str = "", actor_name: str = ""
+) -> Dict[str, Any]:
+    """软退役：保留目录与历史，退役后写入由 `http.py` 统一拦成 409。"""
+    target = str(model_id)
+    with _LOCK:
+        item = config_lifecycle.retire_profile(
+            config_lifecycle.repository(),
+            {"ip": "", "name": actor_name},
+            pid=target,
+            reason=reason,
+            replaced_by=replaced_by,
+        )
+    revision.bump(storage.DEFAULT_PROFILE, PART)
+    return {"profile": item, "retired": True}
+
+
+def restore_profile(model_id: str, *, actor_name: str = "") -> Dict[str, Any]:
+    target = str(model_id)
+    with _LOCK:
+        item = config_lifecycle.restore_profile(
+            config_lifecycle.repository(), {"ip": "", "name": actor_name}, pid=target
+        )
+    revision.bump(storage.DEFAULT_PROFILE, PART)
+    return {"profile": item, "retired": False}
 
 
 def _validated_name(raw: Any) -> str:

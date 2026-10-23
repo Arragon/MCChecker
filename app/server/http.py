@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional
 from .. import __version__
 from ..config import Settings
 from ..core import device_models, fsutil, log_context, storage
+from ..services import config_lifecycle
 from ..core.errors import (
     FORBIDDEN,
     INVALID_INPUT,
@@ -344,6 +345,9 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         self._access_pid = pid or "-"
         if pid is not None and not device_models.exists(pid):
             raise AppError(NOT_FOUND, "机型不存在")
+        if pid is not None:
+            # 退役机型保留读能力与历史；写请求在进入 handler 前统一拦下。
+            config_lifecycle.assert_writable(pid, method, path)
 
         # §3.4 第 4 步：每个请求都重新解析身份（撤权后下一次请求即 403）；
         # 无 {pid} 的全局接口按 default 机型解析。

@@ -120,6 +120,11 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v1/profiles"): "settings_write",
     ("PATCH", "/api/v1/profiles/{pid}"): "settings_write",
     ("DELETE", "/api/v1/profiles/{pid}"): "settings_write",
+    # M7-12：软退役/恢复与配置类别生命周期；退役机型仍可读。
+    ("POST", "/api/v1/profiles/{pid}/retire"): "settings_write",
+    ("POST", "/api/v1/profiles/{pid}/restore"): "settings_write",
+    ("POST", "/api/v1/config/families/{fid}/retire"): "config_registry_write",
+    ("POST", "/api/v1/config/families/{fid}/reactivate"): "config_registry_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
     # M6-01/M6-02（INH-1946/1947）：配置目录的写接口只有管理员（`config_registry_write`）。
     # 这些 handler **先授权后门禁**，所以未授权身份得到的是 403（detail.action 可解释），
@@ -1002,6 +1007,10 @@ WRITE_FAMILIES = [
     ("POST", "/api/v1/profiles", "deployer", {"name": "跨站机型", "copy_from": None}, False),
     ("PATCH", "/api/v1/profiles/{pid}", "deployer", {"name": "跨站改名"}, False),
     ("DELETE", "/api/v1/profiles/{pid}", "deployer", None, False),
+    ("POST", "/api/v1/profiles/{pid}/retire", "deployer", {"reason": "跨站退役"}, False),
+    ("POST", "/api/v1/profiles/{pid}/restore", "deployer", {}, False),
+    ("POST", "/api/v1/config/families/{fid}/retire", "deployer", {"reason": "跨站退役", "acknowledge_refs": True}, False),
+    ("POST", "/api/v1/config/families/{fid}/reactivate", "deployer", {}, False),
     ("PUT", "/api/v1/p/{pid}/files/{name}", "deployer", XML_V1, True),
     ("DELETE", "/api/v1/p/{pid}/files/{name}", "admin", None, True),
     # M3-11（INH-1896）：DL 条件保存。body 留空也能证明 CSRF 闸门在 handler 之前

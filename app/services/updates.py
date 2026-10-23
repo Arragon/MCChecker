@@ -312,6 +312,13 @@ def rename_source(
     clean_record = _validated_url(record_url, "record_url", required=False)
     # None：请求没带 keyword，保留原值。空串：清掉关键词。
     clean_keyword = None if keyword is None else _validated_keyword(keyword)
+    # 旧入口改名不得绕过 managed：策略守卫在真正搬文件之前判定。
+    config_policies.guard_or_raise(
+        config_policies.repository(),
+        config_policies.ACTION_RENAME,
+        filename=target,
+        profile_id=pid,
+    )
     # 改名是一次跨多份数据的读-改-写（映射 + 五份引用 + 三处产物 + `update_status.json` 的键），
     # 整段扣在同一把机型锁里：`update_config_mapping` 内部另取的 `_profile_write()` 解析到
     # 同一把 per-pid RLock，可重入、无死锁（与 `create_source` 同形）。
@@ -367,6 +374,13 @@ def delete_source(pid: str, name: Any) -> bool:
     上一个同名源的更新历史，而这条历史从未发生在它身上。见 `_retarget_update_status`。
     """
     clean = _optional_validated_name(name)
+    if clean:
+        config_policies.guard_or_raise(
+            config_policies.repository(),
+            config_policies.ACTION_DELETE,
+            filename=clean,
+            profile_id=pid,
+        )
     with storage.use_profile(pid):
         removed = bool(clean) and storage.remove_config_mapping(clean)
         if removed:

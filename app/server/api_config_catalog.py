@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from ..config import Settings
 from ..core.errors import INVALID_INPUT, AppError
-from ..services import authz, config_catalog, config_gate, config_store
+from ..services import authz, config_catalog, config_gate, config_lifecycle, config_store
 from ..services.context import RequestContext
 from .api_documents import content_disposition
 from .router import Response, Router, json_body, query_param
@@ -404,6 +404,46 @@ def _idempotency(ctx: RequestContext) -> Optional[str]:
     return key
 
 
+def retire_family(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+    settings: Settings,
+) -> Response:
+    # POST /api/v1/config/families/{fid}/retire {"reason","acknowledge_refs"}
+    _write(ctx)
+    payload = json_body(body) if body else {}
+    return Response(
+        payload={
+            "item": config_lifecycle.retire_family(
+                _repo(settings), ctx.actor,
+                family_id=params["fid"],
+                reason=payload.get("reason"),
+                acknowledge_refs=bool(payload.get("acknowledge_refs")),
+            )
+        }
+    )
+
+
+def reactivate_family(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+    settings: Settings,
+) -> Response:
+    # POST /api/v1/config/families/{fid}/reactivate
+    _write(ctx)
+    return Response(
+        payload={
+            "item": config_lifecycle.restore_family(
+                _repo(settings), ctx.actor, family_id=params["fid"]
+            )
+        }
+    )
+
+
 def register(router: Router, settings: Settings) -> None:
     """挂载配置目录路由（在骨架路由之后注册，避免抢占）。"""
     # 版本
@@ -421,6 +461,14 @@ def register(router: Router, settings: Settings) -> None:
     # 配置族与逻辑文件
     router.add("GET", "/api/v1/config/families", partial(list_families, settings=settings))
     router.add("POST", "/api/v1/config/families", partial(create_family, settings=settings))
+    router.add(
+        "POST", "/api/v1/config/families/{fid}/retire", partial(retire_family, settings=settings)
+    )
+    router.add(
+        "POST",
+        "/api/v1/config/families/{fid}/reactivate",
+        partial(reactivate_family, settings=settings),
+    )
     router.add(
         "GET", "/api/v1/config/families/{fid}/files", partial(list_logical_files, settings=settings)
     )

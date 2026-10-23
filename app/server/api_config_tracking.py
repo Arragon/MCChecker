@@ -114,6 +114,7 @@ def set_tracking(
         notes=payload.get("notes"),
         expected_revision=payload.get("expected_revision") or None,
         idempotency_key=_idempotency(ctx),
+        acknowledge_drift=bool(payload.get("acknowledge_drift")),
     )
     return Response(status=201, payload={"item": item})
 

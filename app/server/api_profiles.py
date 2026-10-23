@@ -21,6 +21,8 @@ def register(router: Router) -> None:
     router.add("POST", "/api/v1/profiles", create_profile)
     router.add("PATCH", "/api/v1/profiles/{pid}", rename_profile)
     router.add("DELETE", "/api/v1/profiles/{pid}", delete_profile)
+    router.add("POST", "/api/v1/profiles/{pid}/retire", retire_profile)
+    router.add("POST", "/api/v1/profiles/{pid}/restore", restore_profile)
 
 
 def create_profile(
@@ -31,7 +33,9 @@ def create_profile(
 ) -> Response:
     # POST /api/v1/profiles  {"name","copy_from"} -> 201 {profile:{id,name}}
     authz.authorize(ctx, "settings_write")
-    return Response(status=201, payload=profiles.create_profile(json_body(body)))
+    return Response(
+        status=201, payload=profiles.create_profile(json_body(body), ctx.actor)
+    )
 
 
 def rename_profile(
@@ -61,5 +65,39 @@ def delete_profile(
             params["pid"],
             actor_name=getattr(actor, "name", "") or "",
             actor_ip=ctx.ip,
+        )
+    )
+
+
+def retire_profile(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    # POST /api/v1/profiles/{pid}/retire  {"reason","replaced_by"}
+    authz.authorize(ctx, "settings_write")
+    payload = json_body(body) if body else {}
+    return Response(
+        payload=profiles.retire_profile(
+            params["pid"],
+            reason=str(payload.get("reason") or ""),
+            replaced_by=str(payload.get("replaced_by") or ""),
+            actor_name=getattr(ctx.actor, "name", "") or "",
+        )
+    )
+
+
+def restore_profile(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    # POST /api/v1/profiles/{pid}/restore
+    authz.authorize(ctx, "settings_write")
+    return Response(
+        payload=profiles.restore_profile(
+            params["pid"], actor_name=getattr(ctx.actor, "name", "") or ""
         )
     )

@@ -18,12 +18,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import hashlib
+import os
+from typing import Any, Dict, List, Optional, Tuple
 
-from ..core import storage
+from ..core import device_models, storage
 from ..core.config_repository import ConfigRepository, now_iso
 from ..core.errors import (
     INVALID_INPUT,
+    LIFECYCLE_BLOCKED,
     NOT_FOUND,
     POLICY_BLOCKED,
     REVISION_CONFLICT,
@@ -124,6 +127,70 @@ def _find_policy(
     return None
 
 
+def _sha256_file(path: str) -> Optional[str]:
+    if not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _drift_profiles(scope: str, profile_id: Optional[str]) -> List[str]:
+    if scope == SCOPE_MODEL:
+        return [str(profile_id)] if profile_id else []
+    return [str(model.get("id")) for model in device_models.load_models()]
+
+
+def _snapshot_scope(
+    repo: ConfigRepository,
+    *,
+    scope: str,
+    family_id: Optional[str],
+    profile_id: Optional[str],
+) -> Dict[str, Optional[str]]:
+    """记录停用瞬间各机型当前配置文件的 sha256；缺失也记 None。"""
+    files = config_catalog.list_logical_files(
+        repo, family_id, include_retired=False
+    )
+    names = [str(item.get("display_name") or "") for item in files if item.get("display_name")]
+    snapshot: Dict[str, Optional[str]] = {}
+    for pid in _drift_profiles(scope, profile_id):
+        with storage.use_profile(pid):
+            for name in names:
+                snapshot["%s|%s" % (pid, name)] = _sha256_file(storage.get_config_path(name))
+    return snapshot
+
+
+def _drift_changes(
+    before: Dict[str, Optional[str]], after: Dict[str, Optional[str]]
+) -> List[Dict[str, Any]]:
+    changes = []
+    for key in sorted(set(before) | set(after)):
+        old = before.get(key)
+        new = after.get(key)
+        if old == new:
+            continue
+        pid, _, filename = key.partition("|")
+        if old is None:
+            state = "added"
+        elif new is None:
+            state = "missing"
+        else:
+            state = "changed"
+        changes.append(
+            {
+                "profile_id": pid,
+                "filename": filename,
+                "before_sha256": old,
+                "after_sha256": new,
+                "state": state,
+            }
+        )
+    return changes
+
+
 def set_policy(
     repo: ConfigRepository,
     actor: Any,
@@ -136,6 +203,7 @@ def set_policy(
     notes: Any = "",
     expected_revision: Optional[str] = None,
     idempotency_key: Optional[str] = None,
+    acknowledge_drift: bool = False,
 ) -> Dict[str, Any]:
     """设置（或改写）一条追踪策略。**同一目标追加修订，不新建对象**，因此历史可查。"""
     if scope not in SCOPES:
@@ -156,6 +224,13 @@ def set_policy(
         if not str(profile_id or "").strip():
             raise AppError(INVALID_INPUT, "机型级策略必须指定机型", field="profile_id")
         model_id = str(profile_id).strip()
+        if device_models.is_retired(model_id):
+            raise AppError(
+                LIFECYCLE_BLOCKED,
+                "机型已退役，不能修改追踪策略",
+                profile_id=model_id,
+                hint="先恢复机型，再调整策略",
+            )
         if str(family_id or "").strip():
             family = config_catalog.get_family(repo, str(family_id))
 
@@ -167,6 +242,28 @@ def set_policy(
         return existing
 
     stamp = now_iso()
+    drift: List[Dict[str, Any]] = []
+    disabled_snapshot = existing.get("disabled_snapshot") if existing else None
+    if existing is not None and existing.get("mode") == MODE_MANAGED and mode == MODE_ARCHIVE_ONLY:
+        # 停用瞬间留一份指纹；重开时用它判断"停用期间有没有人改过文件"。
+        disabled_snapshot = _snapshot_scope(
+            repo, scope=scope, family_id=family["id"] if family else None,
+            profile_id=model_id,
+        )
+    elif existing is not None and existing.get("mode") == MODE_ARCHIVE_ONLY and mode == MODE_MANAGED:
+        current = _snapshot_scope(
+            repo, scope=scope, family_id=family["id"] if family else None,
+            profile_id=model_id,
+        )
+        drift = _drift_changes(disabled_snapshot or {}, current)
+        if drift and not acknowledge_drift:
+            raise AppError(
+                LIFECYCLE_BLOCKED,
+                "停用期间配置文件发生变化，重新开启前必须确认漂移",
+                field="acknowledge_drift",
+                drift=drift,
+                hint="逐项对账后再以 acknowledge_drift=true 重试",
+            )
     payload = {
         "scope": scope,
         "family_id": family["id"] if family else None,
@@ -176,7 +273,17 @@ def set_policy(
         "reason": reason_text,
         "created_by": _label(actor),
         "updated_at": stamp,
+        "disabled_snapshot": disabled_snapshot,
+        "disabled_at": existing.get("disabled_at") if existing else None,
+        "reopened_at": stamp if drift or (
+            existing is not None and existing.get("mode") == MODE_ARCHIVE_ONLY and mode == MODE_MANAGED
+        ) else None,
+        "drift": drift,
+        "drift_acknowledged_at": stamp if drift and acknowledge_drift else None,
     }
+    if existing is not None and existing.get("mode") == MODE_MANAGED and mode == MODE_ARCHIVE_ONLY:
+        payload["disabled_at"] = stamp
+        payload["reopened_at"] = None
     expected: Dict[str, Any] = {}
     if existing is not None:
         expected["tracking_policy:%s" % existing["id"]] = (
