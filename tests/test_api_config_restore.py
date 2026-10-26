@@ -64,6 +64,7 @@ def _world():
 
 
 def test_restore_requires_gate_and_submit_permission(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles(PROFILE)
         admin = as_role(server, "admin")

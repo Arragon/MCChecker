@@ -80,6 +80,7 @@ def _policy(caller, *, scope, mode, reason="受管上线", family_id=None, profi
 
 
 def test_tracking_requires_gate_and_admin(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         admin = as_role(server, "admin")
@@ -446,8 +447,9 @@ def test_archive_only_keeps_legacy_behaviour(monkeypatch) -> None:
         assert world["family"]["id"]
 
 
-def test_disabled_gate_bypasses_guard_entirely() -> None:
+def test_disabled_gate_bypasses_guard_entirely(monkeypatch) -> None:
     """特性关闭：守卫一律放行，旧功能零影响（连 managed 策略都不生效）。"""
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         caller = as_role(server, "admin")

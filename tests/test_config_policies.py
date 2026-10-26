@@ -231,7 +231,8 @@ def test_policy_history_survives_switch_back(repo, world) -> None:
 # -- 旧入口守卫 -------------------------------------------------------------
 
 
-def test_guard_is_noop_when_feature_off(repo, world) -> None:
+def test_guard_is_noop_when_feature_off(monkeypatch, repo, world) -> None:
+    monkeypatch.setenv(config_gate.ENV_KEY, config_gate.MODE_OFF)
     report = config_policies.guard_legacy_write(
         repo, "upload", filename="随便什么.xml", profile_id="A"
     )

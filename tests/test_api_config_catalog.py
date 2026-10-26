@@ -71,7 +71,8 @@ def _upload(caller, release_id, logical_file_id, data=XML_A, query="source=archi
 # -- 门禁与权限 -------------------------------------------------------------
 
 
-def test_read_endpoints_are_503_when_off() -> None:
+def test_read_endpoints_are_503_when_off(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         caller = as_role(server, "admin")

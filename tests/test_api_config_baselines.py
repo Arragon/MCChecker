@@ -163,6 +163,7 @@ def _approve(baseline: dict) -> dict:
 
 
 def test_baselines_require_gate_and_admin(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         admin = as_role(server, "admin")
