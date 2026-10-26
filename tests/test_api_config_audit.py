@@ -85,7 +85,7 @@ def test_audit_is_read_only_and_rejects_bad_cursor(monkeypatch, world) -> None: 
 
 
 def test_audit_is_gated(monkeypatch) -> None:
-    monkeypatch.delenv(config_gate.ENV_KEY, raising=False)
+    monkeypatch.setenv(config_gate.ENV_KEY, config_gate.MODE_OFF)
     with make_server() as server:
         seed_roles("p1")
         admin = as_role(server, "admin")

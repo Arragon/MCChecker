@@ -4,11 +4,11 @@
 
 | 值 | 读接口 | 写接口 |
 |---|---|---|
-| `off`（默认） | 503 `CONFIG_DISABLED` | 503 `CONFIG_DISABLED` |
+| `off` | 503 `CONFIG_DISABLED` | 503 `CONFIG_DISABLED` |
 | `readonly` | 正常 | 503 `CONFIG_DISABLED`（`detail.mode = readonly`） |
-| `on` | 正常 | 正常，仍需 `authz` 判定 |
+| `on`（默认） | 正常 | 正常，仍需 `authz` 判定 |
 
-默认 `off`，因此**未接入的部署不会出现半成品入口**；旧功能完全不受影响。
+未设置环境变量时默认 `on`；若需与旧版一致或暂时关闭入口，可显式设为 `off`。
 门禁在 handler 入口判定（而不是路由注册时开关），这样改环境变量后重启即可生效，
 测试也不必重建路由表。
 """
@@ -32,7 +32,9 @@ _READONLY_WORDS = {"readonly", "read-only", "ro", "read"}
 
 
 def mode() -> str:
-    """当前档位。无法识别的取值按 `off` 处理（失败关闭，不失败开放）。"""
+    """当前档位。未设置时默认 `on`；无法识别的取值按 `off` 处理（失败关闭，不失败开放）。"""
+    if ENV_KEY not in os.environ:
+        return MODE_ON
     raw = str(os.environ.get(ENV_KEY, "")).strip().lower()
     if not raw:
         return MODE_OFF

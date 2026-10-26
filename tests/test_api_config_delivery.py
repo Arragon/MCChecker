@@ -68,6 +68,7 @@ def _observe(repo, world, artifact, *, captured_at=LATE, release_id=None):
 
 
 def test_delivery_requires_gate_and_generate_permission(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles(PROFILE)
         admin = as_role(server, "admin")

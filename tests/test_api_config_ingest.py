@@ -2,7 +2,7 @@
 
 覆盖：
 
-* 门禁（默认 off → 503）与权限（成员只读、`readonly` 写 503）；
+* 门禁（`off` → 503）与权限（成员只读、`readonly` 写 503）；
 * 原文下载逐字节一致，且带 `X-Content-Sha256` / `ETag`；
 * 同内容重复上传返回同一条观测（`deduplicated=true`）但仍多一条事件；
 * 重新映射：201 + 新修订，旧修订仍可读；`expected_revision` 过期 → 409；
@@ -82,6 +82,7 @@ def _capture(caller, query="", body=XML_DOC, headers=None):
 
 
 def test_observations_require_gate_and_admin(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         admin = as_role(server, "admin")

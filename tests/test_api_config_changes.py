@@ -136,6 +136,7 @@ def _create(caller, world, **overrides):
 
 
 def test_changes_require_gate_and_split_permissions(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         admin = as_role(server, "admin")

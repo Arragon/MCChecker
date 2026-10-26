@@ -177,6 +177,7 @@ def _approve_common(world, *, value="900"):
 
 
 def test_upgrade_requires_gate_and_submit_permission(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         pid = seed_roles("p1")
         admin = as_role(server, "admin")

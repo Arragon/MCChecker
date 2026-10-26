@@ -97,6 +97,7 @@ def _definition_body(**overrides):
 
 
 def test_registry_requires_gate_and_admin(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         caller = as_role(server, "admin")

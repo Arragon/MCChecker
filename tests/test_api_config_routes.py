@@ -27,9 +27,9 @@ def _enable(monkeypatch, mode="on"):
 # --- 门禁单元 ------------------------------------------------------------
 
 
-def test_default_mode_is_off(monkeypatch) -> None:
-    assert config_gate.mode() == config_gate.MODE_OFF
-    assert config_gate.enabled() is False
+def test_default_mode_is_on_when_unset(monkeypatch) -> None:
+    assert config_gate.mode() == config_gate.MODE_ON
+    assert config_gate.enabled() is True
 
 
 @pytest.mark.parametrize(
@@ -50,7 +50,8 @@ def test_mode_parsing_is_fail_closed(monkeypatch, raw, expected) -> None:
     assert config_gate.mode() == expected
 
 
-def test_require_read_blocks_when_off() -> None:
+def test_require_read_blocks_when_off(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with pytest.raises(AppError) as error:
         config_gate.require_read()
     assert error.value.code == "CONFIG_DISABLED"
@@ -74,7 +75,8 @@ def test_require_write_allows_on(monkeypatch) -> None:
 # --- 真实服务 ------------------------------------------------------------
 
 
-def test_revision_endpoint_is_503_when_disabled() -> None:
+def test_revision_endpoint_is_503_when_disabled(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         caller = as_role(server, "admin")
@@ -83,7 +85,8 @@ def test_revision_endpoint_is_503_when_disabled() -> None:
         assert body["error"]["code"] == "CONFIG_DISABLED"
 
 
-def test_status_endpoint_is_503_when_disabled() -> None:
+def test_status_endpoint_is_503_when_disabled(monkeypatch) -> None:
+    _enable(monkeypatch, "off")
     with make_server() as server:
         seed_roles("p1")
         caller = as_role(server, "admin")
