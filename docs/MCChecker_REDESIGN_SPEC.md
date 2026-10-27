@@ -781,7 +781,8 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 | `POST /p/{pid}/dl/{item}/compute` | 全部 | `{"mode": "forward\|reverse\|multi_check","values": [number],"params": item}` → forward：`{"results": [{"input_index","x","y_base","y","status": "ok\|out_of_x_range\|out_of_y_range"}]}`；reverse：`{"results": [{"input_index","y","y_base","x_values","residuals","status": "single\|multiple\|none\|identity\|out_of_y_range"}],"exhaustive": false}`；multi_check：`{"has_multi","cases": [{"y","x_values"}]}` |
 | `GET /p/{pid}/dl/{item}/coeff-history` | 全部 | `?aom=delay\|width`（仅 RP 脉宽）→ `{"aom","current_id","entries": [{id,event,note,coeffs,actor_ip,actor_name,created_at,source_id,current}]}`。不创建历史文件 |
 | `POST /p/{pid}/dl/{item}/coeffs` | 全部 | 头 `If-Match`；整份计算项（系数、四个范围、binding、PP 换算、RP 的 `aom_sum` 与 `aom_width`、可选 note）→ `{"rev","snapshot","coeffs","unchanged","entry"}` |
-| `POST /p/{pid}/dl/{item}/coeff-history/{hid}/apply` | 全部 | 头 `If-Match` → 把该条历史的整份设置写回，包括固定和与两种脉宽模式 |
+| `POST /p/{pid}/dl/{item}/coeff-history/{hid}/apply` | 全部 | 头 `If-Match` → 把该条历史的整份设置写回，包括固定和与两种脉宽模式。不追加历史。和已有记录完全相同的 `event=apply` 不出现在列表里 |
+| `DELETE /p/{pid}/dl/{item}/coeff-history/{hid}` | 管理员 | → `{"deleted","current_id"}`。只删记录，不改当前参数，不要求 `If-Match` |
 
 `variable_path` 可以是旧节点 ID、定位符，或详情面板复制的绑定路径（`文件名/标签/…`，也接受 `›` 分隔）。提取该节点的直接子节点作为字段（XML 子元素/属性标签、JSON 键）。XML 属性写成 `min` 或 `@min` 都能取到。无法转为有限数 → `invalid`；缺失 → `missing`。**不再**用 0 替代失败字段（C15）。
 
@@ -1110,7 +1111,7 @@ MC.views[kind] = function (app, route) {
 #### 9.8.7 DL 计算（`views/dltool.js`）
 
 - 页头：标题 + 计算项分段 PP 能量｜RP 能量｜RP 脉宽｜PPz（有未保存修改的项显示“•”）；当前项有未保存修改时，页头右侧出现“有未保存的修改”。管理员另有“放弃修改”+“保存为配置”（`If-Match` 冲突时提示加载最新或保留草稿）。访客改了范围、绑定或换算时，页头说明这些只留在本页。保存组只在脏状态变化时重建，避免点击途中被替换。
-- 多项式系数一栏旁的「函数与参数」标题有「系数历史」与「保存修改」。保存修改对所有人开放，对话框可填备注，提交系数、上下限、绑定和换算（PP 能量含传输系数与功率转换系数），不提交固定和。系数历史按计算项（RP 脉宽再按当前模式）列出这些内容，当前参数那条标「当前」，其余可一键应用整套参数。
+- 多项式系数一栏旁的「函数与参数」标题有「系数历史」与「保存修改」。保存修改对所有人开放，对话框可填备注，提交系数、上下限、绑定和换算（PP 能量含传输系数与功率转换系数），不提交固定和。系数历史按计算项列出这些内容。应用不再追加记录；和已有记录完全相同的「应用历史」不显示。当前参数那条标「当前」，其余可一键应用整套参数。管理员可删除一条历史，当前参数不变。
 - 轴名与单位：PP 能量 x=电动波片角度（urad）、y=PP@PF能量（mJ）；RP 能量 x=RP能量（mJ）、y=TFP2角度(SMTM页面)（urad）；RP 脉宽 x=RP脉宽（ns）、y=AOM2 delay(SMIM1页面)（ns）或 AOM2 width(SMIM1页面)（ns）；PPz x=调焦镜发散角（urad）、y=BTS_ppz（um）。PPz 与 RP 能量一样是纯多项式，老配置读取时补默认项。
 - 布局（宽屏 ≥1500 px：求解区在左、参数卡片 390 px 在右；窄屏：求解区在上、参数卡片在下，参数卡片内部按列自适应）：
   - RP 脉宽独有“输出量”卡片：两个模式卡片（AOM2 delay 模式 / AOM2 width 模式，各显示名称与一行函数摘要，有未保存修改的显示橙点）+ “固定和”输入（AOM2 delay + AOM2 width，ns）。两种模式使用各自独立的一套系数、有效范围与系数绑定。

@@ -2,10 +2,12 @@
 
 任何人（含访客）都可以保存当前计算项的全部参数：多项式系数、上下限、绑定、
 PP 能量的换算系数，以及 RP 脉宽的两套参数和固定和。每次真正改动都记一条历史：
-IP、已登记姓名、事件、备注和整份设置。一键应用会把该条历史整份写回。
+IP、已登记姓名、事件、备注和整份设置。一键应用会把该条历史整份写回，
+但不再追加记录；和已有记录完全相同的「应用历史」不出现在列表里。
+管理员可以删除一条历史，当前正在使用的参数不变。
 
 历史文件是机型目录里的 `dl_coeff_history.json`。读取时不创建文件。
-与当前设置完全相同的最新一条标成当前。
+与当前设置完全相同的最新一条可见记录标成当前。
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ def list_history(pid: str, item: str, aom: Any) -> Dict[str, Any]:
         with storage.profile_lock(pid):
             cfg = dltool.load_config()
             live = _item_snapshot(item_id, _item_target(cfg, item_id))
-            entries = _item_entries(_load_book(), item_id)
+            entries = _visible_entries(_load_book(), item_id)
     current_id = _current_id(entries, live, item_id)
     return {
         "aom": "",
@@ -104,7 +106,7 @@ def apply_history(
     if_match: Optional[str],
     actor: Optional[Actor],
 ) -> Dict[str, Any]:
-    """把一条历史里的整份设置写回。包括固定和与 RP 脉宽的两套参数。"""
+    """把一条历史里的整份设置写回。包括固定和与 RP 脉宽的两套参数。不新增历史。"""
     item_id = _require_item(item)
     header = _require_match(if_match)
     wanted = str(entry_id or "").strip()
@@ -119,33 +121,56 @@ def apply_history(
         target = _item_target(cfg, item_id)
         incoming = _item_snapshot(item_id, source)
         current = _item_snapshot(item_id, target)
-        if _same_snapshot(current, incoming):
-            current_id = _current_id(_item_entries(book, item_id), current, item_id)
-            current_entry = _find(book, current_id) if current_id else None
-            return {
-                "rev": _rev(),
-                "snapshot": current,
-                "coeffs": current["coeffs"],
-                "unchanged": True,
-                "entry": _public(current_entry, current_id) if current_entry else None,
-            }
-        _write_snapshot(item_id, target, incoming)
-        dltool.save_config(cfg)
-        entry = _append_locked(item_id, "", "apply", "", incoming, actor, wanted, book=book)
+        changed = not _same_snapshot(current, incoming)
+        if changed:
+            _write_snapshot(item_id, target, incoming)
+            dltool.save_config(cfg)
+        removed = _prune_redundant_apply(book, item_id)
+        if removed:
+            fsutil.atomic_write_json(history_path(), book)
+        entries = _visible_entries(book, item_id)
+        current_id = _current_id(entries, incoming, item_id)
+        shown = _find(book, current_id) if current_id else None
         rev = _rev()
 
-    from . import revision
-    from .dl import PART
+    if changed:
+        from . import revision
+        from .dl import PART
 
-    revision.bump(pid, PART)
-    logger.info("DL 参数已应用历史：机型=%s 计算项=%s 来源=%s 记录=%s", pid, item_id, wanted, entry["id"])
+        revision.bump(pid, PART)
+    who = actor.ip if actor is not None else ""
+    logger.info(
+        "DL 参数已应用历史：机型=%s 计算项=%s 来源=%s 操作者=%s 未新增记录",
+        pid,
+        item_id,
+        wanted,
+        who,
+    )
     return {
         "rev": rev,
         "snapshot": incoming,
         "coeffs": incoming["coeffs"],
-        "unchanged": False,
-        "entry": _public(entry, entry["id"]),
+        "unchanged": not changed,
+        "entry": _public(shown, current_id) if shown else None,
     }
+
+
+def delete_history(pid: str, item: str, entry_id: str) -> Dict[str, Any]:
+    """删掉一条历史。不改当前正在使用的参数。调用方必须已确认是管理员。"""
+    item_id = _require_item(item)
+    wanted = str(entry_id or "").strip()
+    with storage.use_profile(pid), storage.profile_write(pid):
+        book = _load_book()
+        source = _find(book, wanted)
+        if source is None or source.get("item") != item_id:
+            raise AppError(NOT_FOUND, "系数历史不存在", id=wanted)
+        book["entries"] = [row for row in book["entries"] if row.get("id") != wanted]
+        fsutil.atomic_write_json(history_path(), book)
+        cfg = dltool.load_config()
+        live = _item_snapshot(item_id, _item_target(cfg, item_id))
+        current_id = _current_id(_visible_entries(book, item_id), live, item_id)
+    logger.info("DL 参数历史已删除：机型=%s 计算项=%s 记录=%s", pid, item_id, wanted)
+    return {"deleted": wanted, "current_id": current_id}
 
 
 def ensure_history_readable() -> None:
@@ -205,6 +230,36 @@ def _item_target(cfg: Dict[str, Any], item: str) -> Dict[str, Any]:
 
 def _item_entries(book: Dict[str, Any], item: str) -> List[Dict[str, Any]]:
     return [row for row in book["entries"] if row.get("item") == item]
+
+
+def _redundant_apply_ids(entries: List[Dict[str, Any]], item: str) -> set:
+    """和更早一条完全相同的「应用历史」。这种记录只是把已有设置又写了一遍。"""
+    seen: List[Dict[str, Any]] = []
+    drop = set()
+    for row in entries:
+        if row.get("item") != item:
+            continue
+        snap = _item_snapshot(item, row)
+        if row.get("event") == "apply" and any(_same_snapshot(snap, prev) for prev in seen):
+            ident = row.get("id")
+            if ident:
+                drop.add(ident)
+            continue
+        seen.append(snap)
+    return drop
+
+
+def _visible_entries(book: Dict[str, Any], item: str) -> List[Dict[str, Any]]:
+    drop = _redundant_apply_ids(book["entries"], item)
+    return [row for row in _item_entries(book, item) if row.get("id") not in drop]
+
+
+def _prune_redundant_apply(book: Dict[str, Any], item: str) -> int:
+    drop = _redundant_apply_ids(book["entries"], item)
+    if not drop:
+        return 0
+    book["entries"] = [row for row in book["entries"] if row.get("id") not in drop]
+    return len(drop)
 
 
 def _write_snapshot(item: str, target: Dict[str, Any], snap: Dict[str, Any]) -> None:
@@ -358,6 +413,7 @@ def _append_locked(
 ) -> Dict[str, Any]:
     if book is None:
         book = _load_book()
+    _prune_redundant_apply(book, item)
     number = int(book["next"])
     entry = {
         "id": "ch_%06d" % number,

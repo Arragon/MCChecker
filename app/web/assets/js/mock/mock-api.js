@@ -1893,6 +1893,7 @@
       entry.aom_sum = snapshot.aom_sum;
       entry.aom_width = snapshot.aom_width;
     }
+    pruneApplyDupes(P, item);
     book.next += 1;
     book.entries.push(entry);
     var series = book.entries.filter(function (row) { return row.item === item && (row.aom || "") === (aom || ""); });
@@ -1970,6 +1971,27 @@
       if (JSON.stringify(paramSnapshot(item, row)) === JSON.stringify(liveSnap)) found = row.id;
     });
     return found;
+  }
+
+  function visibleHistory(item, entries) {
+    var kept = [];
+    var snaps = [];
+    entries.forEach(function (row) {
+      var snap = paramSnapshot(item, row);
+      var dup = snaps.some(function (prev) { return sameSnap(prev, snap); });
+      if (row.event === "apply" && dup) return;
+      kept.push(row);
+      snaps.push(snap);
+    });
+    return kept;
+  }
+
+  function pruneApplyDupes(P, item) {
+    var book = historyBook(P);
+    var mine = book.entries.filter(function (row) { return row.item === item; });
+    var keep = {};
+    visibleHistory(item, mine).forEach(function (row) { keep[row.id] = true; });
+    book.entries = book.entries.filter(function (row) { return row.item !== item || keep[row.id]; });
   }
 
   function dlConfig(P) {
@@ -2078,7 +2100,7 @@
     if (mode === null) return fail(400, "INVALID_INPUT", "RP 脉宽模式只能是 delay 或 width", { field: "aom" });
     var target = cfg.items[a.item];
     var live = paramSnapshot(a.item, target);
-    var entries = historyBook(P).entries.filter(function (row) { return row.item === a.item; });
+    var entries = visibleHistory(a.item, historyBook(P).entries.filter(function (row) { return row.item === a.item; }));
     var currentId = currentHistoryId(a.item, entries, live);
     return ok({
       aom: mode,
@@ -2150,21 +2172,40 @@
     book.entries.forEach(function (row) { if (row.id === a.hid) source = row; });
     if (!source || source.item !== a.item) return fail(404, "NOT_FOUND", "系数历史不存在", { id: a.hid });
     var cfg = dlConfig(P);
-    var cfg = dlConfig(P);
     var target = cfg.items[a.item];
     var incoming = paramSnapshot(a.item, source);
     var current = paramSnapshot(a.item, target);
-    if (sameSnap(current, incoming)) {
-      var entries = book.entries.filter(function (row) { return row.item === a.item; });
-      var currentId = currentHistoryId(a.item, entries, current);
-      var row = null;
-      book.entries.forEach(function (item) { if (item.id === currentId) row = item; });
-      return ok({ rev: dlRev(P), snapshot: current, coeffs: current.coeffs, unchanged: true, entry: row ? publicHistory(row, currentId) : null });
+    var changed = !sameSnap(current, incoming);
+    if (changed) {
+      applySnap(target, a.item, incoming);
+      bump(a.pid, "settings");
     }
-    applySnap(target, a.item, incoming);
-    var entry = pushCoeffHistory(P, a.item, "", "apply", "", incoming, id, source.id);
-    bump(a.pid, "settings");
-    return ok({ rev: dlRev(P), snapshot: incoming, coeffs: incoming.coeffs, unchanged: false, entry: publicHistory(entry, entry.id) });
+    pruneApplyDupes(P, a.item);
+    var entries = visibleHistory(a.item, book.entries.filter(function (row) { return row.item === a.item; }));
+    var currentId = currentHistoryId(a.item, entries, incoming);
+    var row = null;
+    book.entries.forEach(function (item) { if (item.id === currentId) row = item; });
+    return ok({
+      rev: dlRev(P),
+      snapshot: incoming,
+      coeffs: incoming.coeffs,
+      unchanged: !changed,
+      entry: row ? publicHistory(row, currentId) : null,
+    });
+  });
+
+  route("DELETE", "/p/{pid}/dl/{item}/coeff-history/{hid}", function (a, req, P, id) {
+    var deny = needAdmin(id);
+    if (deny) return deny;
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    var book = historyBook(P);
+    var source = null;
+    book.entries.forEach(function (row) { if (row.id === a.hid) source = row; });
+    if (!source || source.item !== a.item) return fail(404, "NOT_FOUND", "系数历史不存在", { id: a.hid });
+    book.entries = book.entries.filter(function (row) { return row.id !== a.hid; });
+    var live = paramSnapshot(a.item, dlConfig(P).items[a.item]);
+    var entries = visibleHistory(a.item, book.entries.filter(function (row) { return row.item === a.item; }));
+    return ok({ deleted: a.hid, current_id: currentHistoryId(a.item, entries, live) });
   });
 
   route("POST", "/p/{pid}/dl/{item}/extract", function (a, req, P) {
