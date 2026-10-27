@@ -25,6 +25,7 @@ def register(router: Router) -> None:
     router.add("GET", "/api/v1/p/{pid}/dl/{item}/coeff-history", coeff_history)
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/coeffs", save_coefficients)
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply", apply_coefficients)
+    router.add("DELETE", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}", delete_history)
 
 
 def get_state(
@@ -129,11 +130,25 @@ def apply_coefficients(
     body: Optional[bytes],
 ) -> Response:
     # POST /api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply
-    # 全部角色。只把该条历史的系数写成当前系数。
+    # 全部角色。把该条历史整份写回，不追加历史。
     authz.authorize(ctx, "read")
     if_match = (ctx.headers or {}).get("if-match")
     return Response(
         payload=dl_history.apply_history(
             params["pid"], params["item"], params["hid"], if_match, ctx.actor
         )
+    )
+
+
+def delete_history(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    # DELETE /api/v1/p/{pid}/dl/{item}/coeff-history/{hid}
+    # 仅管理员。只删记录，不改当前参数，也不看 If-Match。
+    authz.authorize(ctx, "settings_write")
+    return Response(
+        payload=dl_history.delete_history(params["pid"], params["item"], params["hid"])
     )

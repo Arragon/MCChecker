@@ -55,6 +55,7 @@ EXTRACT_URL = "/api/v1/p/%s/dl/%s/extract"
 COEFF_URL = "/api/v1/p/%s/dl/%s/coeffs"
 HIST_URL = "/api/v1/p/%s/dl/%s/coeff-history"
 APPLY_URL = "/api/v1/p/%s/dl/%s/coeff-history/%s/apply"
+DELETE_HIST_URL = "/api/v1/p/%s/dl/%s/coeff-history/%s"
 
 SOURCE = "dl_source.xml"
 SOURCE_DOC = (
@@ -1510,13 +1511,26 @@ class TestCoeffHistory:
                 {},
                 headers={"If-Match": second["rev"]},
             )
-        assert status == 200, applied
+            assert status == 200, applied
+            status, _h, again = member.json(
+                "POST",
+                APPLY_URL % (pid, "rp_energy", first["entry"]["id"]),
+                {},
+                headers={"If-Match": applied["rev"]},
+            )
+            assert status == 200, again
+            status, _h, hist = member.json("GET", HIST_URL % (pid, "rp_energy"))
         assert applied["unchanged"] is False
-        assert applied["entry"]["event"] == "apply"
-        assert applied["entry"]["source_id"] == first["entry"]["id"]
+        assert applied["entry"]["id"] == first["entry"]["id"]
+        assert applied["entry"]["event"] == "save"
+        assert applied["entry"]["current"] is True
+        assert again["unchanged"] is True
         assert applied["coeffs"]["k1"] == 2.0
         assert applied["snapshot"]["y_min"] == -4.0
         assert applied["snapshot"]["binding"]["source_file"] == "rp.xml"
+        assert len(hist["entries"]) == 2
+        assert hist["current_id"] == first["entry"]["id"]
+        assert [row["event"] for row in hist["entries"]] == ["save", "save"]
         stored = _load_item(pid, "rp_energy")
         assert stored["y_min"] == -4.0
         assert stored["coeffs"]["k1"] == 2.0
@@ -1602,9 +1616,9 @@ class TestCoeffHistory:
         assert item["x_min"] == 1.0
         assert item["aom_width"]["coeffs"]["k1"] == 0.8
         assert item["aom_width"]["x_min"] == 7.0
-        assert hist["entries"][0]["event"] == "apply"
-        assert hist["entries"][0]["aom_sum"] == 100
-        assert any(row["note"] == "整份" for row in hist["entries"])
+        assert [row["event"] for row in hist["entries"]] == ["save", "save"]
+        assert hist["current_id"] == saved["entry"]["id"]
+        assert any(row["note"] == "整份" and row["aom_sum"] == 100 and row["current"] for row in hist["entries"])
 
     def test_full_save_records_limits_as_well_as_coefficients(self):
         pid = seed_roles("dlcoeff6")
@@ -1664,12 +1678,132 @@ class TestCoeffHistory:
                 {},
                 headers={"If-Match": second["rev"]},
             )
-        assert status == 200, applied
+            assert status == 200, applied
+            status, _h, hist = visitor.json("GET", HIST_URL % (pid, "pp_energy"))
+        assert status == 200, hist
         item = _load_item(pid, "pp_energy")
         assert item["coeffs"]["k1"] == 2.0
         assert item["trans_coeff"] == 2.0
         assert item["power_conv_coeff"] == 0.5
         assert item["x_min"] == 1.0 and item["x_max"] == 5.0
+        assert len(hist["entries"]) == 2
+        assert hist["current_id"] == first["entry"]["id"]
+        assert all(row["event"] == "save" for row in hist["entries"])
+
+    def test_duplicate_apply_rows_are_hidden_until_pruned(self):
+        pid = seed_roles("dlhide")
+        rev = _seed_config(pid)
+        with make_server() as server:
+            visitor = as_role(server, "visitor")
+            status, _h, saved = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(note="原记录", k1=2.0),
+                headers={"If-Match": rev},
+            )
+            assert status == 200, saved
+            path = _history_file(pid)
+            with open(path, encoding="utf-8") as fh:
+                book = json.load(fh)
+            duplicate = dict(saved["entry"])
+            duplicate["id"] = "ch_000099"
+            duplicate["event"] = "apply"
+            duplicate["source_id"] = saved["entry"]["id"]
+            duplicate["current"] = False
+            unique = dict(saved["entry"])
+            unique["id"] = "ch_000098"
+            unique["event"] = "apply"
+            unique["coeffs"] = dict(unique["coeffs"])
+            unique["coeffs"]["k1"] = 9.0
+            unique["source_id"] = ""
+            book["entries"].extend([duplicate, unique])
+            book["next"] = 100
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(book, fh, ensure_ascii=False)
+            status, _h, hist = visitor.json("GET", HIST_URL % (pid, "ppz"))
+            assert status == 200, hist
+            assert [row["id"] for row in hist["entries"]] == ["ch_000098", saved["entry"]["id"]]
+            assert hist["current_id"] == saved["entry"]["id"]
+            before = _file_state(pid)
+            status, _h, applied = visitor.json(
+                "POST",
+                APPLY_URL % (pid, "ppz", saved["entry"]["id"]),
+                {},
+                headers={"If-Match": saved["rev"]},
+            )
+            assert status == 200, applied
+            assert applied["unchanged"] is True
+            assert _file_state(pid) == before
+            with open(path, encoding="utf-8") as fh:
+                stored = json.load(fh)
+        assert [row["id"] for row in stored["entries"]] == [saved["entry"]["id"], "ch_000098"]
+
+    def test_admin_deletes_history_without_changing_the_live_setup(self):
+        pid = seed_roles("dldel")
+        rev = _seed_config(pid)
+        with make_server() as server:
+            visitor = as_role(server, "visitor")
+            member = as_role(server, "member")
+            admin = as_role(server, "admin")
+            status, _h, first = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(note="留下", k1=2.0),
+                headers={"If-Match": rev},
+            )
+            assert status == 200, first
+            status, _h, second = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(note="删掉", k1=4.0),
+                headers={"If-Match": first["rev"]},
+            )
+            assert status == 200, second
+            path = _history_file(pid)
+            with open(path, "rb") as fh:
+                raw_before = fh.read()
+            config_before = _file_state(pid)
+            parts_before = _parts(pid)
+            status, _h, denied = visitor.json(
+                "DELETE", DELETE_HIST_URL % (pid, "ppz", second["entry"]["id"])
+            )
+            assert status == 403, denied
+            assert denied["error"]["detail"]["action"] == "settings_write"
+            status, _h, denied = member.json(
+                "DELETE", DELETE_HIST_URL % (pid, "ppz", second["entry"]["id"])
+            )
+            assert status == 403, denied
+            with open(path, "rb") as fh:
+                assert fh.read() == raw_before
+            assert _file_state(pid) == config_before
+            status, _h, missing = admin.json(
+                "DELETE", DELETE_HIST_URL % (pid, "ppz", "ch_999999")
+            )
+            assert status == 404, missing
+            status, _h, wrong_item = admin.json(
+                "DELETE", DELETE_HIST_URL % (pid, "rp_energy", second["entry"]["id"])
+            )
+            assert status == 404, wrong_item
+            status, _h, removed = admin.json(
+                "DELETE", DELETE_HIST_URL % (pid, "ppz", second["entry"]["id"])
+            )
+            assert status == 200, removed
+            assert removed["deleted"] == second["entry"]["id"]
+            assert removed["current_id"] is None
+            assert _file_state(pid) == config_before
+            assert _parts(pid) == parts_before
+            assert _load_item(pid, "ppz")["coeffs"]["k1"] == 4.0
+            status, _h, hist = visitor.json("GET", HIST_URL % (pid, "ppz"))
+            assert [row["id"] for row in hist["entries"]] == [first["entry"]["id"]]
+            assert hist["entries"][0]["current"] is False
+            status, _h, cleared = admin.json(
+                "DELETE", DELETE_HIST_URL % (pid, "ppz", first["entry"]["id"])
+            )
+            assert status == 200, cleared
+            assert cleared["current_id"] is None
+            status, _h, empty = visitor.json("GET", HIST_URL % (pid, "ppz"))
+        assert empty["entries"] == []
+        assert _load_item(pid, "ppz")["coeffs"]["k1"] == 4.0
 
 
 class TestRoutesRegistered:
@@ -1682,3 +1816,4 @@ class TestRoutesRegistered:
         assert ("GET", "/api/v1/p/{pid}/dl/{item}/coeff-history") in templates
         assert ("POST", "/api/v1/p/{pid}/dl/{item}/coeffs") in templates
         assert ("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply") in templates
+        assert ("DELETE", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}") in templates

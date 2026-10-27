@@ -105,9 +105,11 @@ WRITE_ROUTE_ACTIONS = {
     # 全部角色可用，所以登记为 None——不登记会让上面的双向对账直接红。
     ("POST", "/api/v1/p/{pid}/dl/{item}/compute"): None,
     ("POST", "/api/v1/p/{pid}/dl/{item}/extract"): None,
-    # 系数保存与应用历史对所有角色开放（含访客）。只写 k1–k8 与 b，不写上下限。
+    # 系数与整份参数的保存、应用历史对所有角色开放（含访客）。
+    # 删除历史只给管理员，且不改当前正在使用的参数。
     ("POST", "/api/v1/p/{pid}/dl/{item}/coeffs"): None,
     ("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply"): None,
+    ("DELETE", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}"): "settings_write",
     # M3-13（INH-1898）：人员两张表的写接口全部只有部署者（§7.9）。
     ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",

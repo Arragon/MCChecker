@@ -1792,10 +1792,17 @@
         var liveItem = S.saved[itemId];
         var same = !mine && JSON.stringify(packItem(liveItem, itemId)) === JSON.stringify(packItem(entry, itemId));
         var action = mine
-          ? h("span.badge.badge-primary", "当前")
+          ? null
           : same
             ? h("span.xsmall.muted", "与当前相同")
             : h("button.btn.btn-sm", { type: "button", onclick: function (e) { applyEntry(itemId, entry, e.currentTarget, repaint); } }, "应用这套设置");
+        var remove = app.can("admin")
+          ? h("button.btn.btn-sm.btn-danger-ghost", {
+              type: "button",
+              title: "删除这条历史，不改变当前参数",
+              onclick: function (e) { deleteEntry(itemId, entry, e.currentTarget, repaint); },
+            }, "删除")
+          : null;
         function limitText(v) { return v === null || v === undefined || v === "" ? "不限" : util.formatNumber(Number(v)); }
         var bind = entry.binding || {};
         var extras = [
@@ -1815,7 +1822,7 @@
             h("span.badge", EVENT_LABEL[entry.event] || entry.event || "保存系数"),
             mine ? h("span.badge.badge-primary", "当前") : null,
             h("span.spacer"),
-            mine ? null : action
+            h("span.dl-hist-actions", action, remove)
           ),
           entry.note ? h("div.dl-hist-note", entry.note) : null,
           h("div.dl-hist-fn", "y = " + polyText({ coeffs: entry.coeffs })),
@@ -1858,6 +1865,25 @@
         return;
       }
       send();
+    }
+
+    function deleteEntry(id, entry, btn, repaint) {
+      MC.confirm({
+        title: "删除这条历史",
+        message: "只从历史里去掉这条记录，当前正在使用的参数不会改变。",
+        confirmText: "删除",
+        danger: true,
+      }).then(function (ok) {
+        if (!ok) return;
+        MC.withBusy(btn, function () {
+          return api.del(app.p("/dl/" + id + "/coeff-history/" + api.seg(entry.id))).then(function () {
+            MC.toast.success("已删除这条历史");
+            api.get(app.p("/dl/" + id + "/coeff-history"), historyQuery()).then(repaint, function () {});
+          }, function (err) {
+            MC.toastError("删除失败", err);
+          });
+        });
+      });
     }
 
     load();
