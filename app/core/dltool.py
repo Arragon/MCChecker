@@ -68,6 +68,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "aom_width": deepcopy(DEFAULT_ITEM),
             **deepcopy(DEFAULT_ITEM),
         },
+        # PPz 与 RP 能量一样是纯多项式：没有传输/功率换算，也没有第二套参数。
+        "ppz": {
+            "name": "计算PPz",
+            **deepcopy(DEFAULT_ITEM),
+        },
     },
 }
 

@@ -3,7 +3,7 @@
 口径（全部打真实 `MCServer` + 真 HTTP，不 mock 传输层）：
 
 1. **GET /dl**：全部角色；`rev` = `dltool_config.json` 的 sha1 前 12 位（文件不存在时
-   对默认配置的规范字节取哈希），三个计算项齐全；`editing` 读到后忽略；**读路径不建文件、
+   对默认配置的规范字节取哈希），四个计算项齐全；`editing` 读到后忽略；**读路径不建文件、
    不递增修订号**（`tests/data_guard.py` 另有会话级守卫，这里钉的是单次请求）。
    `rev` 与 `items` 在同一次机型锁内读：并发保存不能把它们撕裂成「旧 items + 新 rev」。
 2. **compute / extract**：全部角色、纯计算/预览。三种 mode 的响应形状逐字按 §7.11
@@ -41,7 +41,7 @@ from app.core import dltool, storage
 from app.server.router import build_router
 from app.services import dl, revision
 
-ITEMS = ("pp_energy", "rp_energy", "rp_width")
+ITEMS = ("pp_energy", "rp_energy", "rp_width", "ppz")
 ROLES = ("visitor", "member", "admin", "deployer")
 
 WEB_DIR = os.path.join(
@@ -160,7 +160,7 @@ def _route_templates():
 
 
 class TestGetState:
-    def test_four_roles_get_rev_and_three_items_without_creating_the_file(self):
+    def test_four_roles_get_rev_and_four_items_without_creating_the_file(self):
         pid = seed_roles("dlget")
         path = _config_path(pid)
         assert not os.path.exists(path), "前提：还没人保存过 DL 配置"
@@ -355,6 +355,22 @@ class TestCompute:
         assert status == 200, body
         row = body["results"][0]
         assert row["y_base"] == 3.0 and row["y"] == 12.0
+
+    def test_ppz_forward_is_the_plain_polynomial(self):
+        """PPz 不做传输/功率换算：y 就是 f(x)。"""
+        pid = seed_roles("dlcomputeppz")
+        params = _item(kind="ppz", coeffs={"k1": 2.0, "b": 1.0}, x_min=0.0, x_max=10.0)
+        assert "trans_coeff" not in params
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json(
+                "POST",
+                COMPUTE_URL % (pid, "ppz"),
+                {"mode": "forward", "values": [3], "params": params},
+            )
+        assert status == 200, body
+        row = body["results"][0]
+        assert row["status"] == "ok"
+        assert row["y_base"] == 7.0 and row["y"] == 7.0
 
     def test_all_roles_may_compute(self):
         pid = seed_roles("dlcompute5")
@@ -1146,6 +1162,49 @@ class TestSaveItem:
         assert item["aom_sum"] is None
         assert set(item["aom_width"]) == {"coeffs", "binding", "x_min", "x_max", "y_min", "y_max"}
         assert item["aom_width"]["coeffs"]["k1"] == 0.0
+
+
+class TestPpz:
+    def test_legacy_config_without_ppz_gets_defaults_and_does_not_rewrite(self):
+        """老配置没有 ppz：读出来补默认项，原有系数不动，GET 不写文件。"""
+        pid = seed_roles("dlppzlegacy")
+
+        def strip(cfg):
+            cfg["items"].pop("ppz", None)
+            cfg["items"]["rp_energy"]["coeffs"]["k1"] = 4.0
+
+        _seed_config(pid, mutate=strip)
+        before = _file_state(pid)
+        with make_server() as server:
+            status, _h, body = as_role(server, "visitor").json("GET", DL_URL % pid)
+        assert status == 200, body
+        assert body["items"]["rp_energy"]["coeffs"]["k1"] == 4.0
+        ppz = body["items"]["ppz"]
+        assert ppz["name"] == "计算PPz"
+        assert ppz["coeffs"]["k1"] == 0.0
+        assert set(ppz) == {"name", "coeffs", "binding", "x_min", "x_max", "y_min", "y_max"}
+        assert _file_state(pid) == before
+
+    def test_ppz_save_keeps_plain_polynomial_fields(self):
+        pid = seed_roles("dlppzsave")
+        rev = _seed_config(pid)
+        payload = _load_item(pid, "ppz")
+        payload["coeffs"]["k1"] = 0.25
+        with make_server() as server:
+            status, _h, body = as_role(server, "deployer").json(
+                "PUT",
+                ITEM_URL % (pid, "ppz"),
+                payload,
+                headers={"If-Match": rev},
+            )
+        assert status == 200, body
+        saved = _load_item(pid, "ppz")
+        assert saved["coeffs"]["k1"] == 0.25
+        assert saved["name"] == "计算PPz"
+        assert "trans_coeff" not in saved
+        assert "power_conv_coeff" not in saved
+        assert "aom_width" not in saved
+        assert "aom_sum" not in saved
 
 
 class TestTransCoeffZero:

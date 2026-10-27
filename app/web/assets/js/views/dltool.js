@@ -1,5 +1,5 @@
 /*
- * DL 快捷计算：f(x) = k1·x + k2·x² + … + k8·x⁸ + b，三个计算项（PP 能量 / RP 能量 / RP 脉宽）。
+ * DL 快捷计算：f(x) = k1·x + k2·x² + … + k8·x⁸ + b，四个计算项（PP 能量 / RP 能量 / RP 脉宽 / PPz）。
  * - 参数修改先进入“本地草稿”，所有人都可用草稿试算；只有部署者能把草稿保存为共享配置（If-Match 防覆盖）。
  * - 计算由服务端完成（POST .../compute，传入草稿参数），结果按 input_index 与输入一一对应，越界行明确标出而不是静默丢弃。
  * - 输入数值后自动计算（防抖）；改参数同样自动重算，结果始终对应当前参数。
@@ -23,6 +23,7 @@
     { id: "pp_energy", label: "PP 能量" },
     { id: "rp_energy", label: "RP 能量" },
     { id: "rp_width", label: "RP 脉宽" },
+    { id: "ppz", label: "PPz" },
   ];
   var AXES = {
     pp_energy: { x: "电动波片角度", xUnit: "urad", y: "PP@PF能量", yUnit: "mJ" },
@@ -30,9 +31,10 @@
     rp_width: {
       x: "RP脉宽",
       xUnit: "ns",
-      delay: { name: "AOM2 delay(SMSM1页面)", unit: "ns", mode: "AOM2 delay 模式" },
-      width: { name: "AOM2 width(SMSM1页面)", unit: "ns", mode: "AOM2 width 模式" },
+      delay: { name: "AOM2 delay(SMIM1页面)", unit: "ns", mode: "AOM2 delay 模式" },
+      width: { name: "AOM2 width(SMIM1页面)", unit: "ns", mode: "AOM2 width 模式" },
     },
+    ppz: { x: "调焦镜发散角", xUnit: "urad", y: "BTS_ppz", yUnit: "um" },
   };
   var RANGE_KEYS = ["x_min", "x_max", "y_min", "y_max"];
 
@@ -40,7 +42,7 @@
     return unit ? name + "（" + unit + "）" : name;
   }
 
-  /** 「AOM2 delay(SMSM1页面)」拆成主名 + 页面备注，两段各自不折行，避免在「页」「面」之间断开。 */
+  /** 「AOM2 delay(SMIM1页面)」拆成主名 + 页面备注，两段各自不折行，避免在「页」「面」之间断开。 */
   function splitName(name) {
     var m = /^(.*?)\s*(\([^)]*页面\))\s*$/.exec(String(name));
     return m && m[1] ? { main: m[1], note: m[2] } : { main: String(name), note: "" };
@@ -49,6 +51,11 @@
   function nameNode(name, unit) {
     var parts = splitName(name);
     return h("span.dl-name", h("span.dl-name-main", parts.main), parts.note ? h("small.dl-note", parts.note) : null, unit ? h("small.dl-unit-tag", unit) : null);
+  }
+
+  function knownItem(id) {
+    for (var i = 0; i < ITEMS.length; i++) if (ITEMS[i].id === id) return id;
+    return "pp_energy";
   }
 
   function axisOf(id, aom) {
@@ -637,7 +644,7 @@
       rev: null,
       saved: null,
       draft: null,
-      item: q.item || "pp_energy",
+      item: knownItem(q.item),
       aom: q.aom === "width" ? "width" : "delay",
       dir: "forward",
       inputs: {},
@@ -684,6 +691,10 @@
       api.get(app.p("/dl")).then(function (res) {
         S.rev = res.rev;
         if (res.items.rp_width && !res.items.rp_width.aom_width) res.items.rp_width.aom_width = emptySet();
+        if (!res.items.ppz) {
+          res.items.ppz = emptySet();
+          res.items.ppz.name = "计算PPz";
+        }
         S.saved = res.items;
         S.draft = clone(res.items);
         render();
@@ -1558,7 +1569,7 @@
       update: function (r) {
         var qy = r.query || {};
         var changed = false;
-        if (qy.item && qy.item !== S.item && S.draft) { S.item = qy.item; changed = true; }
+        if (qy.item && knownItem(qy.item) !== S.item && S.draft) { S.item = knownItem(qy.item); changed = true; }
         if ((qy.aom === "delay" || qy.aom === "width") && qy.aom !== S.aom && S.draft) { S.aom = qy.aom; changed = true; }
         if (changed) render();
       },

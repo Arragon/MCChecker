@@ -109,7 +109,7 @@ MCChecker 是部署在内网、面向设备配置人员的 **XML/JSON 配置文�
 | F18 | 管理员列表 | 姓名列表，增删改；全机型共用一份 | `storage.*admin_user*` | 设置 · 人员与权限 |
 | F19 | 变量绑定 | 绑定组 = 名称 + 若干（文件, 路径）；对比时标注绑定组 | `pages/bindings.py`、`storage.*binding*`、`differ` | 设置 · 变量绑定；对比结果紫色标签 |
 | F20 | 工具菜单 | 名称/说明/地址增删改；点击在新窗口打开 | `views/tools.js`、`services/tools.py` | 侧栏按钮「外部工具」（位于 DL 计算与设置之间）；设置 · 工具菜单 |
-| F21 | DL 快捷计算 | 三个计算项（PP 能量/RP 能量/RP 脉宽）；系数 k1–k8、b；PP 额外“传输系数/功率转换系数”；x/y 范围；正向/反向；多解检测与提示；多解时手选生成唯一解表；从配置文件按字段映射提取系数并可刷新；修改/保存/取消 | `pages/dltool.py`、`core/dltool.py` | 「DL 计算」 |
+| F21 | DL 快捷计算 | 四个计算项（PP 能量/RP 能量/RP 脉宽/PPz）；系数 k1–k8、b；PP 额外“传输系数/功率转换系数”；x/y 范围；正向/反向；多解检测与提示；多解时手选生成唯一解表；从配置文件按字段映射提取系数并可刷新；修改/保存/取消 | `pages/dltool.py`、`core/dltool.py` | 「DL 计算」 |
 | F22 | 多机型 | 切换、新增（可从当前复制）、重命名、删除（可选同时删数据）；所有业务数据按机型隔离 | `home.py`、`core/device_models.py`、`storage.copy/delete_profile_data` | 顶栏机型切换；设置 · 机型管理 |
 | F23 | 标签页工作区 | 多标签、上限 15（淘汰最早非活动）、关闭相邻激活、返回历史栈、按机型持久化 | `home.py`、`core/tab_manager.py`、`core/tabs_state.py` | 标签栏（§8.4） |
 | F24 | 身份识别 | 部署者 = 服务器本机 IP；管理员 = IP 对应姓名在管理员名单；顶栏身份徽标 | `utils/auth.py` | 顶栏身份按钮 + 身份说明弹层 |
@@ -424,12 +424,12 @@ data/
 
 **ip_mapping.json** `[{"ip", "name", "updated_at"}]`；**admin_users.json** `[{"name", "updated_at"}]`。
 
-**dltool_config.json**（原有字段与现状完全相同；`rp_width` 新增 `aom_sum` 与 `aom_width`，见 §9.8.7，老配置读取时补默认值）
+**dltool_config.json**（原有字段与现状完全相同；`rp_width` 新增 `aom_sum` 与 `aom_width`，并新增计算项 `ppz`，见 §9.8.7，老配置读取时补默认值）
 ```json
 {"editing": false, "items": {"pp_energy": {"name": "计算PP能量", "trans_coeff": 1.0, "power_conv_coeff": 1.0,
   "coeffs": {"k1": 0.0, "…": 0.0, "k8": 0.0, "b": 0.0},
   "binding": {"source_file": "", "variable_path": "", "field_map": {"m1": "k1"}},
-  "x_min": null, "x_max": null, "y_min": null, "y_max": null}, "rp_energy": {…}, "rp_width": {…}}}
+  "x_min": null, "x_max": null, "y_min": null, "y_max": null}, "rp_energy": {…}, "rp_width": {…}, "ppz": {…}}}
 ```
 - `editing` 字段读取时忽略、写入时保持 `false`（编辑态改为前端本地草稿，C15）。`null` 表示未设置，**不得**再用 `value or 0.0` 把空值写成 0。
 
@@ -775,7 +775,7 @@ def compare_documents(base: CompactDoc, target: CompactDoc, base_name: str, targ
 
 | 方法 路径 | 权限 | 请求 → 响应 |
 |---|---|---|
-| `GET /p/{pid}/dl` | 全部 | `{"rev": "<dltool_config.json 的 sha1 前 12 位>", "items": {pp_energy, rp_energy, rp_width}}` |
+| `GET /p/{pid}/dl` | 全部 | `{"rev": "<dltool_config.json 的 sha1 前 12 位>", "items": {pp_energy, rp_energy, rp_width, ppz}}` |
 | `PUT /p/{pid}/dl/{item}` | 部署者 | 头 `If-Match: <rev>`；body 为完整 item；校验（§9.8.7 规则）→ `{"rev","item"}`；rev 不符 → 409 `REVISION_CONFLICT` |
 | `POST /p/{pid}/dl/{item}/extract` | 全部 | `{"binding": {"source_file","variable_path","field_map"}}` → `{"coeffs": {成功提取的键}, "fields": [{"field","coeff","status": "ok\|missing\|invalid","value"\|"raw"}]}`（只预览，不保存） |
 | `POST /p/{pid}/dl/{item}/compute` | 全部 | `{"mode": "forward\|reverse\|multi_check","values": [number],"params": item}` → forward：`{"results": [{"input_index","x","y_base","y","status": "ok\|out_of_x_range\|out_of_y_range"}]}`；reverse：`{"results": [{"input_index","y","y_base","x_values","residuals","status": "single\|multiple\|none\|identity\|out_of_y_range"}],"exhaustive": false}`；multi_check：`{"has_multi","cases": [{"y","x_values"}]}` |
@@ -846,7 +846,7 @@ app/web/
 | `#/p/{pid}/f/{name}` | 文件工作区 | `view=tree\|history\|compare\|records`（缺省 tree）、`version=archive:…\|record:…`、`node=<loc 或旧 ID>`、`base`/`target`（对比两侧，取值 `current`/`archive:…`/`record:…`/`temp:<token>`） |
 | `#/p/{pid}/t/{token}` | 临时文件（同文件工作区，仅结构/对比） | 同上 |
 | `#/p/{pid}/review` | 审阅 | — |
-| `#/p/{pid}/dl` | DL 计算 | `item=pp_energy\|rp_energy\|rp_width` |
+| `#/p/{pid}/dl` | DL 计算 | `item=pp_energy\|rp_energy\|rp_width\|ppz` |
 | `#/p/{pid}/settings/{section}` | 设置 | section：`sources\|schedule\|people\|bindings\|tools\|profiles` |
 
 URL 永远携带 `pid`，从而修复“记录链接不带机型”；同事拿到链接即打开同一机型、文件、版本与节点。
@@ -1106,8 +1106,8 @@ MC.views[kind] = function (app, route) {
 
 #### 9.8.7 DL 计算（`views/dltool.js`）
 
-- 页头：标题 + 计算项分段 PP 能量｜RP 能量｜RP 脉宽（有未保存修改的项显示“•”）；当前项有未保存修改时，页头右侧出现“有未保存的修改”+“放弃修改”+“保存为配置”（仅部署者；`If-Match` 冲突时提示加载最新或保留草稿）。非部署者可用草稿试算。保存组只在脏状态变化时重建，避免点击途中被替换。
-- 轴名与单位：PP 能量 x=电动波片角度（urad）、y=PP@PF能量（mJ）；RP 能量 x=RP能量（mJ）、y=TFP2角度(SMTM页面)（urad）；RP 脉宽 x=RP脉宽（ns）、y=AOM2 delay(SMSM1页面)（ns）或 AOM2 width(SMSM1页面)（ns）。
+- 页头：标题 + 计算项分段 PP 能量｜RP 能量｜RP 脉宽｜PPz（有未保存修改的项显示“•”）；当前项有未保存修改时，页头右侧出现“有未保存的修改”+“放弃修改”+“保存为配置”（仅部署者；`If-Match` 冲突时提示加载最新或保留草稿）。非部署者可用草稿试算。保存组只在脏状态变化时重建，避免点击途中被替换。
+- 轴名与单位：PP 能量 x=电动波片角度（urad）、y=PP@PF能量（mJ）；RP 能量 x=RP能量（mJ）、y=TFP2角度(SMTM页面)（urad）；RP 脉宽 x=RP脉宽（ns）、y=AOM2 delay(SMIM1页面)（ns）或 AOM2 width(SMIM1页面)（ns）；PPz x=调焦镜发散角（urad）、y=BTS_ppz（um）。PPz 与 RP 能量一样是纯多项式，老配置读取时补默认项。
 - 布局（宽屏 ≥1500 px：求解区在左、参数卡片 390 px 在右；窄屏：求解区在上、参数卡片在下，参数卡片内部按列自适应）：
   - RP 脉宽独有“输出量”卡片：两个模式卡片（AOM2 delay 模式 / AOM2 width 模式，各显示名称与一行函数摘要，有未保存修改的显示橙点）+ “固定和”输入（AOM2 delay + AOM2 width，ns）。两种模式使用各自独立的一套系数、有效范围与系数绑定。
   - “求解”卡片：卡片头是方向分段（正向 x→y / 反向 y→x）；下面一条“x 名称 → y 名称”提示；左为输入（多行，空格/逗号/分号/换行分隔；实时提示“已识别 n 个数值”及被忽略的片段；计算/求解、清空；Ctrl+Enter 立即计算），右为数值关系曲线（按草稿系数绘制；取景包住已填的 x/y 上下界、全部计算点，以及离它们不远的极值点；离得很远的极值不拉轴，曲线超出该范围的部分裁掉；x 上下限竖虚线，y 上下限横虚线；计算点标号，超出边界为空心橙点；画面内的极值点用小字标出坐标；结果行悬停时高亮对应点；坐标轴标注名称；多项式系数的 k₁x…k₈x⁸ 用 16px 等宽字）。输入停下约 350 ms 后自动计算，改参数 220 ms 后自动重算，结果始终对应当前参数；服务端返回 400（如传输系数为 0）时在结果区显示错误横幅而不是弹 Toast。
