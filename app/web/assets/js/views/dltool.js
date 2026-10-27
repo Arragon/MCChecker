@@ -1761,8 +1761,8 @@
 
     function historyDialog(id) {
       var host = h("div.dl-hist");
-      var mode = id === "rp_width" ? AXES.rp_width[S.aom].mode : "";
-      var subtitle = ITEMS.filter(function (it) { return it.id === id; })[0].label + (mode ? " · " + mode : "");
+      var subtitle = ITEMS.filter(function (it) { return it.id === id; })[0].label;
+      if (id === "rp_width") subtitle += " · 两种模式记在同一条里";
 
       function paint(res) {
         var entries = res.entries || [];
@@ -1804,15 +1804,50 @@
             }, "删除")
           : null;
         function limitText(v) { return v === null || v === undefined || v === "" ? "不限" : util.formatNumber(Number(v)); }
-        var bind = entry.binding || {};
-        var extras = [
-          "x " + limitText(entry.x_min) + " ~ " + limitText(entry.x_max),
-          "y " + limitText(entry.y_min) + " ~ " + limitText(entry.y_max),
-          bind.source_file ? "绑定 " + bind.source_file : "未绑定",
-        ];
-        if (entry.trans_coeff !== undefined) extras.push("传输 " + entry.trans_coeff + " · 功率转换 " + entry.power_conv_coeff);
-        if (entry.aom_sum !== undefined) extras.push("固定和 " + (entry.aom_sum === null || entry.aom_sum === undefined || entry.aom_sum === "" ? "未设置" : util.formatNumber(Number(entry.aom_sum))));
-        if (entry.aom_width && entry.aom_width.coeffs) extras.push("width y = " + polyText({ coeffs: entry.aom_width.coeffs }));
+        function bindText(set) {
+          var bind = (set && set.binding) || {};
+          var map = bind.field_map || {};
+          var keys = Object.keys(map);
+          if (!bind.source_file) return "未绑定";
+          var text = "绑定 " + bind.source_file;
+          if (bind.variable_path) text += " · " + bind.variable_path;
+          if (keys.length) text += " · " + keys.map(function (k) { return k + "→" + (SUB[map[k]] || map[k]); }).join(" ");
+          return text;
+        }
+        function modeBlock(label, tone, set) {
+          set = set || {};
+          return h(
+            "div.dl-hist-mode.is-" + tone,
+            h("div.dl-hist-mode-head", h("span.badge" + (tone === "width" ? ".badge-warning" : ""), label)),
+            h("div.dl-hist-fn", "y = " + polyText({ coeffs: set.coeffs })),
+            h("div.xsmall.muted", "x " + limitText(set.x_min) + " ~ " + limitText(set.x_max) + " · y " + limitText(set.y_min) + " ~ " + limitText(set.y_max)),
+            h("div.xsmall.muted", bindText(set))
+          );
+        }
+        var body;
+        if (itemId === "rp_width") {
+          var sum = entry.aom_sum;
+          body = [
+            h(
+              "div.dl-hist-modes",
+              modeBlock(AXES.rp_width.delay.mode, "delay", entry),
+              modeBlock(AXES.rp_width.width.mode, "width", entry.aom_width || {})
+            ),
+            h("div.xsmall.muted", "固定和 " + (sum === null || sum === undefined || sum === "" ? "未设置" : util.formatNumber(Number(sum)))),
+          ];
+        } else {
+          var bind = entry.binding || {};
+          var extras = [
+            "x " + limitText(entry.x_min) + " ~ " + limitText(entry.x_max),
+            "y " + limitText(entry.y_min) + " ~ " + limitText(entry.y_max),
+            bind.source_file ? "绑定 " + bind.source_file : "未绑定",
+          ];
+          if (entry.trans_coeff !== undefined) extras.push("传输 " + entry.trans_coeff + " · 功率转换 " + entry.power_conv_coeff);
+          body = [
+            h("div.dl-hist-fn", "y = " + polyText({ coeffs: entry.coeffs })),
+            h("div.xsmall.muted", extras.join(" · ")),
+          ];
+        }
         return h(
           "article.dl-hist-item" + (mine ? ".is-current" : ""),
           h(
@@ -1825,8 +1860,7 @@
             h("span.dl-hist-actions", action, remove)
           ),
           entry.note ? h("div.dl-hist-note", entry.note) : null,
-          h("div.dl-hist-fn", "y = " + polyText({ coeffs: entry.coeffs })),
-          h("div.xsmall.muted", extras.join(" · "))
+          body
         );
       }
 
