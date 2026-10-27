@@ -1123,7 +1123,7 @@
       P.favorites.forEach(function (f) { if (f.source_file === a.name) f.source_file = name; });
       P.remarks.forEach(function (r) { if (r.source_file === a.name) r.source_file = name; });
       P.bindings.forEach(function (b) { b.variables.forEach(function (v) { if (v.file === a.name) v.file = name; }); });
-      ["pp_energy", "rp_energy", "rp_width"].forEach(function (k) {
+      ["pp_energy", "rp_energy", "rp_width", "ppz"].forEach(function (k) {
         var it = P.dl && P.dl.items && P.dl.items[k];
         if (it && it.binding && it.binding.source_file === a.name) it.binding.source_file = name;
       });
@@ -1632,7 +1632,7 @@
     return ok({ removed: removed });
   });
 
-  var DL_ITEMS = ["pp_energy", "rp_energy", "rp_width"];
+  var DL_ITEMS = ["pp_energy", "rp_energy", "rp_width", "ppz"];
   var DL_MODES = ["forward", "reverse", "multi_check"];
   var DL_TRANS_ZERO_MESSAGE = "传输系数不能为 0";
 
@@ -1795,6 +1795,12 @@
 
   function dlConfig(P) {
     if (!P.dl) P.dl = clone(S.profiles["default"].dl);
+    if (!P.dl.items) P.dl.items = {};
+    if (!P.dl.items.ppz) {
+      var ppz = emptyDlSet();
+      ppz.name = "计算PPz";
+      P.dl.items.ppz = ppz;
+    }
     var rp = P.dl.items && P.dl.items.rp_width;
     if (rp) {
       if (!Object.prototype.hasOwnProperty.call(rp, "aom_sum")) rp.aom_sum = null;

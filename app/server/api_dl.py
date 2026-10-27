@@ -30,7 +30,7 @@ def get_state(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    # GET /api/v1/p/{pid}/dl -> {"rev", "items": {pp_energy, rp_energy, rp_width}}
+    # GET /api/v1/p/{pid}/dl -> {"rev", "items": {pp_energy, rp_energy, rp_width, ppz}}
     authz.authorize(ctx, "read")
     return Response(payload=dl.get_state(params["pid"]))
 

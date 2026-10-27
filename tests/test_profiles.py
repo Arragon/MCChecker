@@ -327,4 +327,4 @@ class TestDltoolConfigIntegrity:
 
         storage.set_active_profile("p1")
         cfg = dltool.load_config()
-        assert set(cfg["items"]) == {"pp_energy", "rp_energy", "rp_width"}
+        assert set(cfg["items"]) == {"pp_energy", "rp_energy", "rp_width", "ppz"}

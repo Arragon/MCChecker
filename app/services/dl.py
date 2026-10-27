@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 #: DL 配置属设置域（M3-17 会审这个归属）。
 PART = "settings"
 
-ITEMS = ("pp_energy", "rp_energy", "rp_width")
+ITEMS = ("pp_energy", "rp_energy", "rp_width", "ppz")
 MODES = ("forward", "reverse", "multi_check")
 
 _COEFF_FIELDS = dltool.KEYS + ("b",)
@@ -88,7 +88,7 @@ def current_rev(pid: str) -> str:
 
 
 def get_state(pid: str) -> Dict[str, Any]:
-    """`GET /p/{pid}/dl` → `{"rev", "items": {pp_energy, rp_energy, rp_width}}`。
+    """`GET /p/{pid}/dl` → `{"rev", "items": {pp_energy, rp_energy, rp_width, ppz}}`。
 
     `dltool_config.json` 里的 `editing`（v1 的共享编辑态）**读到后忽略**：v2 不做共享
     编辑态（C15），草稿只存在于浏览器内存。
@@ -286,7 +286,7 @@ def save_item(
         cfg["editing"] = False  # v2 不做共享编辑态（C15）
         items = cfg.get("items")
         if not isinstance(items, dict) or not isinstance(items.get(item), dict):
-            # `_ensure_defaults` 保证三件都在；走到这里说明文件形状被破坏。
+            # `_ensure_defaults` 保证各项都在；走到这里说明文件形状被破坏。
             raise AppError(NOT_FOUND, "计算项不存在")
         new_item = _merged_item(items[item], clean, name, binding, aom)
         items[item] = new_item
