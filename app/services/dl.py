@@ -238,6 +238,7 @@ def save_item(
     item: str,
     payload: Optional[Dict[str, Any]],
     if_match: Optional[str],
+    actor: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """`PUT /p/{pid}/dl/{item}` → `{"rev", "item"}`。
 
@@ -288,9 +289,14 @@ def save_item(
         if not isinstance(items, dict) or not isinstance(items.get(item), dict):
             # `_ensure_defaults` 保证各项都在；走到这里说明文件形状被破坏。
             raise AppError(NOT_FOUND, "计算项不存在")
-        new_item = _merged_item(items[item], clean, name, binding, aom)
+        before_item = deepcopy(items[item])
+        new_item = _merged_item(before_item, clean, name, binding, aom)
         items[item] = new_item
+        from .dl_history import ensure_history_readable, record_config_save
+
+        ensure_history_readable()
         dltool.save_config(cfg)
+        record_config_save(item, before_item, new_item, actor)
         new_rev = _current_rev_in_profile()
 
     revision.bump(pid, PART)

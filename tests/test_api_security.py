@@ -105,6 +105,9 @@ WRITE_ROUTE_ACTIONS = {
     # 全部角色可用，所以登记为 None——不登记会让上面的双向对账直接红。
     ("POST", "/api/v1/p/{pid}/dl/{item}/compute"): None,
     ("POST", "/api/v1/p/{pid}/dl/{item}/extract"): None,
+    # 系数保存与应用历史对所有角色开放（含访客）。只写 k1–k8 与 b，不写上下限。
+    ("POST", "/api/v1/p/{pid}/dl/{item}/coeffs"): None,
+    ("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply"): None,
     # M3-13（INH-1898）：人员两张表的写接口全部只有部署者（§7.9）。
     ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
     ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings_write",
@@ -181,7 +184,7 @@ WRITE_ROUTE_ACTIONS = {
 
 ROUTE_VALUES = {
     "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
-    "item": "pp_energy", "group": "g1",
+    "item": "pp_energy", "group": "g1", "hid": "ch_000001",
     # 配置域对象 ID（M6-01/02）：形状必须是 `<prefix>_<6 位>`，否则会先撞上 ID 校验
     # 而不是权限矩阵——这里要验的是"权限先于存在性"。
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
