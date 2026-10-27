@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from ..services import authz, dl
+from ..services import authz, dl, dl_history
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
@@ -22,6 +22,9 @@ def register(router: Router) -> None:
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/compute", compute)
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/extract", extract)
     router.add("PUT", "/api/v1/p/{pid}/dl/{item}", save_item)
+    router.add("GET", "/api/v1/p/{pid}/dl/{item}/coeff-history", coeff_history)
+    router.add("POST", "/api/v1/p/{pid}/dl/{item}/coeffs", save_coefficients)
+    router.add("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply", apply_coefficients)
 
 
 def get_state(
@@ -85,5 +88,52 @@ def save_item(
     authz.authorize(ctx, "settings_write")
     if_match = (ctx.headers or {}).get("if-match")
     return Response(
-        payload=dl.save_item(params["pid"], params["item"], json_body(body), if_match)
+        payload=dl.save_item(params["pid"], params["item"], json_body(body), if_match, ctx.actor)
+    )
+
+
+def coeff_history(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    # GET /api/v1/p/{pid}/dl/{item}/coeff-history?aom=delay|width
+    # 全部角色。只读，不建历史文件。
+    authz.authorize(ctx, "read")
+    aom = (query.get("aom") or [None])[0]
+    return Response(payload=dl_history.list_history(params["pid"], params["item"], aom))
+
+
+def save_coefficients(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    # POST /api/v1/p/{pid}/dl/{item}/coeffs
+    # 全部角色。只写多项式系数，可带备注。If-Match 缺失或过期 → 409。
+    authz.authorize(ctx, "read")
+    if_match = (ctx.headers or {}).get("if-match")
+    return Response(
+        payload=dl_history.save_coefficients(
+            params["pid"], params["item"], json_body(body), if_match, ctx.actor
+        )
+    )
+
+
+def apply_coefficients(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    # POST /api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply
+    # 全部角色。只把该条历史的系数写成当前系数。
+    authz.authorize(ctx, "read")
+    if_match = (ctx.headers or {}).get("if-match")
+    return Response(
+        payload=dl_history.apply_history(
+            params["pid"], params["item"], params["hid"], if_match, ctx.actor
+        )
     )

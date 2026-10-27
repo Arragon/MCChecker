@@ -52,6 +52,9 @@ DL_URL = "/api/v1/p/%s/dl"
 ITEM_URL = "/api/v1/p/%s/dl/%s"
 COMPUTE_URL = "/api/v1/p/%s/dl/%s/compute"
 EXTRACT_URL = "/api/v1/p/%s/dl/%s/extract"
+COEFF_URL = "/api/v1/p/%s/dl/%s/coeffs"
+HIST_URL = "/api/v1/p/%s/dl/%s/coeff-history"
+APPLY_URL = "/api/v1/p/%s/dl/%s/coeff-history/%s/apply"
 
 SOURCE = "dl_source.xml"
 SOURCE_DOC = (
@@ -1369,6 +1372,306 @@ class TestExtremeValues:
 # ---------------------------------------------------------------------------
 
 
+def _coeff_body(note="", aom=None, binding=None, x_min=None, x_max=None, y_min=None, y_max=None,
+                trans=None, power=None, aom_sum=None, aom_width=None, **coeffs):
+    body_coeffs = {f"k{i}": 0.0 for i in range(1, 9)}
+    body_coeffs["b"] = 0.0
+    body_coeffs.update(coeffs)
+    body = {
+        "coeffs": body_coeffs,
+        "note": note,
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "binding": binding or {"source_file": "", "variable_path": "", "field_map": {}},
+    }
+    if aom:
+        body["aom"] = aom
+    if trans is not None or power is not None:
+        body["trans_coeff"] = 1.0 if trans is None else trans
+        body["power_conv_coeff"] = 1.0 if power is None else power
+    if aom_sum is not None or aom_width is not None:
+        body["aom_sum"] = aom_sum
+        body["aom_width"] = aom_width
+    return body
+    body_coeffs = {f"k{i}": 0.0 for i in range(1, 9)}
+    body_coeffs["b"] = 0.0
+    body_coeffs.update(coeffs)
+    body = {
+        "coeffs": body_coeffs,
+        "note": note,
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "binding": binding or {"source_file": "", "variable_path": "", "field_map": {}},
+    }
+    if aom:
+        body["aom"] = aom
+    if trans is not None or power is not None:
+        body["trans_coeff"] = 1.0 if trans is None else trans
+        body["power_conv_coeff"] = 1.0 if power is None else power
+    return body
+
+
+def _history_file(pid):
+    from app.services import dl_history
+
+    with storage.use_profile(pid):
+        return dl_history.history_path()
+
+
+class TestCoeffHistory:
+    def test_visitor_saves_coefficients_limits_and_binding(self):
+        pid = seed_roles("dlcoeff")
+
+        def limit(cfg):
+            cfg["items"]["ppz"]["x_min"] = 3.0
+            cfg["items"]["ppz"]["x_max"] = 9.0
+            cfg["items"]["ppz"]["coeffs"]["b"] = 1.0
+
+        rev = _seed_config(pid, mutate=limit)
+        binding = {"source_file": "bts.xml", "variable_path": "root/ppz", "field_map": {"m1": "k1"}}
+        assert not os.path.exists(_history_file(pid))
+        with make_server() as server:
+            visitor = as_role(server, "visitor")
+            status, _h, empty = visitor.json("GET", HIST_URL % (pid, "ppz"))
+            assert status == 200, empty
+            assert empty["entries"] == []
+            assert empty["current_id"] is None
+            assert not os.path.exists(_history_file(pid)), "读取历史不得创建文件"
+            status, _h, saved = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(note="  现场试算  ", k1=2.0, b=1.0, x_min=4.0, x_max=9.0, binding=binding),
+                headers={"If-Match": rev},
+            )
+            assert status == 200, saved
+            assert saved["unchanged"] is False
+            assert saved["coeffs"]["k1"] == 2.0
+            assert saved["snapshot"]["x_min"] == 4.0
+            assert saved["snapshot"]["binding"]["source_file"] == "bts.xml"
+            assert saved["entry"]["event"] == "save"
+            assert saved["entry"]["note"] == "现场试算"
+            assert saved["entry"]["x_min"] == 4.0
+            assert saved["entry"]["actor_ip"] == "10.0.0.1"
+            assert saved["entry"]["actor_name"] == ""
+            assert saved["entry"]["current"] is True
+            status, _h, hist = visitor.json("GET", HIST_URL % (pid, "ppz"))
+        assert status == 200, hist
+        assert hist["current_id"] == saved["entry"]["id"]
+        assert hist["entries"][0]["current"] is True
+        item = _load_item(pid, "ppz")
+        assert item["coeffs"]["k1"] == 2.0
+        assert item["coeffs"]["b"] == 1.0
+        assert item["x_min"] == 4.0 and item["x_max"] == 9.0
+        assert item["binding"]["variable_path"] == "root/ppz"
+        assert item["binding"]["field_map"] == {"m1": "k1"}
+        assert "trans_coeff" not in item
+
+    def test_member_name_is_stored_and_ranges_survive_apply(self):
+        pid = seed_roles("dlcoeff2")
+
+        def limit(cfg):
+            cfg["items"]["rp_energy"]["y_min"] = -4.0
+
+        rev = _seed_config(pid, mutate=limit)
+        with make_server() as server:
+            member = as_role(server, "member")
+            status, _h, first = member.json(
+                "POST",
+                COEFF_URL % (pid, "rp_energy"),
+                _coeff_body(
+                    note="第一套",
+                    k1=2.0,
+                    y_min=-4.0,
+                    binding={"source_file": "rp.xml", "variable_path": "root/rp", "field_map": {"n": "b"}},
+                ),
+                headers={"If-Match": rev},
+            )
+            assert status == 200, first
+            assert first["entry"]["actor_name"] == "成员甲"
+            assert first["entry"]["actor_ip"] == "10.0.0.2"
+            status, _h, second = member.json(
+                "POST",
+                COEFF_URL % (pid, "rp_energy"),
+                _coeff_body(note="第二套", k1=5.0, y_min=6.0),
+                headers={"If-Match": first["rev"]},
+            )
+            assert status == 200, second
+            status, _h, hist = member.json("GET", HIST_URL % (pid, "rp_energy"))
+            assert hist["entries"][0]["note"] == "第二套"
+            assert hist["entries"][0]["current"] is True
+            assert hist["entries"][1]["current"] is False
+            status, _h, applied = member.json(
+                "POST",
+                APPLY_URL % (pid, "rp_energy", first["entry"]["id"]),
+                {},
+                headers={"If-Match": second["rev"]},
+            )
+        assert status == 200, applied
+        assert applied["unchanged"] is False
+        assert applied["entry"]["event"] == "apply"
+        assert applied["entry"]["source_id"] == first["entry"]["id"]
+        assert applied["coeffs"]["k1"] == 2.0
+        assert applied["snapshot"]["y_min"] == -4.0
+        assert applied["snapshot"]["binding"]["source_file"] == "rp.xml"
+        stored = _load_item(pid, "rp_energy")
+        assert stored["y_min"] == -4.0
+        assert stored["coeffs"]["k1"] == 2.0
+        assert stored["binding"]["variable_path"] == "root/rp"
+
+    def test_same_coefficients_do_not_add_another_row(self):
+        pid = seed_roles("dlcoeff3")
+        rev = _seed_config(pid)
+        with make_server() as server:
+            status, _h, saved = as_role(server, "visitor").json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(),
+                headers={"If-Match": rev},
+            )
+        assert status == 200, saved
+        assert saved["unchanged"] is True
+        assert saved["entry"] is None
+        assert not os.path.exists(_history_file(pid))
+
+    def test_missing_revision_and_bad_note_do_not_write(self):
+        pid = seed_roles("dlcoeff4")
+        rev = _seed_config(pid)
+        before = _file_state(pid)
+        with make_server() as server:
+            visitor = as_role(server, "visitor")
+            status, _h, missing = visitor.json("POST", COEFF_URL % (pid, "ppz"), _coeff_body(k1=1.0))
+            assert status == 409, missing
+            assert missing["error"]["code"] == "REVISION_CONFLICT"
+            status, _h, long_note = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(note="字" * 201, k1=1.0),
+                headers={"If-Match": rev},
+            )
+            assert status == 400, long_note
+            status, _h, bad = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "ppz"),
+                _coeff_body(k1="abc"),
+                headers={"If-Match": rev},
+            )
+        assert status == 400, bad
+        assert _file_state(pid) == before
+        assert not os.path.exists(_history_file(pid))
+
+    def test_rp_width_saves_both_modes_and_the_fixed_sum(self):
+        pid = seed_roles("dlcoeff5")
+        rev = _seed_config(pid)
+        width = _coeff_body(k1=0.8, x_min=7.0, x_max=30.0)
+        width.pop("note", None)
+        with make_server() as server:
+            visitor = as_role(server, "visitor")
+            status, _h, saved = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "rp_width"),
+                _coeff_body(k1=0.5, x_min=1.0, x_max=20.0, aom_sum=100, aom_width=width, note="整份"),
+                headers={"If-Match": rev},
+            )
+            assert status == 200, saved
+            assert saved["snapshot"]["aom_sum"] == 100
+            assert saved["snapshot"]["aom_width"]["coeffs"]["k1"] == 0.8
+            assert saved["snapshot"]["coeffs"]["k1"] == 0.5
+            status, _h, second = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "rp_width"),
+                _coeff_body(k1=0.5, x_min=1.0, x_max=20.0, aom_sum=40, aom_width=width),
+                headers={"If-Match": saved["rev"]},
+            )
+            assert status == 200, second
+            status, _h, applied = visitor.json(
+                "POST",
+                APPLY_URL % (pid, "rp_width", saved["entry"]["id"]),
+                {},
+                headers={"If-Match": second["rev"]},
+            )
+            status, _h, hist = visitor.json("GET", HIST_URL % (pid, "rp_width"))
+        assert status == 200, applied
+        assert applied["snapshot"]["aom_sum"] == 100
+        item = _load_item(pid, "rp_width")
+        assert item["aom_sum"] == 100
+        assert item["coeffs"]["k1"] == 0.5
+        assert item["x_min"] == 1.0
+        assert item["aom_width"]["coeffs"]["k1"] == 0.8
+        assert item["aom_width"]["x_min"] == 7.0
+        assert hist["entries"][0]["event"] == "apply"
+        assert hist["entries"][0]["aom_sum"] == 100
+        assert any(row["note"] == "整份" for row in hist["entries"])
+
+    def test_full_save_records_limits_as_well_as_coefficients(self):
+        pid = seed_roles("dlcoeff6")
+        rev = _seed_config(pid)
+        payload = _valid_payload(pid, "rp_energy", k1=4.0)
+        with make_server() as server:
+            admin = as_role(server, "admin")
+            status, _h, saved = admin.json(
+                "PUT", ITEM_URL % (pid, "rp_energy"), payload, headers={"If-Match": rev}
+            )
+            assert status == 200, saved
+            status, _h, hist = admin.json("GET", HIST_URL % (pid, "rp_energy"))
+            assert hist["entries"][0]["event"] == "config"
+            assert hist["entries"][0]["actor_name"] == "管理员乙"
+            assert hist["current_id"] == hist["entries"][0]["id"]
+            ranged = _load_item(pid, "rp_energy")
+            ranged["x_min"] = 1.0
+            ranged["x_max"] = 2.0
+            status, _h, again = admin.json(
+                "PUT",
+                ITEM_URL % (pid, "rp_energy"),
+                ranged,
+                headers={"If-Match": saved["rev"]},
+            )
+            assert status == 200, again
+            status, _h, after = admin.json("GET", HIST_URL % (pid, "rp_energy"))
+        assert len(after["entries"]) == 2
+        assert after["entries"][0]["event"] == "config"
+        assert after["entries"][0]["x_min"] == 1.0
+        assert after["entries"][0]["current"] is True
+        assert _load_item(pid, "rp_energy")["x_min"] == 1.0
+
+    def test_pp_energy_saves_conversion_and_apply_restores_it(self):
+        pid = seed_roles("dlcoeffpp")
+        rev = _seed_config(pid)
+        with make_server() as server:
+            visitor = as_role(server, "visitor")
+            status, _h, first = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "pp_energy"),
+                _coeff_body(k1=2.0, trans=2.0, power=0.5, x_min=1.0, x_max=5.0),
+                headers={"If-Match": rev},
+            )
+            assert status == 200, first
+            assert first["snapshot"]["trans_coeff"] == 2.0
+            assert first["snapshot"]["power_conv_coeff"] == 0.5
+            status, _h, second = visitor.json(
+                "POST",
+                COEFF_URL % (pid, "pp_energy"),
+                _coeff_body(k1=3.0, trans=1.0, power=1.0),
+                headers={"If-Match": first["rev"]},
+            )
+            assert status == 200, second
+            status, _h, applied = visitor.json(
+                "POST",
+                APPLY_URL % (pid, "pp_energy", first["entry"]["id"]),
+                {},
+                headers={"If-Match": second["rev"]},
+            )
+        assert status == 200, applied
+        item = _load_item(pid, "pp_energy")
+        assert item["coeffs"]["k1"] == 2.0
+        assert item["trans_coeff"] == 2.0
+        assert item["power_conv_coeff"] == 0.5
+        assert item["x_min"] == 1.0 and item["x_max"] == 5.0
+
+
 class TestRoutesRegistered:
     def test_all_four_dl_routes_are_registered(self):
         templates = _route_templates()
@@ -1376,3 +1679,6 @@ class TestRoutesRegistered:
         assert ("POST", "/api/v1/p/{pid}/dl/{item}/compute") in templates
         assert ("POST", "/api/v1/p/{pid}/dl/{item}/extract") in templates
         assert ("PUT", "/api/v1/p/{pid}/dl/{item}") in templates
+        assert ("GET", "/api/v1/p/{pid}/dl/{item}/coeff-history") in templates
+        assert ("POST", "/api/v1/p/{pid}/dl/{item}/coeffs") in templates
+        assert ("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply") in templates

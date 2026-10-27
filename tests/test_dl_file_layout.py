@@ -11,7 +11,7 @@ FILEVIEW = (ROOT / "app/web/assets/js/views/fileview.js").read_text(encoding="ut
 
 
 def test_dl_item_and_axis_labels():
-    for label in ("PP 能量", "RP 能量", "RP 脉宽", "PPz", "DL 快捷计算"):
+    for label in ("PP 能量", "RP 能量", "RP 脉宽", "PPz", "DL 快捷计算", "保存系数", "系数历史"):
         assert label in DL
     for axis in (
         "电动波片角度",

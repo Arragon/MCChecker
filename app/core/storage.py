@@ -2100,6 +2100,7 @@ COPY_PROFILE_FILES = (
     "tools.json",
     "schedule.json",
     "dltool_config.json",
+    "dl_coeff_history.json",
 )
 
 #: `default` 机型在新位置缺文件时按旧位置回退（§5.5 旧布局）。

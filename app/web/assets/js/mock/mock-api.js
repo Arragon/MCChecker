@@ -1793,6 +1793,185 @@
     return { coeffs: coeffs, binding: { source_file: "", variable_path: "", field_map: {} }, x_min: null, x_max: null, y_min: null, y_max: null };
   }
 
+  function coeffOnly(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "系数必须是有限数值" };
+    var coeffs = {};
+    for (var i = 1; i <= 8; i++) {
+      var value = dlNumber(raw["k" + i]);
+      if (value === null) return { error: "系数必须是有限数值" };
+      coeffs["k" + i] = value;
+    }
+    var b = dlNumber(raw.b);
+    if (b === null) return { error: "系数必须是有限数值" };
+    coeffs.b = b;
+    return { item: { coeffs: coeffs } };
+  }
+
+  function coeffSnapshot(coeffs) {
+    var out = {};
+    for (var i = 1; i <= 8; i++) out["k" + i] = dlNumber(coeffs && coeffs["k" + i]) || 0;
+    out.b = dlNumber(coeffs && coeffs.b) || 0;
+    return out;
+  }
+
+  function sameCoeffMap(a, b) {
+    return JSON.stringify(coeffSnapshot(a)) === JSON.stringify(coeffSnapshot(b));
+  }
+
+  function sameSnap(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+  function historyBook(P) {
+    if (!P.dlHistory || typeof P.dlHistory !== "object") P.dlHistory = { next: 1, entries: [] };
+    if (!Array.isArray(P.dlHistory.entries)) P.dlHistory.entries = [];
+    if (!P.dlHistory.next || P.dlHistory.next < 1) P.dlHistory.next = 1;
+    return P.dlHistory;
+  }
+
+  function bindingView(raw) {
+    raw = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    var map = raw.field_map && typeof raw.field_map === "object" && !Array.isArray(raw.field_map) ? raw.field_map : {};
+    var pairs = {};
+    Object.keys(map).forEach(function (k) { if (typeof map[k] === "string") pairs[k] = map[k]; });
+    return {
+      source_file: typeof raw.source_file === "string" ? raw.source_file : "",
+      variable_path: typeof raw.variable_path === "string" ? raw.variable_path : "",
+      field_map: pairs,
+    };
+  }
+
+  function paramSnapshot(item, source) {
+    var snap = {
+      coeffs: coeffSnapshot(source && source.coeffs),
+      x_min: source && source.x_min !== undefined && source.x_min !== "" ? optNum(source.x_min) : null,
+      x_max: source && source.x_max !== undefined && source.x_max !== "" ? optNum(source.x_max) : null,
+      y_min: source && source.y_min !== undefined && source.y_min !== "" ? optNum(source.y_min) : null,
+      y_max: source && source.y_max !== undefined && source.y_max !== "" ? optNum(source.y_max) : null,
+      binding: bindingView(source && source.binding),
+    };
+    if (item === "pp_energy") {
+      var trans = dlNumber(source && source.trans_coeff);
+      var power = dlNumber(source && source.power_conv_coeff);
+      snap.trans_coeff = trans === null ? 1 : trans;
+      snap.power_conv_coeff = power === null ? 1 : power;
+    }
+    if (item === "rp_width") {
+      snap.aom_sum = source && source.aom_sum !== undefined && source.aom_sum !== "" ? optNum(source.aom_sum) : null;
+      snap.aom_width = paramSnapshot("rp_energy", (source && source.aom_width) || {});
+    }
+    return snap;
+  }
+
+  function optNum(v) {
+    if (v === null || v === undefined || v === "") return null;
+    return dlNumber(v);
+  }
+
+  function pushCoeffHistory(P, item, aom, event, note, snapshot, actor, sourceId) {
+    var book = historyBook(P);
+    var entry = {
+      id: "ch_" + ("000000" + book.next).slice(-6),
+      item: item,
+      aom: aom || "",
+      event: event,
+      note: note || "",
+      coeffs: snapshot.coeffs,
+      x_min: snapshot.x_min,
+      x_max: snapshot.x_max,
+      y_min: snapshot.y_min,
+      y_max: snapshot.y_max,
+      binding: snapshot.binding,
+      actor_ip: actor && actor.ip ? actor.ip : "",
+      actor_name: actor && actor.registered ? actor.name : "",
+      created_at: util.nowString(),
+      source_id: sourceId || "",
+    };
+    if (item === "pp_energy") {
+      entry.trans_coeff = snapshot.trans_coeff;
+      entry.power_conv_coeff = snapshot.power_conv_coeff;
+    }
+    if (item === "rp_width") {
+      entry.aom_sum = snapshot.aom_sum;
+      entry.aom_width = snapshot.aom_width;
+    }
+    book.next += 1;
+    book.entries.push(entry);
+    var series = book.entries.filter(function (row) { return row.item === item && (row.aom || "") === (aom || ""); });
+    if (series.length > 200) {
+      var drop = series[0].id;
+      book.entries = book.entries.filter(function (row) { return row.id !== drop; });
+    }
+    return entry;
+  }
+
+  function applySnap(target, item, snap) {
+    target.coeffs = clone(snap.coeffs);
+    ["x_min", "x_max", "y_min", "y_max"].forEach(function (k) { target[k] = snap[k]; });
+    target.binding = clone(snap.binding);
+    if (item === "pp_energy") {
+      target.trans_coeff = snap.trans_coeff;
+      target.power_conv_coeff = snap.power_conv_coeff;
+    }
+    if (item === "rp_width") {
+      target.aom_sum = snap.aom_sum === undefined ? null : snap.aom_sum;
+      if (!target.aom_width) target.aom_width = emptyDlSet();
+      applySnap(target.aom_width, "rp_energy", snap.aom_width || {});
+    }
+  }
+
+  function historyMode(item, raw) {
+    if (item !== "rp_width") return "";
+    if (raw === undefined || raw === null || raw === "") return "delay";
+    var mode = String(raw).trim();
+    return mode === "delay" || mode === "width" ? mode : null;
+  }
+
+  function coeffTarget(cfg, item, mode) {
+    var host = cfg.items[item];
+    if (item === "rp_width" && mode === "width") {
+      if (!host.aom_width || typeof host.aom_width !== "object") host.aom_width = emptyDlSet();
+      return host.aom_width;
+    }
+    return host;
+  }
+
+  function publicHistory(entry, currentId) {
+    var view = {
+      id: entry.id,
+      item: entry.item,
+      aom: entry.aom || "",
+      event: entry.event,
+      note: entry.note || "",
+      coeffs: coeffSnapshot(entry.coeffs),
+      x_min: entry.x_min === undefined ? null : entry.x_min,
+      x_max: entry.x_max === undefined ? null : entry.x_max,
+      y_min: entry.y_min === undefined ? null : entry.y_min,
+      y_max: entry.y_max === undefined ? null : entry.y_max,
+      binding: bindingView(entry.binding),
+      actor_ip: entry.actor_ip || "",
+      actor_name: entry.actor_name || "",
+      created_at: entry.created_at || "",
+      source_id: entry.source_id || "",
+      current: entry.id === currentId,
+    };
+    if (entry.item === "pp_energy") {
+      view.trans_coeff = entry.trans_coeff;
+      view.power_conv_coeff = entry.power_conv_coeff;
+    }
+    if (entry.item === "rp_width") {
+      view.aom_sum = entry.aom_sum === undefined ? null : entry.aom_sum;
+      view.aom_width = entry.aom_width || null;
+    }
+    return view;
+  }
+
+  function currentHistoryId(item, entries, liveSnap) {
+    var found = null;
+    entries.forEach(function (row) {
+      if (JSON.stringify(paramSnapshot(item, row)) === JSON.stringify(liveSnap)) found = row.id;
+    });
+    return found;
+  }
+
   function dlConfig(P) {
     if (!P.dl) P.dl = clone(S.profiles["default"].dl);
     if (!P.dl.items) P.dl.items = {};
@@ -1882,9 +2061,110 @@
     }
     if (!cfg.items[a.item]) return fail(404, "NOT_FOUND", "计算项不存在");
     cfg.editing = false;
+    var before = clone(cfg.items[a.item]);
     cfg.items[a.item] = mergeDlItem(cfg.items[a.item], req.body, norm.item, a.item, widthNorm ? widthNorm.item : null);
+    var after = cfg.items[a.item];
+    if (!sameSnap(paramSnapshot(a.item, before), paramSnapshot(a.item, after))) {
+      pushCoeffHistory(P, a.item, "", "config", "", paramSnapshot(a.item, after), id, "");
+    }
     bump(a.pid, "settings");
     return ok({ rev: dlRev(P), item: clone(cfg.items[a.item]) });
+  });
+
+  route("GET", "/p/{pid}/dl/{item}/coeff-history", function (a, req, P) {
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    var cfg = dlConfig(P);
+    var mode = historyMode(a.item, req.query.aom);
+    if (mode === null) return fail(400, "INVALID_INPUT", "RP 脉宽模式只能是 delay 或 width", { field: "aom" });
+    var target = cfg.items[a.item];
+    var live = paramSnapshot(a.item, target);
+    var entries = historyBook(P).entries.filter(function (row) { return row.item === a.item; });
+    var currentId = currentHistoryId(a.item, entries, live);
+    return ok({
+      aom: mode,
+      current_id: currentId,
+      entries: entries.slice().reverse().map(function (row) { return publicHistory(row, currentId); }),
+    });
+  });
+
+  route("POST", "/p/{pid}/dl/{item}/coeffs", function (a, req, P, id) {
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    var header = req.headers["If-Match"] || req.headers["if-match"];
+    if (!header) return fail(409, "REVISION_CONFLICT", "缺少 If-Match 头：请先 GET /dl 取得当前 rev", { header: "If-Match" });
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return fail(400, "INVALID_INPUT", "请求体必须是对象");
+    var mode = historyMode(a.item, req.body.aom);
+    if (mode === null) return fail(400, "INVALID_INPUT", "RP 脉宽模式只能是 delay 或 width", { field: "aom" });
+    var norm = coeffOnly(req.body.coeffs);
+    if (norm.error) return fail(400, "INVALID_INPUT", norm.error, { field: "coeffs" });
+    var missing = ["x_min", "x_max", "y_min", "y_max"].filter(function (k) { return !Object.prototype.hasOwnProperty.call(req.body, k); });
+    if (missing.length) return fail(400, "INVALID_INPUT", "保存时必须提供完整的范围字段（缺少：" + missing.join("、") + "）", { field: missing[0] });
+    var bindingErr = validateDlBinding(req.body);
+    if (bindingErr) return fail(400, "INVALID_INPUT", bindingErr, { field: "binding" });
+    if (!req.body.binding) return fail(400, "INVALID_INPUT", "binding 必须是对象", { field: "binding" });
+    if (a.item === "pp_energy" && (dlNumber(req.body.trans_coeff) === null || dlNumber(req.body.power_conv_coeff) === null)) {
+      return fail(400, "INVALID_INPUT", "传输系数与功率转换系数必须是有限数值");
+    }
+    if (a.item === "pp_energy" && dlNumber(req.body.power_conv_coeff) === 0) return fail(400, "INVALID_INPUT", "功率转换系数不能为 0", { field: "power_conv_coeff" });
+    if (a.item === "pp_energy" && dlNumber(req.body.trans_coeff) === 0) return fail(400, "INVALID_INPUT", "传输系数不能为 0", { field: "trans_coeff" });
+    if (a.item === "rp_width") {
+      if (!Object.prototype.hasOwnProperty.call(req.body, "aom_sum")) return fail(400, "INVALID_INPUT", "保存时必须提供固定和；不需要时请显式传 null", { field: "aom_sum" });
+      if (req.body.aom_sum !== null && req.body.aom_sum !== "" && dlNumber(req.body.aom_sum) === null) return fail(400, "INVALID_INPUT", "AOM2 delay 与 width 的和必须是有限数值", { field: "aom_sum" });
+      if (!req.body.aom_width || typeof req.body.aom_width !== "object" || Array.isArray(req.body.aom_width)) return fail(400, "INVALID_INPUT", "aom_width 必须是对象", { field: "aom_width" });
+      var widthNorm = coeffOnly(req.body.aom_width.coeffs);
+      if (widthNorm.error) return fail(400, "INVALID_INPUT", widthNorm.error, { field: "aom_width" });
+    }
+    var note = req.body.note === undefined || req.body.note === null ? "" : req.body.note;
+    if (typeof note !== "string" || note.indexOf("\u0000") >= 0) return fail(400, "INVALID_INPUT", "备注必须是文本", { field: "note" });
+    note = note.trim();
+    if (note.length > 200) return fail(400, "INVALID_INPUT", "备注不能超过 200 字", { field: "note" });
+    if (header !== dlRev(P)) return fail(409, "REVISION_CONFLICT", "计算参数已被他人修改，请刷新后再保存");
+    var cfg = dlConfig(P);
+    var target = cfg.items[a.item];
+    var incoming = paramSnapshot(a.item, {
+      coeffs: norm.item.coeffs,
+      x_min: req.body.x_min,
+      x_max: req.body.x_max,
+      y_min: req.body.y_min,
+      y_max: req.body.y_max,
+      binding: req.body.binding,
+      trans_coeff: req.body.trans_coeff,
+      power_conv_coeff: req.body.power_conv_coeff,
+      aom_sum: req.body.aom_sum,
+      aom_width: req.body.aom_width,
+    });
+    var current = paramSnapshot(a.item, target);
+    if (sameSnap(current, incoming)) return ok({ rev: dlRev(P), snapshot: current, coeffs: current.coeffs, unchanged: true, entry: null });
+    applySnap(target, a.item, incoming);
+    var entry = pushCoeffHistory(P, a.item, "", "save", note, incoming, id, "");
+    bump(a.pid, "settings");
+    return ok({ rev: dlRev(P), snapshot: incoming, coeffs: incoming.coeffs, unchanged: false, entry: publicHistory(entry, entry.id) });
+  });
+
+  route("POST", "/p/{pid}/dl/{item}/coeff-history/{hid}/apply", function (a, req, P, id) {
+    if (DL_ITEMS.indexOf(a.item) < 0) return fail(404, "NOT_FOUND", "计算项不存在");
+    var header = req.headers["If-Match"] || req.headers["if-match"];
+    if (!header) return fail(409, "REVISION_CONFLICT", "缺少 If-Match 头：请先 GET /dl 取得当前 rev", { header: "If-Match" });
+    if (header !== dlRev(P)) return fail(409, "REVISION_CONFLICT", "计算参数已被他人修改，请刷新后再保存");
+    var book = historyBook(P);
+    var source = null;
+    book.entries.forEach(function (row) { if (row.id === a.hid) source = row; });
+    if (!source || source.item !== a.item) return fail(404, "NOT_FOUND", "系数历史不存在", { id: a.hid });
+    var cfg = dlConfig(P);
+    var cfg = dlConfig(P);
+    var target = cfg.items[a.item];
+    var incoming = paramSnapshot(a.item, source);
+    var current = paramSnapshot(a.item, target);
+    if (sameSnap(current, incoming)) {
+      var entries = book.entries.filter(function (row) { return row.item === a.item; });
+      var currentId = currentHistoryId(a.item, entries, current);
+      var row = null;
+      book.entries.forEach(function (item) { if (item.id === currentId) row = item; });
+      return ok({ rev: dlRev(P), snapshot: current, coeffs: current.coeffs, unchanged: true, entry: row ? publicHistory(row, currentId) : null });
+    }
+    applySnap(target, a.item, incoming);
+    var entry = pushCoeffHistory(P, a.item, "", "apply", "", incoming, id, source.id);
+    bump(a.pid, "settings");
+    return ok({ rev: dlRev(P), snapshot: incoming, coeffs: incoming.coeffs, unchanged: false, entry: publicHistory(entry, entry.id) });
   });
 
   route("POST", "/p/{pid}/dl/{item}/extract", function (a, req, P) {

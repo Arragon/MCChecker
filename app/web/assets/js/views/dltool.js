@@ -683,6 +683,70 @@
     function sigOf(set) { return JSON.stringify([set.coeffs, set.x_min, set.x_max, set.y_min, set.y_max, set.binding]); }
     function setDirty(id, aom) { return !!S.saved && sigOf(setOf(S.saved, id, aom)) !== sigOf(setOf(S.draft, id, aom)); }
     function itemDirty(id) { return !!S.saved && JSON.stringify(S.saved[id]) !== JSON.stringify(S.draft[id]); }
+    function coeffNumbers(set) {
+      return KEYS.map(function (k) { return Number(set && set.coeffs ? set.coeffs[k] : 0) || 0; });
+    }
+    function coeffsDirty(id) {
+      if (!S.saved || !S.draft) return false;
+      var saved = coeffNumbers(setOf(S.saved, id, S.aom));
+      var draft = coeffNumbers(setOf(S.draft, id, S.aom));
+      return saved.some(function (n, i) { return n !== draft[i]; });
+    }
+    function otherDirty(id) {
+      if (!S.saved || !S.draft) return false;
+      function neutralize(src) {
+        var copy = clone(src);
+        var set = id === "rp_width" && S.aom === "width" ? copy.aom_width : copy;
+        var base = setOf(S.saved, id, S.aom);
+        if (set && base) {
+          set.coeffs = clone(base.coeffs);
+          RANGE_KEYS.forEach(function (k) { set[k] = base[k]; });
+          set.binding = clone(base.binding || { source_file: "", variable_path: "", field_map: {} });
+          if (id === "pp_energy") {
+            set.trans_coeff = base.trans_coeff;
+            set.power_conv_coeff = base.power_conv_coeff;
+          }
+        }
+        return copy;
+      }
+      return JSON.stringify(neutralize(S.saved[id])) !== JSON.stringify(neutralize(S.draft[id]));
+    }
+    function saveDirty(id) {
+      if (!S.saved || !S.draft) return false;
+      return JSON.stringify(packItem(S.saved[id], id)) !== JSON.stringify(packItem(S.draft[id], id));
+    }
+    function packItem(item, id) {
+      var pack = packSet(item, id);
+      if (id === "rp_width") {
+        var sum = item && item.aom_sum;
+        pack.aom_sum = sum === null || sum === undefined || sum === "" ? null : Number(sum);
+        pack.aom_width = packSet((item && item.aom_width) || emptySet(), "rp_width");
+      }
+      return pack;
+    }
+    function packSet(set, id) {
+      var coeffs = {};
+      KEYS.forEach(function (k) { coeffs[k] = Number(set && set.coeffs ? set.coeffs[k] : 0) || 0; });
+      var binding = (set && set.binding) || { source_file: "", variable_path: "", field_map: {} };
+      function opt(v) { return v === null || v === undefined || v === "" ? null : Number(v); }
+      var pack = {
+        coeffs: coeffs,
+        x_min: opt(set && set.x_min),
+        x_max: opt(set && set.x_max),
+        y_min: opt(set && set.y_min),
+        y_max: opt(set && set.y_max),
+        binding: {
+          source_file: binding.source_file || "",
+          variable_path: binding.variable_path || "",
+          field_map: binding.field_map || {},
+        },
+      };
+      if (id === "pp_energy") {
+        pack.trans_coeff = Number(set.trans_coeff);
+        pack.power_conv_coeff = Number(set.power_conv_coeff);
+      }
+      return pack;
+    }
     function anyDirty() { return !!S.saved && ITEMS.some(function (it) { return itemDirty(it.id); }); }
     function keyOf(id) { return id + (id === "rp_width" ? ":" + S.aom : "") + ":" + S.dir; }
 
@@ -724,19 +788,20 @@
       var id = S.item;
       var save = null;
       if (S.saved && itemDirty(id)) {
-        var saveBtn = h("button.btn.btn-primary.btn-sm", { type: "button", disabled: !app.can("deployer"), title: app.can("deployer") ? null : "仅管理员可保存为共享配置" }, "保存为配置");
-        saveBtn.addEventListener("click", function () { doSave(saveBtn); });
-        save = h(
-          "div.dl-save",
-          h("span.badge.badge-warning", "有未保存的修改"),
-          app.can("deployer") ? null : h("span.xsmall.muted", "仅管理员可保存"),
-          h("button.btn.btn-sm", { type: "button", onclick: function () { S.draft[id] = clone(S.saved[id]); S.results = {}; render(); } }, "放弃修改"),
-          saveBtn
-        );
+        var abandon = h("button.btn.btn-sm", { type: "button", onclick: function () { S.draft[id] = clone(S.saved[id]); S.results = {}; render(); } }, "放弃修改");
+        var bits = [h("span.badge.badge-warning", "有未保存的修改")];
+        if (app.can("deployer")) {
+          var saveBtn = h("button.btn.btn-primary.btn-sm", { type: "button" }, "保存为配置");
+          saveBtn.addEventListener("click", function () { doSave(saveBtn); });
+          bits.push(abandon, saveBtn);
+        } else {
+          bits.push(h("span.xsmall.muted", "在右侧保存修改，可以填写备注。保存后所有人共用，并记入历史。"), abandon);
+        }
+        save = h("div.dl-save", bits);
       }
       util.replace(
         header,
-        h("div.view-title", h("h1", "DL 快捷计算"), h("div.view-sub", "以八阶多项式进行正向求值与反向求解。参数修改仅作用于当前会话，保存后对所有用户生效。")),
+        h("div.view-title", h("h1", "DL 快捷计算"), h("div.view-sub", "以八阶多项式进行正向求值与反向求解。计算项里的全部参数都可以保存，每次保存都留下历史，并可一键恢复。")),
         seg,
         save
       );
@@ -794,6 +859,7 @@
     function afterParamChange() {
       renderHeader();
       app.renderTabbar();
+      syncCoeffActions();
       updateFormula();
       renderTiles();
       renderResults();
@@ -1235,6 +1301,44 @@
       util.replace(S.ui.formula, formulaNodes(id, activeSet(id), axisOf(id, S.aom)));
     }
 
+    function syncCoeffActions() {
+      var btn = S.ui && S.ui.saveCoeff;
+      if (!btn) return;
+      var dirty = saveDirty(S.item);
+      btn.disabled = !dirty;
+      btn.title = dirty ? "保存这一计算项的全部参数，可填写备注" : "这些参数没有变化";
+    }
+
+    function coeffPayload(id) {
+      var pack = packItem(S.draft[id], id);
+      pack.note = "";
+      return pack;
+    }
+
+    function applyPack(set, snap, id) {
+      if (snap.coeffs) KEYS.forEach(function (k) { set.coeffs[k] = snap.coeffs[k]; });
+      RANGE_KEYS.forEach(function (k) {
+        if (Object.prototype.hasOwnProperty.call(snap, k)) set[k] = snap[k];
+      });
+      if (snap.binding) set.binding = clone(snap.binding);
+      if (id === "pp_energy" && snap.trans_coeff !== undefined) {
+        set.trans_coeff = snap.trans_coeff;
+        set.power_conv_coeff = snap.power_conv_coeff;
+      }
+    }
+
+    function writeSnapshot(id, snap) {
+      if (!snap) return;
+      [S.saved[id], S.draft[id]].forEach(function (item) {
+        applyPack(item, snap, id);
+        if (id === "rp_width") {
+          if (!item.aom_width) item.aom_width = emptySet();
+          if (snap.aom_width) applyPack(item.aom_width, snap.aom_width, "rp_width");
+          if (Object.prototype.hasOwnProperty.call(snap, "aom_sum")) item.aom_sum = snap.aom_sum;
+        }
+      });
+    }
+
     function coeffGroup(set) {
       return h(
         "div.dl-group",
@@ -1317,9 +1421,15 @@
       S.ui.formula = h("div.dl-formula", formulaNodes(id, set, axis));
       S.ui.multi = h("div.dl-multi-box");
       var modeBadge = id === "rp_width" ? h("span.badge.badge-primary", AXES.rp_width[S.aom].mode) : null;
+      var saveCoeff = h("button.btn.btn-primary.btn-sm", { type: "button" }, "保存修改");
+      saveCoeff.addEventListener("click", function () { saveCoeffDialog(id); });
+      S.ui.saveCoeff = saveCoeff;
+      var historyBtn = h("button.btn.btn-sm", { type: "button" }, icon("history"), "系数历史");
+      historyBtn.addEventListener("click", function () { historyDialog(id); });
+      syncCoeffActions();
       return h(
         "section.panel.dl-params-card",
-        h("div.panel-header", h("h2", "函数与参数"), modeBadge),
+        h("div.panel-header", h("h2", "函数与参数"), modeBadge, h("span.dl-coeff-actions", historyBtn, saveCoeff)),
         h(
           "div.panel-body.dl-params-body",
           S.ui.formula,
@@ -1559,6 +1669,195 @@
           ];
         },
       });
+    }
+
+    var EVENT_LABEL = { save: "保存系数", apply: "应用历史", config: "保存配置" };
+
+    function historyQuery() {
+      return null;
+    }
+
+    function sameCoeffs(a, b) {
+      return coeffNumbers({ coeffs: a }).join(",") === coeffNumbers({ coeffs: b }).join(",");
+    }
+
+    function actorLine(entry) {
+      if (entry.actor_name && entry.actor_ip) return entry.actor_name + " · " + entry.actor_ip;
+      return entry.actor_name || entry.actor_ip || "未知地址";
+    }
+
+    function saveCoeffDialog(id) {
+      if (!saveDirty(id)) return;
+      var saved = setOf(S.saved, id, S.aom);
+      var draft = activeSet(id);
+      var changes = [];
+      KEYS.forEach(function (k) {
+        if ((Number(saved.coeffs[k]) || 0) !== (Number(draft.coeffs[k]) || 0)) {
+          changes.push(SUB[k] + " " + util.formatNumber(Number(saved.coeffs[k]) || 0) + " → " + util.formatNumber(Number(draft.coeffs[k]) || 0));
+        }
+      });
+      function rangeBit(label, key) {
+        var a = saved[key];
+        var b = draft[key];
+        if (a === b) return;
+        function text(v) { return v === null || v === undefined || v === "" ? "不限" : util.formatNumber(Number(v)); }
+        changes.push(label + " " + text(a) + " → " + text(b));
+      }
+      rangeBit("x 下限", "x_min");
+      rangeBit("x 上限", "x_max");
+      rangeBit("y 下限", "y_min");
+      rangeBit("y 上限", "y_max");
+      var savedBind = JSON.stringify(packSet(saved, id).binding);
+      var draftBind = JSON.stringify(packSet(draft, id).binding);
+      if (savedBind !== draftBind) changes.push("绑定已修改");
+      if (id === "pp_energy") {
+        if (Number(saved.trans_coeff) !== Number(draft.trans_coeff)) changes.push("传输系数 " + saved.trans_coeff + " → " + draft.trans_coeff);
+        if (Number(saved.power_conv_coeff) !== Number(draft.power_conv_coeff)) changes.push("功率转换系数 " + saved.power_conv_coeff + " → " + draft.power_conv_coeff);
+      }
+      if (id === "rp_width" && S.saved[id].aom_sum !== S.draft[id].aom_sum) {
+        function sumText(v) { return v === null || v === undefined || v === "" ? "未设置" : util.formatNumber(Number(v)); }
+        changes.push("固定和 " + sumText(S.saved[id].aom_sum) + " → " + sumText(S.draft[id].aom_sum));
+      }
+      var note = h("textarea.textarea", { id: util.uid("dlnote"), rows: 3, maxlength: 200, placeholder: "可选。例如：按今天的测量改了范围和 k₁", "aria-label": "备注" });
+      var count = h("span.xsmall.muted", "0/200");
+      note.addEventListener("input", function () { count.textContent = note.value.length + "/200"; });
+      var saveBtn = h("button.btn.btn-primary", { type: "button" }, "保存修改");
+      MC.modal({
+        title: "保存修改",
+        subtitle: "写入这一计算项的全部参数。RP 脉宽会同时保存两种模式和固定和。",
+        body: h(
+          "div.col",
+          h("div.dl-diff", changes.map(function (text) { return h("span.dl-chip", text); })),
+          h("label.field-label", { for: note.id }, "备注"),
+          note,
+          h("div.row", count, h("span.xsmall.muted", "所有人都能保存，保存后对全体用户生效"))
+        ),
+        footer: function (close) {
+          saveBtn.addEventListener("click", function () {
+            var text = note.value.trim();
+            if (text.length > 200) return MC.toast.warning("备注不能超过 200 字");
+            var body = coeffPayload(id);
+            body.note = text;
+            var aom = S.aom;
+            MC.withBusy(saveBtn, function () {
+              return api.post(app.p("/dl/" + id + "/coeffs"), body, null, { "If-Match": S.rev }).then(function (res) {
+                S.rev = res.rev;
+                writeSnapshot(id, res.snapshot || res);
+                close();
+                MC.toast.success(res.unchanged ? "参数没有变化" : "修改已保存");
+                render();
+              }, function (err) {
+                if (err.code === "REVISION_CONFLICT") {
+                  close();
+                  MC.confirm({ title: "计算参数已被更新", message: "保存期间已有其他用户写入。可以放弃本地修改并加载最新参数，或保留当前草稿。", confirmText: "加载最新参数", cancelText: "保留草稿" }).then(function (ok) { if (ok) load(); });
+                } else MC.toastError("保存失败", err);
+              });
+            });
+          });
+          return [h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"), saveBtn];
+        },
+      });
+    }
+
+    function historyDialog(id) {
+      var host = h("div.dl-hist");
+      var mode = id === "rp_width" ? AXES.rp_width[S.aom].mode : "";
+      var subtitle = ITEMS.filter(function (it) { return it.id === id; })[0].label + (mode ? " · " + mode : "");
+
+      function paint(res) {
+        var entries = res.entries || [];
+        if (!entries.length) {
+          util.replace(host, MC.stateBlock({
+            title: "还没有修改记录",
+            desc: "保存一次后，修改人、备注、系数、上下限、绑定和换算会出现在这里。",
+            icon: "history",
+          }));
+          return;
+        }
+        util.replace(host, entries.map(function (entry) { return historyRow(id, entry, paint); }));
+        if (!res.current_id) {
+          host.insertBefore(h("div.banner", icon("info"), h("div.banner-body", "当前参数没有对应的历史记录。")), host.firstChild);
+        }
+      }
+
+      function loadHistory() {
+        util.replace(host, MC.stateBlock({ kind: "loading", title: "正在读取系数历史…" }));
+        api.get(app.p("/dl/" + id + "/coeff-history"), historyQuery()).then(paint, function (err) {
+          util.replace(host, MC.errorBlock(err, loadHistory));
+        });
+      }
+
+      function historyRow(itemId, entry, repaint) {
+        var mine = !!entry.current;
+        var liveItem = S.saved[itemId];
+        var same = !mine && JSON.stringify(packItem(liveItem, itemId)) === JSON.stringify(packItem(entry, itemId));
+        var action = mine
+          ? h("span.badge.badge-primary", "当前")
+          : same
+            ? h("span.xsmall.muted", "与当前相同")
+            : h("button.btn.btn-sm", { type: "button", onclick: function (e) { applyEntry(itemId, entry, e.currentTarget, repaint); } }, "应用这套设置");
+        function limitText(v) { return v === null || v === undefined || v === "" ? "不限" : util.formatNumber(Number(v)); }
+        var bind = entry.binding || {};
+        var extras = [
+          "x " + limitText(entry.x_min) + " ~ " + limitText(entry.x_max),
+          "y " + limitText(entry.y_min) + " ~ " + limitText(entry.y_max),
+          bind.source_file ? "绑定 " + bind.source_file : "未绑定",
+        ];
+        if (entry.trans_coeff !== undefined) extras.push("传输 " + entry.trans_coeff + " · 功率转换 " + entry.power_conv_coeff);
+        if (entry.aom_sum !== undefined) extras.push("固定和 " + (entry.aom_sum === null || entry.aom_sum === undefined || entry.aom_sum === "" ? "未设置" : util.formatNumber(Number(entry.aom_sum))));
+        if (entry.aom_width && entry.aom_width.coeffs) extras.push("width y = " + polyText({ coeffs: entry.aom_width.coeffs }));
+        return h(
+          "article.dl-hist-item" + (mine ? ".is-current" : ""),
+          h(
+            "div.dl-hist-meta",
+            h("span", entry.created_at || ""),
+            h("span", actorLine(entry)),
+            h("span.badge", EVENT_LABEL[entry.event] || entry.event || "保存系数"),
+            mine ? h("span.badge.badge-primary", "当前") : null,
+            h("span.spacer"),
+            mine ? null : action
+          ),
+          entry.note ? h("div.dl-hist-note", entry.note) : null,
+          h("div.dl-hist-fn", "y = " + polyText({ coeffs: entry.coeffs })),
+          h("div.xsmall.muted", extras.join(" · "))
+        );
+      }
+
+      MC.modal({
+        title: "系数历史",
+        subtitle: subtitle,
+        size: "wide",
+        body: host,
+      });
+      loadHistory();
+    }
+
+    function applyEntry(id, entry, btn, repaint) {
+      function send() {
+        var q = id === "rp_width" ? { aom: entry.aom || "delay" } : null;
+        return MC.withBusy(btn, function () {
+          return api.post(app.p("/dl/" + id + "/coeff-history/" + api.seg(entry.id) + "/apply"), {}, q, { "If-Match": S.rev }).then(function (res) {
+            S.rev = res.rev;
+            writeSnapshot(id, res.snapshot || entry);
+            MC.toast.success(res.unchanged ? "已经是这套设置" : "已应用这套设置");
+            render();
+            api.get(app.p("/dl/" + id + "/coeff-history"), historyQuery()).then(repaint, function () {});
+          }, function (err) {
+            if (err.code === "REVISION_CONFLICT") {
+              MC.confirm({ title: "计算参数已被更新", message: "应用期间已有其他用户写入。可以加载最新参数，或保留当前草稿。", confirmText: "加载最新参数", cancelText: "保留草稿" }).then(function (ok) { if (ok) load(); });
+            } else MC.toastError("应用失败", err);
+          });
+        });
+      }
+      if (saveDirty(id) && !(id === "rp_width" && (entry.aom || "delay") !== S.aom)) {
+        MC.confirm({
+          title: "应用这套设置",
+          message: "草稿里还没保存的参数会被整份替换，包括固定和与两种脉宽模式。",
+          confirmText: "应用",
+        }).then(function (ok) { if (ok) send(); });
+        return;
+      }
+      send();
     }
 
     load();
