@@ -110,7 +110,7 @@ After frontend modifications are completed, execute according to project capabil
 - Frontend unit tests
 - Build checks
 - Type checks or lint
-- Manual verification of key flows
+- Playwright verification of the changed flow, including click, type, submit, and the result. A single screenshot is not verification. Do not use the computer-use desktop agent for this; see `/AGENTS.md`
 - Basic layout checks under different sizes
 
 If user operation methods, page entries, parameters, or feature highlights change, update:

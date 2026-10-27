@@ -107,6 +107,8 @@ Select appropriate levels based on project actual conditions:
 
 Prioritize running most relevant fast tests, then execute broader regression according to impact.
 
+Browser UI uses Playwright, as specified in `/AGENTS.md`. Do not use the computer-use desktop agent for pages, dialogs, or other browser interaction. Keep API and non-UI checks on the existing pytest suites.
+
 ---
 
 ## 6. Test Failure Handling
