@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 101;  // 96 + M9-05 + M10-01/02 + M11-02 文本原文
+  var EXPECTED_CASES = 102;  // 96 + M9-05 + M10-01/02 + M11-02 + M12-07
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -208,9 +208,9 @@
     localStorage.removeItem("mc.workspace");
   });
 
-  test("工作区：v3 session 返回 workspace/workspaces，configspace 旧链解析到 registry", function () {
+  test("工作区：v3 session 返回 workspace/workspaces，configspace 旧链解析到 configv3", function () {
     var route = MC.router.parse("#/p/default/configspace");
-    eq(route.kind, "registry", "configspace 深链不能降级成 overview");
+    eq(route.kind, "configv3", "configspace 深链进入 V3 配置管理");
     return MC.api.getV3("/api/v3/session", { workspace: "default" }).then(function (s) {
       eq(s.workspace.id, "default");
       ok(Array.isArray(s.workspaces) && s.workspaces.length >= 1, "workspaces 必须非空");
@@ -700,6 +700,44 @@
       MC.api.fetchBlob = origFetch;
       throw e;
     });
+  });
+
+  test("M12-07：配置管理原生视图按 W/P 读取固定配置，非管理员显示只读横幅与五个 tab", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("default");
+    var t = productionRun();
+    return t.run(function (r) {
+      var base = "/api/v3/workspaces/default/profiles/default/configs";
+      var spy = r.useApi({
+        getV3: function (path) {
+          if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 0 }] });
+          if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [] } });
+          if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
+          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 0, items: [] });
+          if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
+          if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var inst = r.mountView(MC.views.configv3(settingsApp(false)));
+      function wait(n) {
+        return tick().then(function () {
+          if (inst.el.textContent.indexOf("一号配置") >= 0) return true;
+          if (!n) return false;
+          return wait(n - 1);
+        });
+      }
+      return wait(20).then(function () {
+        var text = inst.el.textContent;
+        ok(text.indexOf("配置管理") >= 0, "视图标题");
+        ok(text.indexOf("一号配置") >= 0 && text.indexOf("MC-001") >= 0, "配置列表与标识");
+        ok(text.indexOf("当前身份可查看配置") >= 0, "非管理员只读横幅");
+        ["版本演进", "参数工作台", "参数总览", "模板导出", "配置历史"].forEach(function (label) {
+          ok(text.indexOf(label) >= 0, "缺少 tab：" + label);
+        });
+        ok(spy.calls.filter(function (c) { return c.indexOf("GETV3 " + base) === 0; }).length >= 2, "必须走 v3 W/P 配置端点");
+      });
+    }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
   });
 
   test("M3-14：bindings 分段在生产模式打 /bindings，行内显示紫色组名与绑定路径，成员只读", function () {

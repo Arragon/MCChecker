@@ -682,6 +682,134 @@
     return ok({ workspace: workspaceView(w) });
   });
 
+  /* V3 配置管理工作台（M12-07）：模板演示用的最小内存域 */
+  var V3CFG = [];
+  var V3SEQ = 0;
+  function v3cfg(id) { return V3CFG.filter(function (c) { return c.config_id === id; })[0] || null; }
+  function v3relView(r) {
+    return { release_id: r.release_id, version: r.version, order: r.order, predecessor_id: r.predecessor_id,
+      created_at: r.created_at, definition_revision: 0, default_revision_id: r.default_revision_id || null,
+      default_frozen_at: r.default_frozen_at || null,
+      d0: { values: clone(r.values || {}), frozen: !!r.frozen, revision: r.revision || 0 } };
+  }
+  function v3cfgView(c, detail) {
+    var row = { config_id: c.config_id, code: c.code, name: c.name, description: "", created_at: c.created_at, updated_at: c.created_at, release_count: c.releases.length };
+    if (detail) row.releases = c.releases.map(v3relView);
+    return row;
+  }
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", function (a) {
+    return ok({ items: V3CFG.map(function (c) { return v3cfgView(c, false); }) });
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    if (V3CFG.some(function (c) { return c.code === String(req.body.code || "").trim(); })) return fail(409, "FILE_EXISTS", "已存在相同配置标识", { field: "code" });
+    var c = { config_id: "cfg-" + String(++V3SEQ), code: String(req.body.code || "").trim(), name: String(req.body.name || "").trim(), created_at: util.nowString(), releases: [] };
+    V3CFG.push(c);
+    return ok({ config: v3cfgView(c, true) }, 201);
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}", function (a) {
+    var c = v3cfg(a.cid);
+    return c ? ok({ config: v3cfgView(c, true) }) : fail(404, "NOT_FOUND", "配置不存在");
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var c = v3cfg(a.cid);
+    if (!c) return fail(404, "NOT_FOUND", "配置不存在");
+    if (c.releases.some(function (r) { return r.version === String(req.body.version || "").trim(); })) return fail(409, "FILE_EXISTS", "已存在相同版本号", { field: "version" });
+    var r = { release_id: "rel-" + String(++V3SEQ), version: String(req.body.version || "").trim(), order: c.releases.length + 1, predecessor_id: req.body.predecessor_id || null, created_at: util.nowString(), values: {}, frozen: false, revision: 0 };
+    c.releases.push(r);
+    return ok({ release: v3relView(r) }, 201);
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/graph", function (a) {
+    var c = v3cfg(a.cid);
+    if (!c) return fail(404, "NOT_FOUND", "配置不存在");
+    return ok({ config_id: a.cid, nodes: c.releases.map(function (r) { return { release_id: r.release_id, version: r.version, order: r.order, predecessor_id: r.predecessor_id, d0_frozen: !!r.frozen }; }), edges: c.releases.filter(function (r) { return r.predecessor_id; }).map(function (r) { return { from: r.predecessor_id, to: r.release_id, kind: "predecessor" }; }) });
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters", function () {
+    return ok({ revision: 0, items: [] });
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/branches/main", function (a) {
+    var c = v3cfg(a.cid);
+    return c ? ok({ branch_id: "main", head_id: c.head_id || null, baselines: c.baselines || [] }) : fail(404, "NOT_FOUND", "配置不存在");
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines", function (a) {
+    var c = v3cfg(a.cid);
+    return c ? ok({ items: (c.machines || []).map(function (m) { return { machine_id: m.machine_id, machine_no: m.machine_no, head_id: m.head_id || null, published: !!m.head_id, draft: m.draft, revisions: m.revisions || [], management_only: true }; }) }) : fail(404, "NOT_FOUND", "配置不存在");
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machine-branches", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var c = v3cfg(a.cid);
+    if (!c) return fail(404, "NOT_FOUND", "配置不存在");
+    c.machines = c.machines || [];
+    if (c.machines.some(function (m) { return m.machine_no === String(req.body.machine_no || "").trim(); })) return fail(400, "INVALID_INPUT", "机台编号已存在", { field: "machine_no" });
+    var m = { machine_id: "m-" + String(++V3SEQ), machine_no: String(req.body.machine_no || "").trim(), head_id: null, draft: { draft_id: "md-" + V3SEQ, status: "draft", revision: 0, values: {} }, revisions: [] };
+    c.machines.push(m);
+    return ok({ machine: m }, 201);
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/publish", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var c = v3cfg(a.cid);
+    var m = c && (c.machines || []).filter(function (x) { return x.machine_id === a.mid; })[0];
+    if (!m) return fail(404, "NOT_FOUND", "机台不存在");
+    var rid = "mr-" + String(++V3SEQ);
+    m.revisions.push({ revision_id: rid, label: "r" + (m.revisions.length + 1), parent_id: m.head_id, published_at: util.nowString() });
+    m.head_id = rid;
+    return ok({ machine: m });
+  });
+
+  function v3relByDraft(did) {
+    var rid = String(did || "").replace(/^d0-/, "");
+    for (var i = 0; i < V3CFG.length; i++) {
+      var r = V3CFG[i].releases.filter(function (x) { return x.release_id === rid; })[0];
+      if (r) return { config: V3CFG[i], release: r };
+    }
+    return null;
+  }
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}", function (a) {
+    var hit = v3relByDraft(a.did);
+    if (!hit) return fail(404, "NOT_FOUND", "草稿不存在");
+    return ok({ draft_id: a.did, config_id: a.cid, release_id: hit.release.release_id,
+      revision: hit.release.revision || 0, frozen: !!hit.release.frozen, values: clone(hit.release.values || {}) });
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/freeze", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var hit = v3relByDraft(a.did);
+    if (!hit) return fail(404, "NOT_FOUND", "草稿不存在");
+    if (hit.release.frozen) return fail(409, "DEFAULT_ALREADY_FROZEN", "该版本的 canonical D0 已冻结");
+    hit.release.frozen = true;
+    hit.release.default_revision_id = a.did;
+    return ok({ draft_id: a.did, config_id: a.cid, release_id: hit.release.release_id, revision: hit.release.revision || 0, frozen: true, values: clone(hit.release.values || {}) });
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/baseline-drafts", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var c = v3cfg(a.cid);
+    var r = c && c.releases.filter(function (x) { return x.release_id === a.rid; })[0];
+    if (!r) return fail(404, "NOT_FOUND", "软件版本不存在");
+    if (!r.default_revision_id) return fail(400, "INVALID_INPUT", "canonical D0 尚未冻结");
+    c.machines = c.machines || [];
+    var did = "bd-" + String(++V3SEQ);
+    c.bd = { draft_id: did, release_id: a.rid, revision: 0, values: clone(r.values || {}), source_revision_id: r.default_revision_id };
+    return ok({ draft: c.bd }, 201);
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/publish", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var c = v3cfg(a.cid);
+    if (!c || !c.bd || c.bd.draft_id !== a.did) return fail(404, "NOT_FOUND", "基线草稿不存在");
+    c.baselines = c.baselines || [];
+    var bid = "bl-" + String(++V3SEQ);
+    var row = { baseline_id: bid, label: "B" + (c.baselines.length + 1), release_id: c.bd.release_id, definition_revision: 0, published_at: util.nowString() };
+    c.baselines.push(row);
+    c.head_id = bid;
+    return ok({ baseline: row });
+  });
+
   function profileName(raw) {
     var text = String(raw === null || raw === undefined ? "" : raw).trim();
     if (!text || text.length > 100 || /[\u0000-\u001f\u007f]/.test(text)) return null;

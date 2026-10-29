@@ -75,7 +75,8 @@ def patch_values(
     request_id = str(payload.get("request_id") or "").strip()
     if not request_id or len(request_id) > 100:
         raise AppError(INVALID_INPUT, "request_id 必填且 ≤100 字符", field="request_id")
-    expected_raw = str(if_match or payload.get("expected_revision") or "").strip().strip('"')
+    raw = if_match if if_match is not None and str(if_match).strip() else payload.get("expected_revision")
+    expected_raw = str(raw if raw is not None else "").strip().strip('"')
     try:
         expected = int(expected_raw)
     except ValueError:

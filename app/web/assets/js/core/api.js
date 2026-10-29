@@ -186,7 +186,7 @@
    * #/p/{pid}/tools
    * #/p/{pid}/settings/{section}
    */
-  var KINDS = { overview: 1, search: 1, f: 1, t: 1, review: 1, dl: 1, tools: 1, settings: 1, registry: 1 };
+  var KINDS = { overview: 1, search: 1, f: 1, t: 1, review: 1, dl: 1, tools: 1, settings: 1, registry: 1, configv3: 1 };
 
   function parseHash(hash) {
     var raw = (hash || "").replace(/^#/, "");
@@ -205,7 +205,7 @@
     });
     if (segs[0] !== "p" || !segs[1]) return null;
     var kind = segs[2] || "overview";
-    if (kind === "configspace") kind = "registry";
+    if (kind === "configspace") kind = "configv3";
     if (!KINDS[kind]) kind = "overview";
     return { pid: segs[1], kind: kind, arg: segs.slice(3).join("/") || "", query: query };
   }
