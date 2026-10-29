@@ -17,6 +17,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
+from ..core import config_mapping
 from ..core.errors import PARSE_FAILED, TOO_LARGE, AppError
 
 try:  # parser 的公开上限与这里共用，避免两套数字
@@ -146,26 +147,28 @@ def json_locators(content: bytes) -> List[Dict[str, Any]]:
     except RecursionError as exc:
         raise AppError(TOO_LARGE, "文档嵌套超过上限（%d 层）" % MAX_DEPTH) from exc
     rows: List[Dict[str, Any]] = []
-    _walk_json(data, "", 0, rows)
+    _walk_json(data, "", 0, rows, "")
     if not rows and not isinstance(data, (dict, list)):
-        rows.append({"locator": {"pointer": ""}, "display_path": "", "value": data})
+        rows.append({"locator": {"pointer": "", "path_kinds": ""}, "display_path": "", "value": data})
     return rows
 
 
-def _walk_json(value: Any, pointer: str, depth: int, rows: List[Dict[str, Any]]) -> None:
+def _walk_json(
+    value: Any, pointer: str, depth: int, rows: List[Dict[str, Any]], kinds: str
+) -> None:
     if depth > MAX_DEPTH:
         raise AppError(TOO_LARGE, "文档嵌套超过上限（%d 层）" % MAX_DEPTH)
     if isinstance(value, dict):
         for key, child in value.items():
-            _walk_json(child, _json_pointer(pointer, str(key)), depth + 1, rows)
+            _walk_json(child, _json_pointer(pointer, str(key)), depth + 1, rows, kinds + "o")
         return
     if isinstance(value, list):
         for index, child in enumerate(value):
-            _walk_json(child, pointer + "/" + str(index), depth + 1, rows)
+            _walk_json(child, pointer + "/" + str(index), depth + 1, rows, kinds + "a")
         return
     rows.append(
         {
-            "locator": {"pointer": pointer},
+            "locator": {"pointer": pointer, "path_kinds": kinds},
             "display_path": pointer or "/",
             "value": value,
         }
@@ -190,14 +193,4 @@ def page(items: Iterable[Dict[str, Any]], offset: int = 0, limit: int = 200) -> 
 
 def locator_key(row: Dict[str, Any]) -> str:
     """把 locator 规范化成可比较的稳定键（测试/去重用）。"""
-    loc = row.get("locator") or {}
-    if "pointer" in loc:
-        return "json:" + loc["pointer"]
-    parts = loc.get("path") or []
-    text = "/".join(
-        "%s|%s|%s" % (p.get("namespace_uri", ""), p.get("local_name", ""), p.get("occurrence"))
-        for p in parts
-    )
-    kind = loc.get("kind", "")
-    attr = loc.get("attribute_name", "")
-    return "xml:%s#%s#%s" % (text, kind, attr)
+    return config_mapping.canonical_locator(row.get("locator") or {})
