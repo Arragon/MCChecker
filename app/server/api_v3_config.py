@@ -11,10 +11,11 @@ from ..services import (
     config_v3_catalog,
     config_v3_drafts,
     config_v3_machines,
+    config_v3_projection,
     workspace_catalog,
 )
 from ..services.context import RequestContext
-from .router import Response, Router, json_body
+from .router import Response, Router, json_body, query_param
 
 
 def register(router: Router) -> None:
@@ -138,6 +139,11 @@ def register(router: Router) -> None:
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/publish",
         publish_machine,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/overview",
+        overview,
     )
 
 
@@ -423,3 +429,22 @@ def publish_machine(
         (ctx.headers or {}).get("if-match"),
     )
     return Response(payload={"machine": result}, headers={"ETag": '"%d"' % seq})
+
+
+def _csv(raw: str) -> List[str]:
+    return [part.strip() for part in str(raw or "").split(",") if part.strip()]
+
+
+def overview(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload=config_v3_projection.overview(
+            params["pid"], params["cid"], params["rid"],
+            query_param(query, "compare_release_id"),
+            _csv(query_param(query, "baselines")),
+            _csv(query_param(query, "machines")),
+        )
+    )

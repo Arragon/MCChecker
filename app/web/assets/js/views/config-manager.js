@@ -18,7 +18,7 @@
     var S = {
       configs: [], cid: null, detail: null, graph: null, params: null, branch: null,
       machines: [], releaseId: null, tab: "versions", draft: null, loading: true, error: null,
-      filter: "",
+      filter: "", overview: null, overviewMachine: "", overviewCompare: "",
     };
     var canWrite = function () { return app.can("config_registry_write"); };
     function root(rest) {
@@ -49,6 +49,18 @@
       });
     }
 
+    function overviewQuery() {
+      var q = {};
+      if (S.overviewMachine) q.machines = S.overviewMachine;
+      if (S.overviewCompare) q.compare_release_id = S.overviewCompare;
+      return q;
+    }
+    function loadOverview() {
+      if (!S.releaseId) { S.overview = null; return Promise.resolve(); }
+      return api.getV3(cfgPath("/releases/" + enc(S.releaseId) + "/overview"), overviewQuery())
+        .then(function (res) { S.overview = res; }, function () { S.overview = null; });
+    }
+
     function loadDetail() {
       return api.getV3(cfgPath("")).then(function (res) {
         S.detail = res.config;
@@ -62,6 +74,7 @@
           api.getV3(cfgPath("/branches/main")).catch(function () { return { head_id: null, baselines: [] }; }),
           api.getV3(cfgPath("/machines")).catch(function () { return { items: [] }; }),
           S.releaseId ? api.getV3(cfgPath("/drafts/" + enc(draftId()))).catch(function () { return null; }) : Promise.resolve(null),
+          loadOverview(),
         ];
         return Promise.all(jobs).then(function (rows) {
           S.graph = rows[0];
@@ -129,6 +142,7 @@
       var body;
       if (S.tab === "versions") body = versionsView(rel);
       else if (S.tab === "workbench") body = workbenchView(rel);
+      else if (S.tab === "overview") body = overviewView(rel);
       else body = placeholder(S.tab);
       return h("section.panel.config-main",
         h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, addRel),
@@ -193,6 +207,47 @@
         h("div.table-wrap", h("table.table",
           h("thead", h("tr", h("th", "参数"), h("th", "目录"), h("th", "类型/单位"), h("th", "值"))),
           h("tbody", bodyRows))));
+    }
+
+    function overviewView(rel) {
+      if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
+      var ov = S.overview;
+      var machineSel = h("select.select", { "aria-label": "机台列" }, h("option", { value: "" }, "不显示机台"),
+        (S.machines || []).map(function (m) {
+          return h("option", { value: m.machine_id, selected: S.overviewMachine === m.machine_id }, m.machine_no);
+        }));
+      machineSel.addEventListener("change", function () {
+        S.overviewMachine = machineSel.value;
+        loadOverview().then(render);
+      });
+      var compareSel = h("select.select", { "aria-label": "对比版本" }, h("option", { value: "" }, "不对比前版"),
+        (S.detail.releases || []).filter(function (r) { return r.release_id !== S.releaseId; }).map(function (r) {
+          return h("option", { value: r.release_id, selected: S.overviewCompare === r.release_id }, r.version);
+        }));
+      compareSel.addEventListener("change", function () {
+        S.overviewCompare = compareSel.value;
+        loadOverview().then(render);
+      });
+      if (!ov) return MC.stateBlock({ kind: "empty", title: "正在读取参数总览…" });
+      var head = h("div.row", { style: "gap:8px;flex-wrap:wrap" }, machineSel, compareSel,
+        h("span.xsmall.muted", ov.has_previous ? "" : "第一版无前一版本"));
+      if (!(ov.columns || []).length) {
+        return h("div.col", { style: "gap:12px" }, head,
+          MC.stateBlock({ kind: "empty", title: "该版本还没有可显示的 D0/Bn/机台快照", desc: "先冻结 D0、发布基线或本版机台 rn。" }));
+      }
+      var labels = { ok: null, unset: "未设", null: "null", removed: "已移除", disabled: "已停用", not_introduced: "未纳入" };
+      var header = h("tr", h("th", "参数"), h("th", "目录 / 类型"), (ov.columns || []).map(function (c) { return h("th", c.label); }));
+      var bodyRows = (ov.rows || []).map(function (r) {
+        return h("tr", h("td.cell-strong", r.name), h("td.xsmall.mono", (r.directory || []).join(" / ") + (r.type ? " · " + r.type : "")),
+          (ov.columns || []).map(function (c) {
+            var cell = r.cells[c.column_id] || {};
+            var shown = cell.status === "ok" || cell.status === "disabled" ? (cell.value == null ? "—" : String(cell.value)) : (labels[cell.status] || cell.status || "—");
+            return h("td", { title: (cell.revision_id || "") + " · " + (cell.status || "") }, shown);
+          }));
+      });
+      return h("div.col", { style: "gap:12px" }, head,
+        h("div.table-wrap", h("table.table", h("thead", header), h("tbody", bodyRows))),
+        h("p.xsmall.muted", "每格绑定来源 revision；未形成/未纳入/未设/null/已移除/已停用分开显示。"));
     }
 
     function placeholder(tab) {
