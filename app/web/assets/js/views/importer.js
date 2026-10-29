@@ -16,8 +16,8 @@
     var state = { source: preset.source || "local", files: [], persist: canSave };
     var limit = app.session.limits.upload_max_bytes;
 
-    var fileInput = h("input", { type: "file", multiple: true, accept: ".xml,.json,application/xml,application/json,text/xml", class: "sr-only" });
-    var drop = h("div.dropzone", { tabindex: "0", role: "button", "aria-label": "选择或拖入文件" }, icon("upload"), h("div", h("strong", "点击选择"), " 或将 XML / JSON 文件拖到此处"), h("div.xsmall", "可一次选择多个文件。单个文件不超过 " + util.formatBytes(limit)));
+    var fileInput = h("input", { type: "file", multiple: true, accept: ".xml,.json,.ini,.cfg,.conf,.txt,application/xml,application/json,text/xml,text/plain", class: "sr-only" });
+    var drop = h("div.dropzone", { tabindex: "0", role: "button", "aria-label": "选择或拖入文件" }, icon("upload"), h("div", h("strong", "点击选择"), " 或将 XML / JSON / INI / CFG / CONF / TXT 文件拖到此处"), h("div.xsmall", "可一次选择多个文件。单个文件不超过 " + util.formatBytes(limit)));
     var chosen = h("div.file-chip-list");
     var nameInput = h("input.input.input-mono", { type: "text", placeholder: "例如 config.xml", autocomplete: "off" });
     var urlInput = h("input.input.input-mono", { type: "url", placeholder: "http://10.20.1.15/cfg/config.xml", autocomplete: "off" });
@@ -110,7 +110,7 @@
       if (leaf) options.push(leaf);
       if (fromQuery) options.push(fromQuery);
       var i;
-      for (i = 0; i < options.length; i++) if (extOf(options[i]) === ".xml" || extOf(options[i]) === ".json") return options[i];
+      for (i = 0; i < options.length; i++) if ([".xml", ".json", ".ini", ".cfg", ".conf", ".txt"].indexOf(extOf(options[i])) >= 0) return options[i];
       for (i = 0; i < options.length; i++) if (extOf(options[i])) return options[i];
       return options[0] || "";
     }

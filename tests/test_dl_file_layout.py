@@ -31,12 +31,12 @@ def test_dl_item_and_axis_labels():
 
 
 def test_file_view_segments():
-    assert '{ value: "tree", label: "结构"' in FILEVIEW
+    assert 'rawMode ? "原文" : "结构"' in FILEVIEW
     assert '{ value: "history", label: "历史版本"' in FILEVIEW
     assert '{ value: "compare", label: "对比"' in FILEVIEW
     assert '{ value: "records", label: "修改记录"' in FILEVIEW
     temp_line = next(line for line in FILEVIEW.splitlines() if line.strip().startswith("? [{ value: \"tree\""))
-    assert 'label: "结构"' in temp_line
+    assert 'label: rawMode ? "原文" : "结构"' in temp_line
     assert 'label: "对比"' in temp_line
     assert "历史版本" not in temp_line
     assert "修改记录" not in temp_line
