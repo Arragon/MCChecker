@@ -19,6 +19,7 @@
 - 旧页面 1366：`v3-overview-1366.png`（速览）、`v3-review-1366.png`（审阅）、`v3-dl-1366.png`（DL）、`v3-settings-1366.png`（设置）均渲染；文件列表是宿主左侧栏，无独立 `files` 路由（旧 files 截图与 overview 相同）。
 - 模态：真实页「合并配置」打开后焦点落在基准输入框（base_revision_id），Escape 可关闭；role=status/aria-live 已加。提取 modal 在空文件态无输入控件，文件选择聚焦未单独验证；键盘-only 全走查仍未完成。
 - 参数树键盘：真实浏览器 Tab 到 `.vtree` 后按 ↓、Enter，选中 `Mode`，右侧详情显示类型 string/当前 unset；树键盘可用。
+- 合并 modal 键盘：打开后焦点在 `base_revision_id`，Tab 依次到 ours → theirs → 预览合并，焦点被限制在 modal 内；Escape 关闭。
 - 未保存值保护：真实浏览器改值后点「参数总览」，弹出“有未保存的值”确认；点取消仍停在参数工作台，修改不丢。
 - console：1 条 issue「A form field element should have an id or name attribute (count: 3)」，无 JS error/unhandled rejection；表单可访问名需修。
 - 尚未覆盖：完整键盘-only 走查、375 修复后的可保存截图（CDP 量化已通过）、失败/空态逐屏、Q1–Q6/A01–A17 全矩阵。
