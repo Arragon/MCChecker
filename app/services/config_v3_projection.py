@@ -57,6 +57,8 @@ def overview(
     compare_release_id: str = "",
     baseline_ids: Optional[List[str]] = None,
     machine_ids: Optional[List[str]] = None,
+    offset: int = 0,
+    limit: Optional[int] = None,
 ) -> Dict[str, Any]:
     with storage.use_profile(profile_id):
         doc = config_v3_catalog._load(profile_id)
@@ -136,8 +138,16 @@ def overview(
             }
         )
 
+    ordered = sorted(
+        params,
+        key=lambda k: (params[k].get("directory") or [], params[k].get("name") or ""),
+    )
+    total = len(ordered)
+    start = max(0, int(offset))
+    size = None if limit is None else max(1, min(int(limit), 500))
+    visible = ordered[start:] if size is None else ordered[start : start + size]
     rows = []
-    for pid in sorted(params, key=lambda k: (params[k].get("directory") or [], params[k].get("name") or "")):
+    for pid in visible:
         p = params[pid]
         cells = {
             col["column_id"]: _member(col["values"], pid, col["revision_id"])
@@ -159,6 +169,7 @@ def overview(
     public_columns = []
     for col in columns:
         public_columns.append({k: v for k, v in col.items() if k != "values"})
+    page = rows
     return {
         "config_id": config_id,
         "release_id": release_id,
@@ -167,5 +178,8 @@ def overview(
         "has_previous": bool(release.get("predecessor_id")),
         "previous_release_id": release.get("predecessor_id"),
         "columns": public_columns,
-        "rows": rows,
+        "total": total,
+        "offset": start,
+        "limit": size,
+        "rows": page,
     }

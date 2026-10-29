@@ -15,7 +15,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -93,6 +95,10 @@ def _pending(plan: Dict[str, Any]) -> int:
 
 
 def _filtered(plan: Dict[str, Any], filter_name: str, q: str) -> List[Dict[str, Any]]:
+    cache = plan.setdefault("_filter_cache", {})
+    key = (filter_name, str(q or ""))
+    if key in cache:
+        return cache[key]
     rows = config_v3_extract.filter_items(plan["rows"], filter_name)
     keyword = str(q or "").strip().lower()
     if keyword:
@@ -103,6 +109,7 @@ def _filtered(plan: Dict[str, Any], filter_name: str, q: str) -> List[Dict[str, 
             or keyword in str(row.get("display_path") or "").lower()
             or keyword in "/".join(row.get("directory") or []).lower()
         ]
+    cache[key] = rows
     return rows
 
 
@@ -120,7 +127,7 @@ def _summary(plan: Dict[str, Any]) -> Dict[str, Any]:
         "source": copy.deepcopy(plan["source"]),
         "revision": plan["revision"],
         "counts": copy.deepcopy(plan["counts"]),
-        "pending": _pending(plan),
+        "pending": plan.get("pending", 0),
         "created_at": plan["created_at"],
     }
 
@@ -138,8 +145,29 @@ def _get(wid: str, pid: str, cid: str, plan_id: str) -> Dict[str, Any]:
         return plan
 
 
-def _refresh(plan: Dict[str, Any]) -> None:
-    """来源/目录修订变化时把计划标 stale；旧行与决议保留。"""
+def _catalog_stamp(pid: str):
+    try:
+        return os.stat(config_v3_catalog._path(pid)).st_mtime_ns
+    except OSError:
+        return None
+
+
+def _refresh(plan: Dict[str, Any], force: bool = False) -> None:
+    """来源/目录修订变化时把计划标 stale；旧行与决议保留。
+
+    读页路径允许 2 秒缓存；catalog 文件 mtime 变化会立刻穿透缓存，
+    避免 50k 目录每个分页都完整加载一次，又不把 stale 拖成很久。
+    """
+    now = time.monotonic()
+    stamp = _catalog_stamp(plan["profile_id"])
+    if (
+        not force
+        and now - float(plan.get("_checked_at") or 0.0) < 2.0
+        and stamp == plan.get("_catalog_mtime")
+    ):
+        return
+    plan["_checked_at"] = now
+    plan["_catalog_mtime"] = stamp
     state = config_v3_extract.current_state(plan["profile_id"], plan["config_id"], plan["source"])
     source = plan["source"]
     changed = (
@@ -178,7 +206,11 @@ def create(wid: str, pid: str, cid: str, version_id: str) -> Dict[str, Any]:
         "status": STATUS_OPEN,
         "created_at": _now(),
         "receipts": {},
+        "_checked_at": 0.0,
+        "_catalog_mtime": _catalog_stamp(pid),
+        "_filter_cache": {},
     }
+    plan["pending"] = _pending(plan)
     with _LOCK:
         _PLANS[plan["plan_id"]] = plan
         _drop_old_plans(wid, pid, cid)
@@ -188,7 +220,7 @@ def create(wid: str, pid: str, cid: str, version_id: str) -> Dict[str, Any]:
 def get(wid: str, pid: str, cid: str, plan_id: str) -> Dict[str, Any]:
     plan = _get(wid, pid, cid, plan_id)
     with _LOCK:
-        _refresh(plan)
+        _refresh(plan, force=True)
         return _summary(plan)
 
 
@@ -277,7 +309,7 @@ def _apply(plan: Dict[str, Any], rows_to_update: List[Dict[str, Any]], decision:
 def decisions(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     plan = _get(wid, pid, cid, plan_id)
     with _LOCK:
-        _refresh(plan)
+        _refresh(plan, force=True)
         if plan["status"] == STATUS_STALE:
             raise AppError(PLAN_STALE, "计划已过期，请先重算", plan_id=plan_id)
         scope = str(payload.get("scope") or "rows").strip().lower()
@@ -304,6 +336,7 @@ def decisions(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any
             updated = _apply(plan, targets, decision, strict=False)
         else:
             raise AppError(INVALID_INPUT, "未知的决议范围", field="scope")
+        plan["pending"] = _pending(plan)
         out = _summary(plan)
         out["updated"] = updated
         return out
@@ -326,6 +359,10 @@ def recompute(wid: str, pid: str, cid: str, plan_id: str, version_id: Optional[s
         plan["rows"] = copy.deepcopy(built["items"])
         plan["decisions"] = kept
         plan["status"] = STATUS_OPEN
+        plan["pending"] = _pending(plan)
+        plan["_filter_cache"] = {}
+        plan["_checked_at"] = time.monotonic()
+        plan["_catalog_mtime"] = _catalog_stamp(pid)
         out = _summary(plan)
         out["preserved"] = len(kept)
         return out
@@ -363,7 +400,7 @@ def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) 
             result = copy.deepcopy(receipt["result"])
             result["replayed"] = True
             return result
-        _refresh(plan)
+        _refresh(plan, force=True)
         if plan["status"] == STATUS_STALE:
             raise AppError(PLAN_STALE, "计划已过期，请先重算再提交", plan_id=plan_id)
         if _pending(plan):
@@ -408,7 +445,7 @@ def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) 
                         }
                     )
         def ensure_current():
-            _refresh(plan)
+            _refresh(plan, force=True)
             if plan["status"] == STATUS_STALE:
                 raise AppError(PLAN_STALE, "计划已过期，请先重算再提交", plan_id=plan_id)
 
