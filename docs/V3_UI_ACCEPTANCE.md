@@ -17,7 +17,7 @@
 - 用 CDP `Emulation.setDeviceMetricsOverride` 375×812 mobile 复测：修复前顶栏搜索/身份 chip 越界；修复后 `.app-header` 收起搜索、身份文案与徽章，`document.scrollWidth=375`、越界元素 0，五 tab 自动换行。CSS-only 修复见 INH-2164。
 - 1920×1080 与 768×900：`docs/evidence/v3-config-1920.png`、`v3-config-768.png`；配置管理布局正常，768 下侧栏收起、主内容仍完整。
 - 旧页面 1366：`v3-overview-1366.png`（速览）、`v3-review-1366.png`（审阅）、`v3-dl-1366.png`（DL）、`v3-settings-1366.png`（设置）均渲染；文件列表是宿主左侧栏，无独立 `files` 路由（旧 files 截图与 overview 相同）。
-- 模态：真实页点击「从文件提取参数」打开 modal，按 Escape 关闭成功；补齐 role=status/aria-live 与首控件聚焦逻辑后，headless 下 activeElement 仍停在 BODY（焦点未落到 modal，像环境限制，未确认修好），键盘-only 全走查仍未完成。
+- 模态：真实页「合并配置」打开后焦点落在基准输入框（base_revision_id），Escape 可关闭；role=status/aria-live 已加。提取 modal 在空文件态无输入控件，文件选择聚焦未单独验证；键盘-only 全走查仍未完成。
 - 参数树键盘：真实浏览器 Tab 到 `.vtree` 后按 ↓、Enter，选中 `Mode`，右侧详情显示类型 string/当前 unset；树键盘可用。
 - 未保存值保护：真实浏览器改值后点「参数总览」，弹出“有未保存的值”确认；点取消仍停在参数工作台，修改不丢。
 - console：1 条 issue「A form field element should have an id or name attribute (count: 3)」，无 JS error/unhandled rejection；表单可访问名需修。
