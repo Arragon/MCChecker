@@ -20,6 +20,9 @@
       machines: [], releaseId: null, tab: "versions", draft: null, loading: true, error: null,
       filter: "", overview: null, overviewMachine: "", overviewCompare: "",
       paramMode: "list", selectedParam: null, paramTree: null,
+      exportFiles: null, exportFileId: "", exportRevisionId: "", exportPlan: null,
+      exportArtifact: null, exportBusy: false,
+      historyEvents: null, historyLoading: false, historyQ: "",
     };
     var canWrite = function () { return app.can("config_registry_write"); };
     function root(rest) {
@@ -147,6 +150,8 @@
       if (S.tab === "versions") body = versionsView(rel);
       else if (S.tab === "workbench") body = workbenchView(rel);
       else if (S.tab === "overview") body = overviewView(rel);
+      else if (S.tab === "export") body = exportView(rel);
+      else if (S.tab === "history") body = historyView();
       else body = placeholder(S.tab);
       return h("section.panel.config-main",
         h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, extract, mergeBtn, addRel),
@@ -850,6 +855,129 @@
         });
         MC.modal({ title: "参数历程 · " + r.name, body: rows.length ? h("ul.mini-list", rows) : h("div.muted", "没有历史。") });
       }, function (err) { MC.toastError("读取历程失败", err); });
+    }
+
+
+    function exportRevisions(rel) {
+      var options = [{ id: "d0-" + S.releaseId, label: "D0 " + rel.version }];
+      ((S.branch && S.branch.baselines) || []).forEach(function (row) {
+        if (!row.release_id || row.release_id === S.releaseId) {
+          options.push({ id: row.baseline_id, label: row.label + " · " + (row.published_at || "") });
+        }
+      });
+      (S.machines || []).forEach(function (m) {
+        if (m.release_id && m.release_id !== S.releaseId) return;
+        (m.revisions || []).forEach(function (row) {
+          options.push({ id: row.revision_id, label: "机台 " + m.machine_no + " · " + row.label });
+        });
+      });
+      return options;
+    }
+
+    function exportView(rel) {
+      if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
+      var revisions = exportRevisions(rel);
+      if (!S.exportRevisionId || !revisions.some(function (row) { return row.id === S.exportRevisionId; })) {
+        S.exportRevisionId = revisions[0] && revisions[0].id;
+      }
+      if (S.exportFiles === null) {
+        S.exportFiles = [];
+        api.getV3(root("/file-selector")).then(function (res) {
+          S.exportFiles = (res.items || []).filter(function (f) {
+            return ["json", "xml", "ini"].indexOf(String(f.name || "").split(".").pop().toLowerCase()) >= 0;
+          });
+          render();
+        }, function (err) { MC.toastError("读取模板文件失败", err); });
+      }
+      var revSel = h("select.select", { "aria-label": "导出修订" }, revisions.map(function (row) {
+        return h("option", { value: row.id, selected: row.id === S.exportRevisionId }, row.label);
+      }));
+      revSel.addEventListener("change", function () { S.exportRevisionId = revSel.value; S.exportPlan = null; S.exportArtifact = null; render(); });
+      if (!S.exportFileId && S.exportFiles && S.exportFiles.length) S.exportFileId = S.exportFiles[0].version_id;
+      var fileSel = h("select.select", { "aria-label": "模板文件", name: "version_id" },
+        (S.exportFiles || []).map(function (f) {
+          return h("option", { value: f.version_id, selected: f.version_id === S.exportFileId },
+            f.name + " · " + f.version_id);
+        }));
+      fileSel.addEventListener("change", function () { S.exportFileId = fileSel.value; S.exportPlan = null; S.exportArtifact = null; });
+      var confirm = h("input", { type: "checkbox", name: "confirm_removed" });
+      var previewBtn = h("button.btn.btn-primary", { type: "button", disabled: !canWrite() || !S.exportFileId || S.exportBusy, onclick: function () {
+        S.exportBusy = true; S.exportPlan = null; S.exportArtifact = null; render();
+        api.requestV3("POST", cfgPath("/export-plans"), { body: {
+          release_id: S.releaseId, revision_id: revSel.value, version_id: fileSel.value,
+          confirm_removed: confirm.checked,
+        } }).then(function (res) { S.exportPlan = res.plan; S.exportBusy = false; render(); },
+          function (err) { S.exportBusy = false; render(); MC.toastError("导出预览失败", err); });
+      } }, "预览导出");
+      var body = h("div.col", { style: "gap:12px" },
+        h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+          h("label.xsmall.muted", "配置修订"), revSel,
+          h("label.xsmall.muted", "模板文件"), fileSel,
+          h("label.xsmall.row", { style: "gap:4px" }, confirm, "确认停用/移除字段"),
+          previewBtn));
+      if (!(S.exportFiles || []).length) {
+        body.appendChild(MC.stateBlock({ kind: "empty", title: "没有 JSON/XML/INI 模板", desc: "先在左下文件列表上传模板。" }));
+      }
+      if (S.exportPlan) {
+        var plan = S.exportPlan;
+        body.appendChild(h("div.banner.banner-info", icon("info"), h("div.banner-body",
+          "已应用 " + plan.applied + " 个参数；digest " + String(plan.digest).slice(0, 12) + "…；停用/移除项 " + (plan.blocked || []).length + "。")));
+        body.appendChild(h("pre.mono.xsmall", { style: "max-height:260px;overflow:auto;white-space:pre-wrap" }, plan.preview || ""));
+        var commit = h("button.btn.btn-primary", { type: "button", disabled: S.exportBusy, onclick: function () {
+          S.exportBusy = true; render();
+          api.requestV3("POST", cfgPath("/export-plans/" + enc(plan.plan_id) + "/commit"), { body: { preview_token: plan.preview_token } })
+            .then(function (res) { S.exportArtifact = res.artifact; S.exportBusy = false; render(); },
+              function (err) { S.exportBusy = false; render(); MC.toastError("生成导出文件失败", err); });
+        } }, "生成不可变文件");
+        body.appendChild(h("div.row", { style: "gap:8px" }, commit));
+      }
+      if (S.exportArtifact) {
+        var art = S.exportArtifact;
+        var download = h("button.btn.btn-primary", { type: "button", onclick: function () {
+          api.download("/api/v3/workspaces/" + enc(MC.workspaces.scopeId()) + "/profiles/" + enc(app.pid) + "/exports/" + enc(art.artifact_id) + "/download");
+        } }, "下载 " + art.filename);
+        body.appendChild(h("div.row", { style: "gap:8px" }, download,
+          h("span.xsmall.muted", "仅表示内部导出，不代表真实机台已部署")));
+      }
+      return h("div.col", { style: "gap:12px" }, body);
+    }
+
+    function historyView() {
+      if (!S.cid) return MC.stateBlock({ kind: "empty", title: "先选择配置" });
+      if (S.historyEvents === null && !S.historyLoading) {
+        S.historyLoading = true;
+        api.getV3(cfgPath("/events") + (S.historyQ ? "?q=" + enc(S.historyQ) : "")).then(function (res) {
+          S.historyEvents = res.items || []; S.historyLoading = false; render();
+        }, function (err) { S.historyLoading = false; MC.toastError("读取配置事件失败", err); });
+      }
+      var q = h("input.input.input-sm", { type: "search", name: "q", placeholder: "搜索事件/参数/操作人", value: S.historyQ });
+      var search = h("button.btn.btn-sm", { type: "button", onclick: function () {
+        S.historyQ = q.value.trim(); S.historyEvents = null; render();
+      } }, "搜索");
+      q.addEventListener("keydown", function (e) { if (e.key === "Enter") search.click(); });
+      var rows = (S.historyEvents || []).slice(0, 100).map(function (ev) {
+        var restore = null;
+        var source = ev.source || {};
+        if (canWrite() && source.revision_id) {
+          restore = h("button.btn.btn-sm", { type: "button", onclick: function () {
+            api.requestV3("POST", cfgPath("/restore-plans"), { body: {
+              revision_id: source.revision_id, request_id: "ui-restore-" + Date.now(),
+            } }).then(function () { MC.toast.success("已生成恢复草稿"); reloadDetail(); },
+              function (err) { MC.toastError("恢复失败", err); });
+          } }, "从该修订恢复");
+        }
+        return h("tr",
+          h("td.xsmall", ev.at), h("td", h("span.badge", ev.type)),
+          h("td", ev.principal || "—"), h("td.mono.xsmall", ev.ip || "—"),
+          h("td.xsmall", ev.request_id || ev.undo_of || ""), h("td", restore));
+      });
+      return h("div.col", { style: "gap:10px" },
+        h("div.row", { style: "gap:8px" }, q, search,
+          h("span.spacer"), h("button.btn.btn-sm", { type: "button", onclick: function () { S.historyEvents = null; render(); } }, "刷新")),
+        S.historyLoading ? MC.stateBlock({ kind: "loading", title: "读取事件…" })
+          : (rows.length ? h("div.table-wrap", h("table.table",
+            h("thead", h("tr", h("th", "时间"), h("th", "类型"), h("th", "操作人"), h("th", "IP"), h("th", "请求/撤销"), h("th", ""))),
+            h("tbody", rows))) : MC.stateBlock({ kind: "empty", title: "没有配置事件", desc: "提交提取/合并/导入/导出/恢复后会在这里出现。" })));
     }
 
     function placeholder(tab) {
