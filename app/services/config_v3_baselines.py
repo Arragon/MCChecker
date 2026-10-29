@@ -225,6 +225,7 @@ def publish_baseline(
             "label": "B%d" % seq,
             "release_id": release["release_id"],
             "definition_revision": int(draft.get("definition_revision", 0)),
+            "parent_id": branch.get("head_id"),
             "source_revision_id": draft.get("source_revision_id"),
             "values": copy.deepcopy(draft.get("values") or {}),
             "published_at": _now(),

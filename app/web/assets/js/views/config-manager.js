@@ -230,6 +230,7 @@
       });
       if (!ov) return MC.stateBlock({ kind: "empty", title: "正在读取参数总览…" });
       var head = h("div.row", { style: "gap:8px;flex-wrap:wrap" }, machineSel, compareSel,
+        h("button.btn.btn-sm", { type: "button", disabled: !rel.default_revision_id, onclick: showDiff }, "与前一修订对比"),
         h("span.xsmall.muted", ov.has_previous ? "" : "第一版无前一版本"));
       if (!(ov.columns || []).length) {
         return h("div.col", { style: "gap:12px" }, head,
@@ -238,7 +239,7 @@
       var labels = { ok: null, unset: "未设", null: "null", removed: "已移除", disabled: "已停用", not_introduced: "未纳入" };
       var header = h("tr", h("th", "参数"), h("th", "目录 / 类型"), (ov.columns || []).map(function (c) { return h("th", c.label); }));
       var bodyRows = (ov.rows || []).map(function (r) {
-        return h("tr", h("td.cell-strong", r.name), h("td.xsmall.mono", (r.directory || []).join(" / ") + (r.type ? " · " + r.type : "")),
+        return h("tr", h("td.cell-strong", r.name, h("button.link-btn.small", { type: "button", style: "margin-left:8px", onclick: function () { showHistory(r); } }, "历程")), h("td.xsmall.mono", (r.directory || []).join(" / ") + (r.type ? " · " + r.type : "")),
           (ov.columns || []).map(function (c) {
             var cell = r.cells[c.column_id] || {};
             var shown = cell.status === "ok" || cell.status === "disabled" ? (cell.value == null ? "—" : String(cell.value)) : (labels[cell.status] || cell.status || "—");
@@ -248,6 +249,29 @@
       return h("div.col", { style: "gap:12px" }, head,
         h("div.table-wrap", h("table.table", h("thead", header), h("tbody", bodyRows))),
         h("p.xsmall.muted", "每格绑定来源 revision；未形成/未纳入/未设/null/已移除/已停用分开显示。"));
+    }
+
+    function showDiff() {
+      var rid = "d0-" + S.releaseId;
+      api.getV3(cfgPath("/revisions/" + enc(rid) + "/diff")).then(function (res) {
+        var rows = (res.rows || []).map(function (r) {
+          return h("li", h("strong", r.name_after || r.name_before || r.parameter_id), " · ",
+            r.categories.join(" / "),
+            h("span.xsmall.muted", "  " + (r.before && r.before.status || "—") + " → " + (r.after && r.after.status || "—")));
+        });
+        MC.modal({ title: "与前一修订对比", body: rows.length ? h("ul.mini-list", rows) : h("div.muted", "前一版本无差异或没有前一版本。") });
+      }, function (err) { MC.toastError("读取差异失败", err); });
+    }
+
+    function showHistory(r) {
+      api.getV3(cfgPath("/parameters/" + enc(r.parameter_id) + "/history")).then(function (res) {
+        var rows = (res.items || []).map(function (it) {
+          return h("li", h("span.mono", it.revision_id), " · ", it.label,
+            h("span.badge", it.value.status), it.value.value != null ? h("span.mono", " = " + it.value.value) : null,
+            it.previous_id ? h("span.xsmall.muted", "  前驱 " + it.previous_id) : null);
+        });
+        MC.modal({ title: "参数历程 · " + r.name, body: rows.length ? h("ul.mini-list", rows) : h("div.muted", "没有历史。") });
+      }, function (err) { MC.toastError("读取历程失败", err); });
     }
 
     function placeholder(tab) {
