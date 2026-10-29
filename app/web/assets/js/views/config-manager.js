@@ -512,7 +512,7 @@
           refreshFooter();
           return;
         }
-        var sel = h("select.select", { "aria-label": "配置文件" }, state.files.map(function (f) {
+        var sel = h("select.select", { "aria-label": "配置文件", id: "extract-file", name: "file" }, state.files.map(function (f) {
           return h("option", { value: f.file_id, selected: f.file_id === state.fileId }, f.name + " · " + f.version_id);
         }));
         sel.addEventListener("change", function () { state.fileId = sel.value; });
@@ -528,7 +528,7 @@
       function typeControl(row, d) {
         var value = state.types[row.row_id] !== undefined ? state.types[row.row_id] : (d.type || "");
         var options = [["", "选择类型…"], ["string", "string"], ["number", "number"], ["boolean", "boolean"], ["decimal", "decimal"]];
-        var sel = h("select.select", { "aria-label": "null 类型", disabled: state.page.stale },
+        var sel = h("select.select", { "aria-label": "null 类型", name: "type", disabled: state.page.stale },
           options.map(function (pair) {
             return h("option", { value: pair[0], selected: pair[0] === value }, pair[1]);
           }));
@@ -557,7 +557,7 @@
       }
 
       function actionControl(row, d) {
-        var sel = h("select.select", { "aria-label": "逐行决议", disabled: state.page.stale },
+        var sel = h("select.select", { "aria-label": "逐行决议", name: "decision", disabled: state.page.stale },
           actionOptions(row, d).map(function (pair) {
             return h("option", { value: pair[0], selected: pair[0] === d.action }, pair[1]);
           }));
@@ -584,7 +584,7 @@
           return h("span.xsmall.muted", "→ " + cands[0].name + " / " + ((cands[0].directory || []).join(" / ") || "根目录"));
         }
         var current = d.parameter_id || cands[0].parameter_id;
-        var sel = h("select.select", { "aria-label": "关联目标", disabled: state.page.stale }, cands.map(function (c) {
+        var sel = h("select.select", { "aria-label": "关联目标", name: "parameter_id", disabled: state.page.stale }, cands.map(function (c) {
           return h("option", { value: c.parameter_id, selected: c.parameter_id === current },
             c.name + " / " + ((c.directory || []).join(" / ") || "根目录"));
         }));
@@ -618,7 +618,7 @@
         var size = h("select.select", { "aria-label": "每页行数" },
           [50, 100].map(function (n) { return h("option", { value: String(n), selected: n === state.size }, n + " 行/页"); }));
         size.addEventListener("change", function () { state.size = +size.value; state.offset = 0; loadRows(); });
-        var q = h("input.input.input-sm", { type: "search", placeholder: "按名称 / 层级筛选", value: state.q });
+        var q = h("input.input.input-sm", { type: "search", name: "q", placeholder: "按名称 / 层级筛选", value: state.q });
         var search = h("button.btn.btn-sm", { type: "button", onclick: function () { state.q = q.value.trim(); state.offset = 0; loadRows(); } }, "搜索");
         q.addEventListener("keydown", function (e) { if (e.key === "Enter") search.click(); });
         body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, filter, size, q, search,
@@ -738,9 +738,9 @@
           });
         });
       });
-      var baseInput = h("input.input.input-sm.input-mono", { value: branch.baselines && branch.baselines.length ? branch.baselines[0].baseline_id : "", placeholder: "基准 O（可留空则禁止一键合并）" });
-      var oursInput = h("input.input.input-sm.input-mono", { value: branch.head_id || d0, placeholder: "本地 L（Bn/rn）" });
-      var theirsInput = h("input.input.input-sm.input-mono", { value: d0, placeholder: "目标 N（D0）" });
+      var baseInput = h("input.input.input-sm.input-mono", { name: "base_revision_id", value: branch.baselines && branch.baselines.length ? branch.baselines[0].baseline_id : "", placeholder: "基准 O（可留空则禁止一键合并）" });
+      var oursInput = h("input.input.input-sm.input-mono", { name: "ours_revision_id", value: branch.head_id || d0, placeholder: "本地 L（Bn/rn）" });
+      var theirsInput = h("input.input.input-sm.input-mono", { name: "theirs_revision_id", value: d0, placeholder: "目标 N（D0）" });
       function render() {
         util.clear(body);
         body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
@@ -760,7 +760,7 @@
           body.appendChild(h("div.banner.banner-warning", icon("info"), h("div.banner-body", "O/L/N 来源已变化，旧决议仍保留；请重新预览后再提交。")));
         }
         var rows = (state.page.items || []).map(function (row) {
-          var sel = h("select.select", { "aria-label": "合并决议", disabled: state.page.stale },
+          var sel = h("select.select", { "aria-label": "合并决议", name: "merge_decision", disabled: state.page.stale },
             row.allowed_decisions.map(function (value) {
               var label = value;
               MERGE_DECISIONS.forEach(function (pair) { if (pair[0] === value) label = pair[1]; });
