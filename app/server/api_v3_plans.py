@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from ..core.errors import NOT_FOUND, AppError
-from ..services import authz, config_v3_import, config_v3_merge_plans, config_v3_plans, workspace_catalog
+from ..services import authz, config_v3_history, config_v3_import, config_v3_merge_plans, config_v3_plans, workspace_catalog
 from ..services.context import RequestContext
 from .router import Response, Router, json_body, query_param
 
@@ -135,13 +135,15 @@ def commit_plan(
 ) -> Response:
     authz.authorize(ctx, "config_registry_write")
     _scope(params["wid"], params["pid"])
-    return Response(
-        payload={
-            "result": config_v3_plans.commit(
-                params["wid"], params["pid"], params["cid"], params["plan_id"], json_body(body)
-            )
-        }
+    result = config_v3_plans.commit(
+        params["wid"], params["pid"], params["cid"], params["plan_id"], json_body(body)
     )
+    config_v3_history.record(
+        params["pid"], params["cid"], "extract_commit", actor=ctx.actor, ip=ctx.ip,
+        after={"created": result.get("created"), "unchanged": result.get("unchanged")},
+        request_id=str((json_body(body) or {}).get("request_id") or ""),
+    )
+    return Response(payload={"result": result})
 
 
 def create_merge_plan(
@@ -196,9 +198,15 @@ def commit_merge_plan(
 ) -> Response:
     authz.authorize(ctx, "config_registry_write")
     _scope(params["wid"], params["pid"])
-    return Response(payload=config_v3_merge_plans.commit(
+    result = config_v3_merge_plans.commit(
         params["wid"], params["pid"], params["cid"], params["plan_id"], json_body(body)
-    ))
+    )
+    config_v3_history.record(
+        params["pid"], params["cid"], "merge_commit", actor=ctx.actor, ip=ctx.ip,
+        after={"draft_id": (result.get("draft") or {}).get("draft_id")},
+        request_id=str((json_body(body) or {}).get("request_id") or ""),
+    )
+    return Response(payload=result)
 
 
 def create_value_plan(
@@ -236,6 +244,12 @@ def commit_value_plan(
 ) -> Response:
     authz.authorize(ctx, "config_registry_write")
     _scope(params["wid"], params["pid"])
-    return Response(payload=config_v3_import.commit(
+    result = config_v3_import.commit(
         params["wid"], params["pid"], params["cid"], params["plan_id"], json_body(body)
-    ))
+    )
+    config_v3_history.record(
+        params["pid"], params["cid"], "value_import", actor=ctx.actor, ip=ctx.ip,
+        after={"applied": result.get("applied"), "created": result.get("created")},
+        request_id=str((json_body(body) or {}).get("request_id") or ""),
+    )
+    return Response(payload=result)
