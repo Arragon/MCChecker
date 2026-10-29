@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 104;  // 96 + M9-05 + M10-01/02 + M11-02 + M12-07 + M13-01/05
+  var EXPECTED_CASES = 105;  // 96 + M9-05 + M10-01/02 + M11-02 + M12-07 + M13-01/05 + M14-02
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -935,6 +935,80 @@
         return waitFor(function () { return !document.querySelector(".modal"); }, 20);
       }).then(function () {
         ok(!document.querySelector(".modal"), "提交成功后 modal 关闭");
+      });
+    }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
+  });
+
+  test("M14-02：合并 modal 三栏 O/L/N、逐行决议与生成新草稿", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("default");
+    var t = productionRun();
+    return t.run(function (r) {
+      var base = "/api/v3/workspaces/default/profiles/default/configs";
+      var release = { release_id: "rel-1", version: "690", order: 1, predecessor_id: null, created_at: "2026-10-29 10:00:00", definition_revision: 1, default_revision_id: "d0-rel-1", default_frozen_at: "2026-10-29 10:00:00", d0: { values: {}, frozen: true, revision: 0 } };
+      var row = { parameter_id: "p-1", name: "P1", action: "conflict", base: { value: { text: "1", type: "decimal" } }, ours: { value: { text: "9", type: "decimal" } }, theirs: { value: { text: "3", type: "decimal" } }, decision: "pending", allowed_decisions: ["adopt_target", "keep_local", "custom"] };
+      var decision = "pending";
+      r.useApi({
+        getV3: function (path) {
+          if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
+          if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
+          if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [{ release_id: "rel-1", version: "690", order: 1, predecessor_id: null, d0_frozen: true }], edges: [] });
+          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 1, items: [] });
+          if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: "bl-1", baselines: [{ baseline_id: "bl-1", label: "B1" }] });
+          if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
+          if (path.indexOf("/merge-plans/mp-1/rows") >= 0) {
+            return Promise.resolve({ plan_id: "mp-1", config_id: "cfg-1", status: "open", stale: false, mode: "main_cross_version", total: 1, pending: decision === "pending" ? 1 : 0, filter: "conflict", items: [Object.assign({}, row, { decision: decision })] });
+          }
+          return Promise.resolve({ items: [] });
+        },
+        requestV3: function (method, path, opts) {
+          if (method === "POST" && /\/merge-plans$/.test(path)) {
+            return Promise.resolve({ plan: { plan_id: "mp-1", config_id: "cfg-1", status: "open", stale: false, mode: "main_cross_version", pending: 1 } });
+          }
+          if (method === "PATCH" && path.indexOf("/merge-plans/mp-1/decisions") >= 0) {
+            decision = opts.body.decision;
+            return Promise.resolve({ plan_id: "mp-1", pending: decision === "pending" ? 1 : 0 });
+          }
+          if (method === "POST" && path.indexOf("/merge-plans/mp-1/commit") >= 0) {
+            return Promise.resolve({ draft: { draft_id: "bd-1", kind: "baseline" } });
+          }
+          return Promise.resolve({});
+        },
+      });
+      var testApp = settingsApp(true);
+      testApp.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(testApp));
+      function waitFor(fn, n) {
+        return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); });
+      }
+      function modalText() { var m = document.querySelector(".modal"); return m ? m.textContent : ""; }
+      function clickModal(text) {
+        var btn = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.trim() === text; })[0];
+        if (btn) btn.click();
+        return !!btn;
+      }
+      return waitFor(function () { return inst.el.textContent.indexOf("合并配置") >= 0; }, 20).then(function () {
+        var btn = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.trim() === "合并配置"; })[0];
+        ok(btn, "合并入口");
+        btn.click();
+        return waitFor(function () { return modalText().indexOf("预览合并") >= 0; }, 20);
+      }).then(function () {
+        clickModal("预览合并");
+        return waitFor(function () { return modalText().indexOf("待决议 1 行") >= 0; }, 20);
+      }).then(function () {
+        ok(modalText().indexOf("O 基准") >= 0 && modalText().indexOf("L 本地") >= 0 && modalText().indexOf("N 目标") >= 0, "三栏");
+        var sel = document.querySelector('.modal select[aria-label="合并决议"]');
+        ok(sel, "逐行决议");
+        sel.value = "keep_local";
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        return waitFor(function () { return modalText().indexOf("冲突已全部决议") >= 0; }, 20);
+      }).then(function () {
+        var commit = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("生成新草稿") >= 0; })[0];
+        ok(commit && !commit.disabled, "决议齐备后可提交");
+        commit.click();
+        return waitFor(function () { return !document.querySelector(".modal"); }, 20);
+      }).then(function () {
+        ok(!document.querySelector(".modal"), "提交后关闭");
       });
     }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
   });
