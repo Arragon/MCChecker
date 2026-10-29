@@ -22,7 +22,8 @@
 - 合并 modal 键盘：打开后焦点在 `base_revision_id`，Tab 依次到 ours → theirs → 预览合并，焦点被限制在 modal 内；Escape 关闭。
 - 未保存值保护：真实浏览器改值后点「参数总览」，弹出“有未保存的值”确认；点取消仍停在参数工作台，修改不丢。
 - console：1 条 issue「A form field element should have an id or name attribute (count: 3)」，无 JS error/unhandled rejection；表单可访问名需修。
-- 尚未覆盖：完整键盘-only 走查、375 修复后的可保存截图（CDP 量化已通过）、失败/空态逐屏、Q1–Q6/A01–A17 全矩阵。
+- 空态：真实服务新建空工作区“空态验收”，1366 截图 `docs/evidence/v3-config-empty-1366.png`；0 固定配置、两个新建入口正常。
+- 尚未覆盖：完整键盘-only 走查、375 修复后的可保存截图（CDP 量化已通过）、失败态逐屏、旧页面逐屏像素对比。
 
 ## 尚未取得的阻断级证据
 
