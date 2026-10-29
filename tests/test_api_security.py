@@ -214,6 +214,15 @@ WRITE_ROUTE_ACTIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans/{plan_id}/commit",
     ): "config_registry_write",
+    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/value-import-plans"): "config_registry_write",
+    (
+        "PATCH",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/value-import-plans/{plan_id}/decisions",
+    ): "config_registry_write",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/value-import-plans/{plan_id}/commit",
+    ): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/reactivate"): "config_registry_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
