@@ -6,19 +6,20 @@
 > |---|---|
 > | `docs/MCChecker_REDESIGN_SPEC.md` | 需求与技术规范（§15 任务卡 T-01–T-30、§16 验收） |
 > | `docs/MCChecker_FEATURE_CHANGES.md` | 行为变更 C01–C32（相对 v1.0.1） |
-> | Linear 项目 **MC-checker-v2**（`P-INH-14`，**104 卡** = M0–M4 原 60 卡 + M5–M8 44 卡；B10.2 的活已合并但**没有对应卡**） | 每卡范围/验收/开发方案与执行状态 |
+> | Linear 项目 **MC-checker-v2**（`P-INH-14`，**149 卡** = M0–M4 原 60 卡 + M5–M8 44 卡 + M9–M15 V3.0 45 卡；B10.2 的活已合并但**没有对应卡**） | 每卡范围/验收/开发方案与执行状态 |
 > | 本文件 | 执行协议、进度台账、已定决策、接力入口 |
 >
 > 卡定义在 Linear；进度以 Linear 为准，本文件第 5/6 节表格与第 7 节是镜像台账（如两者不一致，以 Linear 为准并回填本文件）。
 
 ---
 
-## 0. 一句话现状（2026-10-22）
+## 0. 一句话现状（2026-10-28）
 
-**Linear 板 104 张 / 91 Done / 9 In Progress / 2 Backlog / 2 Canceled**：M0 9、M1 7、M2 12、M3 17 全 Done；**M4 8/9**（M4-08 In Progress）；**M5 11/11 Done**；**M6 13/14**（M6-14 压真实系统导入）；**M7 9 Done + 2 Canceled + 1 In Progress**（M7-10 等真实设备；M7-07/08 Canceled）；**M8 0 Done / 7 In Progress**（代码已落地，真实浏览器/设备/断网/演练证据待补）；INH-1932 Backlog。
+**Linear 板 149 张 / 91 Done / 9 In Progress / 47 Backlog / 2 Canceled**（2026-10-28 复核）：M0 9、M1 7、M2 12、M3 17 全 Done；**M4 8/9**（M4-08 In Progress）；**M5 11/11 Done**；**M6 13/14**（M6-14 压真实系统导入）；**M7 9 Done + 2 Canceled + 1 In Progress**（M7-10 等真实设备；M7-07/08 Canceled）；**M8 0 Done / 7 In Progress**（代码已落地，真实浏览器/设备/断网/演练证据待补）；INH-1932 Backlog。**M9–M15（V3.0）45 张全部 Backlog**（M9 7、M10 6、M11 6、M12 7、M13 7、M14 6、M15 6），2026-10-28 新建，M9-00（INH-2117）是设计基线；范围是全局工作区、唯一文件/精确版本、参数总览与增量提取、合并/模板导出与 M15 真实发布验收，M15 只认证据、不继承 M0–M8 的 Done。
 **M5 全部完成**；**M6 单版本闭环除 M6-14 的真实导入外全部落地**；**M7-01～12 代码已落地**（M7-07/08 按 Canceled 交付「功能关闭」；M7-09/10 评审修复 `6eb4c4d`；M7-11 `1f618e0`；M7-12 `2dfebc0`）；**M8-01/02/06 代码已落地，M8-03/04/05 的本地自动化已补，真实环境验收仍未完成**。
-**仓库实况**：`main@3a60746`；M5–M8 集成分支 `origin/mc-v2/m5-m8`（独立于 main，tip 以远端为准）。**验证基线**：M7-12 收口时全量 **2544 passed**（Python 3.9.11），M8 追加测试后以最终输出为准；前端 HTTP **`ALL PASSED (96)`**；`check_py39.sh` 通过；H3 已在带真实 `data/` 的主工作树重跑（执法中：6 文件/8 目录）。
-**下一件事**：M8-03/04/05 的真实浏览器/设备/离线/性能验收与 M8-07 最终闸门；阻塞项见 `docs/MCChecker_LEFTOVERS.md`：L1 M4-08、L2 INH-1932、L4 M6-14、L5 M7-10、L6 M8-02。
+**仓库实况**：`main@c24ab23`（2026-10-27 合并；2026-10-28 本地快进到该 tip）。v2 交付已进入 main：`feat/mc-v2-delivery` 于 `2e8031f` 并入，M5–M8 收口 tip `df4e642` 已在 main 历史中；`origin/mc-v2/m5-m8` 只是保留的历史分支，不再是与 main 并行的交付线。10-26/27 另有 4 个不带 M0–M8 卡号的功能合并（#117 配置管理未设置时默认开启、#119 DL PPz/SMIM1、#120 DL 系数历史、#121 DL 历史去重/删除）；打开中的 PR 有 #118（清理过期文档）、#122（界面验证默认 Playwright）、#123（RP 脉宽历史双模式）。
+**验证基线**：10-23 收口时（代码树 `493b3b4`，`df4e642` 只追加文档）全量 **2556 passed ×3**（Python 3.9.11）、前端 HTTP **`ALL PASSED (96)`**、`check_py39.sh` 通过；H3 守卫在主工作树执法（6 文件/8 目录）。**2026-10-28 在 `c24ab23` 重跑：2567 passed / 4 failed**（168 s，H3 执法中）——两条是 #117 默认开启后旧写接口用例未接受响应里的 `tracking` 字段（`test_api_import`、`test_api_delete`），一条是 #120/#121 新增的三条 DL 系数历史写路由未登记进 `WRITE_ROUTE_EXPECTATIONS`（`test_api_revision`），一条是 #120 在 mock 里重复声明 `bindingView` 覆盖了原绑定视图（`test_mock_bindings_contract`）；详见 `docs/MCChecker_LEFTOVERS.md` L9。**修复工作区（分支 `chore/fix-main-red-20261028`，未提交）已验证：2571 passed / 0 failed，前端 HTTP `ALL PASSED (96)`，`check_py39.sh` exit 0**；main 转绿以提交/合并为准。
+**下一件事**：先提交/合并 L9 的修复（工作区已验证 2571 passed / 前端 96），让 main 转绿；M0–M8 侧继续 M8-03/04/05 的真实浏览器/设备/离线/性能验收与 M8-07 最终闸门；V3.0 从 M9-00（INH-2117）设计基线开始，45 张 V3 卡不继承 M5–M8 的 Done。阻塞项见 `docs/MCChecker_LEFTOVERS.md`：L1 M4-08、L2 INH-1932、L4 M6-14、L5 M7-10、L6 M8-02。
 
 ## 0.1 历史快照（2026-10-17，保留原文）
 

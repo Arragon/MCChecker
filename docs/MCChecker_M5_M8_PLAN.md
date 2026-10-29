@@ -14,14 +14,14 @@
 
 ---
 
-## 0. 一句话现状（2026-10-22 晚更新）
+## 0. 一句话现状（2026-10-28 更新）
 
-- **Linear 板面**：104 张 / **91 Done / 9 In Progress / 2 Backlog / 2 Canceled**。按里程碑：M5 **11/11 Done**；M6 **13/14**（M6-14 Backlog）；M7 **9 Done + 2 Canceled + 1 In Progress**（M7-10 等真实设备；M7-07/08 Canceled）；M8 **0 Done / 7 In Progress**（代码已落地，真实证据待补）；M4 8/9（M4-08 In Progress）；INH-1932 Backlog。
-- **代码基线**：`main@3a60746`；M5–M8 集成分支 `origin/mc-v2/m5-m8`（独立于 main，tip 以远端为准）。
+- **Linear 板面**（2026-10-28 复核）：**149 张 / 91 Done / 9 In Progress / 47 Backlog / 2 Canceled**。M0–M8 部分不变：M5 **11/11 Done**；M6 **13/14**（M6-14 Backlog）；M7 **9 Done + 2 Canceled + 1 In Progress**（M7-10 等真实设备；M7-07/08 Canceled）；M8 **0 Done / 7 In Progress**（代码已落地，真实证据待补）；M4 8/9（M4-08 In Progress）；INH-1932 Backlog。新增的 **M9–M15（V3.0）45 张全部 Backlog**，不在本文范围，见 Linear 项目描述与 V3 执行索引。
+- **代码基线**：`main@c24ab23`（2026-10-27）。v2 交付已进入 main：`feat/mc-v2-delivery` 于 `2e8031f` 并入，M5–M8 收口 tip `df4e642` 已在 main 历史中；`origin/mc-v2/m5-m8` 只是保留的历史分支。之后 main 有 4 个不带卡号的功能合并（#117/#119/#120/#121）与 3 个打开 PR（#118/#122/#123）。
 - **已完成代码**：M5-01～11；M6-01～14（M6-14 的真实导入仍缺 D6）；M7-01～06；M7-07/08 按 Canceled 交付「功能关闭」；M7-09/10 四态交付与回读核验（`d2be668` + 评审修复 `6eb4c4d`）；M7-11 审计谱系（`1f618e0`）；M7-12 生命周期收口（`2dfebc0`）；M8-01 迁移 CLI、M8-02 全域备份恢复、M8-06 发布白名单/零依赖门禁已落代码与测试；M8-04 的并发/故障注入用例已补。
-- **测试基线**（2026-10-23）：M7-12 收口时全量 **2544 passed**（Python 3.9.11），M8 追加测试后以最终输出为准；H3 守卫已在带真实 `data/` 的主工作树重跑（执法中：6 文件/8 目录）；前端 HTTP **`ALL PASSED (96)`**、`check_py39.sh` 通过。
+- **测试基线**：10-23 收口时（代码树 `493b3b4`，`df4e642` 只追加文档）全量 **2556 passed ×3**（Python 3.9.11），H3 守卫在带真实 `data/` 的主工作树执法（6 文件/8 目录），前端 HTTP **`ALL PASSED (96)`**、`check_py39.sh` 通过。**2026-10-28 在 `c24ab23` 重跑：2567 passed / 4 failed**（根因见 `docs/MCChecker_LEFTOVERS.md` L9）；`check_py39.sh` 仍通过。**修复工作区（分支 `chore/fix-main-red-20261028`，未提交）已验证：2571 passed / 0 failed、前端 HTTP `ALL PASSED (96)`**；main 转绿以提交/合并为准。
 - **仍未闭合**：M6-14 的真实系统 XML 导入（D6）、M7-10 的真实设备端到端、M8-02 的真实副本/磁盘满/kill -9 演练、M8-03/M8-05 的真实浏览器/设备/物理断网、M8-06 的 Windows/Linux 首装首访、M4-08 的人工验收、INH-1932 的搜索预算；M8-07 最终闸门因此不能签署。详见 `docs/MCChecker_LEFTOVERS.md` 与 `docs/MCChecker_ACCEPTANCE_LEDGER.md`。
-- **结论**：M5–M8 的**本地代码工作**已闭环（剩余为验收/真实环境证据，不是功能实现）；正式现网受管写入仍以 M8-02 的完整恢复演练为硬前置。
+- **结论**：M5–M8 的**本地代码工作**在 `df4e642` 上已闭环（剩余为验收/真实环境证据，不是功能实现）；当前 main 的 4 条红灯来自其后的 #117/#120/#121，修复已在工作区验证（2571 passed / 前端 96），待提交/合并后 main 转绿；正式现网受管写入仍以 M8-02 的完整恢复演练为硬前置。
 
 ---
 
@@ -152,6 +152,7 @@
 - **建议**：环境变量 `MCHECKER_CONFIG_MANAGEMENT=off|readonly|on`（默认 `off`），服务端在 handler 入口判定并返回 503 `CONFIG_DISABLED`；`off` 时不注册 `api_config_*` 路由。
 - **理由**：M5-08 要求"禁用特性时旧服务功能可正常使用，新路由拒绝管理写入"，且项目已有 `MCHECKER_*` 环境变量惯例（`MCHECKER_DATA_DIR`、`MCHECKER_PORT`）。
 - **代价**：`readonly` 档需要在每个写 handler 额外判定一次；建议由 `authz` 统一拦截而非逐 handler 复制。
+- **落地偏离（2026-10-26）**：PR #117（`c59e803`）把**未设置环境变量**时的默认档改为 `on`；显式 `off`、`readonly`、空值与无法识别的取值行为不变，`docs/manual.md` / `README.md` 已同步。上面「默认 `off`」保留为当时的提案记录。
 
 ### D6 · 真实 XML/JSON 样本来源
 
