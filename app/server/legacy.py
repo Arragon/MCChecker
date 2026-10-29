@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 from ..core import device_models, fsutil, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, AppError
+from ..services import workspace_context
 from .router import Response, Router, query_param
 
 DOWNLOAD_KIND_CURRENT = "current"
@@ -145,7 +146,13 @@ def file_download(
 ) -> Response:
     probe = ((getattr(ctx, "headers", None) or {}).get("x-mc-download-probe") or "").strip() == "1"
     profile = query_param(query, "profile", storage.DEFAULT_PROFILE)
+    workspace = getattr(ctx, "workspace_id", "") or "default"
     try:
+        try:
+            workspace_context.assert_profile(workspace, profile)
+        except AppError:
+            # 保持旧 probe 的 JSON 形状（{"ok": false}），不把新 404 包络漏给旧调用方。
+            raise DownloadResolutionError("机型不存在", status_code=404)
         if not device_models.exists(profile):
             raise DownloadResolutionError("机型不存在", status_code=404)
         target = resolve_download_target(

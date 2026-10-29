@@ -16,6 +16,7 @@ import re
 import time
 import urllib.parse
 import uuid
+from contextlib import nullcontext
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
@@ -32,7 +33,7 @@ from ..core.errors import (
     TOO_LARGE,
     AppError,
 )
-from ..services import auth, tasks
+from ..services import auth, tasks, workspace_context
 from ..services.context import RequestContext
 from .router import Response, Router
 
@@ -335,6 +336,7 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         if handler is None:
             raise AppError(NOT_FOUND, "接口不存在")
         query_params = urllib.parse.parse_qs(query, keep_blank_values=True)
+        resolution = workspace_context.resolve(method, path, params or {}, query_params, self.headers)
 
         # §3.4 第 4、5、6 步：解析客户端 IP 与会话 cookie，组装 RequestContext；
         # 路径含 {pid} 时先校验机型存在（不回落 default），再在
@@ -343,9 +345,11 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         cid = auth.cookie_cid(self.headers.get("Cookie"))
         pid = params.get("pid") if params else None
         self._access_pid = pid or "-"
-        if pid is not None and not device_models.exists(pid):
-            raise AppError(NOT_FOUND, "机型不存在")
         if pid is not None:
+            if resolution.check_profile:
+                workspace_context.assert_profile(resolution.workspace_id, pid)
+            elif not device_models.exists(pid):
+                raise AppError(NOT_FOUND, "机型不存在")
             # 退役机型保留读能力与历史；写请求在进入 handler 前统一拦下。
             config_lifecycle.assert_writable(pid, method, path)
 
@@ -356,6 +360,7 @@ class MCRequestHandler(BaseHTTPRequestHandler):
             ip=ip,
             cid=cid,
             profile_id=pid or "",
+            workspace_id=resolution.workspace_id,
             actor=actor,
             # C26：X-Filename 先按百分号解码，文件名合法性留给服务层用 validate_filename 判。
             filename=urllib.parse.unquote(self.headers.get("X-Filename") or "") or None,
@@ -363,10 +368,8 @@ class MCRequestHandler(BaseHTTPRequestHandler):
             # 头名大小写不敏感，这里统一归一成小写（`self.headers` 本身也是不敏感的）。
             headers={name.lower(): value for name, value in self.headers.items()},
         )
-        if pid is None:
-            self._send_response(handler(ctx, params, query_params, body))
-            return
-        with storage.use_profile(pid):
+        scope = storage.use_profile(pid) if pid is not None else nullcontext()
+        with storage.use_workspace(resolution.workspace_id), scope:
             self._send_response(handler(ctx, params, query_params, body))
 
     # ===================== 请求体 =====================
