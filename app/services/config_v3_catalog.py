@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import fsutil, locks, storage
-from ..core.errors import FILE_EXISTS, INVALID_INPUT, NOT_FOUND, AppError
+from ..core.errors import FILE_EXISTS, INVALID_INPUT, LIFECYCLE_BLOCKED, NOT_FOUND, AppError
 
 SCHEMA_VERSION = 1
 _CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -458,3 +458,132 @@ def freeze_bindings(profile_id: str, config_id: str, release_id: str) -> Dict[st
         binding_set["frozen"] = True
         _save(profile_id, doc)
         return copy.deepcopy(binding_set)
+
+
+def commit_extraction(
+    profile_id: str,
+    config_id: str,
+    rows: List[Dict[str, Any]],
+    release_id: Optional[str] = None,
+    include_existing_missing_bindings: bool = False,
+    bindings: Optional[List[Dict[str, Any]]] = None,
+    add_members: bool = False,
+    precheck: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """一次事务提交提取计划（M13-06 / INH-2148）。
+
+    参数、定义修订、来源索引、可选成员与补绑全部在同一个 catalog doc 上完成；
+    任何异常发生在 `_save` 之前都不会留下半批数据。已有名称/层级/释义/值/绑定不改。
+    """
+    with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
+        if precheck is not None:
+            precheck()
+        doc = _load(profile_id)
+        config = doc["configs"].get(config_id)
+        if config is None:
+            raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        release = None
+        if release_id:
+            release = (config.get("releases") or {}).get(str(release_id))
+            if release is None:
+                raise AppError(NOT_FOUND, "软件版本不存在", release_id=release_id)
+            if release.get("d0", {}).get("frozen"):
+                raise AppError(LIFECYCLE_BLOCKED, "目标软件版本的 D0 已冻结，拒绝写入")
+        parameters = _definition(config)["current"].setdefault("parameters", {})
+        keys = {(row.get("name"), tuple(row.get("directory") or [])) for row in parameters.values()}
+        locators = set()
+        for row in parameters.values():
+            source = row.get("source") or {}
+            if source.get("file_id") and source.get("canonical_locator"):
+                locators.add((source["file_id"], source["canonical_locator"]))
+        created: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        for raw in rows:
+            name = _clean_parameter_text(raw.get("name"), "name", required=True, limit=200)
+            directory = _clean_directory(raw.get("directory"))
+            key = (name, tuple(directory))
+            source = raw.get("source") or {}
+            locator_key = (source.get("file_id"), source.get("canonical_locator"))
+            if key in keys or (locator_key[0] and locator_key[1] and locator_key in locators):
+                skipped.append({"name": name, "directory": directory, "reason": "already_exists"})
+                continue
+            pid = "p-" + uuid.uuid4().hex[:12]
+            row = {
+                "parameter_id": pid,
+                "name": name,
+                "description": "",
+                "directory": directory,
+                "type": _clean_parameter_text(raw.get("type", ""), "type", limit=50),
+                "unit": "",
+                "attrs": {},
+                "source": copy.deepcopy(source),
+                "created_at": _now(),
+            }
+            parameters[pid] = row
+            keys.add(key)
+            if locator_key[0] and locator_key[1]:
+                locators.add(locator_key)
+            created.append({"parameter_id": pid, "name": name, "directory": directory})
+        bound = 0
+        binding_conflicts = 0
+        if release is not None and include_existing_missing_bindings:
+            binding_set = _binding_set(release)
+            if binding_set.get("frozen"):
+                raise AppError(LIFECYCLE_BLOCKED, "目标软件版本的绑定集已冻结")
+            occupied_params = {row.get("parameter_id") for row in binding_set["bindings"].values()}
+            occupied_locators = {row.get("locator") for row in binding_set["bindings"].values()}
+            for spec in bindings or []:
+                pid = str(spec.get("parameter_id") or "")
+                locator = str(spec.get("locator") or "")
+                if not pid or not locator:
+                    continue
+                if pid in occupied_params or locator in occupied_locators:
+                    binding_conflicts += 1
+                    continue
+                binding_id = "b-" + uuid.uuid4().hex[:12]
+                binding_set["bindings"][binding_id] = {
+                    "binding_id": binding_id,
+                    "parameter_id": pid,
+                    "locator": locator,
+                    "file_id": str(spec.get("file_id") or ""),
+                    "version_id": str(spec.get("version_id") or ""),
+                    "confirmed": True,
+                    "created_at": _now(),
+                }
+                occupied_params.add(pid)
+                occupied_locators.add(locator)
+                bound += 1
+            if bound:
+                binding_set["revision"] = int(binding_set.get("revision", 1)) + 1
+        members = 0
+        if release is not None and add_members and created:
+            d0 = release.setdefault("d0", {"values": {}, "frozen": False, "revision": 0})
+            values = d0.setdefault("values", {})
+            for row in created:
+                if row["parameter_id"] not in values:
+                    values[row["parameter_id"]] = {
+                        "membership": "included", "enabled": True, "value_state": "unset",
+                    }
+                    members += 1
+            if members:
+                d0["revision"] = int(d0.get("revision", 0)) + 1
+        revision = int(_definition(config)["revision"])
+        if created:
+            _snapshot_definition(config)
+            revision = int(_definition(config)["revision"])
+            if release is not None and add_members:
+                release["definition_revision"] = revision
+        if created or bound or members:
+            config["updated_at"] = _now()
+        _save(profile_id, doc)
+        return {
+            "created": len(created),
+            "skipped": 0,
+            "unchanged": len(rows) - len(created),
+            "bound": bound,
+            "binding_conflicts": binding_conflicts,
+            "members": members,
+            "revision": revision,
+            "created_items": created,
+            "skipped_items": skipped,
+        }

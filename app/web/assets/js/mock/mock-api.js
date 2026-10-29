@@ -884,6 +884,14 @@
     out.updated = updated;
     return ok(out);
   });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/commit", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var plan = MOCK_PLANS[a.plan_id];
+    if (!plan) return fail(404, "NOT_FOUND", "提取计划不存在");
+    var created = plan.rows.filter(function (row) { return row.status === "new"; }).length;
+    return ok({ result: { created: created, unchanged: plan.rows.length - created, skipped: 0, bound: 0, replayed: false } });
+  });
   route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/recompute", function (a) {
     var deny = needAdmin(identity("default"));
     if (deny) return deny;
