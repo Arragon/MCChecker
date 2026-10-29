@@ -368,3 +368,72 @@ def yield_changes(
         right = new.get(key, MISSING)
         if compare(left, right) not in ("equal",):
             yield key, left, right
+
+
+# ---------------------------------------------------------------------------
+# M12-06：membership / enabled / value_state 与原始文本
+# ---------------------------------------------------------------------------
+
+MEMBERSHIPS = ("not_introduced", "included", "removed")
+VALUE_STATES = ("unset", "null", "present")
+
+
+def default_member() -> Dict[str, Any]:
+    return {"membership": "not_introduced", "enabled": True, "value_state": "unset"}
+
+
+def _typed_text(raw: Any, type_name: str) -> str:
+    kind = {
+        "number": "decimal",
+        "decimal": "decimal",
+        "int": "int",
+        "integer": "int",
+        "float": "decimal",
+        "bool": "bool",
+        "boolean": "bool",
+    }.get((type_name or "").lower(), "string")
+    if raw is None:
+        raise AppError(INVALID_INPUT, "present 状态必须有值", field="value")
+    if isinstance(raw, bool) and kind not in ("bool",):
+        raise AppError(INVALID_INPUT, "该参数不是布尔类型", field="value")
+    value = parse_typed(raw, kind)
+    return value.text
+
+
+def apply_member_patch(
+    current: Optional[Dict[str, Any]], patch: Dict[str, Any], type_name: str
+) -> Dict[str, Any]:
+    """把一条值 PATCH 合并到当前 member；非法立即 422，调用方不得落盘。"""
+    row = dict(current or default_member())
+    if "membership" in patch:
+        membership = str(patch.get("membership") or "").strip()
+        if membership not in MEMBERSHIPS:
+            raise AppError(INVALID_INPUT, "membership 非法", field="membership")
+        row["membership"] = membership
+        if membership == "removed":
+            row["value_state"] = "unset"
+            row.pop("value", None)
+    if "enabled" in patch:
+        if not isinstance(patch.get("enabled"), bool):
+            raise AppError(INVALID_INPUT, "enabled 必须是布尔值", field="enabled")
+        row["enabled"] = patch["enabled"]
+    if "value_state" in patch:
+        state = str(patch.get("value_state") or "").strip()
+        if state not in VALUE_STATES:
+            raise AppError(INVALID_INPUT, "value_state 非法", field="value_state")
+        row["value_state"] = state
+        if state != "present":
+            row.pop("value", None)
+    if "value" in patch:
+        if row.get("value_state") != "present":
+            raise AppError(INVALID_INPUT, "只有 present 状态才能带 value", field="value")
+        try:
+            row["value"] = _typed_text(patch.get("value"), type_name)
+        except AppError as exc:
+            exc.detail.setdefault("field", "value")
+            raise
+    if row.get("value_state") == "present" and "value" not in row:
+        raise AppError(INVALID_INPUT, "present 状态必须有值", field="value")
+    if row.get("value_state") != "present":
+        row.pop("value", None)
+    return row

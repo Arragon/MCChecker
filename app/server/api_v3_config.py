@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from ..core.errors import NOT_FOUND, AppError
-from ..services import authz, config_v3_catalog, workspace_catalog
+from ..services import authz, config_v3_catalog, config_v3_drafts, workspace_catalog
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
@@ -61,6 +61,21 @@ def register(router: Router) -> None:
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/bindings",
         create_binding,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}",
+        get_draft,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/values",
+        get_draft,
+    )
+    router.add(
+        "PATCH",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/values",
+        patch_values,
     )
 
 
@@ -201,3 +216,24 @@ def create_binding(
             )
         },
     )
+
+
+def get_draft(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    draft = config_v3_drafts.get_draft(params["pid"], params["cid"], params["did"])
+    return Response(payload=draft, headers={"ETag": config_v3_drafts._etag(draft["revision"])})
+
+
+def patch_values(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    if_match = (ctx.headers or {}).get("if-match")
+    result, etag = config_v3_drafts.patch_values(
+        params["pid"], params["cid"], params["did"], json_body(body), if_match
+    )
+    return Response(payload=result, headers={"ETag": etag})
