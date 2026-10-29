@@ -17,12 +17,62 @@
     { kind: "search", label: "全局搜索", icon: "search" },
     { kind: "review", label: "审阅修改", icon: "review", admin: true },
     { kind: "dl", label: "DL 计算", icon: "calc" },
-    { kind: "registry", label: "参数登记", icon: "list" },
+    { kind: "registry", label: "配置管理", icon: "list" },
     { kind: "tools", label: "外部工具", icon: "tool" },
     { kind: "settings", label: "设置", icon: "settings" },
   ];
 
   var POLL_MS = 10000;
+  var WORKSPACE_KEY = "mc.workspace";
+  var activeWorkspaceId = "default";
+  var workspaceList = [];
+
+  function rawWorkspaceId() {
+    try {
+      var raw = global.localStorage.getItem(WORKSPACE_KEY);
+      return raw ? JSON.parse(raw) : "default";
+    } catch (e) { return "default"; }
+  }
+
+  function currentWorkspace() {
+    for (var i = 0; i < workspaceList.length; i++) {
+      if (workspaceList[i].id === activeWorkspaceId) return workspaceList[i];
+    }
+    return { id: activeWorkspaceId, name: activeWorkspaceId, profiles: [] };
+  }
+
+  MC.workspaces = {
+    current: currentWorkspace,
+    list: function () { return workspaceList.slice(); },
+    scopeId: function () { return activeWorkspaceId; },
+    epoch: function () { return workspaceEpoch; },
+    setSession: function (workspace, workspaces) {
+      if (workspace && workspace.id) activeWorkspaceId = workspace.id;
+      if (Array.isArray(workspaces) && workspaces.length) workspaceList = workspaces.slice();
+      if (!workspaceList.some(function (w) { return w.id === activeWorkspaceId; })) {
+        workspaceList.unshift({ id: activeWorkspaceId, name: activeWorkspaceId, profiles: [] });
+      }
+    },
+    setActive: function (wid) {
+      activeWorkspaceId = String(wid || "default");
+      try { global.localStorage.setItem(WORKSPACE_KEY, JSON.stringify(activeWorkspaceId)); } catch (e) {}
+    },
+    bumpEpoch: function () { workspaceEpoch++; },
+  };
+  var workspaceEpoch = 0;
+
+  function migrateLegacyKeys() {
+    try {
+      var prefix = "mcc-v3-workspace:default:";
+      var store = global.localStorage;
+      if (!store) return;
+      for (var i = 0; i < store.length; i++) {
+        var key = store.key(i);
+        if (!key || key.indexOf("mc.") !== 0 || key === WORKSPACE_KEY || key === "mc.demo.identity") continue;
+        if (store.getItem(prefix + key) === null) store.setItem(prefix + key, store.getItem(key));
+      }
+    } catch (e) { /* localStorage 不可用时由 storageGet/Set 静默降级 */ }
+  }
 
   /** 任务类型/状态的展示词汇。§7.10：task.state 只说「跑没跑完」，
    * 业务结果在条目 status 里（列表页各自显示，两者不混用）。 */
@@ -45,6 +95,9 @@
     this.root = root;
     this.session = null;
     this.pid = null;
+    this.wid = null;
+    this.workspace = null;
+    this.workspaces = [];
     this.files = [];
     this.tools = [];
     this.tabs = [];
@@ -60,10 +113,13 @@
   App.prototype.start = function () {
     var self = this;
     MC.icons.inject();
+    migrateLegacyKeys();
     var route = MC.router.current();
+    var wid = (route && route.query && route.query.workspace) || rawWorkspaceId();
+    MC.workspaces.setActive(wid);
     var pid = (route && route.pid) || util.storageGet("mc.profile", "default");
     this.renderSkeleton();
-    return this.loadSession(pid).then(function () {
+    return this.loadSession(pid, wid).then(function () {
       MC.router.start();
       MC.bus.on("route", function (r) { self.onRoute(r); });
       var r = MC.router.current();
@@ -82,18 +138,28 @@
     });
   };
 
-  App.prototype.loadSession = function (pid) {
+  App.prototype.loadSession = function (pid, wid) {
     var self = this;
-    return api.get("/session", { profile: pid }).then(
+    var query = { profile: pid };
+    if (wid) query.workspace = wid;
+    return api.getV3("/api/v3/session", query).then(
       function (s) {
         self.session = s;
         self.pid = s.profile.id;
+        self.wid = (s.workspace && s.workspace.id) || wid || "default";
+        self.workspace = s.workspace || { id: self.wid, name: self.wid };
+        self.workspaces = s.workspaces || [];
+        MC.workspaces.setSession(self.workspace, self.workspaces);
         util.storageSet("mc.profile", self.pid);
         self.restoreTabs();
         self.renderChrome();
         return Promise.all([self.refreshFiles(), self.refreshTools()]);
       },
       function (err) {
+        if (err && err.status === 404 && wid !== "default") {
+          MC.workspaces.setActive("default");
+          return self.loadSession(pid, "default");
+        }
         util.replace(self.root, MC.errorBlock(err, function () { location.reload(); }));
         throw err;
       }
@@ -151,6 +217,28 @@
     var id = this.identity;
     var shownName = util.identityName(id);
     var profileName = this.session.profile.name;
+    var workspaceName = (this.workspace && this.workspace.name) || "默认工作区";
+
+    var workspaceBtn = h(
+      "button.btn.btn-ghost.workspace-switch",
+      { type: "button", "aria-haspopup": "menu", "aria-label": "当前工作区：" + workspaceName + "，点击切换" },
+      icon("overview"),
+      h("span.workspace-caption", "工作区"),
+      h("span.workspace-name", workspaceName),
+      icon("chevron-down")
+    );
+    workspaceBtn.addEventListener("click", function () {
+      var items = [{ header: "工作区" }].concat(
+        (self.workspaces.length ? self.workspaces : MC.workspaces.list()).map(function (w) {
+          return { label: w.name, meta: w.id, checked: w.id === self.wid, onClick: function () { self.switchWorkspace(w.id); } };
+        })
+      );
+      if (self.can("settings_write")) {
+        items.push("sep", { label: "工作区设置…", icon: "settings", onClick: function () { self.openWorkspaceSettings(); } });
+        items.push({ label: "新建工作区…", icon: "plus", onClick: function () { self.openWorkspaceCreate(); } });
+      }
+      MC.menu(workspaceBtn, items);
+    });
 
     var profileBtn = h(
       "button.btn.btn-ghost.profile-switch",
@@ -200,6 +288,7 @@
       h("button.btn.btn-ghost.btn-icon", { type: "button", "aria-label": "展开/收起侧栏", "data-tip": "侧栏", onclick: function () { self.toggleSidebar(); } }, icon("sidebar")),
       h("div.brand", h("span.brand-mark", "MC"), h("span.brand-text", "MCChecker")),
       h("span.header-sep"),
+      workspaceBtn,
       profileBtn,
       searchBtn,
       this.taskSlot,
@@ -207,6 +296,133 @@
       idBtn
     );
     this.renderTasks();
+  };
+
+  App.prototype.confirmContext = function (title) {
+    var self = this;
+    var dirty = Object.keys(this.instances || {}).filter(function (key) {
+      var inst = self.instances[key];
+      return inst && inst.isDirty && inst.isDirty();
+    }).length;
+    try { dirty += document.querySelectorAll("dialog[open]").length; } catch (e) {}
+    return dirty
+      ? MC.confirm({ title: title, message: "有 " + dirty + " 个页面或弹窗存在未保存的修改，切换后这些修改会丢失。", confirmText: "仍然切换", danger: true })
+      : Promise.resolve(true);
+  };
+
+  App.prototype.saveActiveRoute = function () {
+    if (this.pid) util.storageSet("mc.active." + this.pid, global.location.hash);
+  };
+
+  App.prototype.switchWorkspace = function (wid, preferred) {
+    if (!wid || wid === this.wid) return Promise.resolve(true);
+    var self = this;
+    return this.confirmContext("切换工作区").then(function (ok) {
+      if (!ok) return false;
+      self.saveTabs();
+      self.saveActiveRoute();
+      MC.workspaces.bumpEpoch();
+      clearTimeout(self._taskTimer);
+      if (self._pollTimer) clearInterval(self._pollTimer);
+      Object.keys(self.instances).forEach(function (k) { self.destroyInstance(k); });
+      self.tabs = [];
+      self.activeTasks = [];
+      self.rev = null;
+      self.files = [];
+      self.tools = [];
+      self.activeKey = null;
+      if (MC.closePopover) MC.closePopover();
+      MC.workspaces.setActive(wid);
+      var pid = util.storageGet("mc.profile", "default");
+      return self.loadSession(pid, wid).then(function () {
+        var saved = util.storageGet("mc.active." + self.pid, null);
+        var route = preferred || (saved && MC.router.parse(saved)) || { pid: self.pid, kind: "overview" };
+        self.go(route, true);
+        self.pollTasks();
+        self.startPolling();
+        MC.toast.info("已切换到工作区：" + self.workspace.name);
+        return true;
+      });
+    });
+  };
+
+  App.prototype.refreshWorkspaces = function () {
+    var self = this;
+    return api.getV3("/api/v3/workspaces").then(function (res) {
+      self.workspaces = res.items || [];
+      MC.workspaces.setSession(self.workspace, self.workspaces);
+      self.renderHeader();
+      return self.workspaces;
+    }, function () { return self.workspaces; });
+  };
+
+  App.prototype.openWorkspaceCreate = function () {
+    var self = this;
+    var name = h("input.input", { type: "text", maxlength: "50", autocomplete: "off", placeholder: "例如：新产线调试" });
+    var desc = h("textarea.input", { rows: "3", maxlength: "300" });
+    var nameField = MC.field({ label: "工作区名称", required: true, control: name });
+    var descField = MC.field({ label: "说明（可选）", control: desc });
+    MC.modal({
+      title: "新建工作区",
+      body: h("div.col", { style: "gap:14px" }, nameField, descField),
+      footer: function (close) {
+        return [
+          h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"),
+          h("button.btn.btn-primary", { type: "button", onclick: function (e) {
+            nameField.setError(""); descField.setError("");
+            var btn = e.currentTarget; btn.disabled = true;
+            api.requestV3("POST", "/api/v3/workspaces", { body: { name: name.value, description: desc.value } }).then(
+              function (res) {
+                btn.disabled = false; close();
+                self.refreshWorkspaces().then(function () { self.switchWorkspace(res.workspace.id); });
+              },
+              function (err) {
+                btn.disabled = false;
+                (err.detail && err.detail.field === "description" ? descField : nameField).setError(MC.errorText(err));
+              }
+            );
+          } }, "创建并打开"),
+        ];
+      },
+    });
+  };
+
+  App.prototype.openWorkspaceSettings = function () {
+    var self = this;
+    var item = this.workspace || MC.workspaces.current();
+    var name = h("input.input", { type: "text", maxlength: "50", autocomplete: "off" });
+    name.value = item.name || "";
+    var desc = h("textarea.input", { rows: "3", maxlength: "300" });
+    desc.value = item.description || "";
+    var nameField = MC.field({ label: "工作区名称", required: true, control: name });
+    var descField = MC.field({ label: "说明（可选）", control: desc });
+    MC.modal({
+      title: "工作区设置",
+      body: h("div.col", { style: "gap:14px" }, nameField, descField),
+      footer: function (close) {
+        return [
+          h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"),
+          h("button.btn.btn-primary", { type: "button", onclick: function (e) {
+            nameField.setError(""); descField.setError("");
+            var btn = e.currentTarget; btn.disabled = true;
+            api.requestV3("PATCH", "/api/v3/workspaces/" + encodeURIComponent(item.id), { body: { name: name.value, description: desc.value } }).then(
+              function (res) {
+                btn.disabled = false; close();
+                self.workspace = res.workspace;
+                self.workspaces = self.workspaces.map(function (w) { return w.id === res.workspace.id ? res.workspace : w; });
+                MC.workspaces.setSession(self.workspace, self.workspaces);
+                self.renderHeader();
+                MC.toast.success("工作区设置已保存");
+              },
+              function (err) {
+                btn.disabled = false;
+                (err.detail && err.detail.field === "description" ? descField : nameField).setError(MC.errorText(err));
+              }
+            );
+          } }, "保存"),
+        ];
+      },
+    });
   };
 
   App.prototype.openIdentity = function (anchor) {
@@ -262,25 +478,28 @@
     var self = this;
     var route = MC.router.current();
     Object.keys(this.instances).forEach(function (k) { self.destroyInstance(k); });
-    return this.loadSession(this.pid).then(function () {
+    return this.loadSession(this.pid, this.wid).then(function () {
       self.onRoute(route || { pid: self.pid, kind: "overview" });
     });
   };
 
-  App.prototype.switchProfile = function (pid) {
-    if (pid === this.pid) return;
+  App.prototype.switchProfile = function (pid, preferred) {
+    if (pid === this.pid) return Promise.resolve(false);
     var self = this;
-    var dirty = this.tabs.filter(function (t) { var inst = self.instances[t.key]; return inst && inst.isDirty && inst.isDirty(); });
-    var proceed = dirty.length
-      ? MC.confirm({ title: "切换机型", message: "有 " + dirty.length + " 个页面存在未保存的修改，切换后这些修改会丢失。", confirmText: "仍然切换", danger: true })
-      : Promise.resolve(true);
-    proceed.then(function (ok) {
-      if (!ok) return;
+    return this.confirmContext("切换机型").then(function (ok) {
+      if (!ok) return false;
+      self.saveTabs();
+      self.saveActiveRoute();
+      MC.workspaces.bumpEpoch();
+      clearTimeout(self._taskTimer);
       Object.keys(self.instances).forEach(function (k) { self.destroyInstance(k); });
-      self.loadSession(pid).then(function () {
-        var saved = util.storageGet("mc.active." + pid, null);
-        MC.router.go((saved && MC.router.parse(saved)) || { pid: pid, kind: "overview" });
+      return self.loadSession(pid, self.wid).then(function () {
+        var saved = preferred || (util.storageGet("mc.active." + pid, null) && MC.router.parse(util.storageGet("mc.active." + pid, null))) || { pid: pid, kind: "overview" };
+        self.go(saved, true);
+        self.pollTasks();
+        self.startPolling();
         MC.toast.info("已切换到机型：" + self.session.profile.name);
+        return true;
       });
     });
   };
@@ -537,7 +756,11 @@
   };
 
   App.prototype.go = function (r, replace) {
-    MC.router.go(Object.assign({ pid: this.pid }, r), replace);
+    var route = Object.assign({ pid: this.pid }, r);
+    if (MC.workspaces) {
+      route.query = Object.assign({}, route.query, { workspace: MC.workspaces.scopeId() });
+    }
+    MC.router.go(route, replace);
   };
 
   App.prototype.openFile = function (name, query) {
@@ -546,10 +769,14 @@
 
   App.prototype.onRoute = function (r) {
     if (!r) return this.go({ kind: "overview" }, true);
+    if (r.kind === "configspace") r = Object.assign({}, r, { kind: "registry" });
+    if (r.query && r.query.workspace && r.query.workspace !== this.wid) {
+      return this.switchWorkspace(r.query.workspace, r);
+    }
     if (r.pid !== this.pid) {
       var self = this;
       Object.keys(this.instances).forEach(function (k) { self.destroyInstance(k); });
-      return this.loadSession(r.pid).then(function () { self.onRoute(r); });
+      return this.loadSession(r.pid, this.wid).then(function () { self.onRoute(r); });
     }
     var key = keyOf(r);
     var tab = this.tabs.filter(function (t) { return t.key === key; })[0];
@@ -746,9 +973,11 @@
   /* ===================== polling (multi-user) ===================== */
   App.prototype.startPolling = function () {
     var self = this;
+    var epoch = MC.workspaces.epoch();
     function tick() {
-      if (document.hidden) return;
+      if (epoch !== MC.workspaces.epoch() || document.hidden) return;
       api.get(self.p("/revision")).then(function (r) {
+        if (epoch !== MC.workspaces.epoch()) return;
         if (self.rev) {
           ["files", "favorites", "remarks", "settings"].forEach(function (part) {
             if (self.rev.parts[part] !== r.parts[part]) MC.bus.emit("changed:" + part, r);
@@ -761,8 +990,11 @@
       }, function () {});
     }
     tick();
-    setInterval(tick, POLL_MS);
-    document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); });
+    if (this._pollTimer) clearInterval(this._pollTimer);
+    this._pollTimer = setInterval(tick, POLL_MS);
+    if (this._visHandler) document.removeEventListener("visibilitychange", this._visHandler);
+    this._visHandler = function () { if (!document.hidden) tick(); };
+    document.addEventListener("visibilitychange", this._visHandler);
   };
 
   /** 立即同步一次修订号（本地写操作后调用，避免把自己的修改当成“他人更新”）。 */
@@ -773,8 +1005,10 @@
 
   App.prototype.pollTasks = function () {
     var self = this;
+    var epoch = MC.workspaces.epoch();
     clearTimeout(this._taskTimer);
     return api.get(this.p("/tasks"), { active: "1" }).then(function (res) {
+      if (epoch !== MC.workspaces.epoch()) return;
       var before = self.activeTasks.map(function (t) { return t.id; });
       self.activeTasks = res.items;
       self.renderTasks();

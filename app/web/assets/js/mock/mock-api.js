@@ -86,7 +86,13 @@
     var name = person ? person.name : preset.ip;
     var admin = P.admins.some(function (a) { return (a.ip && a.ip === preset.ip) || (!a.ip && a.name === name); });
     var label = admin ? "管理员" : person ? "成员" : "访客";
-    return { ip: preset.ip, name: name, registered: !!person, is_deployer: false, is_admin: admin, role_label: label };
+    return {
+      ip: preset.ip, name: name, registered: !!person, is_deployer: false, is_admin: admin, role_label: label,
+      capabilities: {
+        read: true, favorites_write: true, remarks_submit: true, dl_compute: true,
+        settings_write: admin, admin: admin, review: admin, tasks_run: admin,
+      },
+    };
   }
 
   function fileText(entry) {
@@ -615,6 +621,65 @@
       server: { version: "2.0.0-template", time: util.nowString(), scheduler: true, mock: true },
       limits: { upload_max_bytes: 50 * 1024 * 1024, tab_limit: 15, temp_ttl_hours: 24 },
     });
+  });
+
+  var WORKSPACES = [{ id: "default", name: "默认工作区", description: "", default_profile_id: "default" }];
+  function workspaceById(wid) {
+    return WORKSPACES.filter(function (w) { return w.id === wid; })[0] || null;
+  }
+  function workspaceView(w) {
+    return Object.assign({}, w, { profiles: clone(S.models) });
+  }
+  function workspaceList() { return WORKSPACES.map(workspaceView); }
+  function requestWorkspace(req) {
+    var hdr = (req.headers && (req.headers["X-Workspace-Id"] || req.headers["x-workspace-id"])) || "";
+    return String(req.query.workspace || hdr || "default");
+  }
+  function workspaceName(raw) {
+    var text = String(raw === null || raw === undefined ? "" : raw).trim();
+    if (!text || text.length > 50 || /[\u0000-\u001f\u007f]/.test(text)) return null;
+    return text;
+  }
+  route("GET", "/api/v3/session", function (a, req) {
+    var wid = requestWorkspace(req);
+    var w = workspaceById(wid);
+    if (!w) return fail(404, "NOT_FOUND", "工作区不存在");
+    var pid = profile(req.query.profile) ? req.query.profile : "default";
+    return ok({
+      identity: identity(pid),
+      workspace: workspaceView(w),
+      workspaces: workspaceList(),
+      profile: S.models.filter(function (m) { return m.id === pid; })[0],
+      profiles: clone(S.models),
+      server: { version: "3.0.0-design", time: util.nowString(), scheduler: true, mock: true },
+      limits: { upload_max_bytes: 50 * 1024 * 1024, tab_limit: 15, temp_ttl_hours: 24 },
+    });
+  });
+  route("GET", "/api/v3/workspaces", function (a, req) {
+    return ok({ items: workspaceList() });
+  });
+  route("POST", "/api/v3/workspaces", function (a, req) {
+    var deny = needDeployer(identity("default"));
+    if (deny) return deny;
+    var name = workspaceName(req.body.name);
+    if (!name) return fail(400, "INVALID_INPUT", "请输入 1–50 个字符的工作区名称", { field: "name" });
+    if (String(req.body.description || "").trim().length > 300) return fail(400, "INVALID_INPUT", "工作区说明不能超过 300 个字符", { field: "description" });
+    if (WORKSPACES.some(function (w) { return w.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名工作区", { field: "name" });
+    var w = { id: "w-" + String(WORKSPACES.length + 1), name: name, description: String(req.body.description || "").trim(), default_profile_id: "default" };
+    WORKSPACES.push(w);
+    return ok({ workspace: workspaceView(w) }, 201);
+  });
+  route("PATCH", "/api/v3/workspaces/{wid}", function (a, req) {
+    var deny = needDeployer(identity("default"));
+    if (deny) return deny;
+    var w = workspaceById(a.wid);
+    if (!w) return fail(404, "NOT_FOUND", "工作区不存在");
+    var name = workspaceName(req.body.name);
+    if (!name) return fail(400, "INVALID_INPUT", "请输入 1–50 个字符的工作区名称", { field: "name" });
+    if (WORKSPACES.some(function (x) { return x.id !== a.wid && x.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名工作区", { field: "name" });
+    w.name = name;
+    w.description = String(req.body.description || "").trim();
+    return ok({ workspace: workspaceView(w) });
   });
 
   function profileName(raw) {

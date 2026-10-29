@@ -216,9 +216,21 @@
     return (prefix || "id") + "-" + Date.now().toString(36) + rnd;
   }
 
+  function workspaceScope() {
+    try {
+      return (MC.workspaces && MC.workspaces.scopeId) ? String(MC.workspaces.scopeId() || "") : "";
+    } catch (e) { return ""; }
+  }
+
+  function storageKey(key) {
+    var scope = workspaceScope();
+    if (!scope || key === "mc.workspace" || key === "mc.demo.identity") return key;
+    return "mcc-v3-workspace:" + scope + ":" + key;
+  }
+
   function storageGet(key, fallback) {
     try {
-      var raw = global.localStorage.getItem(key);
+      var raw = global.localStorage.getItem(storageKey(key));
       return raw ? JSON.parse(raw) : fallback;
     } catch (e) {
       return fallback;
@@ -227,7 +239,7 @@
 
   function storageSet(key, value) {
     try {
-      global.localStorage.setItem(key, JSON.stringify(value));
+      global.localStorage.setItem(storageKey(key), JSON.stringify(value));
     } catch (e) {
       /* 配额或隐私模式：静默降级为仅内存状态 */
     }

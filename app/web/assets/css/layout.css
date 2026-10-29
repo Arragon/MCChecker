@@ -75,6 +75,35 @@
   font-weight: 400;
 }
 
+.workspace-switch {
+  max-width: 210px;
+  min-width: 0;
+  flex: 0 1 auto;
+  gap: 6px;
+}
+
+.workspace-switch .workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-switch .workspace-caption {
+  color: var(--c-text-3);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+@media (max-width: 1200px) {
+  .workspace-switch .workspace-caption { display: none; }
+  .workspace-switch { max-width: 175px; }
+}
+
+@media (max-width: 960px) {
+  .workspace-switch { max-width: 150px; }
+  .workspace-switch .workspace-name { max-width: 90px; }
+}
+
 .search-trigger {
   display: flex;
   align-items: center;

@@ -75,10 +75,15 @@
   function request(method, path, opts) {
     opts = opts || {};
     var headers = Object.assign({ Accept: "application/json", "X-Requested-With": "MCChecker", "X-Workspace-Id": workspaceId() }, opts.headers || {});
+    var epoch = (MC.workspaces && MC.workspaces.epoch) ? MC.workspaces.epoch() : null;
+    function stale() {
+      return epoch !== null && MC.workspaces && MC.workspaces.epoch && MC.workspaces.epoch() !== epoch;
+    }
     if (MC.config && MC.config.mock) {
       return MC.mock
         .handle({ method: method, path: path, query: opts.query || {}, body: opts.body, raw: opts.raw, headers: headers })
         .then(function (res) {
+          if (stale()) throw new ApiError(0, "STALE_CONTEXT", "");
           if (res.status >= 200 && res.status < 300) return res.body;
           var err = (res.body && res.body.error) || {};
           throw new ApiError(res.status, err.code, err.message, err.detail);
@@ -92,17 +97,21 @@
       init.body = JSON.stringify(opts.body);
       headers["Content-Type"] = "application/json; charset=utf-8";
     }
-    return fetch(BASE + path + buildQuery(opts.query), init).then(
+    var url = (opts.absolute ? "" : BASE) + path + buildQuery(opts.query);
+    return fetch(url, init).then(
       function (resp) {
+        if (stale()) throw new ApiError(0, "STALE_CONTEXT", "");
         var ct = resp.headers.get("Content-Type") || "";
         var parse = ct.indexOf("application/json") >= 0 ? resp.json() : resp.text().then(function () { return null; });
         return parse.then(function (data) {
+          if (stale()) throw new ApiError(0, "STALE_CONTEXT", "");
           if (resp.ok) return data;
           var err = (data && data.error) || {};
           throw new ApiError(resp.status, err.code, err.message || "请求失败（HTTP " + resp.status + "）", err.detail);
         });
       },
       function () {
+        if (stale()) throw new ApiError(0, "STALE_CONTEXT", "");
         throw new ApiError(0, "NETWORK", NETWORK_MESSAGE);
       }
     );
@@ -149,6 +158,8 @@
     seg: seg,
     p: profilePath,
     get: function (path, query) { return request("GET", path, { query: query }); },
+    getV3: function (path, query) { return request("GET", path, { query: query, absolute: true }); },
+    requestV3: function (method, path, opts) { opts = opts || {}; opts.absolute = true; return request(method, path, opts); },
     post: function (path, body, query, headers) {
       return request("POST", path, { body: body || {}, query: query, headers: headers });
     },
@@ -194,6 +205,7 @@
     });
     if (segs[0] !== "p" || !segs[1]) return null;
     var kind = segs[2] || "overview";
+    if (kind === "configspace") kind = "registry";
     if (!KINDS[kind]) kind = "overview";
     return { pid: segs[1], kind: kind, arg: segs.slice(3).join("/") || "", query: query };
   }
