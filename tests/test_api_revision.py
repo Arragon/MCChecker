@@ -66,6 +66,9 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("DELETE", "/api/v1/profiles/{pid}"): "settings (default)",
     ("POST", "/api/v1/profiles/{pid}/retire"): "settings (default)",
     ("POST", "/api/v1/profiles/{pid}/restore"): "settings (default)",
+    # M9-02：workspace 元数据不递增旧 5 段。
+    ("POST", "/api/v3/workspaces"): None,
+    ("PATCH", "/api/v3/workspaces/{wid}"): None,
     # --- 配置管理域（M6-01/M6-02）：**不递增**旧 5 段，改用全局 `config_revision`（决策 D3）。
     # 配置域的对象、审计与回执都在 `data/config_management/` 里，与机型文件的修订语义解耦；
     # 因此这里逐条登记为 None，等于声明"它们绝不碰 models.rev.*"。
