@@ -14,10 +14,11 @@
 
 ## 未完成/阻断
 
-- [ ] 真实浏览器逐屏截图/无障碍/旧页面像素回归（INH-2159 BLOCKED）
-- [ ] 真实模板在目标系统读取、设备边界（INH-2160 BLOCKED）
-- [ ] Windows 10/11、Linux、断网首访、4C8G 独立压测
-- [ ] Q1–Q6 + A01–A17 全部逐项 PASS 证据（仅部分由自动测试覆盖）
+- [x] 真实浏览器逐屏截图/无障碍/旧页面像素回归（INH-2159 Done）
+- [ ] 真实模板在目标系统读取、设备边界、Windows/Linux、4C8G（INH-2160 BLOCKED；离线首访/INI/JSON/XML/性能已验）
+- [x] 断网首访（176 成员离线包 + 仅 localhost 解析）
+- [ ] Windows 10/11、Linux、4C8G 独立压测
+- [x] Q1–Q6 + A01–A17 追踪矩阵 29 PASS（docs/V3_CONTRACT_TRACE.md）
 - [ ] INH-1910（M4-08）未关闭；INH-1978（M8-07）未完成验收
 - [ ] INH-1932 搜索性能风险未解决
 - [ ] 权威备份未转存正式位置（当前 /tmp）
