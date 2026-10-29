@@ -19,6 +19,7 @@
       configs: [], cid: null, detail: null, graph: null, params: null, branch: null,
       machines: [], releaseId: null, tab: "versions", draft: null, loading: true, error: null,
       filter: "", overview: null, overviewMachine: "", overviewCompare: "",
+      paramMode: "list", selectedParam: null, paramTree: null,
     };
     var canWrite = function () { return app.can("config_registry_write"); };
     function root(rest) {
@@ -91,6 +92,7 @@
     }
 
     function render() {
+      if (S.paramTree) { S.paramTree.destroy(); S.paramTree = null; }
       util.clear(el);
       el.appendChild(pageHead());
       if (S.loading) { el.appendChild(MC.stateBlock({ kind: "loading", title: "加载配置…" })); return; }
@@ -183,9 +185,11 @@
     function workbenchView(rel) {
       if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
       var values = (S.draft && S.draft.values) || {};
-      var rows = (S.params && S.params.items || []).map(function (p) {
-        var cur = values[p.parameter_id] || {};
+      var params = (S.params && S.params.items || []);
+      var rows = params.map(function (p) {
+        var cur = values[p.parameter_id] || { membership: "not_introduced", value_state: "unset", enabled: true };
         var input = h("input.input.input-sm", { type: "text", value: cur.value == null ? "" : cur.value, disabled: !canWrite() || !!rel.d0.frozen });
+        input.addEventListener("focus", function () { S.selectedParam = p; renderParamDetail(detailHost); });
         return { p: p, input: input, cur: cur };
       });
       var save = h("button.btn.btn-sm.btn-primary", { type: "button", disabled: !canWrite() || !!rel.d0.frozen, onclick: function () {
@@ -198,15 +202,105 @@
           }).then(function () { MC.toast.success("草稿已保存"); reloadDetail(); }, function (err) { MC.toastError("保存失败", err, err.code === "REVISION_CONFLICT" ? { action: { label: "重新加载", onClick: function () { reloadDetail(); } } } : null); });
         });
       } }, "保存值");
+      var detailHost = h("div");
+      var mode = MC.segmented([
+        { value: "list", label: "列表" }, { value: "tree", label: "参数树" },
+      ], S.paramMode, function (v) { S.paramMode = v; render(); }, "参数视图");
+      var listWrap = h("div.col", { style: "gap:8px" });
       var bodyRows = rows.length ? rows.map(function (r) {
         return h("tr", h("td.cell-strong", r.p.name), h("td.mono.xsmall", (r.p.directory || []).join(" / ") || "—"),
           h("td.xsmall", (r.p.type || "—") + (r.p.unit ? " · " + r.p.unit : "")), h("td", r.input));
       }) : h("tr", h("td", { colspan: 4 }, h("div.muted", "还没有参数；参数目录提取在 M13 接入。")));
+      var list = h("div.table-wrap", h("table.table",
+        h("thead", h("tr", h("th", "参数"), h("th", "目录"), h("th", "类型/单位"), h("th", "值"))),
+        h("tbody", bodyRows)));
+      var treeHost = h("div", { style: "height:420px;border:1px solid var(--c-border);border-radius:8px;overflow:hidden" });
+      var search = h("input.input.input-sm", { type: "search", placeholder: "筛选参数名称 / 完整层级" });
+      var expandAll = h("button.btn.btn-sm", { type: "button" }, "全部展开");
+      var collapseAll = h("button.btn.btn-sm", { type: "button" }, "全部折叠");
+      listWrap.append(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, search, expandAll, collapseAll), S.paramMode === "list" ? list : treeHost, detailHost);
+      search.addEventListener("input", function () {
+        var kw = search.value.trim().toLowerCase();
+        if (S.paramMode === "tree" && S.paramTree) S.paramTree.setFilter(kw, function () { return ""; });
+        if (S.paramMode === "list") {
+          [].slice.call(list.querySelectorAll("tbody tr")).forEach(function (tr) {
+            tr.style.display = !kw || tr.textContent.toLowerCase().indexOf(kw) >= 0 ? "" : "none";
+          });
+        }
+      });
+      expandAll.addEventListener("click", function () { if (S.paramTree) S.paramTree.expandAll(); });
+      collapseAll.addEventListener("click", function () { if (S.paramTree) S.paramTree.collapseAll(); });
+      if (S.paramMode === "tree") {
+        var doc = paramDoc(params, values);
+        Promise.resolve().then(function () {
+          if (!treeHost.isConnected || !MC.Tree) return;
+          S.paramTree = new MC.Tree(treeHost, MC.doc.buildIndex(doc), {
+            label: "参数目录",
+            onSelect: function (i) {
+              var p = doc.metaParams[i];
+              if (p) { S.selectedParam = p; renderParamDetail(detailHost); }
+            },
+          });
+          var sel = null;
+          if (S.selectedParam) {
+            Object.keys(doc.metaParams).forEach(function (k) { if (doc.metaParams[k].parameter_id === S.selectedParam.parameter_id) sel = +k; });
+          }
+          if (sel != null) S.paramTree.select(sel);
+        });
+      }
+      renderParamDetail(detailHost);
       return h("div.col", { style: "gap:12px" },
-        h("div.row", h("span.badge", rel.d0.frozen ? "D0 已冻结" : "D0 草稿"), h("span.xsmall.muted", "修订 " + (S.draft ? S.draft.revision : 0)), h("span.spacer"), save),
-        h("div.table-wrap", h("table.table",
-          h("thead", h("tr", h("th", "参数"), h("th", "目录"), h("th", "类型/单位"), h("th", "值"))),
-          h("tbody", bodyRows))));
+        h("div.row", h("span.badge", rel.d0.frozen ? "D0 已冻结" : "D0 草稿"), h("span.xsmall.muted", "修订 " + (S.draft ? S.draft.revision : 0)), mode, h("span.spacer"), save),
+        listWrap);
+    }
+
+    function paramDoc(params, values) {
+      var nodes = { p: [-1], t: ["file"], l: ["参数"], v: [null], id: ["root"], loc: [""] };
+      var metaParams = {};
+      var dirIndex = { "": 0 };
+      function ensureDir(parts, parent) {
+        var key = "";
+        var idx = parent;
+        for (var k = 0; k < parts.length; k++) {
+          key = key ? key + "/" + parts[k] : parts[k];
+          if (dirIndex[key] === undefined) {
+            nodes.p.push(idx); nodes.t.push("element"); nodes.l.push(parts[k]); nodes.v.push(null);
+            nodes.id.push("dir:" + key); nodes.loc.push(key);
+            idx = nodes.p.length - 1;
+            dirIndex[key] = idx;
+          } else idx = dirIndex[key];
+        }
+        return idx;
+      }
+      params.slice().sort(function (a, b) {
+        return (a.directory || []).join("/").localeCompare((b.directory || []).join("/")) || String(a.name).localeCompare(String(b.name));
+      }).forEach(function (p) {
+        var parent = ensureDir(p.directory || [], 0);
+        var cur = values[p.parameter_id] || { membership: "not_introduced", value_state: "unset", enabled: true };
+        var text = cur.value != null ? String(cur.value)
+          : cur.value_state === "null" ? "null"
+          : cur.value_state === "unset" ? "未设"
+          : cur.membership === "removed" ? "已移除"
+          : cur.membership === "not_introduced" ? "未纳入"
+          : cur.enabled === false ? "已停用" : "—";
+        nodes.p.push(parent); nodes.t.push("element"); nodes.l.push(p.name); nodes.v.push(text);
+        nodes.id.push(p.parameter_id); nodes.loc.push((p.directory || []).join("/"));
+        metaParams[nodes.p.length - 1] = p;
+      });
+      return { file: { name: "参数" }, nodes: nodes, metaParams: metaParams };
+    }
+
+    function renderParamDetail(host) {
+      if (!host) return;
+      var p = S.selectedParam;
+      if (!p) return util.clear(host);
+      var cur = ((S.draft && S.draft.values) || {})[p.parameter_id] || {};
+      util.replace(host, h("div.panel", h("div.panel-header", h("h3", p.name), h("span.xsmall.muted", (p.directory || []).join(" / ") || "根目录")),
+        h("div.panel-body", h("dl.kv",
+          h("dt", "类型/单位"), h("dd", (p.type || "—") + (p.unit ? " · " + p.unit : "")),
+          h("dt", "属性"), h("dd.mono.xsmall", JSON.stringify(p.attrs || {})),
+          h("dt", "来源"), h("dd.mono.xsmall", (p.source && p.source.locator) || "—"),
+          h("dt", "当前"), h("dd", cur.value != null ? String(cur.value) : (cur.value_state || "unset"))))));
     }
 
     function overviewView(rel) {
@@ -346,7 +440,7 @@
     return {
       el: el, title: "配置管理", icon: "list",
       update: function () {},
-      destroy: function () { unsub.forEach(function (f) { f(); }); },
+      destroy: function () { if (S.paramTree) S.paramTree.destroy(); unsub.forEach(function (f) { f(); }); },
     };
   };
 })(window);
