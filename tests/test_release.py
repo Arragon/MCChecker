@@ -43,6 +43,8 @@ EXPECTED_MEMBERS = {
     "app/web/assets/js/views/settings.js",
     "app/web/index.html",
     "docs/manual.md",
+    "docs/V3_API.md",
+    "docs/V3_ROLES.md",
     "scripts/config_backup.py",
     "scripts/inspect_config_management.py",
     "scripts/inspect_v3_workspace.py",
@@ -158,6 +160,7 @@ def source_tree(tmp_path: Path) -> Path:
             'var url = h("input.input", { type: "url", placeholder: "http://…" });\n'
         ),
         "docs/manual.md": "# 使用手册\n\n启动：`python run.py`。\n",
+        "docs/V3_API.md": "# V3 API\n", "docs/V3_ROLES.md": "# V3 角色\n",
         "scripts/config_backup.py": '"""备份工具。"""\n',
         "scripts/inspect_config_management.py": '"""迁移预检工具。"""\n',
         "scripts/inspect_v3_workspace.py": '"""V3 旧数据清单。"""\n',
@@ -1007,7 +1010,7 @@ def test_cli_prints_what_it_wrote_and_guards_overwrite(source_tree: Path, tmp_pa
     first = run_cli(common)
     assert first.returncode == 0, first.stderr
     assert "已生成发布包" in first.stdout and str(out) in first.stdout, first.stdout
-    assert "成员 27 个" in first.stdout, first.stdout
+    assert "成员 29 个" in first.stdout, first.stdout
     assert "外部主机引用：0 个" in first.stdout, first.stdout
     # 放行的每一条都要点名，且报的是「名单有几条」——只看 0 个证明不了闸门在执法。
     assert "已放行 app/web/assets/js/ui/icons.js" in first.stdout, first.stdout
