@@ -796,7 +796,14 @@
           h("button.btn.btn-primary", { type: "button", onclick: preview }, "预览合并")));
         if (state.loading) { body.appendChild(MC.stateBlock({ kind: "loading", title: "读取合并计划…" })); refreshFooter(); return; }
         if (state.error) { body.appendChild(MC.stateBlock({ kind: "error", title: "合并预览失败", desc: MC.errorText(state.error) })); refreshFooter(); return; }
-        if (!state.page) { refreshFooter(); return; }
+        if (!state.page) {
+          refreshFooter();
+          if (!hadFocus) {
+            var initial = body.querySelector("select, input, button");
+            if (initial) initial.focus();
+          }
+          return;
+        }
         var filter = MC.segmented([
           { value: "conflict", label: "仅冲突" }, { value: "all", label: "全部" },
           { value: "resolved", label: "已决议" },
