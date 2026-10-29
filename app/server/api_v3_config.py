@@ -29,6 +29,39 @@ def register(router: Router) -> None:
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/graph",
         graph,
     )
+    router.add(
+        "GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters",
+        list_parameters,
+    )
+    router.add(
+        "POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters",
+        create_parameter,
+    )
+    router.add(
+        "PATCH",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters/{parameter_id}",
+        update_parameter,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/definition-revisions",
+        definition_revisions,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/definition-revisions/{revision}",
+        definition_revision,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/bindings",
+        bindings,
+    )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/bindings",
+        create_binding,
+    )
 
 
 def _scope(wid: str, pid: str) -> None:
@@ -86,3 +119,85 @@ def graph(
     authz.authorize(ctx, "config_read")
     _scope(params["wid"], params["pid"])
     return Response(payload=config_v3_catalog.graph(params["pid"], params["cid"]))
+
+
+def list_parameters(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload=config_v3_catalog.list_parameters(params["pid"], params["cid"]))
+
+
+def create_parameter(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        status=201,
+        payload={"parameter": config_v3_catalog.create_parameter(params["pid"], params["cid"], json_body(body))},
+    )
+
+
+def update_parameter(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload={
+            "parameter": config_v3_catalog.update_parameter(
+                params["pid"], params["cid"], params["parameter_id"], json_body(body)
+            )
+        }
+    )
+
+
+def definition_revisions(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload={"items": config_v3_catalog.definition_revisions(params["pid"], params["cid"])}
+    )
+
+
+def definition_revision(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload={
+            "revision": config_v3_catalog.definition_revision(
+                params["pid"], params["cid"], int(params["revision"])
+            )
+        }
+    )
+
+
+def bindings(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload={"binding_set": config_v3_catalog.bindings_for(params["pid"], params["cid"], params["rid"])}
+    )
+
+
+def create_binding(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        status=201,
+        payload={
+            "binding_set": config_v3_catalog.create_binding(
+                params["pid"], params["cid"], params["rid"], json_body(body)
+            )
+        },
+    )
