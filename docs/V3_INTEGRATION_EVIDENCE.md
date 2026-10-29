@@ -23,6 +23,13 @@
 - 服务端新增 `GET /configs/{cid}/parameter-tree?parent=&offset=&limit=`，只返回直接子目录与当前目录参数页；`tests/test_v3_parameter_tree.py` 覆盖根/子目录/分页无重复。
 - 前端 M13-PERF 用例覆盖列表翻页、目录钻取、总览翻页只保留当前页。
 
+### 跨平台自动化（2026-10-29，INH-2160 部分）
+- 工作流：`.github/workflows/v3-cross-platform.yml`；提交 `18ef40b`（合并 `df43205`），run `40950516838`。
+- ubuntu-latest + Python 3.9.25：**2722 passed / 0 failed**（3m43s），与 macOS + 3.9.11 本机结果一致。
+- windows-latest + Python 3.9.25：**2694 passed / 28 skipped / 0 failed**（9m48s）。28 个 skip 全部是平台不可执行或平台语义不同：`start.sh`/`service.sh`/`add-admin.sh`（无 `/bin/sh`）、POSIX 权限位、跨盘 `relpath`、Windows 关闭端口表现为超时。
+- 同轮修复的真实跨平台问题：残留锁存活判断改用 `GetExitCodeProcess`（避免已退出进程仍占锁）；删除恢复清单路径统一为 `/`；下载 `Content-Type` 不再依赖 Windows 注册表（`.xml` 固定 `application/xml`）。
+- 限制：托管 runner 不是 Windows 10/11 目标机，也不是 Python 3.9.11；未覆盖实体设备、真实目标模板、4C8G/SSD 压测。
+
 ### 离线首访（2026-10-29）
 - 当前源码重建发布包 176 成员，`--verify-only` 外部主机 0；解压到 `/tmp/mcc-offline`，用独立数据根启动 `run.py --port 8902`。
 - Chrome `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"` 下访问：速览页标题正常，配置管理显示“还没有固定配置”；证明首访不依赖外网。
@@ -37,7 +44,7 @@
 
 - 脱敏真实目标软件模板在目标系统读取：无授权模板/实体设备。
 - 实体设备/PLC/机台部署与回读：无环境；V3 发布只移动内部 head。
-- Windows 10/11 + Python 3.9.11、Linux 实机包运行。
+- Windows 10/11 + Python 3.9.11、Linux 实机包运行（GitHub runner 的全量测试已绿，但不等于目标机）。
 - 断网首访（离线内网）真实浏览器验证。
 - 4C8G/SSD 目标硬件与 20 并发独立进程压测；当前是本机线程级。
 - INH-1932（100 文件档搜索 P50 ~2.4–2.7s vs 500ms）风险仍未解决，继续追踪，不当作已解决。
