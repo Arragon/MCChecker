@@ -142,11 +142,18 @@ def _process_alive(pid: int) -> bool:
         import ctypes
 
         kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION：能读退出码即可。
+        handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, pid)
         if not handle:
             return False
-        kernel32.CloseHandle(handle)
-        return True
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                # 读不到退出码时保守当作存活，宁可拒绝启动也不抢占活进程的锁。
+                return True
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

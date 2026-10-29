@@ -61,7 +61,22 @@ def _sanitize_segment(value: str, *, label: str) -> str:
     return text
 
 
+#: 这几类配置文件的 Content-Type 不查操作系统注册表：Windows 会把 .xml 猜成
+#: `text/xml`，同一份下载在不同平台上头部不一致，客户端与测试都没法依赖。
+_DETERMINISTIC_MEDIA_TYPES = {
+    ".xml": "application/xml",
+    ".json": "application/json",
+    ".ini": "text/plain",
+    ".cfg": "text/plain",
+    ".conf": "text/plain",
+    ".txt": "text/plain",
+}
+
+
 def _guess_media_type(filename: str) -> str:
+    suffix = os.path.splitext(filename)[1].lower()
+    if suffix in _DETERMINISTIC_MEDIA_TYPES:
+        return _DETERMINISTIC_MEDIA_TYPES[suffix]
     guessed, _ = mimetypes.guess_type(filename)
     return guessed or "application/octet-stream"
 

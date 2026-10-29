@@ -470,7 +470,9 @@ def _data_relative(path: str) -> str:
     `resolve_within` 会把配置文件路径 realpath 化、归档/记录目录却不会——只 realpath
     一侧会算出 `../../../../` 开头的废路径。
     """
-    return os.path.relpath(os.path.realpath(path), os.path.realpath(storage.DATA_DIR))
+    relative = os.path.relpath(os.path.realpath(path), os.path.realpath(storage.DATA_DIR))
+    # 清单是跨平台恢复凭据：Windows 的 `\` 会让运维在 Linux 上照抄时找不到文件。
+    return relative.replace(os.sep, "/")
 
 
 def _sha256_file(path: str) -> str:

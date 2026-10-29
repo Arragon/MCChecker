@@ -1031,6 +1031,10 @@ class TestPathContainment:
                 assert os.path.realpath(path).startswith(real_root), path
             sentinel_untouched(outside)
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="CI 的仓库在 D:、tmp_path 在 C:，ntpath.relpath 无法跨盘构造逃逸路径",
+    )
     def test_literal_dot_segments_never_reach_outside_the_root(self):
         """未编码的 `../`：静态层把它当「不存在」是**刻意**的不暴露目录结构
         （`http.py:340`，M1-06 的决定，`test_api_http.py` 也钉着 404）。这里不跟它抢
