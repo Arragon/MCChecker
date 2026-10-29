@@ -8,7 +8,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="add-admin.sh 依赖 POSIX sh 与 /usr/bin 路径，Windows 用 start.bat"
+)
 
 
 def env_for(tmp_path: Path, **extra: str) -> dict:

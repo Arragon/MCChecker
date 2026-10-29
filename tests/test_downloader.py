@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import logging
+import os
 import socket
 import threading
 import time
@@ -443,6 +444,10 @@ class TestFailureReasons:
         assert excinfo.value.detail["reason"] == "http_status"
         assert "404" in excinfo.value.message
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="Windows 对已关闭端口的 connect 走超时而不是 ConnectionRefusedError",
+    )
     def test_connection_refused_reason(self, servers):
         srv = servers({"/config.xml": {"body": XML_BODY}})
         srv.httpd.shutdown()

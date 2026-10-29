@@ -89,6 +89,7 @@ def test_full_backup_tamper_and_prune(tmp_path) -> None:
     assert not os.path.exists(os.path.join(target, "profiles", "p1", "configs", "stale.xml"))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows 不认 POSIX 只读位，无法用 chmod 模拟替换失败")
 def test_restore_failure_rolls_back_old_target(tmp_path, monkeypatch) -> None:
     source = str(tmp_path / "data")
     backup = str(tmp_path / "backup")

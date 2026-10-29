@@ -27,8 +27,11 @@ import ast
 import builtins
 import hashlib
 import os
+import posixpath
 import re
 from typing import Dict
+
+import pytest
 
 import data_guard
 from data_guard import (
@@ -125,7 +128,7 @@ def _assert_key_shape(snapshot: Dict[str, str]) -> None:
         assert not rel.startswith("./"), rel
         assert not os.path.isabs(rel), rel
         assert not rel.startswith("data/"), rel
-        assert "\\" not in rel and core == os.path.normpath(core), rel
+        assert "\\" not in rel and core == posixpath.normpath(core), rel
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +265,9 @@ def test_snapshot_of_a_controlled_tree_is_non_empty_and_normalized(tmp_path) -> 
     for rel, content in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # 用 bytes 写：Windows 的文本模式会把 \n 翻成 \r\n，而下面硬写的
+        # sha256 对应的是原始 UTF-8 字节，不能被平台的换行转换改写。
+        path.write_bytes(content.encode("utf-8"))
 
     snapshot = snapshot_data_tree(str(root))
     assert snapshot, "我自己造的树不许快照为空"
@@ -584,6 +589,7 @@ def test_enforcing_notice_prints_the_price_next_to_the_file_count() -> None:
     assert "字节" not in "\n".join(session_notice_lines({"a.txt": _sha256_of(b"a")})), priced
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows 不支持 POSIX 权限位，chmod(0) 拦不住读取")
 def test_unreadable_file_is_named_as_uncompared_instead_of_blaming_the_guard(tmp_path) -> None:
     """读不到的文件不许在 teardown 里裸抛 traceback（那是把机器的权限问题算成守卫炸了），
     也不许当成「没变化」——它本轮**根本没被比较**，必须逐条点名并走警告通道。
@@ -611,6 +617,7 @@ def test_unreadable_file_is_named_as_uncompared_instead_of_blaming_the_guard(tmp
     assert [cat for _msg, cat in session_notice_warnings(snapshot, stats)] == [H3UncomparedWarning]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows 不支持 POSIX 权限位，chmod(0) 拦不住遍历")
 def test_unreadable_directory_is_named_instead_of_silently_vanishing(tmp_path) -> None:
     """`os.walk` 默认把 scandir 的异常咽掉：一个读不了的目录会让**整棵子树**静默变成
     「没有差异」，比单个文件更危险，所以同样点名（尾部带 `/` 表明是目录）。

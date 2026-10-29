@@ -15,6 +15,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="service.sh 依赖 POSIX sh/signal 语义，Windows 无对应服务脚本"
+)
+
 RUN_PY = r"""
 import json, os, signal, sys, time
 args = sys.argv[1:]

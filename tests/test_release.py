@@ -21,6 +21,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
+#: start.sh 是 POSIX 启动器；Windows 对应的是 start.bat，CI 的 windows runner
+#: 没有 /bin/sh，这些用例只能在 POSIX 上执行（start.bat 的行为另有断言）。
+POSIX_SH = pytest.mark.skipif(os.name == "nt", reason="start.sh 依赖 POSIX /bin/sh")
+
 import make_release as mr  # noqa: E402  （脚本不在包里，只能按路径导入）
 
 # 假源树里**应当**进入产物的成员，手写字面量：与 RELEASE_ENTRIES 的展开结果一一对应。
@@ -771,6 +775,7 @@ def start_sh_env(tmp_path: Path, path_dirs: List[str]) -> Dict[str, str]:
     return {"PATH": os.pathsep.join(path_dirs), "HOME": str(tmp_path / "home")}
 
 
+@POSIX_SH
 def test_start_sh_fails_when_no_interpreter(tmp_path: Path) -> None:
     """这台机器上没有 3.9+ 解释器时：非 0 退出 + 能看懂的一句话，且不起服务、不建 data/。"""
     empty = tmp_path / "bin"
@@ -788,6 +793,7 @@ def test_start_sh_fails_when_no_interpreter(tmp_path: Path) -> None:
     assert not (root / "data").exists(), "start.sh 不许提前创建 data/"
 
 
+@POSIX_SH
 def test_start_sh_fails_when_interpreter_is_too_old(tmp_path: Path) -> None:
     """模拟 3.8 解释器（版本检查返回 1）：报「版本过低」而不是「没找到」。"""
     fake = tmp_path / "fakebin"
@@ -806,6 +812,7 @@ def test_start_sh_fails_when_interpreter_is_too_old(tmp_path: Path) -> None:
     assert "低于 3.9" in proc.stderr, proc.stderr
 
 
+@POSIX_SH
 def test_start_sh_reports_url_and_launches_packaged_app(tmp_path: Path) -> None:
     """用源码目录跑一遍正常路径：打印访问地址、并把 run.py 的 stdout 透出来。"""
     root = tmp_path / "release"
@@ -851,6 +858,7 @@ def printed_data_root(stdout: str) -> str:
     return match.group(1).strip()
 
 
+@POSIX_SH
 def test_start_sh_prints_the_data_root_run_py_uses(tmp_path: Path) -> None:
     """`--data-dir` 传了以后，屏幕上报的必须是实际用的那一个（复审 Minor 1）。
 
@@ -874,6 +882,7 @@ def test_start_sh_prints_the_data_root_run_py_uses(tmp_path: Path) -> None:
     assert printed_data_root(default_proc.stdout) == os.path.realpath(str(root / "data"))
 
 
+@POSIX_SH
 def test_start_sh_data_root_matches_config_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """同一份 `--data-dir` / 环境变量，start.sh 打印的与 run.py 解析出的必须是一个值。"""
     from app import config as app_config  # 只跑解析，不碰 storage（§7 那条红线在这儿不适用）
@@ -901,6 +910,7 @@ def test_start_sh_data_root_matches_config_resolution(tmp_path: Path, monkeypatc
     assert printed_data_root(proc.stdout) == str(chosen), proc.stdout
 
 
+@POSIX_SH
 def test_start_sh_uses_the_documented_runtime_python_dir(tmp_path: Path) -> None:
     """内嵌运行时按 §14.3 放在 `runtime/python/`，和 start.bat 同一个目录（复审 Minor 4）。
 
@@ -921,6 +931,7 @@ def test_start_sh_uses_the_documented_runtime_python_dir(tmp_path: Path) -> None
     assert "ARGS=run.py" in proc.stdout, proc.stdout  # 被选中的那个真的接到了 run.py
 
 
+@POSIX_SH
 def test_launchers_read_the_single_default_port() -> None:
     """默认端口只允许出现在 `app.config.DEFAULT_PORT`。启动脚本自己再写一个数字就会分叉。"""
     from app.config import DEFAULT_PORT
@@ -951,6 +962,7 @@ def test_launchers_read_the_single_default_port() -> None:
     assert proc.stdout.strip() == str(DEFAULT_PORT), proc.stdout
 
 
+@POSIX_SH
 def test_start_sh_library_mode_exposes_the_resolvers(tmp_path: Path) -> None:
     """`MCHECKER_START_LIB=0` 不是摆设（复审 Minor 5）：source 进来只取函数，不 exec run.py。
 
@@ -981,6 +993,7 @@ def test_start_sh_library_mode_exposes_the_resolvers(tmp_path: Path) -> None:
     ), proc.stdout
 
 
+@POSIX_SH
 def test_start_sh_needs_run_py(tmp_path: Path) -> None:
     """包不完整（没有 run.py）时也要给一句能看懂的话，而不是 ImportError。"""
     root = tmp_path / "release"

@@ -303,9 +303,8 @@ class TestManifest:
             "archive/%s" % FILE_A,
             "records/%s" % FILE_A,
         }
-        # `from` 必须是相对数据根的可用路径：符号链接的临时数据根（macOS /var）上
-        # 只 realpath 一侧会算出../../../../ 开头的废路径。
-        base = os.path.join("profiles", self.pid)
+        # 清单路径按 posix 记（跨平台可读）；Windows 上也不许混进反斜杠。
+        base = "profiles/%s" % self.pid
         assert moved["configs/%s" % FILE_A] == "%s/configs/%s" % (base, FILE_A)
         assert moved["archive/%s" % FILE_A] == "%s/archive/%s" % (base, FILE_A)
         assert moved["records/%s" % FILE_A] == "%s/records/%s" % (base, FILE_A)
