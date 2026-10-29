@@ -112,7 +112,7 @@
     }
 
     function configsPanel() {
-      var search = h("input.input.input-sm", { type: "search", placeholder: "搜索配置名称 / 标识", value: S.filter });
+      var search = h("input.input.input-sm", { type: "search", name: "config_filter", placeholder: "搜索配置名称 / 标识", value: S.filter });
       search.addEventListener("input", function () { S.filter = search.value.trim().toLowerCase(); render(); });
       var rows = S.configs.filter(function (c) {
         return !S.filter || (c.name + " " + c.code).toLowerCase().indexOf(S.filter) >= 0;
@@ -160,7 +160,7 @@
         return h("section.panel.config-main", h("div.panel-body", MC.stateBlock({ kind: "empty", icon: "list", title: "添加第一个软件版本", desc: "先建固定配置，再创建软件版本；每个版本有唯一的 canonical D0。", actions: canWrite() ? [h("button.btn.btn-primary", { type: "button", onclick: createConfigDialog }, "新建固定配置")] : null })));
       }
       var rel = release();
-      var releaseSel = h("select.select", { "aria-label": "软件版本" },
+      var releaseSel = h("select.select", { "aria-label": "软件版本", name: "release_id" },
         (S.detail.releases || []).map(function (r) {
           return h("option", { value: r.release_id, selected: r.release_id === S.releaseId }, r.version + (r.default_revision_id ? " · D0" : " · 未冻结"));
         }));

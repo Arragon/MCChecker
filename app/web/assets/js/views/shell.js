@@ -510,7 +510,7 @@
     this.navList = h("ul.nav-list");
     this.fileListEl = h("ul.file-list", { "aria-label": "配置文件" });
     this.fileCountEl = h("span.count");
-    var filter = h("input.input.input-sm", { type: "search", placeholder: "筛选文件名", "aria-label": "筛选文件名", value: this.fileFilter });
+    var filter = h("input.input.input-sm", { type: "search", name: "file_filter", placeholder: "筛选文件名", "aria-label": "筛选文件名", value: this.fileFilter });
     filter.addEventListener("input", function () {
       self.fileFilter = filter.value;
       self.renderFileList();
