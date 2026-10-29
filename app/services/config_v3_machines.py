@@ -196,6 +196,7 @@ def publish_machine(
             "revision_id": rid,
             "label": "r%d" % seq,
             "parent_id": machine.get("head_id"),
+            "release_id": machine["release_id"],
             "base_kind": draft.get("base_kind"),
             "base_revision_id": draft.get("base_revision_id"),
             "values": copy.deepcopy(draft.get("values") or {}),
