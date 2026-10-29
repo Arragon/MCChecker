@@ -73,6 +73,8 @@
 
   MC.errorText = errorText;
   MC.toastError = function (title, err, opts) {
+    // M9-05：工作区切换后旧请求的拒绝不应再弹错误。
+    if (err && err.code === "STALE_CONTEXT") return;
     return toast("error", title, errorText(err), opts);
   };
 

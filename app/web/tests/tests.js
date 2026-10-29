@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 96;  // 94 + 审计筛选/渲染（M7-11）
+  var EXPECTED_CASES = 98;  // 96 + M9-05 工作区作用域/ session
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -191,6 +191,31 @@
     eq(back.arg, r.arg);
     eq(back.query, r.query);
     eq(MC.router.parse("#/x"), null);
+  });
+
+  test("工作区：mc.* 键按 mcc-v3-workspace:<wid>: 隔离，mc.workspace 保持全局", function () {
+    var key = "mc.tabs.ws-test";
+    MC.workspaces.setActive("ws-test");
+    MC.util.storageSet(key, [{ k: 1 }]);
+    var raw = localStorage.getItem("mcc-v3-workspace:ws-test:" + key);
+    ok(raw, "scoped key 应存在");
+    eq(MC.util.storageGet(key, null)[0].k, 1);
+    MC.util.storageSet("mc.workspace", "ws-test");
+    eq(localStorage.getItem("mc.workspace"), JSON.stringify("ws-test"));
+    MC.workspaces.setActive("default");
+    eq(MC.util.storageGet(key, null), null, "默认工作区不应读到 ws-test 的键");
+    localStorage.removeItem("mcc-v3-workspace:ws-test:" + key);
+    localStorage.removeItem("mc.workspace");
+  });
+
+  test("工作区：v3 session 返回 workspace/workspaces，configspace 旧链解析到 registry", function () {
+    var route = MC.router.parse("#/p/default/configspace");
+    eq(route.kind, "registry", "configspace 深链不能降级成 overview");
+    return MC.api.getV3("/api/v3/session", { workspace: "default" }).then(function (s) {
+      eq(s.workspace.id, "default");
+      ok(Array.isArray(s.workspaces) && s.workspaces.length >= 1, "workspaces 必须非空");
+      ok(s.identity && s.identity.capabilities, "identity/capabilities 必须下发");
+    });
   });
 
   test("DL：正向计算保留 input_index，越界行标注而非丢弃", function () {
