@@ -11,6 +11,7 @@ from ..services import (
     config_v3_catalog,
     config_v3_diff,
     config_v3_drafts,
+    config_v3_extract,
     config_v3_machines,
     config_v3_projection,
     workspace_catalog,
@@ -50,6 +51,11 @@ def register(router: Router) -> None:
         "PATCH",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters/{parameter_id}",
         update_parameter,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extract-preview",
+        extract_preview,
     )
     router.add(
         "GET",
@@ -444,6 +450,30 @@ def publish_machine(
 
 def _csv(raw: str) -> List[str]:
     return [part.strip() for part in str(raw or "").split(",") if part.strip()]
+
+
+def _int(raw: str, default: int) -> int:
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        return default
+
+
+def extract_preview(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload=config_v3_extract.preview(
+            params["pid"],
+            params["cid"],
+            query_param(query, "version_id"),
+            _int(query_param(query, "offset"), 0),
+            _int(query_param(query, "limit"), 100),
+            query_param(query, "filter") or config_v3_extract.FILTER_ALL,
+        )
+    )
 
 
 def overview(

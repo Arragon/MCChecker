@@ -203,6 +203,18 @@ def find_version_by_sha(
     return None
 
 
+def find_version(profile_id: str, version_id: str) -> Optional[Dict[str, Any]]:
+    """按不可变 version_id 找到对应 FileVersion（含 name/ref）；找不到返回 None。"""
+    wanted = str(version_id or "").strip()
+    if not wanted:
+        return None
+    for item in list_resources(profile_id):
+        for row in versions(profile_id, item["name"]):
+            if row["version_id"] == wanted:
+                return row
+    return None
+
+
 def list_resources(profile_id: str) -> List[Dict[str, Any]]:
     """当前文件列表 + 每个 FileResource 的 current identity（只读）。"""
     out = []

@@ -150,6 +150,74 @@ def parse_pointer(pointer: Any) -> List[str]:
     return parts
 
 
+def canonical_locator(locator: Any) -> str:
+    """把 V3 locator 规范化成稳定键（JSON pointer / XML URI+local+occurrence）。
+
+    这是跨版本、跨文件关联参数的**唯一**定位键；名称只做候选证据。
+    """
+    if not isinstance(locator, dict):
+        raise AppError(INVALID_INPUT, "定位符必须是对象")
+    if "pointer" in locator:
+        pointer = locator.get("pointer")
+        if not isinstance(pointer, str):
+            raise AppError(INVALID_INPUT, "JSON Pointer 必须是字符串")
+        return "json:" + pointer
+    parts = locator.get("path")
+    if not isinstance(parts, list) or not parts:
+        raise AppError(INVALID_INPUT, "XML 定位不能为空", field="locator")
+    text = "/".join(
+        "%s|%s|%s"
+        % (
+            part.get("namespace_uri", ""),
+            part.get("local_name", ""),
+            part.get("occurrence", 0),
+        )
+        for part in parts
+    )
+    return "xml:%s#%s#%s" % (
+        text,
+        locator.get("kind", ""),
+        locator.get("attribute_name", ""),
+    )
+
+
+def locator_leaf(locator: Any) -> Tuple[str, List[str], str]:
+    """从 locator 派生 `(叶名, 完整层级, kind)`。
+
+    * XML 用 local_name；文档根元素只作文件外壳，不计入配置目录；祖先同名
+      出现序号 >1 时层级段写成 `Name[2]`，避免同父下重复元素被压成同一路径。
+    * JSON 用 Pointer 段；纯数字段按数组下标显示为 `[0]`。大小写原样保留。
+    """
+    if not isinstance(locator, dict):
+        raise AppError(INVALID_INPUT, "定位符必须是对象")
+    if "pointer" in locator:
+        parts = parse_pointer(locator.get("pointer"))
+        if not parts:
+            return "", [], "value"
+        kinds = locator.get("path_kinds")
+        if isinstance(kinds, str) and len(kinds) == len(parts):
+            leaf = "" if kinds[-1] == "a" else parts[-1]
+            directory = [
+                "[%s]" % part if kind == "a" else part
+                for part, kind in zip(parts[:-1], kinds[:-1])
+            ]
+            return leaf, directory, "value"
+        directory = [
+            "[%s]" % part if part.isdigit() else part for part in parts[:-1]
+        ]
+        return parts[-1], directory, "value"
+    parts = locator.get("path") or []
+    if not isinstance(parts, list) or not parts:
+        raise AppError(INVALID_INPUT, "XML 定位不能为空", field="locator")
+    directory = []
+    for part in parts[1:-1]:
+        name = str(part.get("local_name") or "")
+        occurrence = int(part.get("occurrence") or 0)
+        directory.append("%s[%d]" % (name, occurrence) if occurrence > 1 else name)
+    leaf = str(parts[-1].get("local_name") or "")
+    return leaf, directory, str(locator.get("kind") or "")
+
+
 def resolve_pointer(document: Any, pointer: Any) -> Any:
     """按 Pointer 取值；不存在返回 `None`（由调用方区分缺失与空值）。"""
     node = document
