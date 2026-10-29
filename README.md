@@ -49,7 +49,26 @@ pytest tests/ -v
 - 原生 JavaScript 前端（`app/web/`），零运行时第三方依赖
 - 标准库进行 XML/JSON 解析、下载、定时调度与文件存储
 
-## 配置管理（M5–M8）
+## V3 工作区与配置管理
+
+V3 把“工作区（Workspace）→ 机型（Profile）”作为业务边界，入口在左侧导航“配置管理”：固定配置、软件版本、canonical D0、基线 Bn 与机台 rn。参数提取、合并、值导入、模板导出、配置历史/恢复都走真实后端；发布只移动管理系统的 head，**不表示真实机台已下发/安装/回读**。
+
+旧 `M5–M8` 配置域保留只读兼容；需要停写时设 `MCHECKER_CONFIG_MANAGEMENT=readonly` 并重启，旧写接口返回 `CONFIG_DISABLED`。V3 数据在 `data/workspaces/<wid>/profiles/<pid>/configs_v3/`，全局身份/权限仍在数据根，不随工作区复制。
+
+V3 运维命令（服务停止后执行；先备份再迁移）：
+
+```bash
+python scripts/inspect_v3_workspace.py --data-dir data --out backups/v3-manifest.json
+python scripts/backup_v3.py backup --data-dir data --out backups/v3-full
+python scripts/backup_v3.py verify --backup backups/v3-full
+python scripts/migrate_v3.py plan --data-dir data
+python scripts/migrate_v3.py execute --data-dir data --backup backups/v3-full
+python scripts/migrate_v3.py rollback --data-dir data --yes
+```
+
+发布包：`python scripts/make_release.py --out dist/`。V3 最终发布门禁仍受真实浏览器/真实模板/设备/Windows/Linux/离线证据与 `INH-1910`/`INH-1978` 阻塞，见 `docs/V3_RELEASE_GATE.md`；在此之前不要把 V3 称为“已发布”。
+
+## 配置管理（M5–M8，旧域只读兼容）
 
 配置管理域默认开启（未设置 `MCHECKER_CONFIG_MANAGEMENT` 时等同 `on`）；设为 `off` 或 `readonly` 并重启可关闭或只读。它提供参数登记、软件版本/定义集合、现场采集与对账、变更单批准发布、XML 产物下载、人工导入登记、回读核验、审计谱系和机型生命周期；设备层按计划延期，状态接口会明确返回“未启用”。
 

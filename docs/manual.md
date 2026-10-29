@@ -238,3 +238,17 @@ python run.py --restore-backup /var/backups/mcc-20261023 --data-dir /var/lib/mcc
 - INH-1932 的 100 文件搜索性能决策。
 
 缺这些证据时，验收台账与 Linear 卡保持未关闭；M8-07 最终发布闸门不能签署“全部通过”。详见 `docs/MCChecker_ACCEPTANCE_LEDGER.md` 与 `docs/MCChecker_LEFTOVERS.md`。
+
+
+## 19. V3 工作区与配置管理
+
+**边界**：一个工作区（Workspace）包含多个机型（Profile），固定配置/参数/文件/任务都属于某个 W+P；身份、角色、管理员名单、IP 映射是全局的，不随工作区复制。切换工作区时前端会先确认未保存的视图/弹窗，再丢弃旧异步响应。
+
+**入口**：左侧“配置管理”。五个分段是版本演进、参数工作台、参数总览、模板导出、配置历史。工作台内可在列表/参数树间切换，共享同一修订、草稿、ETag 和选中参数；参数树支持键盘 ↑↓←→/Enter。
+
+**核心规则**：每个软件版本只有一个 canonical D0，冻结后不可改；Bn/机台 rn 发布后不可变，发布只移动管理 head。提取只生成名称+完整层级、释义为空、值 unset；值导入按已确认绑定匹配，未出现字段保留原值，不推断删除；合并只产新草稿；导出按不可变模板和冻结修订生成新文件，绝不覆盖原模板。以上都不代表真实机台部署。
+
+**数据与运维**：V3 数据在 `data/workspaces/<wid>/profiles/<pid>/configs_v3/`；旧 `profiles/` 保持只读兼容。旧配置域可设 `MCHECKER_CONFIG_MANAGEMENT=readonly` 停写。迁移前先跑 `inspect_v3_workspace.py` 和 `backup_v3.py`，`migrate_v3.py execute` 必须带已校验备份；回退只移除 `legacy-default`，不删除旧根、不扁平化其他工作区。
+
+**发布**：`make_release.py` 已包含 V3 迁移/备份脚本；但真实浏览器全量、真实模板/设备、Windows/Linux、离线、4C8G 证据未取得，且 INH-1910/INH-1978 未关闭，门禁见 `docs/V3_RELEASE_GATE.md`。
+
