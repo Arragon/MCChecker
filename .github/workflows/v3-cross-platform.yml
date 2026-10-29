@@ -23,6 +23,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Report environment
         run: python -c "import platform,sys;print(platform.platform());print(sys.version)"
+      - name: Install dev dependencies
+        run: python -m pip install -r requirements-dev.txt
       - name: Pytest
         run: python -m pytest -q
         env:
