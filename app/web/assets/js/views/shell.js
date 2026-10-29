@@ -579,20 +579,27 @@
 
   App.prototype.refreshFiles = function () {
     var self = this;
+    var epoch = MC.workspaces.epoch();
     return api.get(this.p("/files")).then(
       function (res) {
+        if (epoch !== MC.workspaces.epoch()) return;
         self.files = res.items;
         self.renderFileList();
         self.renderNav();
         MC.bus.emit("files", self.files);
       },
-      function (err) { MC.toastError("文件列表加载失败", err); }
+      function (err) {
+        if (epoch !== MC.workspaces.epoch()) return;
+        MC.toastError("文件列表加载失败", err);
+      }
     );
   };
 
   App.prototype.refreshTools = function () {
     var self = this;
+    var epoch = MC.workspaces.epoch();
     return api.get(this.p("/tools")).then(function (res) {
+      if (epoch !== MC.workspaces.epoch()) return;
       self.tools = res.items;
       MC.bus.emit("tools", self.tools);
     }, function () {});
