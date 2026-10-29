@@ -318,15 +318,8 @@ def filter_items(items: List[Dict[str, Any]], name: str) -> List[Dict[str, Any]]
     ]
 
 
-def preview(
-    profile_id: str,
-    config_id: str,
-    version_id: str,
-    offset: int = 0,
-    limit: int = 100,
-    filter_name: str = FILTER_ALL,
-) -> Dict[str, Any]:
-    """只读提取预览：精确 FileVersion → 全量分类 → 分页。"""
+def build(profile_id: str, config_id: str, version_id: str) -> Dict[str, Any]:
+    """完整提取计划（只读、不写任何参数或目录）。"""
     vid = str(version_id or "").strip()
     if not vid:
         raise AppError(INVALID_INPUT, "必须指定文件版本", field="version_id")
@@ -354,10 +347,6 @@ def preview(
             rows = config_v3_parse.json_locators(raw.data)
         catalog = config_v3_catalog.list_parameters(profile_id, config_id)
     items = classify_rows(rows, catalog["items"], identified["file_id"], source_format)
-    counts = counts_of(items)
-    filtered = filter_items(items, filter_name)
-    start = max(0, int(offset))
-    size = max(1, min(int(limit), 1000))
     return {
         "source": {
             "workspace_id": identified.get("workspace_id"),
@@ -370,7 +359,48 @@ def preview(
             "format": source_format,
         },
         "revision": catalog["revision"],
-        "counts": counts,
+        "counts": counts_of(items),
+        "items": items,
+    }
+
+
+def current_state(profile_id: str, config_id: str, source: Dict[str, Any]) -> Dict[str, Any]:
+    """当前来源与目录修订（stale 判定用；只读）。"""
+    with storage.use_profile(profile_id):
+        catalog = config_v3_catalog.list_parameters(profile_id, config_id)
+        name = str(source.get("name") or "")
+        try:
+            if str(source.get("version_label") or "") == "current":
+                ident = file_versions.current_identity(profile_id, name)
+            else:
+                ident = file_versions.find_version(profile_id, str(source.get("version_id") or ""))
+        except AppError:
+            ident = None
+    return {
+        "revision": catalog["revision"],
+        "version_id": ident["version_id"] if ident else None,
+        "blob_sha256": ident["blob_sha256"] if ident else None,
+        "missing": ident is None,
+    }
+
+
+def preview(
+    profile_id: str,
+    config_id: str,
+    version_id: str,
+    offset: int = 0,
+    limit: int = 100,
+    filter_name: str = FILTER_ALL,
+) -> Dict[str, Any]:
+    """只读提取预览：精确 FileVersion → 全量分类 → 分页。"""
+    built = build(profile_id, config_id, version_id)
+    filtered = filter_items(built["items"], filter_name)
+    start = max(0, int(offset))
+    size = max(1, min(int(limit), 1000))
+    return {
+        "source": built["source"],
+        "revision": built["revision"],
+        "counts": built["counts"],
         "filter": str(filter_name or FILTER_ALL).strip().lower(),
         "total": len(filtered),
         "offset": start,

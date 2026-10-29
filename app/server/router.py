@@ -137,6 +137,7 @@ def build_router(settings: Settings) -> Router:
         api_upload,
         api_v3_config,
         api_v3_files,
+        api_v3_plans,
         api_workspaces,
         legacy,
     )
@@ -149,6 +150,7 @@ def build_router(settings: Settings) -> Router:
     api_workspaces.register(router, settings)
     api_v3_files.register(router)
     api_v3_config.register(router)
+    api_v3_plans.register(router)
     router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)

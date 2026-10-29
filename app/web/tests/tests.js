@@ -769,6 +769,28 @@
         });
         return q;
       }
+      var allRows = planRows();
+      var decisions = {};
+      var counts = { total: allRows.length, new: 80, existing: 25, same_name_other_path: 3, ambiguous: 3, type_conflict: 2, null_uncertain: 2, unsupported: 5, conflict: 10 };
+      function defaultDecision(row) {
+        if (row.status === "new") return { action: "add", type: row.suggested_type || "", parameter_id: "" };
+        if (row.status === "existing") return { action: "link", type: row.suggested_type || "", parameter_id: row.existing_parameter_id || "" };
+        if (row.status === "unsupported") return { action: "skip", type: "", parameter_id: "" };
+        return { action: "pending", type: row.suggested_type || "", parameter_id: row.existing_parameter_id || "" };
+      }
+      function effective(row) { return decisions[row.row_id] || defaultDecision(row); }
+      function pendingCount() {
+        return allRows.filter(function (row) {
+          var d = effective(row);
+          var conflict = ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"].indexOf(row.status) >= 0;
+          return conflict && d.action === "pending";
+        }).length;
+      }
+      function planSummary() {
+        return { plan_id: "ep-1", config_id: "cfg-1", status: "open", stale: false,
+          source: { name: "scenario.json", version_id: "v-1", file_id: "f-1" }, revision: 3,
+          counts: counts, pending: pendingCount(), created_at: "2026-10-29 10:00:00" };
+      }
       r.useApi({
         getV3: function (path) {
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
@@ -780,12 +802,10 @@
           if (path === "/api/v3/workspaces/default/profiles/default/file-selector") {
             return Promise.resolve({ items: [{ name: "scenario.json", file_id: "f-1", version_id: "v-1", format: "json" }], total: 1 });
           }
-          if (path.indexOf(base + "/cfg-1/extract-preview") === 0) {
+          if (path.indexOf(base + "/cfg-1/extraction-plans/ep-1/rows") === 0) {
             var q = queryOf(path);
-            var all = planRows();
-            var counts = { total: all.length, new: 80, existing: 25, same_name_other_path: 3, ambiguous: 3, type_conflict: 2, null_uncertain: 2, unsupported: 5, conflict: 10 };
             var filter = q.filter || "all";
-            var filtered = all.filter(function (row) {
+            var filtered = allRows.filter(function (row) {
               if (filter === "new") return row.status === "new";
               if (filter === "existing") return row.status === "existing";
               if (filter === "conflict") return ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"].indexOf(row.status) >= 0;
@@ -793,9 +813,34 @@
             });
             var limit = +q.limit || 50;
             var offset = +q.offset || 0;
-            return Promise.resolve({ source: { name: "scenario.json", version_id: "v-1", file_id: "f-1" }, revision: 3, counts: counts, filter: filter, total: filtered.length, offset: offset, limit: limit, items: filtered.slice(offset, offset + limit) });
+            var page = Object.assign({}, planSummary(), {
+              filter: filter, q: q.q || "", total: filtered.length, offset: offset, limit: limit,
+              filter_digest: "d-" + filter + "-" + filtered.length,
+              items: filtered.slice(offset, offset + limit).map(function (row) {
+                return Object.assign({}, row, { decision: effective(row) });
+              }),
+            });
+            return Promise.resolve(page);
           }
           return Promise.resolve({ items: [] });
+        },
+        requestV3: function (method, path, opts) {
+          if (method === "POST" && path === base + "/cfg-1/extraction-plans") {
+            return Promise.resolve({ plan: planSummary() });
+          }
+          if (method === "PATCH" && path.indexOf("/extraction-plans/ep-1/decisions") >= 0) {
+            var body = opts.body || {};
+            var updated = 0;
+            (body.row_ids || []).forEach(function (id) {
+              decisions[id] = { action: body.decision.action, type: body.decision.type || "", parameter_id: body.decision.parameter_id || "" };
+              updated++;
+            });
+            return Promise.resolve(Object.assign({}, planSummary(), { updated: updated }));
+          }
+          if (method === "POST" && path.indexOf("/extraction-plans/ep-1/recompute") >= 0) {
+            return Promise.resolve({ plan: planSummary(), preserved: Object.keys(decisions).length });
+          }
+          return Promise.resolve({});
         },
       });
       var testApp = settingsApp(true);
@@ -855,7 +900,7 @@
         ok(first, "冲突行默认待决议");
         first.value = "skip";
         first.dispatchEvent(new Event("change", { bubbles: true }));
-        return tick();
+        return waitFor(function () { return modalText().indexOf("待决议 9 行") >= 0; }, 20);
       }).then(function () {
         ok(modalText().indexOf("待决议 9 行") >= 0, "单行决议后计数减一");
         clickText("全部");
@@ -866,11 +911,15 @@
       }).then(function () {
         ok(modalText().indexOf("待决议 9 行") >= 0, "切换筛选后决议必须保留");
         function resolveNext(n) {
+          if (!n) return Promise.resolve(true);
           var sel = [].slice.call(document.querySelectorAll('.modal select[aria-label="逐行决议"]')).filter(function (s) { return s.value === "pending"; })[0];
-          if (!sel) return Promise.resolve(true);
+          if (!sel) return Promise.resolve(false);
           sel.value = "skip";
           sel.dispatchEvent(new Event("change", { bubbles: true }));
-          return tick().then(function () { return resolveNext(n - 1); });
+          var target = n - 1 === 0 ? "冲突已全部决议" : "待决议 " + (n - 1) + " 行";
+          return waitFor(function () { return modalText().indexOf(target) >= 0; }, 20).then(function (okDone) {
+            return okDone ? resolveNext(n - 1) : false;
+          });
         }
         return resolveNext(9);
       }).then(function () {
