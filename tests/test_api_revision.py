@@ -104,6 +104,18 @@ WRITE_ROUTE_EXPECTATIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/publish",
     ): None,
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machine-branches",
+    ): None,
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/drafts",
+    ): None,
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/publish",
+    ): None,
     # --- 配置管理域（M6-01/M6-02）：**不递增**旧 5 段，改用全局 `config_revision`（决策 D3）。
     # 配置域的对象、审计与回执都在 `data/config_management/` 里，与机型文件的修订语义解耦；
     # 因此这里逐条登记为 None，等于声明"它们绝不碰 models.rev.*"。

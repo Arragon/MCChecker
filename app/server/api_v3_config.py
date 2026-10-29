@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from ..core.errors import NOT_FOUND, AppError
-from ..services import authz, config_v3_baselines, config_v3_catalog, config_v3_drafts, workspace_catalog
+from ..services import (
+    authz,
+    config_v3_baselines,
+    config_v3_catalog,
+    config_v3_drafts,
+    config_v3_machines,
+    workspace_catalog,
+)
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
@@ -106,6 +113,31 @@ def register(router: Router) -> None:
         "GET",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baselines/{bid}",
         baseline_detail,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines",
+        list_machines,
+    )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machine-branches",
+        create_machine,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}",
+        get_machine,
+    )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/drafts",
+        new_machine_draft,
+    )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/publish",
+        publish_machine,
     )
 
 
@@ -335,3 +367,59 @@ def baseline_detail(
     return Response(
         payload={"baseline": config_v3_baselines.get_baseline(params["pid"], params["cid"], params["bid"])}
     )
+
+
+def list_machines(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload={"items": config_v3_machines.list_machines(params["pid"], params["cid"])})
+
+
+def create_machine(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        status=201,
+        payload={"machine": config_v3_machines.create_machine(
+            params["pid"], params["cid"], json_body(body)
+        )},
+    )
+
+
+def get_machine(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload={"machine": config_v3_machines.get_machine(
+        params["pid"], params["cid"], params["mid"]
+    )})
+
+
+def new_machine_draft(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        status=201,
+        payload={"machine": config_v3_machines.new_draft(
+            params["pid"], params["cid"], params["mid"], json_body(body)
+        )},
+    )
+
+
+def publish_machine(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    result, seq = config_v3_machines.publish_machine(
+        params["pid"], params["cid"], params["mid"], json_body(body),
+        (ctx.headers or {}).get("if-match"),
+    )
+    return Response(payload={"machine": result}, headers={"ETag": '"%d"' % seq})
