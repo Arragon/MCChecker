@@ -265,7 +265,9 @@ def test_snapshot_of_a_controlled_tree_is_non_empty_and_normalized(tmp_path) -> 
     for rel, content in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # 用 bytes 写：Windows 的文本模式会把 \n 翻成 \r\n，而下面硬写的
+        # sha256 对应的是原始 UTF-8 字节，不能被平台的换行转换改写。
+        path.write_bytes(content.encode("utf-8"))
 
     snapshot = snapshot_data_tree(str(root))
     assert snapshot, "我自己造的树不许快照为空"
