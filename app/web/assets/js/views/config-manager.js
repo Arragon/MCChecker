@@ -318,15 +318,32 @@
       var state = {
         files: [], fileId: "", plan: null, page: null, filter: "all", q: "",
         size: 50, offset: 0, loading: false, error: null, types: {},
+        includeBindings: false, addMembers: false,
+        requestId: "ui-extract-" + Date.now() + "-" + Math.random().toString(16).slice(2, 8),
       };
       var body = h("div.col", { style: "gap:12px" });
       var pendingText = h("span.xsmall.muted", "尚未加载计划");
-      var applyBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "应用决议");
+      var applyBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "提交新增");
       applyBtn.addEventListener("click", function () {
-        if (applyBtn.disabled) return;
-        MC.toast.warning("批量写入尚未接入", "逐行决议已保存在服务端计划；M13-06 会在此提交原子计划。");
+        if (applyBtn.disabled || !state.plan) return;
+        var payload = {
+          request_id: state.requestId,
+          include_existing_missing_bindings: state.includeBindings,
+          add_members: state.addMembers,
+        };
+        if (S.releaseId) payload.release_id = S.releaseId;
+        MC.withBusy(applyBtn, function () {
+          return api.requestV3("POST", cfgPlan("/" + enc(state.plan.plan_id) + "/commit"), { body: payload }).then(function (res) {
+            var row = res.result || {};
+            MC.toast.success("已提交提取计划", "新增 " + (row.created || 0) + " 个参数，未变 " + (row.unchanged || 0) + " 个" + (row.bound ? "，补绑 " + row.bound : ""));
+            if (state.close) state.close();
+            reloadDetail();
+          }, function (err) {
+            MC.toastError("提交失败", err, err.code === "PLAN_STALE" ? { action: { label: "重算", onClick: recomputePlan } } : null);
+          });
+        });
       });
-      MC.modal({
+      var modal = MC.modal({
         title: "从配置文件提取参数",
         subtitle: "只提取名称与完整层级，不导入值；服务端保存全量计划，浏览器只按页取行。",
         size: "xwide",
@@ -335,6 +352,7 @@
           return [pendingText, h("span.spacer"), h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"), applyBtn];
         },
       });
+      state.close = modal.close;
 
       function cfgPlan(rest) {
         return cfgPath("/extraction-plans" + (rest || ""));
@@ -461,8 +479,8 @@
         pendingText.textContent = page.stale
           ? "计划已过期，需重算"
           : page.pending ? "待决议 " + page.pending + " 行" : "冲突已全部决议";
-        applyBtn.disabled = !canWrite() || page.stale || !(page.total > 0) || page.pending > 0;
-        applyBtn.title = page.pending > 0 ? "先处理所有冲突行" : "批量写入将在 M13-06 接入";
+        applyBtn.disabled = !canWrite() || page.stale || !(state.plan && state.plan.plan_id) || page.pending > 0;
+        applyBtn.title = page.pending > 0 ? "先处理所有冲突行" : "原子提交新增参数";
       }
 
       function renderDialog() {
@@ -607,6 +625,15 @@
           h("button.btn.btn-sm", { type: "button", disabled: page.stale, onclick: batchPageNew }, "本页新增全选"),
           h("button.btn.btn-sm", { type: "button", disabled: page.stale, onclick: batchFilterNew }, "当前筛选全部新增"),
           h("button.btn.btn-sm", { type: "button", onclick: loadRows }, "刷新")));
+        var relLabel = release() ? release().version : "未选择软件版本";
+        var bindToggle = h("input", { type: "checkbox", checked: state.includeBindings, disabled: page.stale || !S.releaseId });
+        bindToggle.addEventListener("change", function () { state.includeBindings = bindToggle.checked; });
+        var memberToggle = h("input", { type: "checkbox", checked: state.addMembers, disabled: page.stale || !S.releaseId });
+        memberToggle.addEventListener("change", function () { state.addMembers = memberToggle.checked; });
+        body.appendChild(h("div.row", { style: "gap:14px;flex-wrap:wrap" },
+          h("label.xsmall.row", { style: "gap:4px" }, bindToggle, "补齐已有参数缺失绑定"),
+          h("label.xsmall.row", { style: "gap:4px" }, memberToggle, "加入当前软件版本（未设值）"),
+          h("span.xsmall.muted", "目标版本：" + relLabel)));
 
         if (!(page.items || []).length) {
           body.appendChild(MC.stateBlock({ kind: "empty", title: "当前筛选没有行", desc: "换一个筛选条件，或确认来源文件是否包含叶节点。" }));

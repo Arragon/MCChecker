@@ -840,6 +840,9 @@
           if (method === "POST" && path.indexOf("/extraction-plans/ep-1/recompute") >= 0) {
             return Promise.resolve({ plan: planSummary(), preserved: Object.keys(decisions).length });
           }
+          if (method === "POST" && path.indexOf("/extraction-plans/ep-1/commit") >= 0) {
+            return Promise.resolve({ result: { created: 80, unchanged: 40, skipped: 0, bound: 0, replayed: false } });
+          }
           return Promise.resolve({});
         },
       });
@@ -879,7 +882,9 @@
       }).then(function () {
         var mEl = document.querySelector(".modal"); ok(modalRows() === 50, "默认 50 行/页，实际 " + modalRows());
         ok(modalText().indexOf("待决议 10 行") >= 0, "初始冲突计数");
-        var apply = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("应用决议") >= 0; })[0];
+        ok(modalText().indexOf("补齐已有参数缺失绑定") >= 0, "补绑显式开关");
+        ok(modalText().indexOf("加入当前软件版本（未设值）") >= 0, "可选成员开关");
+        var apply = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("提交新增") >= 0; })[0];
         ok(apply && apply.disabled, "有冲突时应用按钮必须禁用");
         clickText("下一页");
         return waitFor(function () { return modalText().indexOf("第 2 / 3 页") >= 0; }, 10);
@@ -924,9 +929,12 @@
         return resolveNext(9);
       }).then(function () {
         ok(modalText().indexOf("冲突已全部决议") >= 0, "全部决议后计数：" + modalText());
-        var apply = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("应用决议") >= 0; })[0];
-        ok(apply && !apply.disabled, "决议齐备后可提交（写入在 M13-06 接入）");
-        document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+        var apply = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("提交新增") >= 0; })[0];
+        ok(apply && !apply.disabled, "决议齐备后可提交");
+        apply.click();
+        return waitFor(function () { return !document.querySelector(".modal"); }, 20);
+      }).then(function () {
+        ok(!document.querySelector(".modal"), "提交成功后 modal 关闭");
       });
     }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
   });

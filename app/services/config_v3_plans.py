@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import threading
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ..core.errors import INVALID_INPUT, NOT_FOUND, PLAN_STALE, AppError
+from ..core.errors import IDEMPOTENCY_MISMATCH, INVALID_INPUT, NOT_FOUND, PLAN_STALE, AppError
+from . import config_v3_catalog
 from . import config_v3_extract
 
 _LOCK = threading.RLock()
@@ -175,6 +177,7 @@ def create(wid: str, pid: str, cid: str, version_id: str) -> Dict[str, Any]:
         "decisions": {},
         "status": STATUS_OPEN,
         "created_at": _now(),
+        "receipts": {},
     }
     with _LOCK:
         _PLANS[plan["plan_id"]] = plan
@@ -326,3 +329,105 @@ def recompute(wid: str, pid: str, cid: str, plan_id: str, version_id: Optional[s
         out = _summary(plan)
         out["preserved"] = len(kept)
         return out
+
+
+def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """把计划决议原子提交到参数定义（M13-06 / INH-2148）。
+
+    - request_id 幂等：同 id 同体重放返回同一结果；同 id 不同体 409。
+    - 提交前重新核对来源版本/hash 与目录修订；计划 stale 一律拒绝。
+    - 所有新增参数在一次 catalog 事务里保存；中途异常不会留下半批。
+    """
+    request_id = str(payload.get("request_id") or "").strip()
+    if not request_id or len(request_id) > 100:
+        raise AppError(INVALID_INPUT, "request_id 必填且 ≤100 字符", field="request_id")
+    plan = _get(wid, pid, cid, plan_id)
+    with _LOCK:
+        fingerprint = _digest(
+            json.dumps(
+                {
+                    "plan_id": plan_id,
+                    "revision": plan["revision"],
+                    "source_version": plan["source"].get("version_id"),
+                    "decisions": plan["decisions"],
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        digest = _digest(json.dumps(payload, sort_keys=True, ensure_ascii=False) + "|" + fingerprint)
+        receipt = (plan.setdefault("receipts", {})).get(request_id)
+        if receipt is not None:
+            if receipt.get("digest") != digest:
+                raise AppError(IDEMPOTENCY_MISMATCH, "同一 request_id 的提交内容不同", field="request_id")
+            result = copy.deepcopy(receipt["result"])
+            result["replayed"] = True
+            return result
+        _refresh(plan)
+        if plan["status"] == STATUS_STALE:
+            raise AppError(PLAN_STALE, "计划已过期，请先重算再提交", plan_id=plan_id)
+        if _pending(plan):
+            raise AppError(PLAN_STALE, "仍有未决议的冲突行", plan_id=plan_id)
+        include = bool(payload.get("include_existing_missing_bindings"))
+        add_members = bool(payload.get("add_members"))
+        release_id = str(payload.get("release_id") or "").strip() or None
+        if include and not release_id:
+            raise AppError(INVALID_INPUT, "补绑必须指定目标软件版本", field="release_id")
+        new_rows: List[Dict[str, Any]] = []
+        bind_rows: List[Dict[str, Any]] = []
+        skipped = 0
+        for item in plan["rows"]:
+            decision = effective_decision(plan, item)
+            action = decision.get("action")
+            if action == ACTION_SKIP:
+                skipped += 1
+                continue
+            if action == ACTION_ADD:
+                new_rows.append(
+                    {
+                        "name": item["leaf_name"],
+                        "directory": list(item.get("directory") or []),
+                        "type": decision.get("type") or item.get("suggested_type") or "",
+                        "source": {
+                            "file_id": plan["source"].get("file_id"),
+                            "version_id": plan["source"].get("version_id"),
+                            "blob_sha256": plan["source"].get("blob_sha256"),
+                            "canonical_locator": item["canonical_locator"],
+                            "active": True,
+                        },
+                    }
+                )
+            elif action == ACTION_LINK and include and item["status"] == config_v3_extract.STATUS_EXISTING:
+                if item.get("existing_parameter_id"):
+                    bind_rows.append(
+                        {
+                            "parameter_id": item["existing_parameter_id"],
+                            "locator": item["canonical_locator"],
+                            "file_id": plan["source"].get("file_id"),
+                            "version_id": plan["source"].get("version_id"),
+                        }
+                    )
+        def ensure_current():
+            _refresh(plan)
+            if plan["status"] == STATUS_STALE:
+                raise AppError(PLAN_STALE, "计划已过期，请先重算再提交", plan_id=plan_id)
+
+        result = config_v3_catalog.commit_extraction(
+            pid,
+            cid,
+            new_rows,
+            release_id=release_id,
+            include_existing_missing_bindings=include,
+            bindings=bind_rows,
+            add_members=add_members,
+            precheck=ensure_current,
+        )
+        total = len(plan["rows"])
+        result["skipped"] = skipped
+        result["unchanged"] = max(0, total - result["created"] - skipped)
+        result["plan_id"] = plan_id
+        result["source"] = copy.deepcopy(plan["source"])
+        result["replayed"] = False
+        plan["receipts"][request_id] = {"digest": digest, "result": copy.deepcopy(result)}
+        plan["committed_at"] = _now()
+        return result

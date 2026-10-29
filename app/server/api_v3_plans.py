@@ -21,6 +21,7 @@ def register(router: Router) -> None:
     router.add("GET", base + "/{plan_id}/rows", plan_rows)
     router.add("PATCH", base + "/{plan_id}/decisions", patch_decisions)
     router.add("POST", base + "/{plan_id}/recompute", recompute_plan)
+    router.add("POST", base + "/{plan_id}/commit", commit_plan)
 
 
 def _scope(wid: str, pid: str) -> None:
@@ -116,3 +117,17 @@ def recompute_plan(
     )
     preserved = result.pop("preserved", 0)
     return Response(payload={"plan": result, "preserved": preserved})
+
+
+def commit_plan(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload={
+            "result": config_v3_plans.commit(
+                params["wid"], params["pid"], params["cid"], params["plan_id"], json_body(body)
+            )
+        }
+    )
