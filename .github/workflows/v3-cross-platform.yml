@@ -1,0 +1,29 @@
+name: V3 cross-platform
+
+on:
+  push:
+    branches: [feat/mc-v3]
+  pull_request:
+    branches: [feat/mc-v3]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Report environment
+        run: python -c "import platform,sys;print(platform.platform());print(sys.version)"
+      - name: Pytest
+        run: python -m pytest -q
+        env:
+          PYTHONUTF8: "1"
