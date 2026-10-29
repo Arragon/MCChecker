@@ -9,6 +9,7 @@ from ..services import (
     authz,
     config_v3_baselines,
     config_v3_catalog,
+    config_v3_diff,
     config_v3_drafts,
     config_v3_machines,
     config_v3_projection,
@@ -144,6 +145,16 @@ def register(router: Router) -> None:
         "GET",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/overview",
         overview,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/revisions/{rid}/diff",
+        revision_diff,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters/{pmid}/history",
+        parameter_history,
     )
 
 
@@ -446,5 +457,29 @@ def overview(
             query_param(query, "compare_release_id"),
             _csv(query_param(query, "baselines")),
             _csv(query_param(query, "machines")),
+        )
+    )
+
+
+def revision_diff(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload=config_v3_diff.diff(
+            params["pid"], params["cid"], params["rid"], query_param(query, "against")
+        )
+    )
+
+
+def parameter_history(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload=config_v3_diff.parameter_history(
+            params["pid"], params["cid"], params["pmid"]
         )
     )
