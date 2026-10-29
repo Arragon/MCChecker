@@ -21,7 +21,7 @@
 - [ ] INH-1910（M4-08）未关闭；INH-1978（M8-07）未完成验收
 - [ ] INH-1932 搜索性能风险未解决
 - [ ] 权威备份未转存正式位置（当前 /tmp）
-- [ ] `make_release.py` 尚未纳入 V3 JS/API/schema/迁移/回退脚本与离线包验证
+- [x] `make_release.py` 已纳入 inspect/backup/migrate V3 脚本；本机构建 174 成员、外部主机 0、verify-only 通过（离线 Windows/Linux 实机仍未验证）
 - [ ] 生产页面真实无 mock、凭据/样本零进包最终审计
 
 ## 结论

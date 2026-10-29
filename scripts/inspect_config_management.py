@@ -10,7 +10,7 @@
 用法：
 
     python scripts/inspect_config_management.py inspect --data-dir data
-    python scripts/inspect_config_management.py initialize --data-dir data --backup-dir /tmp/bak --yes
+    python scripts/inspect_config_management.py initialize --data-dir data --backup-dir backups/bak --yes
     python scripts/inspect_config_management.py migrate --data-dir data --plan plan.json --apply
     python scripts/inspect_config_management.py verify --data-dir data
 """

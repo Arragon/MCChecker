@@ -60,16 +60,16 @@ pytest tests/ -v
 python scripts/inspect_config_management.py inspect --data-dir data
 
 # 先备份，再初始化配置管理域
-python scripts/inspect_config_management.py initialize --data-dir data --backup-dir /tmp/mcc-before-init --yes
+python scripts/inspect_config_management.py initialize --data-dir data --backup-dir backups/mcc-before-init --yes
 
 # 全域备份 / 校验 / 恢复
-python scripts/config_backup.py backup-full --data-dir data --out /tmp/mcc-backup
-python scripts/config_backup.py verify-full --backup /tmp/mcc-backup
-python scripts/config_backup.py restore-full --backup /tmp/mcc-backup --data-dir data --dry-run
+python scripts/config_backup.py backup-full --data-dir data --out backups/mcc-backup
+python scripts/config_backup.py verify-full --backup backups/mcc-backup
+python scripts/config_backup.py restore-full --backup backups/mcc-backup --data-dir data --dry-run
 
 # 或由启动入口执行（默认 dry-run，只有 --apply-restore 才写）
-python run.py --restore-backup /tmp/mcc-backup --data-dir data
-python run.py --restore-backup /tmp/mcc-backup --data-dir data --apply-restore
+python run.py --restore-backup backups/mcc-backup --data-dir data
+python run.py --restore-backup backups/mcc-backup --data-dir data --apply-restore
 ```
 
 发布包与兼容性：`python scripts/make_release.py --out dist/`；`check_py39.sh` 覆盖 `app/`、`run.py`、`main.py` 与 `scripts/`。跨版本/真实设备/物理断网证据仍未全部取得，详见 `docs/MCChecker_LEFTOVERS.md` 与验收台账。
