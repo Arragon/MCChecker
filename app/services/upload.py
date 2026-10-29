@@ -32,7 +32,7 @@ from ..core.errors import (
     TOO_LARGE,
     AppError,
 )
-from . import revision, temp_store
+from . import file_versions, revision, temp_store
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ def save_bytes(
         if exists and not overwrite:
             raise AppError(FILE_EXISTS, "已存在同名文件 %s" % clean_name, name=clean_name)
         result = storage.save_config_file_detailed(clean_name, data)
+        file_versions.begin_upload(profile_id, clean_name)
         if not result.unchanged:
             revision.bump(profile_id, PART)
     log_context.business(

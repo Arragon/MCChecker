@@ -12,11 +12,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ..core import storage
+from ..core import fsutil, storage
+from ..core.errors import NOT_FOUND, SOURCE_CHANGED, AppError
 from . import documents
+
+LIFECYCLE_FILE = "file_lifecycle.json"
+SCHEMA_VERSION = 1
 
 
 def _workspace_id() -> str:
@@ -29,8 +35,91 @@ def _digest(*parts: str) -> str:
 
 
 def file_id(profile_id: str, name: str) -> str:
-    """稳定 FileResource id：同一 W/P/文件名永远相同。"""
-    return "f-" + _digest(_workspace_id(), profile_id, name)
+    """稳定 FileResource id：同一 W/P/文件名永远相同（删除后重新上传换 generation）。"""
+    row = _live_row(_load_lifecycle(profile_id), name)
+    if row and row.get("file_id"):
+        return str(row["file_id"])
+    return "f-" + _digest(_workspace_id(), profile_id, name, "0")
+
+
+def _lifecycle_path(profile_id: str) -> str:
+    return os.path.join(storage.get_profile_data_dir(profile_id), LIFECYCLE_FILE)
+
+
+def _load_lifecycle(profile_id: str) -> Dict[str, Any]:
+    raw = fsutil.read_json(_lifecycle_path(profile_id), {})
+    if not isinstance(raw, dict):
+        raw = {}
+    files = raw.get("files")
+    tombstones = raw.get("tombstones")
+    return {
+        "schema": SCHEMA_VERSION,
+        "files": files if isinstance(files, dict) else {},
+        "tombstones": tombstones if isinstance(tombstones, dict) else {},
+    }
+
+
+def _write_lifecycle(profile_id: str, doc: Dict[str, Any]) -> None:
+    fsutil.atomic_write_json(_lifecycle_path(profile_id), doc)
+
+
+def _live_row(doc: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
+    row = (doc.get("files") or {}).get(name)
+    if isinstance(row, dict) and not row.get("deleted"):
+        return row
+    return None
+
+
+def begin_upload(profile_id: str, name: str) -> str:
+    """上传成功后登记/复活 FileResource；删除过的同名文件换新 file_id。"""
+    with storage.use_profile(profile_id), storage.profile_write(profile_id):
+        doc = _load_lifecycle(profile_id)
+        row = (doc.get("files") or {}).get(name)
+        if isinstance(row, dict) and not row.get("deleted"):
+            return str(row.get("file_id") or file_id(profile_id, name))
+        generation = int(row.get("generation", 0)) + 1 if isinstance(row, dict) else 0
+        new_id = "f-" + _digest(_workspace_id(), profile_id, name, str(generation))
+        doc.setdefault("files", {})[name] = {
+            "file_id": new_id,
+            "generation": generation,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "deleted": False,
+        }
+        _write_lifecycle(profile_id, doc)
+        return new_id
+
+
+def mark_deleted(profile_id: str, name: str, identity: Dict[str, Any]) -> None:
+    """文件删除后的 tombstone：冻结引用仍可按 file_id/version_id 判 missing。"""
+    with storage.use_profile(profile_id), storage.profile_write(profile_id):
+        doc = _load_lifecycle(profile_id)
+        row = (doc.get("files") or {}).get(name) or {}
+        row.update(
+            {
+                "file_id": identity["file_id"],
+                "generation": int(row.get("generation", 0)),
+                "deleted": True,
+                "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        doc.setdefault("files", {})[name] = row
+        doc.setdefault("tombstones", {}).setdefault(identity["file_id"], []).append(
+            {
+                "version_id": identity["version_id"],
+                "blob_sha256": identity["blob_sha256"],
+                "version_label": identity["version_label"],
+                "deleted_at": row["deleted_at"],
+            }
+        )
+        _write_lifecycle(profile_id, doc)
+
+
+def is_missing(profile_id: str, file_id_value: str, version_id: str) -> bool:
+    doc = _load_lifecycle(profile_id)
+    for row in (doc.get("tombstones") or {}).get(str(file_id_value), []) or []:
+        if isinstance(row, dict) and str(row.get("version_id")) == str(version_id):
+            return True
+    return False
 
 
 def _ref_parts(version: str) -> tuple:

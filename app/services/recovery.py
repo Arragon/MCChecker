@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Tuple
 
 from ..core import fsutil, log_context, parse_cache, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, STORAGE_FAILURE, AppError
-from . import revision
+from . import file_versions, revision
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,13 @@ def delete_file(
     clean_name = fsutil.validate_filename(name)
     moment = datetime.now()
     with storage.profile_write(profile_id), storage.use_profile(profile_id):
+        try:
+            identity = file_versions.current_identity(profile_id, clean_name)
+        except AppError:
+            identity = None
         payload, parts = _delete_locked(profile_id, clean_name, ip, actor_name, moment)
+        if identity is not None:
+            file_versions.mark_deleted(profile_id, clean_name, identity)
     for part in parts:
         revision.bump(profile_id, part)
     log_context.business(

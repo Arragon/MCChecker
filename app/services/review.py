@@ -28,7 +28,7 @@ from ..core.errors import (
     AppError,
 )
 from ..services.auth import Actor
-from . import documents, revision
+from . import documents, file_versions, revision
 
 PART = "remarks"
 
@@ -443,6 +443,7 @@ def _submit_locked(
     if edits:
         content = reviewing.apply_edits(raw.data, compact["format"], edits)
         generated = storage.save_review_generated_file(file_name, content)
+        file_versions.begin_upload(profile_id, generated)
 
     approved = rejected = 0
     if approved_ids or rejected_ids:
