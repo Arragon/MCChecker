@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from ..core.errors import NOT_FOUND, AppError
-from ..services import authz, config_v3_catalog, config_v3_drafts, workspace_catalog
+from ..services import authz, config_v3_baselines, config_v3_catalog, config_v3_drafts, workspace_catalog
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
@@ -81,6 +81,31 @@ def register(router: Router) -> None:
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/freeze",
         freeze_default,
+    )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/baseline-drafts",
+        create_baseline_draft,
+    )
+    router.add(
+        "PATCH",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/values",
+        patch_baseline_values,
+    )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/publish",
+        publish_baseline,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/branches/main",
+        main_branch,
+    )
+    router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baselines/{bid}",
+        baseline_detail,
     )
 
 
@@ -253,3 +278,60 @@ def freeze_default(
         params["pid"], params["cid"], params["did"], json_body(body)
     )
     return Response(payload=result, headers={"ETag": config_v3_drafts._etag(result["revision"])})
+
+
+def create_baseline_draft(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        status=201,
+        payload={
+            "draft": config_v3_baselines.create_baseline_draft(
+                params["pid"], params["cid"], params["rid"]
+            )
+        },
+    )
+
+
+def patch_baseline_values(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    result, etag = config_v3_baselines.patch_baseline_values(
+        params["pid"], params["cid"], params["did"], json_body(body),
+        (ctx.headers or {}).get("if-match"),
+    )
+    return Response(payload=result, headers={"ETag": etag})
+
+
+def publish_baseline(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    result, etag = config_v3_baselines.publish_baseline(
+        params["pid"], params["cid"], params["did"], json_body(body),
+        (ctx.headers or {}).get("if-match"),
+    )
+    return Response(payload={"baseline": result}, headers={"ETag": etag})
+
+
+def main_branch(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload=config_v3_baselines.get_branch(params["pid"], params["cid"]))
+
+
+def baseline_detail(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(
+        payload={"baseline": config_v3_baselines.get_baseline(params["pid"], params["cid"], params["bid"])}
+    )

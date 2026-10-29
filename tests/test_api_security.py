@@ -159,6 +159,18 @@ WRITE_ROUTE_ACTIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/freeze",
     ): "config_registry_write",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases/{rid}/baseline-drafts",
+    ): "config_registry_write",
+    (
+        "PATCH",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/values",
+    ): "config_registry_write",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/publish",
+    ): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/reactivate"): "config_registry_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
@@ -225,7 +237,7 @@ ROUTE_VALUES = {
     "pmid": "pm_000001", "did": "dr_000001", "dsid": "ds_000001",
     "oid": "ob_000001", "tpid": "tp_000001", "bid": "bl_000001",
     "cid": "cs_000001", "aid": "ar_000001", "parameter_id": "p_000001",
-    "did": "d0-rel_000001",
+    "did": "d0-rel_000001", "bid": "bl_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。
