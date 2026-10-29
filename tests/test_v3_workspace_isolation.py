@@ -1,14 +1,12 @@
 """M9-06 全局工作区安全/兼容首轮门禁（INH-2123）。
 
-覆盖当前已实现的 Q1-A/C/D、A13 与文件/下载/task 隔离；Q1-B 的固定配置/参数
-W+P 验收依赖 M12-01/02，单独标阻塞，不在这里伪造通过。
+覆盖 Q1-A/C/D、A13 与文件/下载/task 隔离；Q1-B 的固定配置/参数 W+P
+验收在 M12-01/02/03 完成后恢复为真实用例。
 """
 
 from __future__ import annotations
 
 import json
-
-import pytest
 
 from authz_fixtures import as_role, make_server, seed_roles
 
@@ -116,8 +114,55 @@ def test_task_retry_is_scoped_to_workspace():
         assert status == 404, body
 
 
-@pytest.mark.skip(
-    reason="Q1-B 固定配置/参数 W+P 隔离依赖 M12-01/02 领域对象；M9-06 先完成现有文件/session/权限门禁"
-)
 def test_q1_b_fixed_config_and_parameter_are_wp_scoped():
-    pass
+    seed_roles("q1b")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        w1, w2 = _create(server, "Q1 W1"), _create(server, "Q1 W2")
+        ids = {}
+        for wid, value in ((w1, "1.25"), (w2, "9.5")):
+            base = "/api/v3/workspaces/%s/profiles/default/configs" % wid
+            status, _h, body = admin.json(
+                "POST", base, {"code": "MC-001", "name": "同名配置"}
+            )
+            assert status == 201, body
+            cid = body["config"]["config_id"]
+            status, _h, body = admin.json(
+                "POST", base + "/%s/parameters" % cid,
+                {"name": "Pulse", "directory": ["G"], "type": "number"},
+            )
+            assert status == 201, body
+            pid = body["parameter"]["parameter_id"]
+            status, _h, body = admin.json(
+                "POST", base + "/%s/releases" % cid, {"version": "690"}
+            )
+            rid = body["release"]["release_id"]
+            did = "d0-" + rid
+            status, _h, body = admin.json(
+                "PATCH", base + "/%s/drafts/%s/values" % (cid, did),
+                {"request_id": "q1b", "items": [
+                    {"parameter_id": pid, "membership": "included", "enabled": True,
+                     "value_state": "present", "value": value}
+                ]}, headers={"If-Match": '"0"'},
+            )
+            assert status == 200, body
+            status, _h, body = admin.json(
+                "POST", base + "/%s/drafts/%s/freeze" % (cid, did),
+                {"request_id": "q1b-f"},
+            )
+            assert status == 200, body
+            ids[wid] = (cid, pid)
+
+        c1, p1 = ids[w1]
+        c2, p2 = ids[w2]
+        assert c1 != c2 and p1 != p2, "同名配置/参数在 W1/W2 必须是不同 ID"
+        detail1 = admin.json(
+            "GET", "/api/v3/workspaces/%s/profiles/default/configs/%s" % (w1, c1)
+        )[2]
+        detail2 = admin.json(
+            "GET", "/api/v3/workspaces/%s/profiles/default/configs/%s" % (w2, c2)
+        )[2]
+        assert detail1["config"]["releases"][0]["d0"]["frozen"] is True
+        assert detail2["config"]["releases"][0]["d0"]["frozen"] is True
+        assert detail1["config"]["releases"][0]["d0"]["values"][p1]["value"] == "1.25"
+        assert detail2["config"]["releases"][0]["d0"]["values"][p2]["value"] == "9.5"
