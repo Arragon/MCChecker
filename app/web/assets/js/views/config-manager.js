@@ -19,7 +19,11 @@
       configs: [], cid: null, detail: null, graph: null, params: null, branch: null,
       machines: [], releaseId: null, tab: "versions", draft: null, loading: true, error: null,
       filter: "", overview: null, overviewMachine: "", overviewCompare: "",
+      overviewOffset: 0, overviewLimit: 100, overviewTotal: 0,
       paramMode: "list", selectedParam: null, paramTree: null,
+      paramPage: null, paramTotal: 0, paramOffset: 0, paramLimit: 100, paramLoading: false, allParams: null,
+      dirParent: "", dirData: null, dirLoading: false, dirError: null, dirOffset: 0,
+      allLoading: false,
       exportFiles: null, exportFileId: "", exportRevisionId: "", exportPlan: null,
       exportArtifact: null, exportBusy: false, exportError: null,
       historyEvents: null, historyLoading: false, historyError: null, historyQ: "", dirty: false,
@@ -57,12 +61,18 @@
       var q = {};
       if (S.overviewMachine) q.machines = S.overviewMachine;
       if (S.overviewCompare) q.compare_release_id = S.overviewCompare;
+      q.offset = S.overviewOffset || 0;
+      q.limit = S.overviewLimit || 100;
       return q;
     }
     function loadOverview() {
       if (!S.releaseId) { S.overview = null; return Promise.resolve(); }
       return api.getV3(cfgPath("/releases/" + enc(S.releaseId) + "/overview"), overviewQuery())
-        .then(function (res) { S.overview = res; }, function () { S.overview = null; });
+        .then(function (res) {
+          S.overview = res;
+          S.overviewOffset = res.offset || 0;
+          S.overviewTotal = res.total == null ? (res.rows || []).length : res.total;
+        }, function () { S.overview = null; });
     }
 
     function loadDetail() {
@@ -74,7 +84,7 @@
         }
         var jobs = [
           api.getV3(cfgPath("/graph")).catch(function () { return { nodes: [], edges: [] }; }),
-          api.getV3(cfgPath("/parameters")).catch(function () { return { revision: 0, items: [] }; }),
+          api.getV3(cfgPath("/parameters") + "?offset=0&limit=" + S.paramLimit).catch(function () { return { revision: 0, items: [], total: 0 }; }),
           api.getV3(cfgPath("/branches/main")).catch(function () { return { head_id: null, baselines: [] }; }),
           api.getV3(cfgPath("/machines")).catch(function () { return { items: [] }; }),
           S.releaseId ? api.getV3(cfgPath("/drafts/" + enc(draftId()))).catch(function () { return null; }) : Promise.resolve(null),
@@ -82,7 +92,15 @@
         ];
         return Promise.all(jobs).then(function (rows) {
           S.graph = rows[0];
+          S.paramPage = rows[1];
+          S.paramTotal = rows[1].total == null ? (rows[1].items || []).length : rows[1].total;
+          S.paramOffset = 0;
           S.params = rows[1];
+          S.allParams = null;
+          S.allLoading = false;
+          S.dirParent = "";
+          S.dirData = null;
+          S.dirOffset = 0;
           S.branch = rows[2];
           S.machines = rows[3].items || [];
           S.draft = rows[4];
@@ -222,77 +240,172 @@
       return r ? r.version : id;
     }
 
+    function pagerRow(total, offset, limit, go, label) {
+      var pages = Math.max(1, Math.ceil((total || 0) / limit));
+      var page = Math.floor((offset || 0) / limit) + 1;
+      return h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+        h("button.btn.btn-sm", { type: "button", disabled: offset <= 0, onclick: function () { go(Math.max(0, offset - limit)); } }, "上一页"),
+        h("span.xsmall.muted", (label || "") + "第 " + page + " / " + pages + " 页 · 共 " + (total || 0) + " 行"),
+        h("button.btn.btn-sm", { type: "button", disabled: page >= pages, onclick: function () { go(offset + limit); } }, "下一页"));
+    }
+
+    function loadParamPage(offset) {
+      S.paramLoading = true;
+      api.getV3(cfgPath("/parameters") + "?offset=" + Math.max(0, offset) + "&limit=" + S.paramLimit).then(function (res) {
+        S.paramPage = res;
+        S.paramTotal = res.total == null ? (res.items || []).length : res.total;
+        S.paramOffset = res.offset || 0;
+        S.params = res;
+        S.paramLoading = false;
+        render();
+      }, function (err) { S.paramLoading = false; MC.toastError("读取参数失败", err); render(); });
+    }
+
+    function loadAllParams() {
+      if (S.allLoading) return;
+      S.allLoading = true;
+      api.getV3(cfgPath("/parameters")).then(function (res) {
+        S.allParams = res.items || [];
+        S.allLoading = false;
+        S.paramTotal = res.total == null ? S.allParams.length : res.total;
+        render();
+      }, function (err) { MC.toastError("读取参数失败", err); });
+    }
+
+    function loadDir(parent, offset) {
+      S.dirLoading = true;
+      S.dirError = null;
+      api.getV3(cfgPath("/parameter-tree") + "?parent=" + enc(parent || "")
+        + "&offset=" + Math.max(0, offset || 0) + "&limit=" + S.paramLimit).then(function (res) {
+        S.dirParent = parent || "";
+        S.dirData = res;
+        S.dirLoading = false;
+        render();
+      }, function (err) { S.dirLoading = false; S.dirError = err; render(); });
+    }
+
     function workbenchView(rel) {
       if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
       var values = (S.draft && S.draft.values) || {};
-      var params = (S.params && S.params.items || []);
-      var rows = params.map(function (p) {
-        var cur = values[p.parameter_id] || { membership: "not_introduced", value_state: "unset", enabled: true };
-        var input = h("input.input.input-sm", { type: "text", value: cur.value == null ? "" : cur.value, disabled: !canWrite() || !!rel.d0.frozen });
-        input.addEventListener("focus", function () { S.selectedParam = p; renderParamDetail(detailHost); });
-        input.addEventListener("input", function () { S.dirty = true; });
-        return { p: p, input: input, cur: cur };
-      });
+      var inputs = [];
+      var detailHost = h("div");
       var save = h("button.btn.btn-sm.btn-primary", { type: "button", disabled: !canWrite() || !!rel.d0.frozen, onclick: function () {
-        var items = rows.map(function (r) {
+        var items = inputs.map(function (r) {
           return { parameter_id: r.p.parameter_id, membership: "included", enabled: true, value_state: "present", value: r.input.value };
         });
+        if (!items.length) { MC.toast.warning("当前页没有可保存的参数"); return; }
         MC.withBusy(save, function () {
           return api.requestV3("PATCH", cfgPath("/drafts/" + enc(draftId()) + "/values"), {
             body: { request_id: "ui-" + Date.now(), expected_revision: S.draft ? S.draft.revision : 0, items: items },
           }).then(function () { S.dirty = false; MC.toast.success("草稿已保存"); reloadDetail(); }, function (err) { MC.toastError("保存失败", err, err.code === "REVISION_CONFLICT" ? { action: { label: "重新加载", onClick: function () { reloadDetail(); } } } : null); });
         });
       } }, "保存值");
-      var detailHost = h("div");
+      function makeRow(p) {
+        var cur = values[p.parameter_id] || { membership: "not_introduced", value_state: "unset", enabled: true };
+        var input = h("input.input.input-sm", { type: "text", value: cur.value == null ? "" : cur.value, disabled: !canWrite() || !!rel.d0.frozen });
+        input.addEventListener("focus", function () { S.selectedParam = p; renderParamDetail(detailHost); });
+        input.addEventListener("input", function () { S.dirty = true; });
+        inputs.push({ p: p, input: input });
+        return h("tr", h("td.cell-strong", p.name), h("td.mono.xsmall", (p.directory || []).join(" / ") || "—"),
+          h("td.xsmall", (p.type || "—") + (p.unit ? " · " + p.unit : "")), h("td", input));
+      }
+      function table(rows) {
+        return h("div.table-wrap", h("table.table",
+          h("thead", h("tr", h("th", "参数"), h("th", "目录"), h("th", "类型/单位"), h("th", "值"))),
+          h("tbody", rows.length ? rows.map(makeRow) : h("tr", h("td", { colspan: 4 }, h("div.muted", "当前页没有参数"))))));
+      }
+      function directoryBrowser() {
+        if (S.dirLoading) return MC.stateBlock({ kind: "loading", title: "读取目录…" });
+        if (S.dirError) return MC.stateBlock({ kind: "error", title: "读取目录失败", desc: MC.errorText(S.dirError),
+          actions: [h("button.btn.btn-sm", { type: "button", onclick: function () { S.dirData = null; render(); } }, "重试")] });
+        if (!S.dirData) {
+          if (!S.dirLoading) Promise.resolve().then(function () { loadDir(S.dirParent, S.dirOffset || 0); });
+          return MC.stateBlock({ kind: "loading", title: "读取目录…" });
+        }
+        var data = S.dirData;
+        var breadcrumb = h("div.row", { style: "gap:6px;flex-wrap:wrap" },
+          h("button.btn.btn-sm", { type: "button", disabled: !S.dirParent, onclick: function () {
+            var parts = S.dirParent.split("/").filter(Boolean); parts.pop();
+            S.dirOffset = 0; loadDir(parts.join("/"), 0);
+          } }, "上一级"),
+          h("span.mono.xsmall", "/" + (S.dirParent || "")));
+        var dirs = (data.directories || []).map(function (row) {
+          return h("button.btn.btn-sm", { type: "button", onclick: function () { S.dirOffset = 0; loadDir(row.path, 0); } },
+            row.name + " (" + row.count + ")");
+        });
+        return h("div.col", { style: "gap:8px" },
+          h("div.banner.banner-info", icon("info"), h("div.banner-body", "目录分组模式：每次只加载当前目录的参数，不构建 50k 全量树。")),
+          breadcrumb,
+          dirs.length ? h("div.row", { style: "gap:6px;flex-wrap:wrap" }, dirs) : h("div.muted.xsmall", "没有子目录"),
+          table(data.items || []),
+          pagerRow(data.parameter_total || 0, S.dirOffset || 0, S.paramLimit, function (offset) {
+            S.dirOffset = offset; loadDir(S.dirParent, offset);
+          }, "本目录 "));
+      }
       var mode = MC.segmented([
         { value: "list", label: "列表" }, { value: "tree", label: "参数树" },
-      ], S.paramMode, function (v) { S.paramMode = v; render(); }, "参数视图");
-      var listWrap = h("div.col", { style: "gap:8px" });
-      var bodyRows = rows.length ? rows.map(function (r) {
-        return h("tr", h("td.cell-strong", r.p.name), h("td.mono.xsmall", (r.p.directory || []).join(" / ") || "—"),
-          h("td.xsmall", (r.p.type || "—") + (r.p.unit ? " · " + r.p.unit : "")), h("td", r.input));
-      }) : h("tr", h("td", { colspan: 4 }, h("div.muted", "还没有参数；参数目录提取在 M13 接入。")));
-      var list = h("div.table-wrap", h("table.table",
-        h("thead", h("tr", h("th", "参数"), h("th", "目录"), h("th", "类型/单位"), h("th", "值"))),
-        h("tbody", bodyRows)));
-      var treeHost = h("div", { style: "height:420px;border:1px solid var(--c-border);border-radius:8px;overflow:hidden" });
-      var search = h("input.input.input-sm", { type: "search", placeholder: "筛选参数名称 / 完整层级" });
-      var expandAll = h("button.btn.btn-sm", { type: "button" }, "全部展开");
-      var collapseAll = h("button.btn.btn-sm", { type: "button" }, "全部折叠");
-      listWrap.append(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, search, expandAll, collapseAll), S.paramMode === "list" ? list : treeHost, detailHost);
+      ], S.paramMode, function (v) {
+        S.paramMode = v;
+        if (v === "tree" && S.paramTotal > 1000) { S.dirParent = ""; S.dirData = null; S.dirOffset = 0; }
+        render();
+      }, "参数视图");
+      var search = h("input.input.input-sm", { type: "search", name: "param_filter", placeholder: "筛选当前页参数名称 / 完整层级" });
+      var size = h("select.select", { "aria-label": "每页行数", name: "param_limit" },
+        [50, 100].map(function (n) { return h("option", { value: String(n), selected: n === S.paramLimit }, n + " 行/页"); }));
+      size.addEventListener("change", function () {
+        S.paramLimit = +size.value; S.paramOffset = 0; S.dirOffset = 0;
+        if (S.paramMode === "tree" && S.paramTotal > 1000) loadDir(S.dirParent, 0);
+        else loadParamPage(0);
+      });
+      var listBody;
+      if (S.paramMode === "list") {
+        if (S.paramLoading) listBody = MC.stateBlock({ kind: "loading", title: "读取参数…" });
+        else {
+          var page = S.paramPage || S.params || { items: [], total: 0 };
+          listBody = h("div.col", { style: "gap:8px" }, table(page.items || []),
+            pagerRow(S.paramTotal, S.paramOffset, S.paramLimit, loadParamPage));
+        }
+      } else if (S.paramTotal > 1000) {
+        listBody = directoryBrowser();
+      } else {
+        if (S.allParams === null) {
+          loadAllParams();
+          listBody = MC.stateBlock({ kind: "loading", title: "读取参数树…" });
+        } else {
+          var treeHost = h("div", { style: "height:420px;border:1px solid var(--c-border);border-radius:8px;overflow:hidden" });
+          var doc = paramDoc(S.allParams, values);
+          Promise.resolve().then(function () {
+            if (!treeHost.isConnected || !MC.Tree) return;
+            S.paramTree = new MC.Tree(treeHost, MC.doc.buildIndex(doc), {
+              label: "参数目录",
+              onSelect: function (i) {
+                var p = doc.metaParams[i];
+                if (p) { S.selectedParam = p; renderParamDetail(detailHost); }
+              },
+            });
+            var sel = null;
+            if (S.selectedParam) {
+              Object.keys(doc.metaParams).forEach(function (k) { if (doc.metaParams[k].parameter_id === S.selectedParam.parameter_id) sel = +k; });
+            }
+            if (sel != null) S.paramTree.select(sel);
+          });
+          listBody = treeHost;
+        }
+      }
       search.addEventListener("input", function () {
         var kw = search.value.trim().toLowerCase();
         if (S.paramMode === "tree" && S.paramTree) S.paramTree.setFilter(kw, function () { return ""; });
-        if (S.paramMode === "list") {
-          [].slice.call(list.querySelectorAll("tbody tr")).forEach(function (tr) {
-            tr.style.display = !kw || tr.textContent.toLowerCase().indexOf(kw) >= 0 ? "" : "none";
-          });
-        }
-      });
-      expandAll.addEventListener("click", function () { if (S.paramTree) S.paramTree.expandAll(); });
-      collapseAll.addEventListener("click", function () { if (S.paramTree) S.paramTree.collapseAll(); });
-      if (S.paramMode === "tree") {
-        var doc = paramDoc(params, values);
-        Promise.resolve().then(function () {
-          if (!treeHost.isConnected || !MC.Tree) return;
-          S.paramTree = new MC.Tree(treeHost, MC.doc.buildIndex(doc), {
-            label: "参数目录",
-            onSelect: function (i) {
-              var p = doc.metaParams[i];
-              if (p) { S.selectedParam = p; renderParamDetail(detailHost); }
-            },
-          });
-          var sel = null;
-          if (S.selectedParam) {
-            Object.keys(doc.metaParams).forEach(function (k) { if (doc.metaParams[k].parameter_id === S.selectedParam.parameter_id) sel = +k; });
-          }
-          if (sel != null) S.paramTree.select(sel);
+        [].slice.call(listBody.querySelectorAll("tbody tr")).forEach(function (tr) {
+          tr.style.display = !kw || tr.textContent.toLowerCase().indexOf(kw) >= 0 ? "" : "none";
         });
-      }
+      });
+      var expandAll = h("button.btn.btn-sm", { type: "button", onclick: function () { if (S.paramTree) S.paramTree.expandAll(); } }, "全部展开");
+      var collapseAll = h("button.btn.btn-sm", { type: "button", onclick: function () { if (S.paramTree) S.paramTree.collapseAll(); } }, "全部折叠");
       renderParamDetail(detailHost);
       return h("div.col", { style: "gap:12px" },
-        h("div.row", h("span.badge", rel.d0.frozen ? "D0 已冻结" : "D0 草稿"), h("span.xsmall.muted", "修订 " + (S.draft ? S.draft.revision : 0)), mode, h("span.spacer"), save),
-        listWrap);
+        h("div.row", h("span.badge", rel.d0.frozen ? "D0 已冻结" : "D0 草稿"), h("span.xsmall.muted", "修订 " + (S.draft ? S.draft.revision : 0)), mode, size, h("span.spacer"), save),
+        h("div.row", { style: "gap:8px;flex-wrap:wrap" }, search, S.paramMode === "tree" && S.paramTotal <= 1000 ? expandAll : null, S.paramMode === "tree" && S.paramTotal <= 1000 ? collapseAll : null),
+        listBody, detailHost);
     }
 
     function paramDoc(params, values) {
@@ -854,6 +967,7 @@
         }));
       machineSel.addEventListener("change", function () {
         S.overviewMachine = machineSel.value;
+        S.overviewOffset = 0;
         loadOverview().then(render);
       });
       var compareSel = h("select.select", { "aria-label": "对比版本" }, h("option", { value: "" }, "不对比前版"),
@@ -862,6 +976,7 @@
         }));
       compareSel.addEventListener("change", function () {
         S.overviewCompare = compareSel.value;
+        S.overviewOffset = 0;
         loadOverview().then(render);
       });
       if (!ov) return MC.stateBlock({ kind: "empty", title: "正在读取参数总览…" });
@@ -884,6 +999,10 @@
       });
       return h("div.col", { style: "gap:12px" }, head,
         h("div.table-wrap", h("table.table", h("thead", header), h("tbody", bodyRows))),
+        pagerRow(S.overviewTotal, S.overviewOffset, S.overviewLimit, function (offset) {
+          S.overviewOffset = offset;
+          loadOverview().then(render);
+        }),
         h("p.xsmall.muted", "每格绑定来源 revision；未形成/未纳入/未设/null/已移除/已停用分开显示。"));
     }
 
