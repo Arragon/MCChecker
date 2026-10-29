@@ -944,6 +944,24 @@
     return ok({ draft: { draft_id: "bd-mock", kind: "baseline" } });
   });
 
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    return ok({ plan: { plan_id: "ex-mock-1", config_id: a.cid, release_id: req.body.release_id,
+      revision_id: req.body.revision_id, digest: "mock-digest", preview_token: "mock-token",
+      applied: 2, blocked: [], preview: '{\n  "G": { "P": 5 }\n}', template: { name: "scenario_a.xml" } } }, 201);
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans/{plan_id}/commit", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    return ok({ artifact: { artifact_id: "ea-mock-1", filename: "config-ea-mock-1.json", digest: "mock-digest", deployed: false } });
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/events", function (a) {
+    return ok({ items: [
+      { event_id: "ev-mock-1", type: "merge_commit", principal: "验收管理员", ip: "127.0.0.1", at: util.nowString(), request_id: "r1", source: {} },
+      { event_id: "ev-mock-2", type: "restore", principal: "验收管理员", ip: "127.0.0.1", at: util.nowString(), request_id: "r2", source: { revision_id: "bl-1" } },
+    ] });
+  });
   route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", function (a) {
     return ok({ items: V3CFG.map(function (c) { return v3cfgView(c, false); }) });
   });
