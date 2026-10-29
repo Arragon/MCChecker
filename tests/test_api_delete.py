@@ -173,6 +173,8 @@ class TestRecoveryMove:
             status, _h, body = as_role(server, "admin").request("DELETE", _url(self.pid, FILE_A))
             assert status == 200, body
         payload = json.loads(body)
+        tracking = payload.pop("tracking", None)
+        assert tracking in (None, {"route": "legacy", "mode": "archive_only"})
         assert set(payload) == {"deleted", "removed", "recovery"}
         assert payload["deleted"] is True
         entry = payload["recovery"]
