@@ -902,6 +902,48 @@
     return ok({ plan: mockPlanSummary(plan), preserved: kept });
   });
 
+  var MOCK_MERGES = {};
+  function mockMergeSummary(plan) {
+    return { plan_id: plan.plan_id, config_id: plan.config_id, status: "open", stale: false,
+      mode: "main_cross_version", base: plan.base, ours: plan.ours, theirs: plan.theirs,
+      pending: plan.decision === "pending" ? 1 : 0, created_at: util.nowString() };
+  }
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/merge-plans", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var plan = { plan_id: "mp-mock-1", config_id: a.cid, decision: "pending",
+      base: { revision_id: req.body.base_revision_id || "bl-1" },
+      ours: { revision_id: req.body.ours_revision_id || "bl-1" },
+      theirs: { revision_id: req.body.theirs_revision_id || "d0-rel-1" } };
+    MOCK_MERGES[plan.plan_id] = plan;
+    return ok({ plan: mockMergeSummary(plan) }, 201);
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/merge-plans/{plan_id}/rows", function (a) {
+    var plan = MOCK_MERGES[a.plan_id];
+    if (!plan) return fail(404, "NOT_FOUND", "合并计划不存在");
+    var row = { parameter_id: "p-mock", name: "Pulse", action: "conflict",
+      base: { value: { text: "1", type: "decimal" } }, ours: { value: { text: "9", type: "decimal" } },
+      theirs: { value: { text: "3", type: "decimal" } }, decision: plan.decision,
+      allowed_decisions: ["adopt_target", "keep_local", "custom"] };
+    var out = mockMergeSummary(plan);
+    out.total = 1; out.filter = "all"; out.items = [row];
+    return ok(out);
+  });
+  route("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/merge-plans/{plan_id}/decisions", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var plan = MOCK_MERGES[a.plan_id];
+    if (!plan) return fail(404, "NOT_FOUND", "合并计划不存在");
+    plan.decision = req.body.decision;
+    return ok(mockMergeSummary(plan));
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/merge-plans/{plan_id}/commit", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    if (!MOCK_MERGES[a.plan_id]) return fail(404, "NOT_FOUND", "合并计划不存在");
+    return ok({ draft: { draft_id: "bd-mock", kind: "baseline" } });
+  });
+
   route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", function (a) {
     return ok({ items: V3CFG.map(function (c) { return v3cfgView(c, false); }) });
   });

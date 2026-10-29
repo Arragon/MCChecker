@@ -135,6 +135,7 @@
       releaseSel.addEventListener("change", function () { S.releaseId = releaseSel.value; S.tab = S.tab; render(); reloadDetail(); });
       var addRel = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本");
       var extract = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "从 JSON/XML 提取参数名称与层级，不导入值" : "只有管理员可以提取参数", onclick: extractDialog }, "从文件提取参数");
+      var mergeBtn = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "比较 O/L/N 并生成新草稿" : "只有管理员可以合并", onclick: mergeDialog }, "合并配置");
       var tabs = MC.segmented([
         { value: "versions", label: "版本演进" },
         { value: "workbench", label: "参数工作台" },
@@ -148,7 +149,7 @@
       else if (S.tab === "overview") body = overviewView(rel);
       else body = placeholder(S.tab);
       return h("section.panel.config-main",
-        h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, extract, addRel),
+        h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, extract, mergeBtn, addRel),
         h("div.panel-body", h("div.col", { style: "gap:14px" }, tabs, body)));
     }
 
@@ -670,6 +671,121 @@
       loadFiles();
     }
 
+
+    var MERGE_DECISIONS = [
+      ["keep_local", "保留本地"], ["adopt_target", "采用目标"], ["custom", "自定义值"],
+      ["deactivate", "停用"], ["remove", "移除"], ["pin", "钉住本地"], ["pending", "待决议"],
+    ];
+
+    function mergeDialog() {
+      if (!S.cid) return;
+      var branch = S.branch || { head_id: null, baselines: [] };
+      var d0 = S.releaseId ? "d0-" + S.releaseId : "";
+      var state = { plan: null, page: null, loading: false, error: null, filter: "conflict", custom: {} };
+      var body = h("div.col", { style: "gap:12px" });
+      var pendingText = h("span.xsmall.muted", "尚未预览");
+      var commitBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "生成新草稿");
+      var modal = MC.modal({
+        title: "预览合并（O / L / N）", size: "xwide", body: body,
+        subtitle: "计划只读；提交只创建新草稿，不移动 head，也不发布。",
+        footer: function (close) {
+          return [pendingText, h("span.spacer"),
+            h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"), commitBtn];
+        },
+      });
+      function cfgMerge(rest) { return cfgPath("/merge-plans" + (rest || "")); }
+      function refreshFooter() {
+        if (!state.page) { pendingText.textContent = "尚未预览"; commitBtn.disabled = true; return; }
+        pendingText.textContent = state.page.stale ? "计划已过期，请重算" : state.page.pending ? "待决议 " + state.page.pending + " 行" : "冲突已全部决议";
+        commitBtn.disabled = !canWrite() || state.page.stale || state.page.pending > 0;
+      }
+      function loadRows() {
+        if (!state.plan) return;
+        state.loading = true;
+        api.getV3(cfgMerge("/" + enc(state.plan.plan_id) + "/rows?limit=100&filter=" + enc(state.filter))).then(function (res) {
+          state.page = res; state.loading = false; render();
+        }, function (err) { state.loading = false; state.error = err; render(); });
+      }
+      function preview() {
+        state.loading = true; state.error = null; render();
+        api.requestV3("POST", cfgMerge(""), { body: {
+          base_revision_id: baseInput.value.trim() || null,
+          ours_revision_id: oursInput.value.trim(),
+          theirs_revision_id: theirsInput.value.trim(),
+        } }).then(function (res) { state.plan = res.plan; state.page = null; return loadRows(); }, function (err) {
+          state.loading = false; state.error = err; render();
+        });
+      }
+      function decide(row, value) {
+        api.requestV3("PATCH", cfgMerge("/" + enc(state.plan.plan_id) + "/decisions"), {
+          body: { scope: "rows", row_ids: [row.parameter_id], decision: value },
+        }).then(function () { return loadRows(); }, function (err) { MC.toastError("决议失败", err); });
+      }
+      commitBtn.addEventListener("click", function () {
+        if (commitBtn.disabled || !state.plan) return;
+        var custom = {};
+        (state.page.items || []).forEach(function (row) {
+          if (row.decision === "custom" && state.custom[row.parameter_id] != null) {
+            custom[row.parameter_id] = state.custom[row.parameter_id];
+          }
+        });
+        MC.withBusy(commitBtn, function () {
+          return api.requestV3("POST", cfgMerge("/" + enc(state.plan.plan_id) + "/commit"), { body: { custom_values: custom } }).then(function (res) {
+            MC.toast.success("已生成新草稿", res.draft ? res.draft.draft_id : "");
+            modal.close(); reloadDetail();
+          }, function (err) {
+            MC.toastError("生成草稿失败", err, err.code === "PLAN_STALE" ? { action: { label: "刷新", onClick: loadRows } } : null);
+          });
+        });
+      });
+      var baseInput = h("input.input.input-sm.input-mono", { value: branch.baselines && branch.baselines.length ? branch.baselines[0].baseline_id : "", placeholder: "基准 O（可留空则禁止一键合并）" });
+      var oursInput = h("input.input.input-sm.input-mono", { value: branch.head_id || d0, placeholder: "本地 L（Bn/rn）" });
+      var theirsInput = h("input.input.input-sm.input-mono", { value: d0, placeholder: "目标 N（D0）" });
+      function render() {
+        util.clear(body);
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+          h("label.xsmall.muted", "O"), baseInput, h("label.xsmall.muted", "L"), oursInput,
+          h("label.xsmall.muted", "N"), theirsInput,
+          h("button.btn.btn-primary", { type: "button", onclick: preview }, "预览合并")));
+        if (state.loading) { body.appendChild(MC.stateBlock({ kind: "loading", title: "读取合并计划…" })); refreshFooter(); return; }
+        if (state.error) { body.appendChild(MC.stateBlock({ kind: "error", title: "合并预览失败", desc: MC.errorText(state.error) })); refreshFooter(); return; }
+        if (!state.page) { refreshFooter(); return; }
+        var filter = MC.segmented([
+          { value: "conflict", label: "仅冲突" }, { value: "all", label: "全部" },
+          { value: "resolved", label: "已决议" },
+        ], state.filter, function (v) { state.filter = v; loadRows(); }, "合并筛选");
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+          filter, h("span.xsmall.muted", "模式 " + state.page.mode + " · " + (state.page.total || 0) + " 行")));
+        if (state.page.stale) {
+          body.appendChild(h("div.banner.banner-warning", icon("info"), h("div.banner-body", "O/L/N 来源已变化，旧决议仍保留；请重新预览后再提交。")));
+        }
+        var rows = (state.page.items || []).map(function (row) {
+          var sel = h("select.select", { "aria-label": "合并决议", disabled: state.page.stale },
+            row.allowed_decisions.map(function (value) {
+              var label = value;
+              MERGE_DECISIONS.forEach(function (pair) { if (pair[0] === value) label = pair[1]; });
+              return h("option", { value: value, selected: row.decision === value }, label);
+            }));
+          sel.addEventListener("change", function () { decide(row, sel.value); });
+          var customInput = null;
+          if (row.decision === "custom") {
+            customInput = h("input.input.input-sm", { value: state.custom[row.parameter_id] || "" });
+            customInput.addEventListener("input", function () { state.custom[row.parameter_id] = customInput.value; });
+          }
+          return h("tr",
+            h("td", h("div.cell-strong", row.name || row.parameter_id), h("div.mono.xsmall", row.parameter_id)),
+            h("td.xsmall", row.base ? row.base.value.text : "—"),
+            h("td.xsmall", row.ours ? row.ours.value.text : "—"),
+            h("td.xsmall", row.theirs ? row.theirs.value.text : "—"),
+            h("td", h("div.col", { style: "gap:4px" }, sel, customInput)));
+        });
+        body.appendChild(h("div.table-wrap", h("table.table",
+          h("thead", h("tr", h("th", "参数"), h("th", "O 基准"), h("th", "L 本地"), h("th", "N 目标"), h("th", "决议"))),
+          h("tbody", rows))));
+        refreshFooter();
+      }
+      render();
+    }
 
     function overviewView(rel) {
       if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
