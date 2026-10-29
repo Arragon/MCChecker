@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 103;  // 96 + M9-05 + M10-01/02 + M11-02 + M12-07 + M13-01
+  var EXPECTED_CASES = 104;  // 96 + M9-05 + M10-01/02 + M11-02 + M12-07 + M13-01/05
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -736,6 +736,148 @@
           ok(text.indexOf(label) >= 0, "缺少 tab：" + label);
         });
         ok(spy.calls.filter(function (c) { return c.indexOf("GETV3 " + base) === 0; }).length >= 2, "必须走 v3 W/P 配置端点");
+      });
+    }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
+  });
+
+  test("M13-05：提取 modal 50/100 分页、筛选与逐行决议保留", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("default");
+    var t = productionRun();
+    return t.run(function (r) {
+      var base = "/api/v3/workspaces/default/profiles/default/configs";
+      var release = {
+        release_id: "rel-1", version: "690", order: 1, predecessor_id: null,
+        created_at: "2026-10-29 10:00:00", definition_revision: 1,
+        default_revision_id: null, default_frozen_at: null,
+        d0: { values: {}, frozen: false, revision: 0 },
+      };
+      function planRows() {
+        var rows = [];
+        var i;
+        for (i = 0; i < 80; i++) rows.push({ row_id: "n" + i, display_path: "/G/p" + i, leaf_name: "Param" + i, directory: ["G"], status: "new", suggested_action: "add", suggested_type: "number", value_kind: "number", candidates: [], type_options: [] });
+        for (i = 0; i < 25; i++) rows.push({ row_id: "e" + i, display_path: "/L/e" + i, leaf_name: "Existing" + i, directory: ["L"], status: "existing", suggested_action: "link", suggested_type: "string", existing_parameter_id: "p-e" + i, existing_parameter: { parameter_id: "p-e" + i, name: "Existing" + i, directory: ["L"], type: "string" }, candidates: [], type_options: [] });
+        for (i = 0; i < 10; i++) rows.push({ row_id: "c" + i, display_path: "/C/d" + i, leaf_name: "Dup" + i, directory: ["C"], status: i < 3 ? "same_name_other_path" : i < 6 ? "ambiguous" : i < 8 ? "type_conflict" : "null_uncertain", suggested_action: "pending", suggested_type: i < 8 ? "number" : "", value_kind: i < 8 ? "number" : "null", existing_parameter_id: null, candidates: i < 3 ? [{ parameter_id: "p-c" + i, name: "Dup" + i, directory: ["Old"], type: "string" }] : i < 6 ? [{ parameter_id: "p-x" + i, name: "Dup" + i, directory: ["X"], type: "string" }, { parameter_id: "p-y" + i, name: "Dup" + i, directory: ["Y"], type: "string" }] : [], type_options: i >= 8 ? ["string", "number", "boolean", "decimal"] : [] });
+        for (i = 0; i < 5; i++) rows.push({ row_id: "u" + i, display_path: "/U/@v" + i, leaf_name: "Attr" + i, directory: ["U"], status: "unsupported", suggested_action: "skip", suggested_type: "", value_kind: "string", candidates: [], type_options: [] });
+        return rows;
+      }
+      function queryOf(path) {
+        var q = {};
+        String(path.split("?")[1] || "").split("&").forEach(function (part) {
+          var kv = part.split("=");
+          if (kv[0]) q[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || "");
+        });
+        return q;
+      }
+      r.useApi({
+        getV3: function (path) {
+          if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
+          if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
+          if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
+          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 1, items: [] });
+          if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
+          if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
+          if (path === "/api/v3/workspaces/default/profiles/default/file-selector") {
+            return Promise.resolve({ items: [{ name: "scenario.json", file_id: "f-1", version_id: "v-1", format: "json" }], total: 1 });
+          }
+          if (path.indexOf(base + "/cfg-1/extract-preview") === 0) {
+            var q = queryOf(path);
+            var all = planRows();
+            var counts = { total: all.length, new: 80, existing: 25, same_name_other_path: 3, ambiguous: 3, type_conflict: 2, null_uncertain: 2, unsupported: 5, conflict: 10 };
+            var filter = q.filter || "all";
+            var filtered = all.filter(function (row) {
+              if (filter === "new") return row.status === "new";
+              if (filter === "existing") return row.status === "existing";
+              if (filter === "conflict") return ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"].indexOf(row.status) >= 0;
+              return true;
+            });
+            var limit = +q.limit || 50;
+            var offset = +q.offset || 0;
+            return Promise.resolve({ source: { name: "scenario.json", version_id: "v-1", file_id: "f-1" }, revision: 3, counts: counts, filter: filter, total: filtered.length, offset: offset, limit: limit, items: filtered.slice(offset, offset + limit) });
+          }
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var testApp = settingsApp(true);
+      testApp.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(testApp));
+      function waitFor(fn, n) {
+        return tick().then(function () {
+          if (fn()) return true;
+          if (!n) return false;
+          return waitFor(fn, n - 1);
+        });
+      }
+      function modalText() {
+        var m = document.querySelector(".modal");
+        return m ? m.textContent : "";
+      }
+      function modalRows() {
+        return document.querySelectorAll(".modal tbody tr").length;
+      }
+      function clickText(text) {
+        var btn = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.trim() === text; })[0];
+        if (btn) btn.click();
+        return !!btn;
+      }
+      function clickView(text) {
+        var btn = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.trim() === text; })[0];
+        if (btn) btn.click();
+        return !!btn;
+      }
+      return waitFor(function () { return inst.el.textContent.indexOf("从文件提取参数") >= 0; }, 20).then(function () {
+        clickView("从文件提取参数");
+        return waitFor(function () { return modalText().indexOf("预览参数") >= 0; }, 20);
+      }).then(function () {
+        clickText("预览参数");
+        return waitFor(function () { return modalText().indexOf("计划 120 行") >= 0; }, 20);
+      }).then(function () {
+        var mEl = document.querySelector(".modal"); ok(modalRows() === 50, "默认 50 行/页，实际 " + modalRows());
+        ok(modalText().indexOf("待决议 10 行") >= 0, "初始冲突计数");
+        var apply = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("应用决议") >= 0; })[0];
+        ok(apply && apply.disabled, "有冲突时应用按钮必须禁用");
+        clickText("下一页");
+        return waitFor(function () { return modalText().indexOf("第 2 / 3 页") >= 0; }, 10);
+      }).then(function () {
+        ok(modalRows() === 50, "第二页 50 行");
+        var size = document.querySelector('.modal select[aria-label="每页行数"]');
+        ok(size, "每页行数选择器");
+        size.value = "100";
+        size.dispatchEvent(new Event("change", { bubbles: true }));
+        return waitFor(function () { return modalText().indexOf("第 1 / 2 页") >= 0; }, 10);
+      }).then(function () {
+        ok(modalRows() === 100, "100 行/页");
+        clickText("冲突");
+        return waitFor(function () { return modalText().indexOf("第 1 / 1 页") >= 0; }, 10);
+      }).then(function () {
+        ok(modalRows() === 10, "冲突筛选 10 行");
+        var first = [].slice.call(document.querySelectorAll('.modal select[aria-label="逐行决议"]')).filter(function (s) { return s.value === "pending"; })[0];
+        ok(first, "冲突行默认待决议");
+        first.value = "skip";
+        first.dispatchEvent(new Event("change", { bubbles: true }));
+        return tick();
+      }).then(function () {
+        ok(modalText().indexOf("待决议 9 行") >= 0, "单行决议后计数减一");
+        clickText("全部");
+        return waitFor(function () { return modalText().indexOf("计划 120 行") >= 0; }, 10);
+      }).then(function () {
+        clickText("冲突");
+        return waitFor(function () { return modalRows() === 10; }, 10);
+      }).then(function () {
+        ok(modalText().indexOf("待决议 9 行") >= 0, "切换筛选后决议必须保留");
+        function resolveNext(n) {
+          var sel = [].slice.call(document.querySelectorAll('.modal select[aria-label="逐行决议"]')).filter(function (s) { return s.value === "pending"; })[0];
+          if (!sel) return Promise.resolve(true);
+          sel.value = "skip";
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          return tick().then(function () { return resolveNext(n - 1); });
+        }
+        return resolveNext(9);
+      }).then(function () {
+        ok(modalText().indexOf("冲突已全部决议") >= 0, "全部决议后计数：" + modalText());
+        var apply = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("应用决议") >= 0; })[0];
+        ok(apply && !apply.disabled, "决议齐备后可提交（写入在 M13-06 接入）");
+        document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
       });
     }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
   });

@@ -134,6 +134,7 @@
         }));
       releaseSel.addEventListener("change", function () { S.releaseId = releaseSel.value; S.tab = S.tab; render(); reloadDetail(); });
       var addRel = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本");
+      var extract = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "从 JSON/XML 提取参数名称与层级，不导入值" : "只有管理员可以提取参数", onclick: extractDialog }, "从文件提取参数");
       var tabs = MC.segmented([
         { value: "versions", label: "版本演进" },
         { value: "workbench", label: "参数工作台" },
@@ -147,7 +148,7 @@
       else if (S.tab === "overview") body = overviewView(rel);
       else body = placeholder(S.tab);
       return h("section.panel.config-main",
-        h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, addRel),
+        h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, extract, addRel),
         h("div.panel-body", h("div.col", { style: "gap:14px" }, tabs, body)));
     }
 
@@ -301,6 +302,274 @@
           h("dt", "属性"), h("dd.mono.xsmall", JSON.stringify(p.attrs || {})),
           h("dt", "来源"), h("dd.mono.xsmall", (p.source && p.source.locator) || "—"),
           h("dt", "当前"), h("dd", cur.value != null ? String(cur.value) : (cur.value_state || "unset"))))));
+    }
+
+    var EXTRACT_STATUS = {
+      new: "新增", existing: "已存在", same_name_other_path: "同名异路径",
+      ambiguous: "身份歧义", type_conflict: "类型冲突", null_uncertain: "null 待定",
+      unsupported: "不支持",
+    };
+    var EXTRACT_CONFLICT = ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"];
+
+    function isExtractConflict(status) { return EXTRACT_CONFLICT.indexOf(status) >= 0; }
+
+    function extractDialog() {
+      if (!S.cid) return;
+      var state = {
+        files: [], fileId: "", filter: "all", size: 50, offset: 0,
+        plan: null, decisions: {}, resolved: {}, loading: false, error: null,
+      };
+      var body = h("div.col", { style: "gap:12px" });
+      var pendingText = h("span.xsmall.muted", "尚未加载计划");
+      var applyBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "应用决议");
+      applyBtn.addEventListener("click", function () {
+        if (applyBtn.disabled) return;
+        MC.toast.warning("批量写入尚未接入", "逐行决议已保留；M13-06 会在此提交原子计划。");
+      });
+      MC.modal({
+        title: "从配置文件提取参数",
+        subtitle: "只提取名称与完整层级，不导入值；提交前会重新读取来源并核对版本。",
+        size: "xwide",
+        body: body,
+        footer: function (close) {
+          return [pendingText, h("span.spacer"), h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"), applyBtn];
+        },
+      });
+
+      function selectedFile() {
+        return state.files.filter(function (f) { return f.file_id === state.fileId; })[0] || state.files[0] || null;
+      }
+
+      function loadFiles() {
+        state.loading = true;
+        state.error = null;
+        renderDialog();
+        api.getV3(root("/file-selector")).then(function (res) {
+          state.files = (res.items || []).filter(function (f) {
+            var ext = String(f.name || "").split(".").pop().toLowerCase();
+            return ext === "json" || ext === "xml";
+          });
+          if (state.files.length) state.fileId = state.files[0].file_id;
+          state.loading = false;
+          renderDialog();
+        }, function (err) {
+          state.loading = false;
+          state.error = err;
+          renderDialog();
+        });
+      }
+
+      function loadPreview() {
+        var f = selectedFile();
+        if (!f) return;
+        state.loading = true;
+        state.error = null;
+        renderDialog();
+        var url = cfgPath("/extract-preview") + "?version_id=" + enc(f.version_id)
+          + "&offset=" + state.offset + "&limit=" + state.size + "&filter=" + enc(state.filter);
+        api.getV3(url).then(function (res) {
+          state.plan = res;
+          state.loading = false;
+          (res.items || []).forEach(syncResolution);
+          renderDialog();
+        }, function (err) {
+          state.loading = false;
+          state.error = err;
+          renderDialog();
+        });
+      }
+
+      function ensureDecision(item) {
+        var d = state.decisions[item.row_id];
+        if (!d) {
+          var action = item.status === "new" ? "add"
+            : item.status === "existing" ? "link"
+            : item.status === "unsupported" ? "skip" : "pending";
+          d = {
+            action: action,
+            type: item.suggested_type || "",
+            parameter_id: item.existing_parameter_id
+              || (item.candidates && item.candidates.length ? item.candidates[0].parameter_id : ""),
+          };
+          state.decisions[item.row_id] = d;
+        }
+        return d;
+      }
+
+      function decisionReady(item, d) {
+        if (!d || d.action === "pending" || !d.action) return false;
+        if (item.status === "null_uncertain" && d.action === "add" && !d.type) return false;
+        if (d.action === "link" && !d.parameter_id) return false;
+        return true;
+      }
+
+      function syncResolution(item) {
+        var d = ensureDecision(item);
+        if (isExtractConflict(item.status) && decisionReady(item, d)) state.resolved[item.row_id] = 1;
+        else if (isExtractConflict(item.status)) delete state.resolved[item.row_id];
+      }
+
+      function refreshFooter() {
+        if (!state.plan) {
+          pendingText.textContent = "尚未加载计划";
+          applyBtn.disabled = true;
+          return;
+        }
+        var conflict = state.plan.counts ? (state.plan.counts.conflict || 0) : 0;
+        var pending = Math.max(0, conflict - Object.keys(state.resolved).length);
+        pendingText.textContent = pending ? "待决议 " + pending + " 行" : "冲突已全部决议";
+        applyBtn.disabled = !canWrite() || !(state.plan.total > 0) || pending > 0;
+        applyBtn.title = pending > 0 ? "先处理所有冲突行" : "批量写入将在 M13-06 接入";
+      }
+
+      function renderDialog() {
+        if (state.plan && !state.loading && !state.error) renderPlan();
+        else renderPicker();
+      }
+
+      function renderPicker() {
+        util.clear(body);
+        if (state.loading) {
+          body.appendChild(MC.stateBlock({ kind: "loading", title: "正在读取提取计划…" }));
+          refreshFooter();
+          return;
+        }
+        if (state.error) {
+          body.appendChild(MC.stateBlock({
+            kind: "error", title: "提取预览失败", desc: MC.errorText(state.error),
+            actions: [
+              h("button.btn.btn-sm", { type: "button", onclick: function () { state.error = null; renderDialog(); } }, "返回选择"),
+              h("button.btn.btn-sm", { type: "button", onclick: loadPreview }, "重新预览"),
+            ],
+          }));
+          refreshFooter();
+          return;
+        }
+        if (!state.files.length) {
+          body.appendChild(MC.stateBlock({ kind: "empty", title: "没有可提取的 JSON/XML 文件", desc: "先在左下文件列表上传或保存一个 JSON/XML 配置文件。" }));
+          refreshFooter();
+          return;
+        }
+        var sel = h("select.select", { "aria-label": "配置文件" }, state.files.map(function (f) {
+          return h("option", { value: f.file_id, selected: f.file_id === state.fileId }, f.name + " · " + f.version_id);
+        }));
+        sel.addEventListener("change", function () { state.fileId = sel.value; });
+        var f = selectedFile();
+        var start = h("button.btn.btn-primary", { type: "button", onclick: loadPreview }, "预览参数");
+        body.appendChild(h("div.row", { style: "gap:10px;flex-wrap:wrap" },
+          h("label.xsmall.muted", "配置文件"), sel, start));
+        body.appendChild(h("div.muted.xsmall",
+          "目标：固定配置 " + (S.detail ? S.detail.code : "") + " · 当前版本 " + (f ? f.version_id : "—")
+          + " · 只读取该不可变版本；预览不会写入任何参数或目录。"));
+      }
+
+      function typeControl(item, d) {
+        var options = [["", "选择类型…"], ["string", "string"], ["number", "number"], ["boolean", "boolean"], ["decimal", "decimal"]];
+        var sel = h("select.select", { "aria-label": "null 类型" }, options.map(function (pair) {
+          return h("option", { value: pair[0], selected: pair[0] === d.type }, pair[1]);
+        }));
+        sel.addEventListener("change", function () { d.type = sel.value; syncResolution(item); renderPlan(); });
+        return sel;
+      }
+
+      function actionControl(item, d) {
+        var options = [];
+        if (item.status === "unsupported") options = [["skip", "跳过"]];
+        else if (item.status === "new") options = [["add", "新增参数"], ["skip", "跳过"]];
+        else if (item.status === "existing") options = [["link", "关联已有"], ["skip", "跳过"]];
+        else {
+          if (d.action === "pending") options.push(["pending", "待决议"]);
+          if (item.status !== "null_uncertain" && (item.existing_parameter_id || (item.candidates || []).length)) {
+            options.push(["link", "关联已有"]);
+          }
+          options.push(["add", "新增参数"], ["skip", "跳过"]);
+        }
+        var sel = h("select.select", { "aria-label": "逐行决议" }, options.map(function (pair) {
+          return h("option", { value: pair[0], selected: pair[0] === d.action }, pair[1]);
+        }));
+        sel.addEventListener("change", function () {
+          d.action = sel.value;
+          if (d.action === "link" && !d.parameter_id) {
+            if (item.existing_parameter_id) d.parameter_id = item.existing_parameter_id;
+            else if (item.candidates && item.candidates.length) d.parameter_id = item.candidates[0].parameter_id;
+          }
+          syncResolution(item);
+          renderPlan();
+        });
+        return sel;
+      }
+
+      function linkControl(item, d) {
+        if (d.action !== "link") return null;
+        var cands = item.candidates || (item.existing_parameter ? [item.existing_parameter] : []);
+        if (!cands.length) return null;
+        if (cands.length === 1) {
+          d.parameter_id = cands[0].parameter_id;
+          return h("span.xsmall.muted", "→ " + cands[0].name + " / " + ((cands[0].directory || []).join(" / ") || "根目录"));
+        }
+        var sel = h("select.select", { "aria-label": "关联目标" }, cands.map(function (c) {
+          return h("option", { value: c.parameter_id, selected: c.parameter_id === d.parameter_id },
+            c.name + " / " + ((c.directory || []).join(" / ") || "根目录"));
+        }));
+        sel.addEventListener("change", function () { d.parameter_id = sel.value; syncResolution(item); renderPlan(); });
+        return sel;
+      }
+
+      function renderPlan() {
+        util.clear(body);
+        var plan = state.plan;
+        var counts = plan.counts || {};
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+          h("span.badge", "计划 " + (counts.total || 0) + " 行"),
+          h("span.badge.badge-success", "新增 " + (counts.new || 0)),
+          h("span.badge", "已存在 " + (counts.existing || 0)),
+          h("span.badge.badge-warning", "冲突 " + (counts.conflict || 0)),
+          h("span.badge.badge-muted", "不支持 " + (counts.unsupported || 0)),
+          h("span.spacer"),
+          h("span.xsmall.muted", "定义修订 r" + (plan.revision || 0))));
+        var filter = MC.segmented([
+          { value: "all", label: "全部" }, { value: "new", label: "新增" },
+          { value: "conflict", label: "冲突" }, { value: "existing", label: "已有" },
+        ], state.filter, function (v) { state.filter = v; state.offset = 0; loadPreview(); }, "提取筛选");
+        var size = h("select.select", { "aria-label": "每页行数" },
+          [50, 100].map(function (n) { return h("option", { value: String(n), selected: n === state.size }, n + " 行/页"); }));
+        size.addEventListener("change", function () { state.size = +size.value; state.offset = 0; loadPreview(); });
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, filter, size,
+          h("button.btn.btn-sm", { type: "button", onclick: loadPreview }, "重新预览")));
+
+        if (!(plan.items || []).length) {
+          body.appendChild(MC.stateBlock({ kind: "empty", title: "当前筛选没有行", desc: "换一个筛选条件，或确认来源文件是否包含叶节点。" }));
+          refreshFooter();
+          return;
+        }
+        var rows = plan.items.map(function (item) {
+          var d = ensureDecision(item);
+          var badgeClass = item.status === "new" ? ".badge-success"
+            : isExtractConflict(item.status) ? ".badge-warning"
+            : item.status === "unsupported" ? ".badge-muted" : "";
+          var typeCell = item.status === "null_uncertain" ? typeControl(item, d)
+            : h("span.xsmall", d.type || item.suggested_type || "—");
+          var link = linkControl(item, d);
+          return h("tr",
+            h("td", h("span.badge" + badgeClass, EXTRACT_STATUS[item.status] || item.status)),
+            h("td", h("div.cell-strong", item.leaf_name || "—"), h("div.mono.xsmall", (item.directory || []).join(" / ") || "根目录")),
+            h("td", typeCell),
+            h("td", h("div.col", { style: "gap:4px" }, actionControl(item, d), link)),
+            h("td.mono.xsmall", item.display_path || ""));
+        });
+        body.appendChild(h("div.table-wrap", h("table.table",
+          h("thead", h("tr", h("th", "状态"), h("th", "名称 / 完整层级"), h("th", "类型"), h("th", "决议"), h("th", "来源路径"))),
+          h("tbody", rows))));
+
+        var pages = Math.max(1, Math.ceil((plan.total || 0) / state.size));
+        var page = Math.floor(state.offset / state.size) + 1;
+        var prev = h("button.btn.btn-sm", { type: "button", disabled: state.offset <= 0, onclick: function () { state.offset = Math.max(0, state.offset - state.size); loadPreview(); } }, "上一页");
+        var next = h("button.btn.btn-sm", { type: "button", disabled: page >= pages, onclick: function () { state.offset += state.size; loadPreview(); } }, "下一页");
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, prev, h("span.xsmall.muted", "第 " + page + " / " + pages + " 页 · 共 " + (plan.total || 0) + " 行"), next));
+        refreshFooter();
+      }
+
+      loadFiles();
     }
 
     function overviewView(rel) {

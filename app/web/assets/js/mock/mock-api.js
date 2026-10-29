@@ -697,6 +697,98 @@
     if (detail) row.releases = c.releases.map(v3relView);
     return row;
   }
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/file-selector", function (a) {
+    var p = profile(a.pid);
+    var items = Object.keys((p && p.files) || {}).map(function (name) {
+      var f = p.files[name];
+      var ext = name.split(".").pop().toLowerCase();
+      return {
+        workspace_id: a.wid, profile_id: a.pid, name: name,
+        file_id: "f-" + name.replace(/[^A-Za-z0-9_.-]/g, "_"),
+        version_id: "v-" + name.replace(/[^A-Za-z0-9_.-]/g, "_") + "-current",
+        blob_sha256: "mock-" + name, byte_size: String((f.current && f.current.text) || "").length,
+        updated_at: f.current && f.current.mtime, format: ext,
+        source_kind: "current", version_label: "current",
+        archive_count: (f.archives || []).length, record_count: (f.records || []).length,
+      };
+    }).filter(function (row) { return row.format === "json" || row.format === "xml"; });
+    return ok({ items: items, total: items.length, limit: 200, offset: 0 });
+  });
+
+  function mockExtractRows() {
+    var rows = [];
+    var i;
+    for (i = 0; i < 80; i++) {
+      rows.push({ row_id: "x-mock-n" + i, canonical_locator: "json:/Group/" + (i % 8) + "/Param" + i,
+        display_path: "/Group/" + (i % 8) + "/Param" + i, leaf_name: "Param" + i,
+        directory: ["Group", String(i % 8)], locator_kind: "value", value_kind: "number",
+        status: "new", suggested_action: "add", suggested_type: "number",
+        existing_parameter_id: null, existing_parameter: null, matched_by: null,
+        candidates: [], reasons: [], type_options: [] });
+    }
+    for (i = 0; i < 25; i++) {
+      var pid = "p-mock-" + i;
+      rows.push({ row_id: "x-mock-e" + i, canonical_locator: "json:/Legacy/E" + i,
+        display_path: "/Legacy/E" + i, leaf_name: "Existing" + i, directory: ["Legacy"],
+        locator_kind: "value", value_kind: "string", status: "existing",
+        suggested_action: "link", suggested_type: "string", existing_parameter_id: pid,
+        existing_parameter: { parameter_id: pid, name: "Existing" + i, directory: ["Legacy"], type: "string" },
+        matched_by: "name_directory", candidates: [], reasons: [], type_options: [] });
+    }
+    for (i = 0; i < 10; i++) {
+      var status = i < 3 ? "same_name_other_path" : i < 6 ? "ambiguous" : i < 8 ? "type_conflict" : "null_uncertain";
+      var cands = status === "same_name_other_path"
+        ? [{ parameter_id: "p-old-" + i, name: "Dup" + i, directory: ["Old"], type: "string" }]
+        : status === "ambiguous"
+          ? [{ parameter_id: "p-a-" + i, name: "Dup" + i, directory: ["A"], type: "string" },
+             { parameter_id: "p-b-" + i, name: "Dup" + i, directory: ["B"], type: "number" }]
+          : status === "type_conflict"
+            ? [{ parameter_id: "p-t-" + i, name: "Typed" + i, directory: ["Types"], type: "string" }] : [];
+      rows.push({ row_id: "x-mock-c" + i, canonical_locator: "json:/Conflict/C" + i,
+        display_path: "/Conflict/C" + i, leaf_name: status === "null_uncertain" ? "Null" + i : "Dup" + i,
+        directory: ["Conflict"], locator_kind: "value",
+        value_kind: status === "null_uncertain" ? "null" : "number", status: status,
+        suggested_action: "pending", suggested_type: status === "null_uncertain" ? "" : "number",
+        existing_parameter_id: status === "type_conflict" ? cands[0].parameter_id : null,
+        existing_parameter: status === "type_conflict" ? cands[0] : null,
+        matched_by: status === "type_conflict" ? "name_directory" : null,
+        candidates: cands, reasons: ["mock_" + status],
+        type_options: status === "null_uncertain" ? ["string", "number", "boolean", "decimal"] : [] });
+    }
+    for (i = 0; i < 5; i++) {
+      rows.push({ row_id: "x-mock-u" + i, canonical_locator: "xml:/R[1]/Attr" + i + "/@v",
+        display_path: "/R[1]/Attr" + i + "/@v", leaf_name: "Attr" + i, directory: ["Attr" + i],
+        locator_kind: "attribute", value_kind: "string", status: "unsupported",
+        suggested_action: "skip", suggested_type: "", existing_parameter_id: null,
+        existing_parameter: null, matched_by: null, candidates: [], reasons: ["attribute_not_parameter"], type_options: [] });
+    }
+    return rows;
+  }
+
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extract-preview", function (a, req) {
+    var all = mockExtractRows();
+    var counts = { total: all.length, new: 0, existing: 0, same_name_other_path: 0, ambiguous: 0,
+      type_conflict: 0, null_uncertain: 0, unsupported: 0, conflict: 0 };
+    all.forEach(function (row) { counts[row.status] = (counts[row.status] || 0) + 1; });
+    counts.conflict = counts.same_name_other_path + counts.ambiguous + counts.type_conflict + counts.null_uncertain;
+    var filter = String(req.query.filter || "all");
+    var filtered = all.filter(function (row) {
+      if (filter === "new") return row.status === "new";
+      if (filter === "existing") return row.status === "existing";
+      if (filter === "conflict") return ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"].indexOf(row.status) >= 0;
+      return true;
+    });
+    var limit = Math.max(1, Math.min(+req.query.limit || 50, 1000));
+    var offset = Math.max(0, +req.query.offset || 0);
+    return ok({
+      source: { workspace_id: a.wid, profile_id: a.pid, name: "scenario_a.xml",
+        file_id: "f-scenario_a.xml", version_id: req.query.version_id || "v-scenario_a.xml-current",
+        version_label: "current", blob_sha256: "mock", format: "xml" },
+      revision: 3, counts: counts, filter: filter, total: filtered.length,
+      offset: offset, limit: limit, items: filtered.slice(offset, offset + limit),
+    });
+  });
+
   route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", function (a) {
     return ok({ items: V3CFG.map(function (c) { return v3cfgView(c, false); }) });
   });
