@@ -44,6 +44,11 @@ def register(router: Router) -> None:
         list_parameters,
     )
     router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-tree",
+        parameter_tree,
+    )
+    router.add(
         "POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters",
         create_parameter,
     )
@@ -234,6 +239,17 @@ def list_parameters(
             _int(query_param(query, "limit"), 0) or None,
         )
     )
+
+
+def parameter_tree(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload=config_v3_catalog.parameter_tree(
+        params["pid"], params["cid"], query_param(query, "parent"),
+        _int(query_param(query, "offset"), 0), _int(query_param(query, "limit"), 50),
+    ))
 
 
 def create_parameter(

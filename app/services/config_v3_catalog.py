@@ -281,6 +281,53 @@ def list_parameters(
     }
 
 
+def parameter_tree(
+    profile_id: str, config_id: str, parent: str = "", offset: int = 0, limit: int = 50
+) -> Dict[str, Any]:
+    """目录分组树：只返回 `parent` 的直接子目录与当前目录参数页（不建全量树）。"""
+    raw_parent = str(parent or "").strip().strip("/")
+    parent_parts = [part for part in raw_parent.split("/") if part] if raw_parent else []
+    if len(parent_parts) > MAX_DIRECTORY_DEPTH:
+        raise AppError(INVALID_INPUT, "目录层级超过上限", field="parent")
+    for part in parent_parts:
+        if len(part) > 100 or _CONTROL_RE.search(part):
+            raise AppError(INVALID_INPUT, "目录段非法", field="parent")
+    with storage.use_profile(profile_id):
+        doc = _load(profile_id)
+    config = doc["configs"].get(config_id)
+    if config is None:
+        raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+    definition = _definition(config)
+    depth = len(parent_parts)
+    children: Dict[tuple, int] = {}
+    leaves = []
+    for row in (definition["current"].get("parameters") or {}).values():
+        directory = list(row.get("directory") or [])
+        if directory[:depth] != parent_parts:
+            continue
+        if len(directory) == depth:
+            leaves.append(row)
+        else:
+            child = tuple(parent_parts + [directory[depth]])
+            children[child] = children.get(child, 0) + 1
+    leaves.sort(key=lambda row: (str(row.get("name") or "").lower(), str(row.get("name") or "")))
+    start = max(0, int(offset))
+    size = max(1, min(int(limit), 200))
+    directories = [
+        {"name": path[-1], "path": "/".join(path), "count": count}
+        for path, count in sorted(children.items(), key=lambda item: item[0][-1].lower())
+    ]
+    return {
+        "revision": definition["revision"],
+        "parent": "/".join(parent_parts),
+        "directories": directories,
+        "parameter_total": len(leaves),
+        "offset": start,
+        "limit": size,
+        "items": leaves[start : start + size],
+    }
+
+
 def create_parameter(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     name = _clean_parameter_text(payload.get("name"), "name", required=True, limit=200)
     description = _clean_parameter_text(payload.get("description", ""), "description", limit=1000)

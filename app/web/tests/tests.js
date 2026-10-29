@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 107;  // + M15-05 导出/历史 tab + M15-09 历史失败重试
+  var EXPECTED_CASES = 108;  // + M13-PERF 50k 分页/目录模式
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -713,7 +713,7 @@
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 0 }] });
           if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [] } });
           if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
-          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 0, items: [] });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) return Promise.resolve({ revision: 0, items: [], total: 0 });
           if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
           if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
           return Promise.resolve({ items: [] });
@@ -792,11 +792,11 @@
           counts: counts, pending: pendingCount(), created_at: "2026-10-29 10:00:00" };
       }
       r.useApi({
-        getV3: function (path) {
+        getV3: function (path, extra) {
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
           if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
           if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
-          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 1, items: [] });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) return Promise.resolve({ revision: 1, items: [], total: 0 });
           if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
           if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
           if (path === "/api/v3/workspaces/default/profiles/default/file-selector") {
@@ -949,11 +949,11 @@
       var row = { parameter_id: "p-1", name: "P1", action: "conflict", base: { value: { text: "1", type: "decimal" } }, ours: { value: { text: "9", type: "decimal" } }, theirs: { value: { text: "3", type: "decimal" } }, decision: "pending", allowed_decisions: ["adopt_target", "keep_local", "custom"] };
       var decision = "pending";
       r.useApi({
-        getV3: function (path) {
+        getV3: function (path, extra) {
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
           if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
           if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [{ release_id: "rel-1", version: "690", order: 1, predecessor_id: null, d0_frozen: true }], edges: [] });
-          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 1, items: [] });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) return Promise.resolve({ revision: 1, items: [], total: 0 });
           if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: "bl-1", baselines: [{ baseline_id: "bl-1", label: "B1" }] });
           if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
           if (path.indexOf("/merge-plans/mp-1/rows") >= 0) {
@@ -1021,11 +1021,11 @@
       var base = "/api/v3/workspaces/default/profiles/default/configs";
       var release = { release_id: "rel-1", version: "690", order: 1, predecessor_id: null, created_at: "2026-10-29 10:00:00", definition_revision: 1, default_revision_id: "d0-rel-1", default_frozen_at: "2026-10-29 10:00:00", d0: { values: {}, frozen: true, revision: 0 } };
       r.useApi({
-        getV3: function (path) {
+        getV3: function (path, extra) {
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
           if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
           if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
-          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 1, items: [] });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) return Promise.resolve({ revision: 1, items: [], total: 0 });
           if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: "bl-1", baselines: [{ baseline_id: "bl-1", label: "B1", release_id: "rel-1" }] });
           if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
           if (path === "/api/v3/workspaces/default/profiles/default/file-selector") return Promise.resolve({ items: [{ name: "tpl.json", version_id: "v-1", file_id: "f-1", format: "json" }] });
@@ -1065,11 +1065,11 @@
       var release = { release_id: "rel-1", version: "690", order: 1, predecessor_id: null, created_at: "2026-10-29 10:00:00", definition_revision: 1, default_revision_id: null, default_frozen_at: null, d0: { values: {}, frozen: false, revision: 0 } };
       var fail = true;
       r.useApi({
-        getV3: function (path) {
+        getV3: function (path, extra) {
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
           if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
           if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
-          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 0, items: [] });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) return Promise.resolve({ revision: 0, items: [], total: 0 });
           if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
           if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
           if (path.indexOf("/cfg-1/events") >= 0) {
@@ -1098,6 +1098,84 @@
     }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
   });
 
+  test("M13-PERF：50k 模式列表/目录/总览只取当前页", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("default");
+    var t = productionRun();
+    return t.run(function (r) {
+      var base = "/api/v3/workspaces/default/profiles/default/configs";
+      var release = { release_id: "rel-1", version: "690", order: 1, predecessor_id: null, created_at: "2026-10-29 10:00:00", definition_revision: 1, default_revision_id: null, default_frozen_at: null, d0: { values: {}, frozen: false, revision: 0 } };
+      function q(path) {
+        var out = {}, tail = String(path.split("?")[1] || "");
+        tail.split("&").forEach(function (part) { var kv = part.split("="); if (kv[0]) out[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || ""); });
+        return out;
+      }
+      function rows(prefix, offset, limit) {
+        var items = [];
+        for (var i = 0; i < limit; i++) items.push({ parameter_id: "p-" + (offset + i), name: prefix + (offset + i), directory: ["G0"], type: "number", unit: "", attrs: {}, source: {} });
+        return items;
+      }
+      r.useApi({
+        getV3: function (path, extra) {
+          if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
+          if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
+          if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
+          if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
+          if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
+          if (path === base + "/cfg-1/drafts/d0-rel-1") return Promise.resolve({ draft_id: "d0-rel-1", revision: 0, values: {} });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) {
+            var query = q(path); var offset = +query.offset || 0; var limit = +query.limit || 100;
+            return Promise.resolve({ revision: 1, total: 5000, offset: offset, limit: limit, items: rows("P", offset, limit) });
+          }
+          if (path.indexOf(base + "/cfg-1/parameter-tree") === 0) {
+            var pq = q(path);
+            if (!pq.parent) return Promise.resolve({ revision: 1, parent: "", directories: [{ name: "G0", path: "G0", count: 4900 }], parameter_total: 0, offset: 0, limit: 100, items: [] });
+            return Promise.resolve({ revision: 1, parent: pq.parent, directories: [], parameter_total: 4900, offset: +pq.offset || 0, limit: 100, items: rows("DirParam", 0, 100) });
+          }
+          if (path.indexOf("/overview") >= 0) {
+            var oq = Object.assign(q(path), extra || {}); var oo = +oq.offset || 0; var ol = +oq.limit || 100;
+            return Promise.resolve({ config_id: "cfg-1", release_id: "rel-1", release_version: "690", definition_revision: 1, has_previous: false, columns: [{ kind: "default", column_id: "d0-rel-1", label: "D0", revision_id: "d0-rel-1" }], total: 5000, offset: oo, limit: ol, rows: rows("Ov", oo, ol).map(function (x) { return { parameter_id: x.parameter_id, name: x.name, directory: ["G"], type: "number", unit: "", attrs: {}, source: {}, cells: { "d0-rel-1": { status: "ok", value: "1", revision_id: "d0-rel-1" } } }; }) });
+          }
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var testApp = settingsApp(true);
+      testApp.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(testApp));
+      function waitFor(fn, n) { return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); }); }
+      function tab(text) { var b = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === text; })[0]; ok(b, "缺少 " + text); b.click(); }
+      return waitFor(function () { return inst.el.textContent.indexOf("版本演进") >= 0; }, 20).then(function () {
+        tab("参数工作台");
+        return waitFor(function () { return inst.el.textContent.indexOf("共 5000 行") >= 0; }, 20);
+      }).then(function () {
+        ok(inst.el.textContent.indexOf("P0") >= 0 && inst.el.textContent.indexOf("P99") >= 0, "首页 100 行");
+        ok(inst.el.textContent.indexOf("P100") < 0, "未加载第二页");
+        var next = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === "下一页"; })[0];
+        next.click();
+        return waitFor(function () { return inst.el.textContent.indexOf("P100") >= 0; }, 20);
+      }).then(function () {
+        ok(inst.el.textContent.indexOf("P0") < 0, "翻页不保留旧页行");
+        tab("参数树");
+        return waitFor(function () { return inst.el.textContent.indexOf("目录分组模式") >= 0 && inst.el.textContent.indexOf("G0 (4900)") >= 0; }, 20);
+      }).then(function () {
+        var dir = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === "G0 (4900)"; })[0];
+        dir.click();
+        return waitFor(function () { return inst.el.textContent.indexOf("DirParam0") >= 0; }, 20);
+      }).then(function () {
+        tab("参数总览");
+        return waitFor(function () { return inst.el.textContent.indexOf("共 5000 行") >= 0; }, 20);
+      }).then(function () {
+        ok(inst.el.textContent.indexOf("Ov0") >= 0, "总览首页");
+        var next = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === "下一页"; })[0];
+        next.click();
+        return waitFor(function () { return inst.el.textContent.indexOf("Ov100") >= 0; }, 20);
+      }).then(function () {
+        var first = inst.el.querySelector("tbody tr td.cell-strong");
+        ok(first && first.textContent.trim().indexOf("Ov100") === 0, "总览翻页只换当前页：" + (first && first.textContent));
+      });
+    }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
+  });
+
   test("M13-01：参数工作台列表/参数树双模式共享同一 draft 与选中参数", function () {
     var prev = MC.workspaces.scopeId();
     MC.workspaces.setActive("default");
@@ -1115,11 +1193,11 @@
         type: "number", unit: "ms", attrs: { precision: 2 }, source: { locator: "/R[1]/p[1]" },
       };
       r.useApi({
-        getV3: function (path) {
+        getV3: function (path, extra) {
           if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
           if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
           if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [{ release_id: "rel-1", version: "690", order: 1, predecessor_id: null, d0_frozen: false }], edges: [] });
-          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 1, items: [param] });
+          if (path.indexOf(base + "/cfg-1/parameters") === 0) return Promise.resolve({ revision: 1, items: [param], total: 1 });
           if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
           if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
           if (path === base + "/cfg-1/drafts/d0-rel-1") return Promise.resolve({ draft_id: "d0-rel-1", revision: 0, values: { "p-1": { membership: "included", enabled: true, value_state: "present", value: "5" } } });
