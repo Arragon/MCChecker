@@ -15,7 +15,11 @@
 - 桌面 1366×900：截图 `docs/evidence/v3-config-1366.png`；配置管理、固定配置、版本演进、按钮与只读提示均正常，console 只有 macOS CVDisplayLink 系统噪声。
 - 窄屏 375×812：**修正测量方式**——Chrome `--window-size=375` 实际最小布局视口为 500，旧截图 `v3-config-375.png` 是“500 布局裁成 375 图”，不能当 375 证据，已删除。
 - 用 CDP `Emulation.setDeviceMetricsOverride` 375×812 mobile 复测：修复前顶栏搜索/身份 chip 越界；修复后 `.app-header` 收起搜索、身份文案与徽章，`document.scrollWidth=375`、越界元素 0，五 tab 自动换行。CSS-only 修复见 INH-2164。
-- 尚未覆盖：1920/768、键盘-only、模态焦点/ESC、失败/空态、旧页面逐屏对比。
+- 1920×1080 与 768×900：`docs/evidence/v3-config-1920.png`、`v3-config-768.png`；配置管理布局正常，768 下侧栏收起、主内容仍完整。
+- 旧页面 1366：`v3-overview-1366.png`（速览）、`v3-review-1366.png`（审阅）、`v3-dl-1366.png`（DL）、`v3-settings-1366.png`（设置）均渲染；文件列表是宿主左侧栏，无独立 `files` 路由（旧 files 截图与 overview 相同）。
+- 模态：真实页点击「从文件提取参数」打开 modal，按 Escape 关闭成功；打开瞬间焦点未落到 modal 内可聚焦元素（headless 下未能确认是环境限制还是缺陷），键盘-only 全走查仍未完成。
+- console：1 条 issue「A form field element should have an id or name attribute (count: 3)」，无 JS error/unhandled rejection；表单可访问名需修。
+- 尚未覆盖：完整键盘-only 走查、375 修复后的可保存截图（CDP 量化已通过）、失败/空态逐屏、Q1–Q6/A01–A17 全矩阵。
 
 ## 尚未取得的阻断级证据
 
