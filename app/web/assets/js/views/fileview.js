@@ -39,6 +39,8 @@
       doc: null,
       idx: null,
       tree: null,
+      rawText: null,
+      loadedVersion: null,
       selected: -1,
       favs: [],
       remarks: [],
@@ -85,7 +87,7 @@
       var q = r.query || {};
       var view = q.view || "tree";
       var version = isTemp ? "temp" : q.version || "current";
-      var needDoc = !S.doc || S.doc.file.version !== version;
+      var needDoc = S.loadedVersion !== version;
       S.view = view;
       S.version = version;
       if (view === "compare") {
@@ -120,6 +122,8 @@
       return Promise.all([api.get(docPath(), q), isTemp ? null : loadFavs(), isTemp ? null : loadRemarks()]).then(
         function (res) {
           S.doc = res[0];
+          S.rawText = null;
+          S.loadedVersion = S.version;
           if (isTemp) {
             S.name = S.doc.file.name;
             inst.title = S.name + "（临时 · 仅自己可见）";
@@ -134,6 +138,10 @@
           revealPending();
         },
         function (err) {
+          var f = app.files.filter(function (x) { return x.name === S.name; })[0];
+          var textOnly = err.code === "PARSE_FAILED"
+            && ((err.detail && err.detail.unsupported) || (f && f.format === "text"));
+          if (textOnly) return loadRawText();
           util.replace(
             body,
             err.code === "PARSE_FAILED"
@@ -142,6 +150,31 @@
           );
         }
       );
+    }
+
+    function loadRawText() {
+      var path = isTemp
+        ? app.p("/temp/" + api.seg(S.token) + "/raw")
+        : app.p("/files/" + api.seg(S.name) + "/raw");
+      var q = !isTemp && S.version !== "current" ? { version: S.version } : {};
+      return api.fetchBlob(path, q).then(function (res) {
+        return res.blob.text().then(function (text) {
+          S.doc = null;
+          S.idx = null;
+          S.rawText = text;
+          S.loadedVersion = S.version;
+          S.stale = false;
+          if (isTemp && res.filename) {
+            S.name = res.filename;
+            inst.title = S.name + "（临时 · 仅自己可见）";
+            app.setTabTitle(inst, inst.title);
+          }
+          renderHeader();
+          renderTreeView();
+        });
+      }, function (err) {
+        util.replace(body, MC.errorBlock(err, loadDoc));
+      });
     }
 
     function loadFavs() {
@@ -171,6 +204,7 @@
     function renderHeader() {
       var f = app.files.filter(function (x) { return x.name === S.name; })[0];
       var d = S.doc && S.doc.file;
+      var rawMode = S.rawText !== null || !!(f && f.format === "text");
       var meta = h("div.fv-meta");
       if (d) {
         meta.append(
@@ -180,12 +214,19 @@
           h("span.meta-item.mono", { title: "内容指纹（用于判断版本是否变化）" }, "#" + String(d.sha256).slice(0, 8))
         );
         if (d.expires_at) meta.append(h("span.meta-item", icon("info"), "临时文件，" + d.expires_at + " 过期"));
+      } else if (rawMode && f) {
+        meta.append(
+          h("span.meta-item", icon("clock"), "更新于 " + util.formatTime(f.updated_at)),
+          h("span.meta-item", util.formatBytes(f.size)),
+          h("span.meta-item", "原文格式")
+        );
       }
       var title = h(
         "div.fv-title-row",
         util.fmtTag(S.name || ".xml"),
         h("h1", S.name || "加载中…"),
         isTemp ? h("span.badge.badge-warning", "临时 · 仅自己可见") : null,
+        rawMode ? h("span.badge", "原文 · 不支持结构树") : null,
         S.version !== "current" && !isTemp ? h("span.badge.badge-primary", versionLabel(S.version)) : null,
         S.version !== "current" && !isTemp ? h("button.link-btn.small", { type: "button", onclick: function () { nav({ view: "tree" }); } }, "回到当前版本") : null,
         meta,
@@ -194,9 +235,9 @@
         moreButton()
       );
       var views = isTemp
-        ? [{ value: "tree", label: "结构", icon: "list" }, { value: "compare", label: "对比", icon: "compare" }]
+        ? [{ value: "tree", label: rawMode ? "原文" : "结构", icon: "list" }, { value: "compare", label: "对比", icon: "compare" }]
         : [
-            { value: "tree", label: "结构", icon: "list" },
+            { value: "tree", label: rawMode ? "原文" : "结构", icon: "list" },
             { value: "history", label: "历史版本", icon: "history", count: f ? f.archive_count : null },
             { value: "compare", label: "对比", icon: "compare" },
             { value: "records", label: "修改记录", icon: "records", count: f ? f.record_count : null },
@@ -289,7 +330,19 @@
       return f ? f.note : "";
     }
 
+    function renderRawText() {
+      var f = app.files.filter(function (x) { return x.name === S.name; })[0];
+      var info = h(
+        "div.banner.banner-info",
+        icon("info"),
+        h("div.banner-body", "该格式不支持结构树，仅显示原文字节。", f && f.size != null ? h("span.xsmall.muted", " " + util.formatBytes(f.size)) : null)
+      );
+      var pre = h("pre.raw-text", { style: "white-space:pre-wrap;word-break:break-word;margin:0;padding:16px 20px;font-family:var(--font-mono);font-size:12px;line-height:1.6;overflow:auto" }, S.rawText);
+      util.replace(body, h("div", { style: "padding:16px 20px" }, h("div.col", { style: "gap:12px" }, info, h("div.panel", h("div.panel-body.flush", pre)))));
+    }
+
     function renderTreeView() {
+      if (S.rawText !== null) return renderRawText();
       if (!S.idx) return loadDoc();
       if (S.tree) {
         S.tree.destroy();
@@ -776,7 +829,7 @@
         }
 
         function pickUpload(side) {
-          var fi = h("input", { type: "file", accept: ".xml,.json" });
+          var fi = h("input", { type: "file", accept: ".xml,.json,.ini,.cfg,.conf,.txt" });
           fi.addEventListener("change", function () {
             var f = fi.files[0];
             if (!f) return;

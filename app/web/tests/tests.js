@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 100;  // 96 + M9-05 + M10-01 v3 机型端点 + M10-02 过期响应
+  var EXPECTED_CASES = 101;  // 96 + M9-05 + M10-01/02 + M11-02 文本原文
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -659,6 +659,45 @@
       restore();
     }, function (e) {
       restore();
+      throw e;
+    });
+  });
+
+  test("M11-02：文本格式文件页显示原文并标明不支持结构树", function () {
+    var t = productionRun();
+    var origGet = MC.api.get;
+    var origFetch = MC.api.fetchBlob;
+    return t.run(function (r) {
+      MC.api.get = function () {
+        return Promise.reject(new MC.ApiError(422, "PARSE_FAILED", "该格式不支持结构树", { unsupported: true }));
+      };
+      MC.api.fetchBlob = function () {
+        return Promise.resolve({ blob: { text: function () { return Promise.resolve("key=value\n# 注释\n"); } }, filename: "a.conf" });
+      };
+      var app = settingsApp(true);
+      app.files = [{ name: "a.conf", format: "text", size: 20, updated_at: "2026-10-29 10:00:00", mapped: false, archive_count: 0, record_count: 0, pending_remarks: 0 }];
+      var inst = r.mountView(MC.views.f(app, { kind: "f", arg: "a.conf", query: {} }));
+      function waitRaw(n) {
+        return tick().then(function () {
+          if (inst.el.textContent.indexOf("key=value") >= 0) return true;
+          if (!n) return false;
+          return waitRaw(n - 1);
+        });
+      }
+      return waitRaw(20).then(function () {
+        var text = inst.el.textContent;
+        ok(text.indexOf("不支持结构树") >= 0, "要清楚标 unsupported：" + text.slice(0, 200));
+        ok(text.indexOf("key=value") >= 0, "原文要显示出来");
+        ok(inst.el.querySelector("pre.raw-text"), "原文面板");
+        var seg = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent === "原文"; });
+        ok(seg.length === 1, "视图标签改为「原文」");
+      });
+    }).then(function () {
+      MC.api.get = origGet;
+      MC.api.fetchBlob = origFetch;
+    }, function (e) {
+      MC.api.get = origGet;
+      MC.api.fetchBlob = origFetch;
       throw e;
     });
   });

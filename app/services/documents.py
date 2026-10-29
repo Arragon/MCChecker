@@ -54,7 +54,13 @@ RAW_CONTENT_TYPES = {
     "xml": "application/xml; charset=utf-8",
     "json": "application/json; charset=utf-8",
     "txt": "text/plain; charset=utf-8",
+    "ini": "text/plain; charset=utf-8",
+    "cfg": "text/plain; charset=utf-8",
+    "conf": "text/plain; charset=utf-8",
 }
+
+#: 只做原文管理、**不伪装结构树**的文本格式（M11-02 / INH-2131）。
+TEXT_FORMATS = ("ini", "cfg", "conf", "txt")
 
 CacheKey = Tuple[str, int, int]
 
@@ -354,6 +360,13 @@ def _with_file_block(
 
 
 def _parse(ref: FileRef, data: bytes) -> Dict[str, Any]:
+    if _format_of(ref.name) == "text":
+        raise AppError(
+            PARSE_FAILED,
+            "该格式不支持结构树，仅提供原文查看与下载",
+            raw_available=True,
+            unsupported=True,
+        )
     try:
         result = parser.to_compact(data, ref.name)
     except AppError as exc:
@@ -469,4 +482,6 @@ def _format_of(name: str) -> str:
         return "xml"
     if ext == "json":
         return "json"
+    if ext in TEXT_FORMATS:
+        return "text"
     return "other"

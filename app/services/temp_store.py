@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import fsutil, parser, storage
-from ..core.errors import NOT_FOUND, TOO_LARGE, AppError
+from ..core.errors import NOT_FOUND, PARSE_FAILED, TOO_LARGE, AppError
 
 CONTENT_FILE = "content"
 META_FILE = "meta.json"
@@ -119,6 +119,14 @@ def take(profile_id: str, token: str, cid: Optional[str], ip: str) -> Tuple[Dict
 def document(profile_id: str, token: str, cid: Optional[str], ip: str) -> Dict[str, Any]:
     """临时文件的 §6.3 文档响应（`file.kind = "temp"`，带 `token` 与 `expires_at`）。"""
     meta, data = take(profile_id, token, cid, ip)
+    ext = meta["name"].rsplit(".", 1)[-1].lower() if "." in meta["name"] else ""
+    if ext in ("ini", "cfg", "conf", "txt"):
+        raise AppError(
+            PARSE_FAILED,
+            "该格式不支持结构树，仅提供原文查看与下载",
+            raw_available=True,
+            unsupported=True,
+        )
     try:
         compact = parser.to_compact(data, meta["name"])
     except AppError as exc:

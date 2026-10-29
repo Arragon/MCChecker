@@ -191,7 +191,7 @@ def _name_from_url(url: str) -> str:
         except AppError:
             continue
     for name in valid:
-        if os.path.splitext(name)[1].lower() in (".xml", ".json"):
+        if os.path.splitext(name)[1].lower() in (".xml", ".json", ".ini", ".cfg", ".conf", ".txt"):
             return name
     for name in valid:
         if "." in name:
@@ -211,6 +211,8 @@ def _check_size(data: bytes, max_bytes: int) -> None:
 
 
 def _must_parse(data: bytes, name: str) -> None:
+    if _format_of(name) == "text":
+        return  # 文本格式只做原文管理，不冒充 XML/JSON 结构树
     try:
         parser.to_compact(data, name)
     except AppError as exc:
@@ -220,4 +222,8 @@ def _must_parse(data: bytes, name: str) -> None:
 
 def _format_of(name: str) -> str:
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    return {"xml": "xml", "json": "json"}.get(ext, "other")
+    if ext in ("xml", "json"):
+        return ext
+    if ext in ("ini", "cfg", "conf", "txt"):
+        return "text"
+    return "other"
