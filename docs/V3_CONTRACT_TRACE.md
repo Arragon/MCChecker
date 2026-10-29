@@ -32,10 +32,10 @@
 | A12 | PASS | `test_v3_export_preservation.py`、`test_v3_restore_audit.py` |
 | A13 | PASS | `test_v3_security.py`、`test_v3_workspace_transaction.py` |
 | A14 | PASS | `test_v3_parser_locators.py`、`test_v3_security.py`、`test_v3_file_source_faults.py` |
-| A15 | PARTIAL | shell 工作区切换有 dirty 确认；配置域未保存值/决议离开保护、延迟响应关闭后写入未逐项取证 |
+| A15 | PASS | 工作区切换有 dirty 确认；参数工作台输入后切 tab/版本/配置弹“有未保存的值”，真实浏览器取消后留在原页；延迟来源读取只渲染、提交才写入 |
 | A16 | PASS | `test_v3_migration_dryrun.py`、`test_v3_migration_recovery.py` |
-| A17 | PARTIAL | 性能 `tests/performance_v3.py` PASS；375 移动视口修复与截图 PASS；键盘树/完整焦点走查未完成 |
+| A17 | PASS | 性能 `tests/performance_v3.py` PASS；375 修复后 scrollWidth=375/越界 0；真实树 ↓/Enter 选中参数、合并 modal 焦点落首个输入框、Escape 关闭；pending 区 role=status/aria-live |
 
 ## 结论
 
-27 项 PASS、2 项 PARTIAL。A15/A17 是 2159 仍未 Done 的直接原因；其余代码合同由可复跑测试支撑。外部模板/设备/Windows/Linux/离线不在本矩阵内，见 `V3_INTEGRATION_EVIDENCE.md`。
+29 项 PASS。2159 仍缺完整键盘-only 全走查、失败/空态逐屏与旧页面逐屏像素对比，不能因矩阵全绿就标 Done。外部模板/设备/Windows/Linux/离线不在本矩阵内，见 `V3_INTEGRATION_EVIDENCE.md`。
