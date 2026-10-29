@@ -147,6 +147,14 @@ WRITE_ROUTE_EXPECTATIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans/{plan_id}/commit",
     ): None,
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/restore-plans",
+    ): None,
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/restore-plans/{plan_id}/undo",
+    ): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/value-import-plans"): None,
     (
         "PATCH",

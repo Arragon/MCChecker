@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from ..core.errors import NOT_FOUND, AppError
-from ..services import authz, config_v3_export, workspace_catalog
+from ..services import authz, config_v3_export, config_v3_history, workspace_catalog
 from ..services.context import RequestContext
 from .api_documents import content_disposition
 from .router import Response, Router, json_body
@@ -39,9 +39,15 @@ def commit_plan(
 ) -> Response:
     authz.authorize(ctx, "config_registry_write")
     _scope(params["wid"], params["pid"])
-    return Response(payload=config_v3_export.commit(
+    result = config_v3_export.commit(
         params["pid"], params["cid"], params["plan_id"], json_body(body)
-    ))
+    )
+    config_v3_history.record(
+        params["pid"], params["cid"], "export", actor=ctx.actor, ip=ctx.ip,
+        after={"artifact_id": (result.get("artifact") or {}).get("artifact_id"),
+               "digest": (result.get("artifact") or {}).get("digest")},
+    )
+    return Response(payload=result)
 
 
 def download(
