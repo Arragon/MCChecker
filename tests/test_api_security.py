@@ -131,6 +131,9 @@ WRITE_ROUTE_ACTIONS = {
     # M9-02（INH-2119）：V3 workspace 元数据写接口，仅管理员。
     ("POST", "/api/v3/workspaces"): "settings_write",
     ("PATCH", "/api/v3/workspaces/{wid}"): "settings_write",
+    ("POST", "/api/v3/workspaces/{wid}/profiles"): "settings_write",
+    ("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}"): "settings_write",
+    ("DELETE", "/api/v3/workspaces/{wid}/profiles/{pid}"): "settings_write",
     ("POST", "/api/v1/config/families/{fid}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/reactivate"): "config_registry_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
