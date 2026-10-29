@@ -62,6 +62,9 @@ KIND_PREFIX = {
     # 回读核验报告（M7-10）：一次核验一个对象，旧的结论照旧可读，
     # 所以是"追加"而不是"覆盖上一次的结论"。
     "verification": "vf",
+    # V3 workspace 配置状态（M9-04）：每 W+P 一个不可变状态对象，
+    # state.json 最后公布 head；不另写平行 state 文件。
+    "workspace_config_state": "ws",
 }
 
 #: 承接不可变 blob 引用的字段名（一致性检查用）。

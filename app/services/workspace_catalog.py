@@ -154,7 +154,7 @@ def _ensure_default_profile(workspace_id: str) -> None:
 def create_workspace(name: Any, description: Any = "") -> Dict[str, Any]:
     clean_name = _validated_name(name)
     clean_description = _validated_description(description)
-    with _LOCK, locks.write_gate.write():
+    with locks.write_gate.write(), _LOCK:
         doc = _load_doc()
         if _name_taken(doc, clean_name):
             raise AppError(FILE_EXISTS, "已存在同名工作区", field="name")
@@ -179,7 +179,7 @@ def update_workspace(workspace_id: str, name: Any, description: Any = "") -> Dic
     wid = _validated_id(workspace_id)
     clean_name = _validated_name(name)
     clean_description = _validated_description(description)
-    with _LOCK, locks.write_gate.write():
+    with locks.write_gate.write(), _LOCK:
         doc = _load_doc()
         if _name_taken(doc, clean_name, exclude_id=wid):
             raise AppError(FILE_EXISTS, "已存在同名工作区", field="name")
