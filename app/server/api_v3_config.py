@@ -226,7 +226,14 @@ def list_parameters(
 ) -> Response:
     authz.authorize(ctx, "config_read")
     _scope(params["wid"], params["pid"])
-    return Response(payload=config_v3_catalog.list_parameters(params["pid"], params["cid"]))
+    return Response(
+        payload=config_v3_catalog.list_parameters(
+            params["pid"],
+            params["cid"],
+            _int(query_param(query, "offset"), 0),
+            _int(query_param(query, "limit"), 0) or None,
+        )
+    )
 
 
 def create_parameter(
@@ -487,6 +494,8 @@ def overview(
             query_param(query, "compare_release_id"),
             _csv(query_param(query, "baselines")),
             _csv(query_param(query, "machines")),
+            _int(query_param(query, "offset"), 0),
+            _int(query_param(query, "limit"), 0) or None,
         )
     )
 

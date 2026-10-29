@@ -259,16 +259,25 @@ def _find_parameter(config: Dict[str, Any], parameter_id: str) -> Optional[Dict[
     return (_definition(config)["current"].get("parameters") or {}).get(str(parameter_id))
 
 
-def list_parameters(profile_id: str, config_id: str) -> Dict[str, Any]:
+def list_parameters(
+    profile_id: str, config_id: str, offset: int = 0, limit: Optional[int] = None
+) -> Dict[str, Any]:
     with storage.use_profile(profile_id):
         doc = _load(profile_id)
     config = doc["configs"].get(config_id)
     if config is None:
         raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
     definition = _definition(config)
+    rows = list(definition["current"]["parameters"].values())
+    start = max(0, int(offset))
+    size = None if limit is None else max(1, min(int(limit), 500))
+    page = rows[start:] if size is None else rows[start : start + size]
     return {
         "revision": definition["revision"],
-        "items": list(definition["current"]["parameters"].values()),
+        "total": len(rows),
+        "offset": start,
+        "limit": size,
+        "items": page,
     }
 
 
