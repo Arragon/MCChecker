@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 106;  // + M15-05 导出/历史 tab
+  var EXPECTED_CASES = 107;  // + M15-05 导出/历史 tab + M15-09 历史失败重试
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1052,6 +1052,48 @@
       }).then(function () {
         ok(inst.el.textContent.indexOf("验收管理员") >= 0, "事件操作人");
         ok(inst.el.textContent.indexOf("从该修订恢复") < 0, "无 revision_id 的事件不应显示恢复");
+      });
+    }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
+  });
+
+  test("M15-09：配置历史失败显示错误块并可重试", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("default");
+    var t = productionRun();
+    return t.run(function (r) {
+      var base = "/api/v3/workspaces/default/profiles/default/configs";
+      var release = { release_id: "rel-1", version: "690", order: 1, predecessor_id: null, created_at: "2026-10-29 10:00:00", definition_revision: 1, default_revision_id: null, default_frozen_at: null, d0: { values: {}, frozen: false, revision: 0 } };
+      var fail = true;
+      r.useApi({
+        getV3: function (path) {
+          if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-1", code: "MC-001", name: "一号配置", release_count: 1 }] });
+          if (path === base + "/cfg-1") return Promise.resolve({ config: { config_id: "cfg-1", code: "MC-001", name: "一号配置", releases: [release] } });
+          if (path === base + "/cfg-1/graph") return Promise.resolve({ nodes: [], edges: [] });
+          if (path === base + "/cfg-1/parameters") return Promise.resolve({ revision: 0, items: [] });
+          if (path === base + "/cfg-1/branches/main") return Promise.resolve({ head_id: null, baselines: [] });
+          if (path === base + "/cfg-1/machines") return Promise.resolve({ items: [] });
+          if (path.indexOf("/cfg-1/events") >= 0) {
+            return fail ? Promise.reject({ code: "STORAGE_FAILURE", message: "模拟失败", status: 500 }) : Promise.resolve({ items: [] });
+          }
+          return Promise.resolve({ items: [] });
+        },
+      });
+      var testApp = settingsApp(true);
+      testApp.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(testApp));
+      function waitFor(fn, n) { return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); }); }
+      return waitFor(function () { return inst.el.textContent.indexOf("配置历史") >= 0; }, 20).then(function () {
+        var tab = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.trim() === "配置历史"; })[0];
+        ok(tab, "配置历史 tab"); tab.click();
+        return waitFor(function () { return inst.el.textContent.indexOf("读取配置事件失败") >= 0; }, 20);
+      }).then(function () {
+        ok(inst.el.textContent.indexOf("读取配置事件失败") >= 0, "失败要显示错误块");
+        var retry = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.trim() === "重试"; })[0];
+        ok(retry, "错误块要有重试");
+        fail = false; retry.click();
+        return waitFor(function () { return inst.el.textContent.indexOf("没有配置事件") >= 0; }, 20);
+      }).then(function () {
+        ok(inst.el.textContent.indexOf("没有配置事件") >= 0, "重试后恢复空态");
       });
     }).then(function () { MC.workspaces.setActive(prev); }, function (e) { MC.workspaces.setActive(prev); throw e; });
   });

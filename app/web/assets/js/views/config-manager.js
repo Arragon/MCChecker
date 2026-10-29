@@ -1001,7 +1001,7 @@
 
     function historyView() {
       if (!S.cid) return MC.stateBlock({ kind: "empty", title: "先选择配置" });
-      if (S.historyEvents === null && !S.historyLoading) {
+      if (S.historyEvents === null && !S.historyLoading && !S.historyError) {
         S.historyLoading = true;
         S.historyError = null;
         api.getV3(cfgPath("/events") + (S.historyQ ? "?q=" + enc(S.historyQ) : "")).then(function (res) {
