@@ -13,7 +13,8 @@
 
 - 真实服务：`run.py --data-dir /tmp/mcc-v3-ui-data --port 8899`，浏览器 127.0.0.1 登记为管理员；fixture 含 MC-001/690/两个参数。
 - 桌面 1366×900：截图 `docs/evidence/v3-config-1366.png`；配置管理、固定配置、版本演进、按钮与只读提示均正常，console 只有 macOS CVDisplayLink 系统噪声。
-- 窄屏 375×812：截图 `docs/evidence/v3-config-375.png`；**发现横向溢出**：搜索框、五 tab、操作按钮被裁切，右侧内容超出视口。已单开 UI 修复卡，不在 2159 冒充通过。
+- 窄屏 375×812：**修正测量方式**——Chrome `--window-size=375` 实际最小布局视口为 500，旧截图 `v3-config-375.png` 是“500 布局裁成 375 图”，不能当 375 证据，已删除。
+- 用 CDP `Emulation.setDeviceMetricsOverride` 375×812 mobile 复测：修复前顶栏搜索/身份 chip 越界；修复后 `.app-header` 收起搜索、身份文案与徽章，`document.scrollWidth=375`、越界元素 0，五 tab 自动换行。CSS-only 修复见 INH-2164。
 - 尚未覆盖：1920/768、键盘-only、模态焦点/ESC、失败/空态、旧页面逐屏对比。
 
 ## 尚未取得的阻断级证据
