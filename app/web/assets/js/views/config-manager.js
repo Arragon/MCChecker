@@ -22,7 +22,7 @@
       paramMode: "list", selectedParam: null, paramTree: null,
       exportFiles: null, exportFileId: "", exportRevisionId: "", exportPlan: null,
       exportArtifact: null, exportBusy: false,
-      historyEvents: null, historyLoading: false, historyQ: "",
+      historyEvents: null, historyLoading: false, historyQ: "", dirty: false,
     };
     var canWrite = function () { return app.can("config_registry_write"); };
     function root(rest) {
@@ -118,12 +118,41 @@
         return !S.filter || (c.name + " " + c.code).toLowerCase().indexOf(S.filter) >= 0;
       }).map(function (c) {
         return h("button.config-item" + (c.config_id === S.cid ? ".is-active" : ""), {
-          type: "button", onclick: function () { S.cid = c.config_id; S.releaseId = null; S.loading = true; render(); loadDetail().then(function () { S.loading = false; render(); }); },
+          type: "button", onclick: function () {
+            confirmDiscard(function () {
+              S.cid = c.config_id; S.releaseId = null; S.loading = true; render();
+              loadDetail().then(function () { S.loading = false; render(); });
+            });
+          },
         }, h("strong", c.name), h("span.mono.xsmall", c.code), h("span.badge", (c.release_count || 0) + " 版本"));
       });
       return h("aside.panel.configs", h("div.panel-header", h("h3", "固定配置"), h("span.badge", S.configs.length + " 项")),
         h("div.panel-body", h("div.col", { style: "gap:10px" }, search,
           rows.length ? h("div.col", { style: "gap:4px" }, rows) : MC.stateBlock({ kind: "empty", title: "还没有固定配置", desc: "新建一个固定配置后，添加第一个软件版本。" }))));
+    }
+
+    function changeTab(value) {
+      if (S.tab === value) return;
+      if (S.dirty && canWrite()) {
+        MC.confirm({ title: "有未保存的值", message: "切换会丢失当前草稿中输入但未保存的修改。", confirmText: "放弃修改" }).then(function (ok) {
+          if (!ok) return;
+          S.dirty = false;
+          S.tab = value;
+          render();
+        });
+        return;
+      }
+      S.tab = value;
+      render();
+    }
+
+    function confirmDiscard(then) {
+      if (!S.dirty) { then(); return; }
+      MC.confirm({ title: "有未保存的值", message: "离开会丢失当前草稿中输入但未保存的修改。", confirmText: "放弃修改" }).then(function (ok) {
+        if (!ok) return;
+        S.dirty = false;
+        then();
+      });
     }
 
     function mainPanel() {
@@ -135,7 +164,11 @@
         (S.detail.releases || []).map(function (r) {
           return h("option", { value: r.release_id, selected: r.release_id === S.releaseId }, r.version + (r.default_revision_id ? " · D0" : " · 未冻结"));
         }));
-      releaseSel.addEventListener("change", function () { S.releaseId = releaseSel.value; S.tab = S.tab; render(); reloadDetail(); });
+      releaseSel.addEventListener("change", function () {
+        var next = releaseSel.value;
+        releaseSel.value = S.releaseId;
+        confirmDiscard(function () { S.releaseId = next; render(); reloadDetail(); });
+      });
       var addRel = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本");
       var extract = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "从 JSON/XML 提取参数名称与层级，不导入值" : "只有管理员可以提取参数", onclick: extractDialog }, "从文件提取参数");
       var mergeBtn = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "比较 O/L/N 并生成新草稿" : "只有管理员可以合并", onclick: mergeDialog }, "合并配置");
@@ -145,7 +178,7 @@
         { value: "overview", label: "参数总览" },
         { value: "export", label: "模板导出" },
         { value: "history", label: "配置历史" },
-      ], S.tab, function (v) { S.tab = v; render(); }, "配置管理视图");
+      ], S.tab, changeTab, "配置管理视图");
       var body;
       if (S.tab === "versions") body = versionsView(rel);
       else if (S.tab === "workbench") body = workbenchView(rel);
@@ -197,6 +230,7 @@
         var cur = values[p.parameter_id] || { membership: "not_introduced", value_state: "unset", enabled: true };
         var input = h("input.input.input-sm", { type: "text", value: cur.value == null ? "" : cur.value, disabled: !canWrite() || !!rel.d0.frozen });
         input.addEventListener("focus", function () { S.selectedParam = p; renderParamDetail(detailHost); });
+        input.addEventListener("input", function () { S.dirty = true; });
         return { p: p, input: input, cur: cur };
       });
       var save = h("button.btn.btn-sm.btn-primary", { type: "button", disabled: !canWrite() || !!rel.d0.frozen, onclick: function () {
@@ -206,7 +240,7 @@
         MC.withBusy(save, function () {
           return api.requestV3("PATCH", cfgPath("/drafts/" + enc(draftId()) + "/values"), {
             body: { request_id: "ui-" + Date.now(), expected_revision: S.draft ? S.draft.revision : 0, items: items },
-          }).then(function () { MC.toast.success("草稿已保存"); reloadDetail(); }, function (err) { MC.toastError("保存失败", err, err.code === "REVISION_CONFLICT" ? { action: { label: "重新加载", onClick: function () { reloadDetail(); } } } : null); });
+          }).then(function () { S.dirty = false; MC.toast.success("草稿已保存"); reloadDetail(); }, function (err) { MC.toastError("保存失败", err, err.code === "REVISION_CONFLICT" ? { action: { label: "重新加载", onClick: function () { reloadDetail(); } } } : null); });
         });
       } }, "保存值");
       var detailHost = h("div");
@@ -328,7 +362,7 @@
         requestId: "ui-extract-" + Date.now() + "-" + Math.random().toString(16).slice(2, 8),
       };
       var body = h("div.col", { style: "gap:12px" });
-      var pendingText = h("span.xsmall.muted", "尚未加载计划");
+      var pendingText = h("span.xsmall.muted", { role: "status", "aria-live": "polite" }, "尚未加载计划");
       var applyBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "提交新增");
       applyBtn.addEventListener("click", function () {
         if (applyBtn.disabled || !state.plan) return;
@@ -489,9 +523,16 @@
         applyBtn.title = page.pending > 0 ? "先处理所有冲突行" : "原子提交新增参数";
       }
 
+      function focusBodyFirst() {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        var target = body.querySelector("select, input, button");
+        if (target) target.focus();
+      }
+
       function renderDialog() {
         if (state.plan && state.page && !state.loading && !state.error) renderPlan();
         else renderPicker();
+        focusBodyFirst();
       }
 
       function renderPicker() {
@@ -688,7 +729,7 @@
       var d0 = S.releaseId ? "d0-" + S.releaseId : "";
       var state = { plan: null, page: null, loading: false, error: null, filter: "conflict", custom: {} };
       var body = h("div.col", { style: "gap:12px" });
-      var pendingText = h("span.xsmall.muted", "尚未预览");
+      var pendingText = h("span.xsmall.muted", { role: "status", "aria-live": "polite" }, "尚未预览");
       var commitBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "生成新草稿");
       var modal = MC.modal({
         title: "预览合并（O / L / N）", size: "xwide", body: body,
@@ -747,6 +788,7 @@
       var oursInput = h("input.input.input-sm.input-mono", { name: "ours_revision_id", value: branch.head_id || d0, placeholder: "本地 L（Bn/rn）" });
       var theirsInput = h("input.input.input-sm.input-mono", { name: "theirs_revision_id", value: d0, placeholder: "目标 N（D0）" });
       function render() {
+        var hadFocus = document.activeElement && document.activeElement !== document.body;
         util.clear(body);
         body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
           h("label.xsmall.muted", "O"), baseInput, h("label.xsmall.muted", "L"), oursInput,
@@ -788,6 +830,10 @@
           h("thead", h("tr", h("th", "参数"), h("th", "O 基准"), h("th", "L 本地"), h("th", "N 目标"), h("th", "决议"))),
           h("tbody", rows))));
         refreshFooter();
+        if (!hadFocus) {
+          var first = body.querySelector("select, input, button");
+          if (first) first.focus();
+        }
       }
       render();
     }
