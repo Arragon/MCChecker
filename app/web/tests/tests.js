@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 98;  // 96 + M9-05 工作区作用域/ session
+  var EXPECTED_CASES = 99;  // 96 + M9-05 工作区作用域/ session + M10-01 v3 机型端点
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -403,7 +403,7 @@
      * request/download/fetchBlob/upload 过去无人拦，结论只对已拦的成立。
      * （两个可选方案里选了「加宽桩」而不是「静态断言视图只用五个动词」，
      * 因为前者对未来的视图改动仍然有效。） */
-    var orig = { get: MC.api.get, post: MC.api.post, put: MC.api.put, patch: MC.api.patch, del: MC.api.del, request: MC.api.request, download: MC.api.download, fetchBlob: MC.api.fetchBlob, upload: MC.api.upload };
+    var orig = { get: MC.api.get, post: MC.api.post, put: MC.api.put, patch: MC.api.patch, del: MC.api.del, request: MC.api.request, download: MC.api.download, fetchBlob: MC.api.fetchBlob, upload: MC.api.upload, getV3: MC.api.getV3, requestV3: MC.api.requestV3 };
     var calls = [];
     function mk(method) {
       return function (path, arg) {
@@ -425,6 +425,14 @@
     MC.api.download = function (path) { calls.push("DOWNLOAD " + path); return Promise.resolve({ blob: null, filename: "" }); };
     MC.api.fetchBlob = function (path) { calls.push("FETCHBLOB " + path); return Promise.resolve({ blob: null, filename: "" }); };
     MC.api.upload = function (path) { calls.push("UPLOAD " + path); return Promise.resolve({}); };
+    MC.api.getV3 = function (path, query) {
+      calls.push("GETV3 " + path + (query !== undefined ? " " + JSON.stringify(query) : ""));
+      return handlers.getV3 ? handlers.getV3(path, query) : Promise.resolve({ items: [] });
+    };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push("V3 " + method + " " + path + (opts && opts.body !== undefined ? " " + JSON.stringify(opts.body) : ""));
+      return handlers.requestV3 ? handlers.requestV3(method, path, opts) : Promise.resolve({});
+    };
     return { calls: calls, restore: function () { Object.keys(orig).forEach(function (k) { MC.api[k] = orig[k]; }); } };
   }
   function cleanOverlays() {
@@ -544,6 +552,71 @@
           ok(del2 && del2.disabled, "非部署者的删除按钮必须禁用");
         });
       });
+    });
+  });
+
+  test("M10-01：非 legacy 工作区的机型列表与改名走 v3 工作区端点", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("w1");
+    var t = productionRun();
+    return t.run(function (r) {
+      var models = [
+        { id: "default", name: "默认机型" },
+        { id: "p1", name: "产线一" },
+      ];
+      var spy = r.useApi({
+        getV3: function (path) {
+          eq(path, "/api/v3/workspaces/w1/profiles", "列表要按当前工作区取机型");
+          return Promise.resolve({ items: models });
+        },
+        requestV3: function (method, path, opts) {
+          return Promise.resolve({ profile: { id: "p1", name: opts.body.name } });
+        },
+      });
+      var inst = r.mount(settingsApp(true), "profiles");
+      return tick().then(function () {
+        var main = inst.el.querySelector(".settings-main");
+        ok(main.textContent.indexOf("产线一") >= 0, "v3 返回的机型要列出");
+        eq(spy.calls, ["GETV3 /api/v3/workspaces/w1/profiles"], "非 legacy 工作区不得再读 v1 /session");
+        var rename = [].slice.call(main.querySelectorAll("button")).filter(function (b) { return b.textContent === "重命名"; })[1];
+        rename.click();
+        return tick().then(function () {
+          modalField("机型名称").control.value = "产线一改";
+          var save = [].slice.call(document.querySelectorAll(".modal button")).filter(function (b) { return b.textContent.indexOf("保存") >= 0; })[0];
+          save.click();
+          return tick().then(function () {
+            eq(spy.calls[1], 'V3 PATCH /api/v3/workspaces/w1/profiles/p1 {"name":"产线一改"}', "改名必须走 v3 工作区端点");
+            var switched = null;
+            var fake = {
+              pid: "p1",
+              wid: "w1",
+              session: { profile: { name: "产线一改" } },
+              instances: {},
+              confirmContext: function () { return Promise.resolve(true); },
+              saveTabs: function () {},
+              saveActiveRoute: function () {},
+              destroyInstance: function () {},
+              go: function () {},
+              pollTasks: function () {},
+              startPolling: function () {},
+              loadSession: function (pid, wid) {
+                switched = [pid, wid];
+                this.pid = pid;
+                this.session = { profile: { name: "产线一改" } };
+                return Promise.resolve();
+              },
+            };
+            return MC.App.prototype.switchProfile.call(fake, "p2").then(function () {
+              eq(switched.join(","), "p2,w1", "切换机型必须留在原工作区");
+            });
+          });
+        });
+      });
+    }).then(function () {
+      MC.workspaces.setActive(prev);
+    }, function (e) {
+      MC.workspaces.setActive(prev);
+      throw e;
     });
   });
 

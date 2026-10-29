@@ -2175,7 +2175,7 @@ def _copy_profile_data_locked(src: str, dst: str) -> None:
 
     for basename in COPY_PROFILE_FILES:
         src_path = _get_profile_json_file(basename, src)
-        if src == DEFAULT_PROFILE and not os.path.exists(src_path):
+        if not get_active_workspace() and src == DEFAULT_PROFILE and not os.path.exists(src_path):
             legacy = _LEGACY_PROFILE_FILES.get(basename)
             if legacy and os.path.exists(legacy):
                 src_path = legacy

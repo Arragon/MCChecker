@@ -16,7 +16,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
-from ..core import fsutil, locks, storage
+from ..core import device_models, fsutil, locks, storage
 from ..core.errors import FILE_EXISTS, INVALID_INPUT, NOT_FOUND, AppError, CorruptDataError
 
 LEGACY_WORKSPACE_ID = "default"
@@ -194,6 +194,96 @@ def update_workspace(workspace_id: str, name: Any, description: Any = "") -> Dic
         row["updated_at"] = _now()
         _write_doc(doc)
         return _public(row)
+
+
+def list_profiles(workspace_id: str) -> List[Dict[str, Any]]:
+    wid = _validated_id(workspace_id)
+    if wid == LEGACY_WORKSPACE_ID:
+        return [dict(m) for m in device_models.load_models()]
+    with _LOCK:
+        ws = get_workspace(wid)
+    return [dict(p) for p in ws.get("profiles") or []]
+
+
+def add_profile(workspace_id: str, name: Any) -> Dict[str, Any]:
+    wid = _validated_id(workspace_id)
+    if wid == LEGACY_WORKSPACE_ID:
+        raise AppError(INVALID_INPUT, "legacy 工作区请使用 v1 机型接口")
+    clean_name = _validated_profile_name(name)
+    with locks.write_gate.write(), _LOCK:
+        doc = _load_doc()
+        row = next((w for w in _all_items(doc) if w.get("id") == wid), None)
+        if row is None or wid == LEGACY_WORKSPACE_ID:
+            raise AppError(NOT_FOUND, "工作区不存在")
+        profiles = row.setdefault("profiles", [])
+        if any(str(p.get("name")) == clean_name for p in profiles):
+            raise AppError(FILE_EXISTS, "已存在同名机型", field="name")
+        pid = _profile_id(profiles, clean_name)
+        profiles.append({"id": pid, "name": clean_name})
+        os.makedirs(profile_root(wid, pid), exist_ok=True)
+        _write_doc(doc)
+        return {"id": pid, "name": clean_name}
+
+
+def rename_profile(workspace_id: str, profile_id: str, name: Any) -> Dict[str, Any]:
+    wid = _validated_id(workspace_id)
+    if wid == LEGACY_WORKSPACE_ID:
+        raise AppError(INVALID_INPUT, "legacy 工作区请使用 v1 机型接口")
+    pid = storage._normalize_profile_id(profile_id)
+    clean_name = _validated_profile_name(name)
+    with locks.write_gate.write(), _LOCK:
+        doc = _load_doc()
+        row = next((w for w in _all_items(doc) if w.get("id") == wid), None)
+        if row is None:
+            raise AppError(NOT_FOUND, "工作区不存在")
+        profiles = row.setdefault("profiles", [])
+        target = next((p for p in profiles if str(p.get("id")) == pid), None)
+        if target is None:
+            raise AppError(NOT_FOUND, "机型不存在")
+        if any(str(p.get("name")) == clean_name and str(p.get("id")) != pid for p in profiles):
+            raise AppError(FILE_EXISTS, "已存在同名机型", field="name")
+        target["name"] = clean_name
+        _write_doc(doc)
+        return {"id": pid, "name": clean_name}
+
+
+def remove_profile(workspace_id: str, profile_id: str) -> Dict[str, Any]:
+    wid = _validated_id(workspace_id)
+    if wid == LEGACY_WORKSPACE_ID:
+        raise AppError(INVALID_INPUT, "legacy 工作区请使用 v1 机型接口")
+    pid = storage._normalize_profile_id(profile_id)
+    if pid == DEFAULT_PROFILE_ID:
+        raise AppError(INVALID_INPUT, "默认机型不能删除", field="id")
+    with locks.write_gate.write(), _LOCK:
+        doc = _load_doc()
+        row = next((w for w in _all_items(doc) if w.get("id") == wid), None)
+        if row is None:
+            raise AppError(NOT_FOUND, "工作区不存在")
+        profiles = row.setdefault("profiles", [])
+        target = next((p for p in profiles if str(p.get("id")) == pid), None)
+        if target is None:
+            raise AppError(NOT_FOUND, "机型不存在")
+        row["profiles"] = [p for p in profiles if str(p.get("id")) != pid]
+        _write_doc(doc)
+        return dict(target)
+
+
+def _validated_profile_name(name: Any) -> str:
+    text = str(name or "").strip()
+    if not text or len(text) > 100 or _NAME_CONTROL_RE.search(text):
+        raise AppError(INVALID_INPUT, "机型名称需为 1-100 个字符，且不含控制字符", field="name")
+    return text
+
+
+def _profile_id(profiles: List[Dict[str, Any]], name: str) -> str:
+    base = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-") or "profile"
+    candidate = base
+    n = 2
+    used = {str(p.get("id")) for p in profiles}
+    while candidate in used or candidate == DEFAULT_PROFILE_ID:
+        candidate = "%s-%d" % (base, n)
+        n += 1
+    return candidate
 
 
 def _now() -> str:

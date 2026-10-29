@@ -154,11 +154,12 @@ def _create_unique_entry(base: str) -> Tuple[str, str]:
     raise AppError(STORAGE_FAILURE, "无法为恢复条目生成唯一目录名", target=base)
 
 
-def create_profile_entry(model_id: str, moment: datetime) -> Tuple[str, str]:
-    """机型删除条目：`<时间>_delete_profile_<机型>`（§5.6 / 卡 16）。"""
-    return _create_unique_entry(
-        "%s_%s_%s" % (moment.strftime(_DIR_TIME), OP_DELETE_PROFILE, model_id)
-    )
+def create_profile_entry(model_id: str, moment: datetime, workspace_id: str = "") -> Tuple[str, str]:
+    """机型删除条目：`<时间>_delete_profile_<机型>`；V3 带 W 时追加 `_w<wid>`。"""
+    name = "%s_%s_%s" % (moment.strftime(_DIR_TIME), OP_DELETE_PROFILE, model_id)
+    if workspace_id:
+        name += "_w" + str(workspace_id)
+    return _create_unique_entry(name)
 
 
 
@@ -205,7 +206,7 @@ def plan_restore(entry: str) -> Dict[str, Any]:
     }
 
 def move_profile_to_recovery(
-    model_id: str, actor_name: str = "", actor_ip: str = ""
+    model_id: str, actor_name: str = "", actor_ip: str = "", workspace_id: str = ""
 ) -> str:
     """把 `data/profiles/<id>/` 整个目录移入恢复区，返回条目目录名。
 
@@ -215,7 +216,7 @@ def move_profile_to_recovery(
     """
     moment = datetime.now()
     source = storage.get_profile_data_dir(model_id)
-    entry_path, entry = create_profile_entry(model_id, moment)
+    entry_path, entry = create_profile_entry(model_id, moment, workspace_id=workspace_id)
     rel = "profiles/%s" % model_id
     manifest: Dict[str, Any] = {
         "op": OP_DELETE_PROFILE,
@@ -225,6 +226,8 @@ def move_profile_to_recovery(
         "moved": [],
         "files": [],
     }
+    if workspace_id:
+        manifest["workspace"] = str(workspace_id)
     try:
         if os.path.exists(source):
             manifest["moved"].append(move_in(entry_path, source, rel))

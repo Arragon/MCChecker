@@ -737,6 +737,61 @@
     return ok({ deleted: true, recovery: "mock_delete_profile_" + a.pid });
   });
 
+  /* v3 工作区机型：mock 只演示同一份机型列表，不做业务数据隔离 */
+  function workspaceProfileTarget(wid) {
+    return workspaceById(wid) ? null : fail(404, "NOT_FOUND", "工作区不存在");
+  }
+  route("GET", "/api/v3/workspaces/{wid}/profiles", function (a) {
+    var miss = workspaceProfileTarget(a.wid);
+    if (miss) return miss;
+    return ok({ items: clone(S.models) });
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles", function (a, req) {
+    var miss = workspaceProfileTarget(a.wid);
+    if (miss) return miss;
+    var deny = needDeployer(identity("default"));
+    if (deny) return deny;
+    var name = profileName(req.body.name);
+    if (!name) return fail(400, "INVALID_INPUT", "请输入机型名称", { field: "name" });
+    if (req.body.copy_from && !profile(req.body.copy_from)) return fail(400, "INVALID_INPUT", "要复制的机型不存在", { field: "copy_from" });
+    if (S.models.some(function (m) { return m.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
+    var slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "") || "model";
+    var mid = slug;
+    var k = 2;
+    while (S.profiles[mid] || mid === "default") mid = slug + "-" + k++;
+    S.profiles[mid] = { files: {}, mapping: [], sourceStatus: {}, favorites: [], remarks: [], bindings: [], tools: [], schedule: { enabled: false, interval_hours: 24, last_run: null }, admins: [], people: [], dl: null };
+    rev[mid] = { files: 1, favorites: 1, remarks: 1, settings: 1, tasks: 1 };
+    S.models.push({ id: mid, name: name });
+    bump("default", "settings");
+    return ok({ profile: { id: mid, name: name } }, 201);
+  });
+  route("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}", function (a, req) {
+    var miss = workspaceProfileTarget(a.wid);
+    if (miss) return miss;
+    var deny = needDeployer(identity("default"));
+    if (deny) return deny;
+    var m = S.models.filter(function (x) { return x.id === a.pid; })[0];
+    if (!m) return fail(404, "NOT_FOUND", "机型不存在");
+    var name = profileName(req.body.name);
+    if (!name) return fail(400, "INVALID_INPUT", "请输入机型名称", { field: "name" });
+    if (S.models.some(function (x) { return x.id !== a.pid && x.name === name; })) return fail(409, "FILE_EXISTS", "已存在同名机型", { field: "name" });
+    m.name = name;
+    bump("default", "settings");
+    return ok({ profile: m });
+  });
+  route("DELETE", "/api/v3/workspaces/{wid}/profiles/{pid}", function (a) {
+    var miss = workspaceProfileTarget(a.wid);
+    if (miss) return miss;
+    var deny = needDeployer(identity("default"));
+    if (deny) return deny;
+    if (a.pid === "default") return fail(400, "INVALID_INPUT", "默认机型不能删除", { field: "id" });
+    if (!S.models.some(function (x) { return x.id === a.pid; })) return fail(404, "NOT_FOUND", "机型不存在");
+    S.models = S.models.filter(function (x) { return x.id !== a.pid; });
+    delete S.profiles[a.pid];
+    bump("default", "settings");
+    return ok({ deleted: true, recovery: "mock_delete_profile_" + a.pid });
+  });
+
   route("GET", "/p/{pid}/revision", function (a) {
     var r = rev[a.pid];
     return ok({ rev: [r.files, r.favorites, r.remarks, r.settings, r.tasks].join("."), parts: clone(r) });

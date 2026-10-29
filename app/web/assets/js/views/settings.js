@@ -455,7 +455,13 @@
 
     /* ---------- 机型管理 ---------- */
     function profiles(sec) {
-      return api.get("/session", { profile: app.pid }).then(function (s) {
+      var wid = MC.workspaces && MC.workspaces.scopeId ? MC.workspaces.scopeId() : "default";
+      var loading = wid === "default"
+        ? api.get("/session", { profile: app.pid })
+        : api.getV3("/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles").then(function (r) {
+            return { profiles: r.items };
+          });
+      return loading.then(function (s) {
         var add = h("button.btn", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: profileDialog }, icon("plus"), "新增机型");
         return [
           pageHead(sec, add),
@@ -482,6 +488,7 @@
     }
 
     function profileDialog() {
+      var wid = MC.workspaces && MC.workspaces.scopeId ? MC.workspaces.scopeId() : "default";
       var name = h("input.input", { type: "text", placeholder: "例如 DL-200 三号线" });
       var copy = h("select.select", h("option", { value: "" }, "不复制，创建空白机型"), app.session.profiles.map(function (m) { return h("option", { value: m.id }, "复制「" + m.name + "」的配置"); }));
       var F = { name: MC.field({ label: "机型名称", required: true, control: name }), copy: MC.field({ label: "初始数据", control: copy, help: "复制：配置文件与历史版本、更新源、收藏、变量绑定、工具菜单、定时设置、DL 参数。不复制：修改记录、待审建议、IP 对应表、管理员名单、缓存。" }) };
@@ -493,7 +500,11 @@
           save.addEventListener("click", function () {
             F.name.setError("");
             MC.withBusy(save, function () {
-              return api.post("/profiles", { name: name.value.trim(), copy_from: copy.value || null }).then(function (r) {
+              var body = { name: name.value.trim(), copy_from: copy.value || null };
+              var call = wid === "default"
+                ? api.post("/profiles", body)
+                : api.requestV3("POST", "/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles", { body: body });
+              return call.then(function (r) {
                 close();
                 MC.toast.success("已创建机型 " + r.profile.name);
                 app.switchProfile(r.profile.id);
@@ -506,6 +517,7 @@
     }
 
     function renameProfile(m) {
+      var wid = MC.workspaces && MC.workspaces.scopeId ? MC.workspaces.scopeId() : "default";
       var name = h("input.input", { type: "text", value: m.name });
       var F = { name: MC.field({ label: "机型名称", required: true, control: name }) };
       MC.modal({
@@ -515,7 +527,10 @@
           var save = h("button.btn.btn-primary", { type: "button" }, "保存");
           save.addEventListener("click", function () {
             MC.withBusy(save, function () {
-              return api.patch("/profiles/" + api.seg(m.id), { name: name.value.trim() }).then(function () { close(); MC.toast.success("已重命名"); app.reloadSession(); }, function (err) { fieldError(F, err); });
+              var call = wid === "default"
+                ? api.patch("/profiles/" + api.seg(m.id), { name: name.value.trim() })
+                : api.requestV3("PATCH", "/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles/" + api.seg(m.id), { body: { name: name.value.trim() } });
+              return call.then(function () { close(); MC.toast.success("已重命名"); app.reloadSession(); }, function (err) { fieldError(F, err); });
             });
           });
           return [h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"), save];
@@ -524,6 +539,7 @@
     }
 
     function removeProfile(m) {
+      var wid = MC.workspaces && MC.workspaces.scopeId ? MC.workspaces.scopeId() : "default";
       MC.confirm({
         title: "删除机型 " + m.name,
         message: "机型将从列表移除，其数据目录会移入服务器恢复区（data/recovery/），不会立即物理删除。",
@@ -532,7 +548,10 @@
         requireText: m.id,
       }).then(function (ok) {
         if (!ok) return;
-        api.del("/profiles/" + api.seg(m.id)).then(function () {
+        var call = wid === "default"
+          ? api.del("/profiles/" + api.seg(m.id))
+          : api.requestV3("DELETE", "/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles/" + api.seg(m.id));
+        call.then(function () {
           MC.toast.success("已删除机型 " + m.name);
           if (m.id === app.pid) app.switchProfile("default");
           else app.reloadSession();

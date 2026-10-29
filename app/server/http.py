@@ -345,7 +345,8 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         cid = auth.cookie_cid(self.headers.get("Cookie"))
         pid = params.get("pid") if params else None
         self._access_pid = pid or "-"
-        if pid is not None:
+        is_v3_workspace = path.startswith("/api/v3/workspaces/")
+        if pid is not None and not is_v3_workspace:
             if resolution.check_profile:
                 workspace_context.assert_profile(resolution.workspace_id, pid)
             elif not device_models.exists(pid):
