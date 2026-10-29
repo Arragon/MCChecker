@@ -91,6 +91,8 @@ def _public_release(release: Dict[str, Any]) -> Dict[str, Any]:
         "predecessor_id": release.get("predecessor_id"),
         "created_at": release["created_at"],
         "definition_revision": int(release.get("definition_revision", 0)),
+        "default_revision_id": release.get("default_revision_id"),
+        "default_frozen_at": release.get("default_frozen_at"),
         "d0": copy.deepcopy(release["d0"]),
         "baseline_ids": list(release.get("baseline_ids") or []),
         "merge_parent_ids": list(release.get("merge_parent_ids") or []),

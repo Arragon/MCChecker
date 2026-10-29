@@ -77,6 +77,11 @@ def register(router: Router) -> None:
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/values",
         patch_values,
     )
+    router.add(
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/drafts/{did}/freeze",
+        freeze_default,
+    )
 
 
 def _scope(wid: str, pid: str) -> None:
@@ -237,3 +242,14 @@ def patch_values(
         params["pid"], params["cid"], params["did"], json_body(body), if_match
     )
     return Response(payload=result, headers={"ETag": etag})
+
+
+def freeze_default(
+    ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
+) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    result = config_v3_drafts.freeze_default(
+        params["pid"], params["cid"], params["did"], json_body(body)
+    )
+    return Response(payload=result, headers={"ETag": config_v3_drafts._etag(result["revision"])})
