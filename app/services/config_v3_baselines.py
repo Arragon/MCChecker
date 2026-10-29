@@ -21,6 +21,13 @@ def _etag(revision: int) -> str:
     return '"%d"' % int(revision)
 
 
+def _expected_text(if_match: Optional[str], payload: Dict[str, Any]) -> str:
+    if if_match is not None and str(if_match).strip():
+        return str(if_match).strip().strip('"')
+    raw = payload.get("expected_revision")
+    return str(raw if raw is not None else "").strip()
+
+
 def _branch(config: Dict[str, Any]) -> Dict[str, Any]:
     return config.setdefault(
         "main_branch", {"head_id": None, "next_seq": 1, "baselines": {}}
@@ -135,7 +142,7 @@ def patch_baseline_values(
     request_id = str(payload.get("request_id") or "").strip()
     if not request_id or len(request_id) > 100:
         raise AppError(INVALID_INPUT, "request_id 必填且 ≤100 字符", field="request_id")
-    expected_raw = str(if_match or payload.get("expected_revision") or "").strip().strip('"')
+    expected_raw = _expected_text(if_match, payload)
     try:
         expected = int(expected_raw)
     except ValueError:
@@ -188,7 +195,7 @@ def publish_baseline(
     request_id = str(payload.get("request_id") or "").strip()
     if not request_id or len(request_id) > 100:
         raise AppError(INVALID_INPUT, "request_id 必填且 ≤100 字符", field="request_id")
-    expected_raw = str(if_match or payload.get("expected_revision") or "").strip().strip('"')
+    expected_raw = _expected_text(if_match, payload)
     try:
         expected = int(expected_raw)
     except ValueError:

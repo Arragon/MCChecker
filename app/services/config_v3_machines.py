@@ -169,7 +169,8 @@ def publish_machine(
     payload: Dict[str, Any],
     if_match: Optional[str],
 ) -> Tuple[Dict[str, Any], int]:
-    expected_raw = str(if_match or payload.get("expected_revision") or "").strip().strip('"')
+    raw = if_match if if_match is not None and str(if_match).strip() else payload.get("expected_revision")
+    expected_raw = str(raw if raw is not None else "").strip().strip('"')
     try:
         expected = int(expected_raw)
     except ValueError:
