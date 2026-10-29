@@ -21,8 +21,8 @@
       filter: "", overview: null, overviewMachine: "", overviewCompare: "",
       paramMode: "list", selectedParam: null, paramTree: null,
       exportFiles: null, exportFileId: "", exportRevisionId: "", exportPlan: null,
-      exportArtifact: null, exportBusy: false,
-      historyEvents: null, historyLoading: false, historyQ: "", dirty: false,
+      exportArtifact: null, exportBusy: false, exportError: null,
+      historyEvents: null, historyLoading: false, historyError: null, historyQ: "", dirty: false,
     };
     var canWrite = function () { return app.can("config_registry_write"); };
     function root(rest) {
@@ -935,12 +935,13 @@
       }
       if (S.exportFiles === null) {
         S.exportFiles = [];
+        S.exportError = null;
         api.getV3(root("/file-selector")).then(function (res) {
           S.exportFiles = (res.items || []).filter(function (f) {
             return ["json", "xml", "ini"].indexOf(String(f.name || "").split(".").pop().toLowerCase()) >= 0;
           });
           render();
-        }, function (err) { MC.toastError("读取模板文件失败", err); });
+        }, function (err) { S.exportError = err; render(); });
       }
       var revSel = h("select.select", { "aria-label": "导出修订" }, revisions.map(function (row) {
         return h("option", { value: row.id, selected: row.id === S.exportRevisionId }, row.label);
@@ -968,7 +969,10 @@
           h("label.xsmall.muted", "模板文件"), fileSel,
           h("label.xsmall.row", { style: "gap:4px" }, confirm, "确认停用/移除字段"),
           previewBtn));
-      if (!(S.exportFiles || []).length) {
+      if (S.exportError) {
+        body.appendChild(MC.stateBlock({ kind: "error", title: "读取模板文件失败", desc: MC.errorText(S.exportError),
+          actions: [h("button.btn.btn-sm", { type: "button", onclick: function () { S.exportFiles = null; S.exportError = null; render(); } }, "重试")] }));
+      } else if (!(S.exportFiles || []).length) {
         body.appendChild(MC.stateBlock({ kind: "empty", title: "没有 JSON/XML/INI 模板", desc: "先在左下文件列表上传模板。" }));
       }
       if (S.exportPlan) {
@@ -999,9 +1003,10 @@
       if (!S.cid) return MC.stateBlock({ kind: "empty", title: "先选择配置" });
       if (S.historyEvents === null && !S.historyLoading) {
         S.historyLoading = true;
+        S.historyError = null;
         api.getV3(cfgPath("/events") + (S.historyQ ? "?q=" + enc(S.historyQ) : "")).then(function (res) {
           S.historyEvents = res.items || []; S.historyLoading = false; render();
-        }, function (err) { S.historyLoading = false; MC.toastError("读取配置事件失败", err); });
+        }, function (err) { S.historyLoading = false; S.historyError = err; render(); });
       }
       var q = h("input.input.input-sm", { type: "search", name: "q", placeholder: "搜索事件/参数/操作人", value: S.historyQ });
       var search = h("button.btn.btn-sm", { type: "button", onclick: function () {
@@ -1028,6 +1033,8 @@
         h("div.row", { style: "gap:8px" }, q, search,
           h("span.spacer"), h("button.btn.btn-sm", { type: "button", onclick: function () { S.historyEvents = null; render(); } }, "刷新")),
         S.historyLoading ? MC.stateBlock({ kind: "loading", title: "读取事件…" })
+          : S.historyError ? MC.stateBlock({ kind: "error", title: "读取配置事件失败", desc: MC.errorText(S.historyError),
+            actions: [h("button.btn.btn-sm", { type: "button", onclick: function () { S.historyEvents = null; S.historyError = null; render(); } }, "重试")] })
           : (rows.length ? h("div.table-wrap", h("table.table",
             h("thead", h("tr", h("th", "时间"), h("th", "类型"), h("th", "操作人"), h("th", "IP"), h("th", "请求/撤销"), h("th", ""))),
             h("tbody", rows))) : MC.stateBlock({ kind: "empty", title: "没有配置事件", desc: "提交提取/合并/导入/导出/恢复后会在这里出现。" })));
