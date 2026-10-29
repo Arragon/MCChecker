@@ -245,6 +245,8 @@ class TestPutFile:
             status, _h, body = self._put(caller, XML_V1.encode("utf-8"), url)
             assert status == 201, body
             payload = json.loads(body)
+            tracking = payload.pop("tracking", None)
+            assert tracking in (None, {"route": "legacy", "mode": "archive_only"})
             assert payload == {"file": {"name": "fresh.xml"}, "archived": None, "unchanged": False}
             assert revision.snapshot(self.pid)["parts"]["files"] == 2
 

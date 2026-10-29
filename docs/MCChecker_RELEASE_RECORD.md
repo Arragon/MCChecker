@@ -6,7 +6,7 @@
 
 - 运行时：Python **3.9.11**，标准库 HTTP + 原生 JS，**零运行时第三方依赖**。
 - 本次范围：M5 配置治理基础、M6 单版本闭环、M7 跨版本生命周期、M8 迁移/发布门禁。
-- 集成分支：`mc-v2/m5-m8`；最终合并到 main 的提交以 `git log -1` 为准。
+- 合并状态：v2 集成分支 `feat/mc-v2-delivery` 已于 `2e8031f` 并入 main；M5–M8 收口 tip `df4e642` 已在 main 历史中（`origin/mc-v2/m5-m8` 保留为历史分支）。截至 2026-10-27，main 为 `c24ab23`。
 - 设备层：M7-07/M7-08 已 Canceled，按计划交付“功能关闭”，不提供 `/config/devices` 或 `device_rebase` 入口。
 
 ## 功能清单
@@ -24,6 +24,14 @@
 - 恢复入口：`run.py --restore-backup` 的 dry-run 与 `--apply-restore` 在临时数据根实测通过（含 `safety_copy`）。
 - 备份/迁移：合成 v1/v2/mixed 树的 inspect 只读、先备份初始化、幂等迁移、pending 标记、全域备份校验/恢复/重复恢复幂等/注入失败回滚均有 pytest 证据。
 - 安全：新写路由登记四角色/CSRF；线程并发批准只产一份修订；state 替换失败不留下“审计有、状态无”。
+
+## 2026-10-28 现状复核
+
+- main 已到 `c24ab23`；v2 交付已在 main 历史中（`feat/mc-v2-delivery@2e8031f`、M5–M8 收口 tip `df4e642`）。
+- 在 `c24ab23` 重跑全量：**2567 passed / 4 failed**；失败来自其后的 #117/#120/#121 未同步测试与 mock，不是 M5–M8 卡面验收证据。详见 `docs/MCChecker_LEFTOVERS.md` L9。
+- 修复工作区（分支 `chore/fix-main-red-20261028`，未提交）已验证：**2571 passed / 0 failed**、前端 HTTP **`ALL PASSED (96)`**、`check_py39.sh` exit 0；main 转绿以提交/合并为准。
+- 上面 10-23 的 2556×3 基线只对 `493b3b4` 代码面成立，不能搬到 `c24ab23`。
+- Linear 同日复核：**149 张 / 91 Done / 9 In Progress / 47 Backlog / 2 Canceled**；M9–M15（V3.0）45 张 Backlog 是新建的后续路线，不改变本发布的 M0–M8 范围。
 
 ## Schema 兼容矩阵
 

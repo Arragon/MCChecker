@@ -1827,7 +1827,7 @@
     return P.dlHistory;
   }
 
-  function bindingView(raw) {
+  function dlBindingView(raw) {
     raw = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     var map = raw.field_map && typeof raw.field_map === "object" && !Array.isArray(raw.field_map) ? raw.field_map : {};
     var pairs = {};
@@ -1846,7 +1846,7 @@
       x_max: source && source.x_max !== undefined && source.x_max !== "" ? optNum(source.x_max) : null,
       y_min: source && source.y_min !== undefined && source.y_min !== "" ? optNum(source.y_min) : null,
       y_max: source && source.y_max !== undefined && source.y_max !== "" ? optNum(source.y_max) : null,
-      binding: bindingView(source && source.binding),
+      binding: dlBindingView(source && source.binding),
     };
     if (item === "pp_energy") {
       var trans = dlNumber(source && source.trans_coeff);
@@ -1947,7 +1947,7 @@
       x_max: entry.x_max === undefined ? null : entry.x_max,
       y_min: entry.y_min === undefined ? null : entry.y_min,
       y_max: entry.y_max === undefined ? null : entry.y_max,
-      binding: bindingView(entry.binding),
+      binding: dlBindingView(entry.binding),
       actor_ip: entry.actor_ip || "",
       actor_name: entry.actor_name || "",
       created_at: entry.created_at || "",
