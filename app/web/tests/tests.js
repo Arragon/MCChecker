@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 99;  // 96 + M9-05 工作区作用域/ session + M10-01 v3 机型端点
+  var EXPECTED_CASES = 100;  // 96 + M9-05 + M10-01 v3 机型端点 + M10-02 过期响应
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -616,6 +616,49 @@
       MC.workspaces.setActive(prev);
     }, function (e) {
       MC.workspaces.setActive(prev);
+      throw e;
+    });
+  });
+
+  test("M10-02：切换工作区后晚到的文件/工具响应不得覆盖当前 W", function () {
+    var prev = MC.workspaces.scopeId();
+    MC.workspaces.setActive("w1");
+    var origGet = MC.api.get;
+    var origEmit = MC.bus.emit;
+    var pending = [];
+    var emitted = [];
+    MC.api.get = function (path) {
+      return new Promise(function (resolve) { pending.push({ path: path, resolve: resolve }); });
+    };
+    MC.bus.emit = function (name) { emitted.push(name); };
+    var renders = 0;
+    var fake = {
+      pid: "default",
+      files: [],
+      tools: [],
+      p: function (rest) { return "/p/default" + rest; },
+      renderFileList: function () { renders++; },
+      renderNav: function () { renders++; },
+    };
+    var pFiles = MC.App.prototype.refreshFiles.call(fake);
+    var pTools = MC.App.prototype.refreshTools.call(fake);
+    eq(pending.map(function (x) { return x.path; }), ["/p/default/files", "/p/default/tools"], "两个请求都要先发出");
+    MC.workspaces.bumpEpoch();
+    pending[0].resolve({ items: [{ name: "stale.xml" }] });
+    pending[1].resolve({ items: [{ name: "stale-tool" }] });
+    function restore() {
+      MC.api.get = origGet;
+      MC.bus.emit = origEmit;
+      MC.workspaces.setActive(prev);
+    }
+    return Promise.all([pFiles, pTools]).then(function () {
+      eq(fake.files.length, 0, "旧 W 的文件列表不得落到新 W");
+      eq(fake.tools.length, 0, "旧 W 的工具列表不得落到新 W");
+      eq(renders, 0, "过期响应不得触发重画");
+      eq(emitted.length, 0, "过期响应不得发 changed/files 事件");
+      restore();
+    }, function (e) {
+      restore();
       throw e;
     });
   });
