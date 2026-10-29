@@ -24,8 +24,9 @@
 - console：1 条 issue「A form field element should have an id or name attribute (count: 3)」，无 JS error/unhandled rejection；表单可访问名需修。
 - 空态：真实服务新建空工作区“空态验收”，1366 截图 `docs/evidence/v3-config-empty-1366.png`；0 固定配置、两个新建入口正常。
 - 失败态：真实服务页面加载后停服务，点配置历史“刷新” → 显示“读取配置事件失败 / 无法连接服务器 + 重试”；重启服务点重试 → 恢复“没有配置事件”空态。前端 M15-09 固化失败→重试→恢复。
-- 旧页面像素回归：从 `main@429dafa` 起旧版服务，用同一 fixture 截 overview/review/dl/settings 1366，与当前 V3 同页对照：内容区布局/文案/tokens 一致，仅全局顶栏新增工作区切换、左侧“参数登记”改为“配置管理”，属 V3 预期改动。旧图在 `docs/evidence/legacy-*-1366.png`。
-- console：修完表单 name/id 后新开页面 console 无消息；真实失败恢复无 JS error/unhandled rejection。
+- 旧页面像素回归：从 `main@429dafa` 起旧版服务，用同一 fixture 截 overview/review/dl/settings 1366，与当前 V3 同页对照：内容区布局/文案/tokens 一致，仅全局顶栏新增工作区切换、左侧“参数登记”改为“配置管理”，属 V3 预期改动；唯一 token 差异是 muted 文本为 AA 对比度主动调深。旧图在 `docs/evidence/legacy-*-1366.png`。
+- console：修完表单 name/id 后新开页面 console **无消息**；真实失败恢复无 JS error/unhandled rejection。
+- 对比度：muted 文本 token 调为 `#4b5563`，在 `#f5f6f8` 上 6.99:1；正文 16.41:1；主按钮 5.17:1，均达 WCAG AA。
 - 375：CDP 375×812 mobile 下 `innerWidth=375`、`scrollWidth=375`、越界元素 0；截图文件受工具工作区限制未落盘，量化结果已记录。
 - 键盘：主页面 Tab 顺序为侧栏开关→工作区→机型；合并 modal 焦点在 base_revision_id，Tab 循环 O/L/N/预览，Escape 关闭；参数树 ↓/Enter 可选参数。完整全页面键盘走查未逐控件穷举。
 
