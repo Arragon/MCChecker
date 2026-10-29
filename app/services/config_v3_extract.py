@@ -166,6 +166,7 @@ def _base_item(row: Dict[str, Any], source_format: str) -> Optional[Dict[str, An
         "suggested_action": ACTION_ADD,
         "suggested_type": "",
         "existing_parameter_id": None,
+        "existing_parameter": None,
         "matched_by": None,
         "candidates": [],
         "reasons": [],
@@ -221,6 +222,7 @@ def _classify(
         matched_by = "source_locator"
     if match is not None:
         item["existing_parameter_id"] = match.get("parameter_id")
+        item["existing_parameter"] = _candidate(match)
         item["matched_by"] = matched_by
         declared = str(match.get("type") or "")
         if inferred and not _types_compatible(declared, inferred):
