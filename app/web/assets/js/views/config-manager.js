@@ -316,25 +316,29 @@
     function extractDialog() {
       if (!S.cid) return;
       var state = {
-        files: [], fileId: "", filter: "all", size: 50, offset: 0,
-        plan: null, decisions: {}, resolved: {}, loading: false, error: null,
+        files: [], fileId: "", plan: null, page: null, filter: "all", q: "",
+        size: 50, offset: 0, loading: false, error: null, types: {},
       };
       var body = h("div.col", { style: "gap:12px" });
       var pendingText = h("span.xsmall.muted", "尚未加载计划");
       var applyBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "应用决议");
       applyBtn.addEventListener("click", function () {
         if (applyBtn.disabled) return;
-        MC.toast.warning("批量写入尚未接入", "逐行决议已保留；M13-06 会在此提交原子计划。");
+        MC.toast.warning("批量写入尚未接入", "逐行决议已保存在服务端计划；M13-06 会在此提交原子计划。");
       });
       MC.modal({
         title: "从配置文件提取参数",
-        subtitle: "只提取名称与完整层级，不导入值；提交前会重新读取来源并核对版本。",
+        subtitle: "只提取名称与完整层级，不导入值；服务端保存全量计划，浏览器只按页取行。",
         size: "xwide",
         body: body,
         footer: function (close) {
           return [pendingText, h("span.spacer"), h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"), applyBtn];
         },
       });
+
+      function cfgPlan(rest) {
+        return cfgPath("/extraction-plans" + (rest || ""));
+      }
 
       function selectedFile() {
         return state.files.filter(function (f) { return f.file_id === state.fileId; })[0] || state.files[0] || null;
@@ -359,18 +363,39 @@
         });
       }
 
-      function loadPreview() {
+      function createPlan() {
         var f = selectedFile();
         if (!f) return;
         state.loading = true;
         state.error = null;
         renderDialog();
-        var url = cfgPath("/extract-preview") + "?version_id=" + enc(f.version_id)
-          + "&offset=" + state.offset + "&limit=" + state.size + "&filter=" + enc(state.filter);
-        api.getV3(url).then(function (res) {
-          state.plan = res;
+        api.requestV3("POST", cfgPlan(""), { body: { version_id: f.version_id } }).then(function (res) {
+          state.plan = res.plan;
+          state.page = null;
+          state.types = {};
+          state.offset = 0;
+          return loadRows();
+        }, function (err) {
           state.loading = false;
-          (res.items || []).forEach(syncResolution);
+          state.error = err;
+          renderDialog();
+        });
+      }
+
+      function loadRows() {
+        if (!state.plan) return;
+        state.loading = true;
+        state.error = null;
+        var url = cfgPlan("/" + enc(state.plan.plan_id) + "/rows")
+          + "?offset=" + state.offset + "&limit=" + state.size
+          + "&filter=" + enc(state.filter) + "&q=" + enc(state.q);
+        return api.getV3(url).then(function (res) {
+          state.page = res;
+          state.plan = Object.assign({}, state.plan, {
+            status: res.status, stale: res.stale, counts: res.counts,
+            pending: res.pending, revision: res.revision,
+          });
+          state.loading = false;
           renderDialog();
         }, function (err) {
           state.loading = false;
@@ -379,51 +404,69 @@
         });
       }
 
-      function ensureDecision(item) {
-        var d = state.decisions[item.row_id];
-        if (!d) {
-          var action = item.status === "new" ? "add"
-            : item.status === "existing" ? "link"
-            : item.status === "unsupported" ? "skip" : "pending";
-          d = {
-            action: action,
-            type: item.suggested_type || "",
-            parameter_id: item.existing_parameter_id
-              || (item.candidates && item.candidates.length ? item.candidates[0].parameter_id : ""),
-          };
-          state.decisions[item.row_id] = d;
+      function recomputePlan() {
+        if (!state.plan) return;
+        api.requestV3("POST", cfgPlan("/" + enc(state.plan.plan_id) + "/recompute"), { body: {} }).then(function (res) {
+          state.plan = res.plan;
+          MC.toast.success("计划已重算", "保留 " + (res.preserved || 0) + " 条仍匹配的决议");
+          return loadRows();
+        }, function (err) { MC.toastError("重算失败", err); });
+      }
+
+      function patchDecision(rows, decision) {
+        return api.requestV3("PATCH", cfgPlan("/" + enc(state.plan.plan_id) + "/decisions"), {
+          body: { scope: "rows", row_ids: rows.map(function (row) { return row.row_id; }), decision: decision },
+        }).then(function () { return loadRows(); }, function (err) {
+          MC.toastError("决议未保存", err);
+          return loadRows();
+        });
+      }
+
+      function ensureDigest(filter) {
+        if (state.page && state.page.filter === filter && state.page.q === state.q) {
+          return Promise.resolve(state.page.filter_digest);
         }
-        return d;
+        return api.getV3(cfgPlan("/" + enc(state.plan.plan_id) + "/rows")
+          + "?offset=0&limit=1&filter=" + enc(filter) + "&q=" + enc(state.q)).then(function (res) {
+          return res.filter_digest;
+        });
       }
 
-      function decisionReady(item, d) {
-        if (!d || d.action === "pending" || !d.action) return false;
-        if (item.status === "null_uncertain" && d.action === "add" && !d.type) return false;
-        if (d.action === "link" && !d.parameter_id) return false;
-        return true;
+      function batchFilterNew() {
+        if (!state.plan || state.page.stale) return;
+        ensureDigest("new").then(function (digest) {
+          return api.requestV3("PATCH", cfgPlan("/" + enc(state.plan.plan_id) + "/decisions"), {
+            body: { scope: "filter", filter: "new", q: state.q, filter_digest: digest, decision: { action: "add" } },
+          });
+        }).then(function (res) {
+          MC.toast.success("已把当前筛选的新增行设为新增", "更新 " + (res.updated || 0) + " 行");
+          return loadRows();
+        }, function (err) { MC.toastError("批量决议失败", err); });
       }
 
-      function syncResolution(item) {
-        var d = ensureDecision(item);
-        if (isExtractConflict(item.status) && decisionReady(item, d)) state.resolved[item.row_id] = 1;
-        else if (isExtractConflict(item.status)) delete state.resolved[item.row_id];
+      function batchPageNew() {
+        if (!state.plan || !state.page || state.page.stale) return;
+        var rows = (state.page.items || []).filter(function (row) { return row.status === "new"; });
+        if (!rows.length) { MC.toast.warning("本页没有新增行"); return; }
+        patchDecision(rows, { action: "add" });
       }
 
       function refreshFooter() {
-        if (!state.plan) {
+        var page = state.page;
+        if (!page) {
           pendingText.textContent = "尚未加载计划";
           applyBtn.disabled = true;
           return;
         }
-        var conflict = state.plan.counts ? (state.plan.counts.conflict || 0) : 0;
-        var pending = Math.max(0, conflict - Object.keys(state.resolved).length);
-        pendingText.textContent = pending ? "待决议 " + pending + " 行" : "冲突已全部决议";
-        applyBtn.disabled = !canWrite() || !(state.plan.total > 0) || pending > 0;
-        applyBtn.title = pending > 0 ? "先处理所有冲突行" : "批量写入将在 M13-06 接入";
+        pendingText.textContent = page.stale
+          ? "计划已过期，需重算"
+          : page.pending ? "待决议 " + page.pending + " 行" : "冲突已全部决议";
+        applyBtn.disabled = !canWrite() || page.stale || !(page.total > 0) || page.pending > 0;
+        applyBtn.title = page.pending > 0 ? "先处理所有冲突行" : "批量写入将在 M13-06 接入";
       }
 
       function renderDialog() {
-        if (state.plan && !state.loading && !state.error) renderPlan();
+        if (state.plan && state.page && !state.loading && !state.error) renderPlan();
         else renderPicker();
       }
 
@@ -439,7 +482,7 @@
             kind: "error", title: "提取预览失败", desc: MC.errorText(state.error),
             actions: [
               h("button.btn.btn-sm", { type: "button", onclick: function () { state.error = null; renderDialog(); } }, "返回选择"),
-              h("button.btn.btn-sm", { type: "button", onclick: loadPreview }, "重新预览"),
+              h("button.btn.btn-sm", { type: "button", onclick: createPlan }, "重新预览"),
             ],
           }));
           refreshFooter();
@@ -455,70 +498,87 @@
         }));
         sel.addEventListener("change", function () { state.fileId = sel.value; });
         var f = selectedFile();
-        var start = h("button.btn.btn-primary", { type: "button", onclick: loadPreview }, "预览参数");
         body.appendChild(h("div.row", { style: "gap:10px;flex-wrap:wrap" },
-          h("label.xsmall.muted", "配置文件"), sel, start));
+          h("label.xsmall.muted", "配置文件"), sel,
+          h("button.btn.btn-primary", { type: "button", onclick: createPlan }, "预览参数")));
         body.appendChild(h("div.muted.xsmall",
           "目标：固定配置 " + (S.detail ? S.detail.code : "") + " · 当前版本 " + (f ? f.version_id : "—")
-          + " · 只读取该不可变版本；预览不会写入任何参数或目录。"));
+          + " · 只读取该不可变版本；创建/切来源/刷新只改计划，不产生参数。"));
       }
 
-      function typeControl(item, d) {
+      function typeControl(row, d) {
+        var value = state.types[row.row_id] !== undefined ? state.types[row.row_id] : (d.type || "");
         var options = [["", "选择类型…"], ["string", "string"], ["number", "number"], ["boolean", "boolean"], ["decimal", "decimal"]];
-        var sel = h("select.select", { "aria-label": "null 类型" }, options.map(function (pair) {
-          return h("option", { value: pair[0], selected: pair[0] === d.type }, pair[1]);
-        }));
-        sel.addEventListener("change", function () { d.type = sel.value; syncResolution(item); renderPlan(); });
-        return sel;
-      }
-
-      function actionControl(item, d) {
-        var options = [];
-        if (item.status === "unsupported") options = [["skip", "跳过"]];
-        else if (item.status === "new") options = [["add", "新增参数"], ["skip", "跳过"]];
-        else if (item.status === "existing") options = [["link", "关联已有"], ["skip", "跳过"]];
-        else {
-          if (d.action === "pending") options.push(["pending", "待决议"]);
-          if (item.status !== "null_uncertain" && (item.existing_parameter_id || (item.candidates || []).length)) {
-            options.push(["link", "关联已有"]);
-          }
-          options.push(["add", "新增参数"], ["skip", "跳过"]);
-        }
-        var sel = h("select.select", { "aria-label": "逐行决议" }, options.map(function (pair) {
-          return h("option", { value: pair[0], selected: pair[0] === d.action }, pair[1]);
-        }));
+        var sel = h("select.select", { "aria-label": "null 类型", disabled: state.page.stale },
+          options.map(function (pair) {
+            return h("option", { value: pair[0], selected: pair[0] === value }, pair[1]);
+          }));
         sel.addEventListener("change", function () {
-          d.action = sel.value;
-          if (d.action === "link" && !d.parameter_id) {
-            if (item.existing_parameter_id) d.parameter_id = item.existing_parameter_id;
-            else if (item.candidates && item.candidates.length) d.parameter_id = item.candidates[0].parameter_id;
+          state.types[row.row_id] = sel.value;
+          if (d.action === "add" || d.action === "skip") {
+            patchDecision([row], { action: d.action, type: sel.value, parameter_id: d.parameter_id || "" });
+          } else {
+            renderPlan();
           }
-          syncResolution(item);
-          renderPlan();
         });
         return sel;
       }
 
-      function linkControl(item, d) {
+      function actionOptions(row, d) {
+        if (row.status === "unsupported") return [["skip", "跳过"]];
+        if (row.status === "new") return [["add", "新增参数"], ["skip", "跳过"]];
+        if (row.status === "existing") return [["link", "关联已有"], ["skip", "跳过"]];
+        var options = [];
+        if (d.action === "pending") options.push(["pending", "待决议"]);
+        if (row.status !== "null_uncertain" && (row.existing_parameter_id || (row.candidates || []).length)) {
+          options.push(["link", "关联已有"]);
+        }
+        options.push(["add", "新增参数"], ["skip", "跳过"]);
+        return options;
+      }
+
+      function actionControl(row, d) {
+        var sel = h("select.select", { "aria-label": "逐行决议", disabled: state.page.stale },
+          actionOptions(row, d).map(function (pair) {
+            return h("option", { value: pair[0], selected: pair[0] === d.action }, pair[1]);
+          }));
+        sel.addEventListener("change", function () {
+          var action = sel.value;
+          var type = state.types[row.row_id] !== undefined ? state.types[row.row_id] : (d.type || "");
+          if (action === "add" && row.status === "null_uncertain" && !type) {
+            MC.toast.warning("先选择类型", "null 行必须先选类型或跳过。");
+            renderPlan();
+            return;
+          }
+          var target = d.parameter_id || row.existing_parameter_id
+            || (row.candidates && row.candidates.length ? row.candidates[0].parameter_id : "");
+          patchDecision([row], { action: action, type: type, parameter_id: target });
+        });
+        return sel;
+      }
+
+      function linkControl(row, d) {
         if (d.action !== "link") return null;
-        var cands = item.candidates || (item.existing_parameter ? [item.existing_parameter] : []);
+        var cands = row.candidates || (row.existing_parameter ? [row.existing_parameter] : []);
         if (!cands.length) return null;
         if (cands.length === 1) {
-          d.parameter_id = cands[0].parameter_id;
           return h("span.xsmall.muted", "→ " + cands[0].name + " / " + ((cands[0].directory || []).join(" / ") || "根目录"));
         }
-        var sel = h("select.select", { "aria-label": "关联目标" }, cands.map(function (c) {
-          return h("option", { value: c.parameter_id, selected: c.parameter_id === d.parameter_id },
+        var current = d.parameter_id || cands[0].parameter_id;
+        var sel = h("select.select", { "aria-label": "关联目标", disabled: state.page.stale }, cands.map(function (c) {
+          return h("option", { value: c.parameter_id, selected: c.parameter_id === current },
             c.name + " / " + ((c.directory || []).join(" / ") || "根目录"));
         }));
-        sel.addEventListener("change", function () { d.parameter_id = sel.value; syncResolution(item); renderPlan(); });
+        sel.addEventListener("change", function () {
+          patchDecision([row], { action: "link", type: d.type || "", parameter_id: sel.value });
+        });
         return sel;
       }
 
       function renderPlan() {
         util.clear(body);
-        var plan = state.plan;
-        var counts = plan.counts || {};
+        var page = state.page;
+        var counts = page.counts || {};
         body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
           h("span.badge", "计划 " + (counts.total || 0) + " 行"),
           h("span.badge.badge-success", "新增 " + (counts.new || 0)),
@@ -526,51 +586,63 @@
           h("span.badge.badge-warning", "冲突 " + (counts.conflict || 0)),
           h("span.badge.badge-muted", "不支持 " + (counts.unsupported || 0)),
           h("span.spacer"),
-          h("span.xsmall.muted", "定义修订 r" + (plan.revision || 0))));
+          h("span.xsmall.muted", "定义修订 r" + (page.revision || 0))));
+        if (page.stale) {
+          body.appendChild(h("div.banner.banner-warning", icon("info"),
+            h("div.banner-body", "来源或目录修订已变化；旧决议仍保留。重算后按 row_id 合并仍合法的决议。",
+              h("button.btn.btn-sm", { type: "button", style: "margin-left:10px", onclick: recomputePlan }, "重算并保留决议"))));
+        }
         var filter = MC.segmented([
           { value: "all", label: "全部" }, { value: "new", label: "新增" },
           { value: "conflict", label: "冲突" }, { value: "existing", label: "已有" },
-        ], state.filter, function (v) { state.filter = v; state.offset = 0; loadPreview(); }, "提取筛选");
+        ], state.filter, function (v) { state.filter = v; state.offset = 0; loadRows(); }, "提取筛选");
         var size = h("select.select", { "aria-label": "每页行数" },
           [50, 100].map(function (n) { return h("option", { value: String(n), selected: n === state.size }, n + " 行/页"); }));
-        size.addEventListener("change", function () { state.size = +size.value; state.offset = 0; loadPreview(); });
-        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, filter, size,
-          h("button.btn.btn-sm", { type: "button", onclick: loadPreview }, "重新预览")));
+        size.addEventListener("change", function () { state.size = +size.value; state.offset = 0; loadRows(); });
+        var q = h("input.input.input-sm", { type: "search", placeholder: "按名称 / 层级筛选", value: state.q });
+        var search = h("button.btn.btn-sm", { type: "button", onclick: function () { state.q = q.value.trim(); state.offset = 0; loadRows(); } }, "搜索");
+        q.addEventListener("keydown", function (e) { if (e.key === "Enter") search.click(); });
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, filter, size, q, search,
+          h("span.spacer"),
+          h("button.btn.btn-sm", { type: "button", disabled: page.stale, onclick: batchPageNew }, "本页新增全选"),
+          h("button.btn.btn-sm", { type: "button", disabled: page.stale, onclick: batchFilterNew }, "当前筛选全部新增"),
+          h("button.btn.btn-sm", { type: "button", onclick: loadRows }, "刷新")));
 
-        if (!(plan.items || []).length) {
+        if (!(page.items || []).length) {
           body.appendChild(MC.stateBlock({ kind: "empty", title: "当前筛选没有行", desc: "换一个筛选条件，或确认来源文件是否包含叶节点。" }));
           refreshFooter();
           return;
         }
-        var rows = plan.items.map(function (item) {
-          var d = ensureDecision(item);
-          var badgeClass = item.status === "new" ? ".badge-success"
-            : isExtractConflict(item.status) ? ".badge-warning"
-            : item.status === "unsupported" ? ".badge-muted" : "";
-          var typeCell = item.status === "null_uncertain" ? typeControl(item, d)
-            : h("span.xsmall", d.type || item.suggested_type || "—");
-          var link = linkControl(item, d);
+        var rows = page.items.map(function (row) {
+          var d = row.decision || { action: "pending", type: "", parameter_id: "" };
+          var badgeClass = row.status === "new" ? ".badge-success"
+            : isExtractConflict(row.status) ? ".badge-warning"
+            : row.status === "unsupported" ? ".badge-muted" : "";
+          var typeCell = row.status === "null_uncertain" ? typeControl(row, d)
+            : h("span.xsmall", d.type || row.suggested_type || "—");
           return h("tr",
-            h("td", h("span.badge" + badgeClass, EXTRACT_STATUS[item.status] || item.status)),
-            h("td", h("div.cell-strong", item.leaf_name || "—"), h("div.mono.xsmall", (item.directory || []).join(" / ") || "根目录")),
+            h("td", h("span.badge" + badgeClass, EXTRACT_STATUS[row.status] || row.status)),
+            h("td", h("div.cell-strong", row.leaf_name || "—"), h("div.mono.xsmall", (row.directory || []).join(" / ") || "根目录")),
             h("td", typeCell),
-            h("td", h("div.col", { style: "gap:4px" }, actionControl(item, d), link)),
-            h("td.mono.xsmall", item.display_path || ""));
+            h("td", h("div.col", { style: "gap:4px" }, actionControl(row, d), linkControl(row, d))),
+            h("td.mono.xsmall", row.display_path || ""));
         });
         body.appendChild(h("div.table-wrap", h("table.table",
           h("thead", h("tr", h("th", "状态"), h("th", "名称 / 完整层级"), h("th", "类型"), h("th", "决议"), h("th", "来源路径"))),
           h("tbody", rows))));
 
-        var pages = Math.max(1, Math.ceil((plan.total || 0) / state.size));
-        var page = Math.floor(state.offset / state.size) + 1;
-        var prev = h("button.btn.btn-sm", { type: "button", disabled: state.offset <= 0, onclick: function () { state.offset = Math.max(0, state.offset - state.size); loadPreview(); } }, "上一页");
-        var next = h("button.btn.btn-sm", { type: "button", disabled: page >= pages, onclick: function () { state.offset += state.size; loadPreview(); } }, "下一页");
-        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, prev, h("span.xsmall.muted", "第 " + page + " / " + pages + " 页 · 共 " + (plan.total || 0) + " 行"), next));
+        var pages = Math.max(1, Math.ceil((page.total || 0) / state.size));
+        var current = Math.floor(state.offset / state.size) + 1;
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+          h("button.btn.btn-sm", { type: "button", disabled: state.offset <= 0, onclick: function () { state.offset = Math.max(0, state.offset - state.size); loadRows(); } }, "上一页"),
+          h("span.xsmall.muted", "第 " + current + " / " + pages + " 页 · 共 " + (page.total || 0) + " 行"),
+          h("button.btn.btn-sm", { type: "button", disabled: current >= pages, onclick: function () { state.offset += state.size; loadRows(); } }, "下一页")));
         refreshFooter();
       }
 
       loadFiles();
     }
+
 
     function overviewView(rel) {
       if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });

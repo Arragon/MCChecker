@@ -183,6 +183,19 @@ WRITE_ROUTE_ACTIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/publish",
     ): "config_registry_write",
+    # M13-05：提取计划与逐行决议只改计划，不改参数，但仍是管理员写操作。
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans",
+    ): "config_registry_write",
+    (
+        "PATCH",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/decisions",
+    ): "config_registry_write",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/recompute",
+    ): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/reactivate"): "config_registry_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
@@ -250,6 +263,7 @@ ROUTE_VALUES = {
     "oid": "ob_000001", "tpid": "tp_000001", "bid": "bl_000001",
     "cid": "cs_000001", "aid": "ar_000001", "parameter_id": "p_000001",
     "did": "d0-rel_000001", "bid": "bl_000001", "mid": "m_000001",
+    "plan_id": "ep_000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

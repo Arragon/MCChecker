@@ -789,6 +789,111 @@
     });
   });
 
+  var MOCK_PLANS = {};
+  var MOCK_PLAN_SEQ = 0;
+  function mockDefaultDecision(row) {
+    if (row.status === "new") return { action: "add", type: row.suggested_type || "", parameter_id: "", source: "default" };
+    if (row.status === "existing") return { action: "link", type: row.suggested_type || "", parameter_id: row.existing_parameter_id || "", source: "default" };
+    if (row.status === "unsupported") return { action: "skip", type: "", parameter_id: "", source: "default" };
+    return { action: "pending", type: row.suggested_type || "", parameter_id: row.existing_parameter_id || "", source: "default" };
+  }
+  function mockDecision(plan, row) {
+    return plan.decisions[row.row_id] || mockDefaultDecision(row);
+  }
+  function mockPending(plan) {
+    return plan.rows.filter(function (row) {
+      var d = mockDecision(plan, row);
+      return ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"].indexOf(row.status) >= 0
+        && (d.action === "pending" || (row.status === "null_uncertain" && d.action === "add" && !d.type));
+    }).length;
+  }
+  function mockPlanSummary(plan) {
+    return { plan_id: plan.plan_id, config_id: plan.config_id, status: plan.status || "open", stale: plan.status === "stale",
+      source: plan.source, revision: plan.revision, counts: plan.counts, pending: mockPending(plan), created_at: plan.created_at };
+  }
+  function mockPlanFiltered(plan, filter, q) {
+    var rows = plan.rows.filter(function (row) {
+      if (filter === "new") return row.status === "new";
+      if (filter === "existing") return row.status === "existing";
+      if (filter === "conflict") return ["same_name_other_path", "ambiguous", "type_conflict", "null_uncertain"].indexOf(row.status) >= 0;
+      return true;
+    });
+    var kw = String(q || "").toLowerCase();
+    if (kw) rows = rows.filter(function (row) { return (row.leaf_name + " " + row.display_path).toLowerCase().indexOf(kw) >= 0; });
+    return rows;
+  }
+  function mockDigest(rows, filter, q) {
+    return "mock-" + filter + "-" + rows.length + "-" + String(q || "").length;
+  }
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var rows = mockExtractRows();
+    var counts = { total: rows.length, new: 0, existing: 0, same_name_other_path: 0, ambiguous: 0,
+      type_conflict: 0, null_uncertain: 0, unsupported: 0, conflict: 0 };
+    rows.forEach(function (row) { counts[row.status] = (counts[row.status] || 0) + 1; });
+    counts.conflict = counts.same_name_other_path + counts.ambiguous + counts.type_conflict + counts.null_uncertain;
+    var plan = { plan_id: "ep-mock-" + String(++MOCK_PLAN_SEQ), workspace_id: a.wid, profile_id: a.pid, config_id: a.cid,
+      source: { name: "scenario_a.xml", file_id: "f-scenario_a.xml", version_id: req.body.version_id || "v-scenario_a.xml-current", version_label: "current", blob_sha256: "mock", format: "xml" },
+      revision: 3, counts: counts, rows: rows, decisions: {}, status: "open", created_at: util.nowString() };
+    MOCK_PLANS[plan.plan_id] = plan;
+    return ok({ plan: mockPlanSummary(plan) }, 201);
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}", function (a) {
+    var plan = MOCK_PLANS[a.plan_id];
+    return plan ? ok({ plan: mockPlanSummary(plan) }) : fail(404, "NOT_FOUND", "提取计划不存在");
+  });
+  route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/rows", function (a, req) {
+    var plan = MOCK_PLANS[a.plan_id];
+    if (!plan) return fail(404, "NOT_FOUND", "提取计划不存在");
+    var filter = String(req.query.filter || "all");
+    var q = String(req.query.q || "");
+    var rows = mockPlanFiltered(plan, filter, q);
+    var limit = Math.max(1, Math.min(+req.query.limit || 50, 200));
+    var offset = Math.max(0, +req.query.offset || 0);
+    var items = rows.slice(offset, offset + limit).map(function (row) {
+      var d = mockDecision(plan, row);
+      return Object.assign({}, row, { decision: d, decision_ready: d.action !== "pending" });
+    });
+    var out = mockPlanSummary(plan);
+    out.filter = filter; out.q = q; out.filter_digest = mockDigest(rows, filter, q);
+    out.total = rows.length; out.offset = offset; out.limit = limit; out.items = items;
+    return ok(out);
+  });
+  route("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/decisions", function (a, req) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var plan = MOCK_PLANS[a.plan_id];
+    if (!plan) return fail(404, "NOT_FOUND", "提取计划不存在");
+    var decision = req.body.decision || {};
+    var updated = 0;
+    if (req.body.scope === "filter") {
+      var filter = String(req.body.filter || "all");
+      var rows = mockPlanFiltered(plan, filter, String(req.body.q || ""));
+      if (req.body.filter_digest !== mockDigest(rows, filter, String(req.body.q || ""))) {
+        return fail(409, "PLAN_STALE", "筛选快照已变化");
+      }
+      rows.forEach(function (row) { plan.decisions[row.row_id] = { action: decision.action, type: decision.type || "", parameter_id: decision.parameter_id || "", source: "user" }; updated++; });
+    } else {
+      (req.body.row_ids || []).forEach(function (rowId) {
+        plan.decisions[rowId] = { action: decision.action, type: decision.type || "", parameter_id: decision.parameter_id || "", source: "user" };
+        updated++;
+      });
+    }
+    var out = mockPlanSummary(plan);
+    out.updated = updated;
+    return ok(out);
+  });
+  route("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/extraction-plans/{plan_id}/recompute", function (a) {
+    var deny = needAdmin(identity("default"));
+    if (deny) return deny;
+    var plan = MOCK_PLANS[a.plan_id];
+    if (!plan) return fail(404, "NOT_FOUND", "提取计划不存在");
+    var kept = Object.keys(plan.decisions).length;
+    plan.status = "open";
+    return ok({ plan: mockPlanSummary(plan), preserved: kept });
+  });
+
   route("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", function (a) {
     return ok({ items: V3CFG.map(function (c) { return v3cfgView(c, false); }) });
   });
