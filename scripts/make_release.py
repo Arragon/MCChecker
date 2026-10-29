@@ -71,6 +71,8 @@ RELEASE_ENTRIES: Tuple[str, ...] = (
     "service.sh",
     "add-admin.sh",
     "docs/manual.md",
+    "docs/V3_API.md",
+    "docs/V3_ROLES.md",
     "scripts/config_backup.py",
     "scripts/inspect_config_management.py",
     "scripts/inspect_v3_workspace.py",
