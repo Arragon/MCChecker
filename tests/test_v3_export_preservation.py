@@ -145,3 +145,36 @@ def test_xml_binding_leaf_and_removed_requires_confirmation():
         root = ET.fromstring(plan["preview"])
         assert root.find("G/P1").text == "7"
         assert root.find("G/Keep").text == "x"
+
+
+def test_ini_binding_preserves_other_keys():
+    seed_roles("export-ini")
+    with make_server() as server:
+        wid, cid = _base(server)
+        p1 = _param(server, wid, cid, "P1")
+        rid = _release(server, wid, cid)
+        _values(server, wid, cid, rid, [
+            {"parameter_id": p1, "membership": "included", "enabled": True,
+             "value_state": "present", "value": "5"},
+        ])
+        template = _put(server, wid, "tpl.ini", b"[s]\nkey=1\nkeep=x\n", "text/plain")
+        _binding(server, wid, cid, rid, p1, "s/key", template)
+        _freeze(server, wid, cid, rid)
+        status, _h, body = _export_plan(server, wid, cid, {
+            "release_id": rid, "revision_id": "d0-" + rid, "version_id": template["version_id"],
+        })
+        assert status == 201, body
+        preview = body["plan"]["preview"]
+        assert "key=5" in preview and "keep=x" in preview
+        status, _h, committed = as_role(server, "admin").json(
+            "POST", "/api/v3/workspaces/%s/profiles/default/configs/%s/export-plans/%s/commit"
+            % (wid, cid, body["plan"]["plan_id"]),
+            {"preview_token": body["plan"]["preview_token"]},
+        )
+        assert status == 200, committed
+        status, _h, raw = as_role(server, "admin").request(
+            "GET", "/api/v3/workspaces/%s/profiles/default/exports/%s/download"
+            % (wid, committed["artifact"]["artifact_id"])
+        )
+        assert status == 200
+        assert raw.decode() == "[s]\nkey=5\nkeep=x\n"

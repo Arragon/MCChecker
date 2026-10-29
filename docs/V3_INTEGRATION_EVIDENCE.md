@@ -18,6 +18,11 @@
 | 50k 提交 | 2164 ms | 无硬预算，记录 |
 | 20 并发 rows p95 / 中位 | 460 / 170 ms | 量化记录 |
 
+### 离线首访（2026-10-29）
+- 当前源码重建发布包 176 成员，`--verify-only` 外部主机 0；解压到 `/tmp/mcc-offline`，用独立数据根启动 `run.py --port 8902`。
+- Chrome `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"` 下访问：速览页标题正常，配置管理显示“还没有固定配置”；证明首访不依赖外网。
+- INI 导出新增回归：`[s] key/keep` 模板只改绑定 key=5，keep=x 保留，下载字节一致。
+
 ### 其他
 - 真实 `data/`：dry-run manifest 4 files（duplicates=1, errors=0）；全域备份 7 files，verify ok，restore dry-run diff=[]。
 - 安全/并发：跨 W 404、草稿 CAS 200+409、同计划双提交 200+409、200 并发读 ≥199、DTD/重复键/NaN 422。
