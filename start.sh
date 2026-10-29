@@ -14,7 +14,7 @@ MCHECKER_PYTHON_CHECK='import sys; sys.exit(0 if sys.version_info >= (3, 9) else
 
 # 发布包根目录 = 本文件所在目录（只依赖 §14.3 名单里确实存在的东西；不用 dirname，
 # 这样 PATH 里只有解释器时也能跑起来）。用 `pwd -P` 取物理路径：run.py 那边的默认数据根
-# 是 `os.path.abspath(__file__)` 算的，而 abspath 走 getcwd（会解掉 /tmp → /private/tmp 这类
+# 是 `os.path.abspath(__file__)` 算的，而 abspath 走 getcwd（会解掉临时目录软链这类
 # 符号链接），用逻辑路径打印就会跟日志里的 `data=` 差一层链接。
 mcc_self=$0
 case "$mcc_self" in

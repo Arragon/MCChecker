@@ -73,6 +73,9 @@ RELEASE_ENTRIES: Tuple[str, ...] = (
     "docs/manual.md",
     "scripts/config_backup.py",
     "scripts/inspect_config_management.py",
+    "scripts/inspect_v3_workspace.py",
+    "scripts/backup_v3.py",
+    "scripts/migrate_v3.py",
     "app",
 )
 
