@@ -62,7 +62,11 @@ def parse_path(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]
 def parse_json(content: bytes, filename: str) -> Dict[str, Any]:
     """解析 JSON 文件为树形结构"""
     text = content.decode("utf-8-sig")
-    data = json.loads(text)
+    data = json.loads(
+        text,
+        object_pairs_hook=_strict_pairs,
+        parse_constant=_reject_json_constant,
+    )
     return {
         "id": "root",
         "label": filename,
@@ -70,6 +74,20 @@ def parse_json(content: bytes, filename: str) -> Dict[str, Any]:
         "children": _json_to_tree(data, "root"),
         "attrs": {"type": "json"},
     }
+
+
+def _strict_pairs(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    """重复键是歧义，直接拒绝（V3 §4.1 / INH-2132）。"""
+    out: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise AppError(PARSE_FAILED, "JSON 存在重复键：%s" % key)
+        out[key] = value
+    return out
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise AppError(PARSE_FAILED, "JSON 不允许 %s" % value)
 
 
 def _preprocess_xml_namespaces(text: str) -> str:
@@ -204,8 +222,10 @@ def parse_xml(content: bytes, filename: str) -> Dict[str, Any]:
     return _parse_xml_iterparse(io.BytesIO(text.encode("utf-8")), filename, allowed_attr_names=allowed)
 
 
-def _json_to_tree(data: Any, path: str) -> List[Dict[str, Any]]:
+def _json_to_tree(data: Any, path: str, depth: int = 0) -> List[Dict[str, Any]]:
     """递归转换 JSON 数据为树形节点列表"""
+    if depth > MAX_DEPTH:
+        raise AppError(TOO_LARGE, "文档嵌套超过上限（%d 层）" % MAX_DEPTH)
     nodes = []
     if isinstance(data, dict):
         for key, value in data.items():
@@ -215,7 +235,7 @@ def _json_to_tree(data: Any, path: str) -> List[Dict[str, Any]]:
                     "id": node_path,
                     "label": str(key),
                     "value": None,
-                    "children": _json_to_tree(value, node_path),
+                    "children": _json_to_tree(value, node_path, depth + 1),
                     "attrs": {"type": "array" if isinstance(value, list) else "object"},
                 }
             else:
@@ -238,7 +258,7 @@ def _json_to_tree(data: Any, path: str) -> List[Dict[str, Any]]:
                 "attrs": {"type": "array"},
             }
             if isinstance(item, (dict, list)):
-                node["children"] = _json_to_tree(item, node_path)
+                node["children"] = _json_to_tree(item, node_path, depth + 1)
             else:
                 node["value"] = _format_primitive(item)
                 node["attrs"]["type"] = type(item).__name__
@@ -442,7 +462,13 @@ def pointer_unescape(token: str) -> str:
 
 def _compact_json(content: bytes, filename: str) -> _Nodes:
     try:
-        data = json.loads(content.decode("utf-8-sig"))
+        data = json.loads(
+            content.decode("utf-8-sig"),
+            object_pairs_hook=_strict_pairs,
+            parse_constant=_reject_json_constant,
+        )
+    except AppError:
+        raise
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AppError(PARSE_FAILED, "JSON 解析失败：%s" % exc)
 
