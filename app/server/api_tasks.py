@@ -73,8 +73,15 @@ def list_tasks(
     authz.authorize(ctx, "read")
     active_only = query_param(query, "active") == "1"
     runner = tasks.get_runner()
+    workspace = ctx.workspace_id or "default"
     return Response(
-        payload={"items": [task.to_payload() for task in runner.list(params["pid"], active_only)]}
+        payload={
+            "items": [
+                task.to_payload()
+                for task in runner.list(params["pid"], active_only)
+                if getattr(task, "workspace", "default") == workspace
+            ]
+        }
     )
 
 
@@ -87,7 +94,7 @@ def get_task(
     # GET /api/v1/tasks/{id} -> {"task"}
     authz.authorize(ctx, "read")
     task = tasks.get_runner().get(params["id"])
-    if task is None:
+    if task is None or getattr(task, "workspace", "default") != (ctx.workspace_id or "default"):
         raise AppError(NOT_FOUND, "任务不存在或已结束太久", id=params["id"])
     return Response(payload={"task": task.to_payload()})
 

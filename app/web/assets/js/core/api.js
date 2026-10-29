@@ -52,6 +52,17 @@
     return encodeURIComponent(String(s));
   }
 
+  /** V3：当前工作区 id；M9-05 之前没有选择器时按 legacy default。 */
+  function workspaceId() {
+    try {
+      if (MC.workspaces && MC.workspaces.current) {
+        var w = MC.workspaces.current();
+        if (w && w.id) return w.id;
+      }
+    } catch (e) { /* 原型/测试页没有工作区实现时走 legacy */ }
+    return "default";
+  }
+
   function profilePath(pid, rest) {
     return "/p/" + seg(pid) + rest;
   }
@@ -63,7 +74,7 @@
    */
   function request(method, path, opts) {
     opts = opts || {};
-    var headers = Object.assign({ Accept: "application/json", "X-Requested-With": "MCChecker" }, opts.headers || {});
+    var headers = Object.assign({ Accept: "application/json", "X-Requested-With": "MCChecker", "X-Workspace-Id": workspaceId() }, opts.headers || {});
     if (MC.config && MC.config.mock) {
       return MC.mock
         .handle({ method: method, path: path, query: opts.query || {}, body: opts.body, raw: opts.raw, headers: headers })
@@ -102,7 +113,7 @@
     if (MC.config && MC.config.mock) {
       return MC.mock.download({ path: path, query: query || {} });
     }
-    return fetch(BASE + path + buildQuery(query), { credentials: "same-origin" }).then(
+    return fetch(BASE + path + buildQuery(query), { credentials: "same-origin", headers: { "X-Workspace-Id": workspaceId() } }).then(
       function (resp) {
         if (!resp.ok) {
           return resp.json().then(

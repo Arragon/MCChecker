@@ -96,6 +96,10 @@ def seed_roles(profile_name: str = "p1", local_admin: bool = False) -> str:
 def http_request(server, method: str, path: str, body=None, headers: Optional[Dict[str, str]] = None):
     """发一个请求；`body` 为 dict/list 时按 JSON 序列化。返回 (status, headers, body)。"""
     merged = dict(headers or {})
+    if method.upper() in WRITE_METHODS:
+        # M9-03：v1 业务写必须显式工作区；测试默认 legacy。要验 428 的用例
+        # 显式传 `X-Workspace-Id: ""`，setdefault 不会覆盖空值。
+        merged.setdefault("X-Workspace-Id", "default")
     payload = None
     if isinstance(body, (dict, list)):
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")

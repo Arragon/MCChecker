@@ -365,6 +365,7 @@ class TaskRunner:
                     task_id=conflict.id,
                 )
             task = Task(profile=pid, ttype=ttype, target=clean_target, actor=_actor_of(ctx))
+            task.workspace = str(getattr(ctx, "workspace_id", "") or "default")
             task.observe(self._on_progress)
             self._tasks[task.id] = task
             self._active[key] = task
@@ -483,6 +484,14 @@ class TaskRunner:
         return None
 
     def _run(self, task: Task, fn: Callable[[Task], None]) -> None:
+        # 工作线程不继承请求 contextvar，必须显式进入任务所属工作区。
+        # 局部 import 保持 §3.3 的“队列本身不直接持有 storage”分层断言。
+        from ..core import storage as storage_module
+
+        with storage_module.use_workspace(getattr(task, "workspace", "default")):
+            self._run_in_workspace(task, fn)
+
+    def _run_in_workspace(self, task: Task, fn: Callable[[Task], None]) -> None:
         # 「收口」要覆盖 `_run` 的**每一**行。原先 `mark_running()` 与第一次 `revision.bump()`
         # 落在 `try` 之外、成功路径的 `_finish()` 落在 `try` 之后：那三处任意一处抛异常，异常
         # 都只进那只没人 inspect 的 `Future`，而 `_active[key]` 永远被占住——这个
