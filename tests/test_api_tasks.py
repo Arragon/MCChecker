@@ -1956,7 +1956,12 @@ class TestLayeringAndContract:
             "fn",
         ]
         assert list(inspect.signature(tasks.TaskRunner.get).parameters) == ["self", "task_id"]
-        assert list(inspect.signature(tasks.TaskRunner.list).parameters) == ["self", "pid", "active_only"]
+        assert list(inspect.signature(tasks.TaskRunner.list).parameters) == [
+            "self",
+            "pid",
+            "active_only",
+            "workspace",
+        ]  # M10-05：任务按 W/P 归属
         shutdown_params = inspect.signature(tasks.TaskRunner.shutdown).parameters
         assert list(shutdown_params) == ["self", "timeout"]
         assert shutdown_params["timeout"].default == 30  # §10.1：至多等 30 秒

@@ -10,20 +10,28 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
+
+from ..core import storage
 
 PARTS = ("files", "favorites", "remarks", "settings", "tasks")
 
 _LOCK = threading.Lock()
-_COUNTERS: Dict[str, Dict[str, int]] = {}
+_COUNTERS: Dict[Tuple[str, str], Dict[str, int]] = {}
+
+
+def _scope(profile_id: str) -> Tuple[str, str]:
+    """计数键 = (工作区, 机型)；legacy 工作区记作 `default`。"""
+    return (storage.get_active_workspace() or "default", profile_id)
 
 
 def _entry(profile_id: str) -> Dict[str, int]:
     """取（或按 §7.3 的起始值 1 建）某机型的计数。调用方必须持锁。"""
-    entry = _COUNTERS.get(profile_id)
+    key = _scope(profile_id)
+    entry = _COUNTERS.get(key)
     if entry is None:
         entry = {part: 1 for part in PARTS}
-        _COUNTERS[profile_id] = entry
+        _COUNTERS[key] = entry
     return entry
 
 

@@ -58,10 +58,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core import device_models, storage
 from ..core.errors import BUSY, INVALID_INPUT, MAINTENANCE, AppError
-from . import revision, tasks, temp_store
+from . import revision, tasks, temp_store, workspace_catalog
 from .context import RequestContext
 
 logger = logging.getLogger(__name__)
+
+#: catalog 里的 legacy 工作区 id；调度计划键统一用它，空串/`None` 也归到这里。
+LEGACY_WORKSPACE = workspace_catalog.LEGACY_WORKSPACE_ID
 
 #: 线程名：可识别、**不带** `mctask` 前缀（理由见模块 docstring 第 3 条）。
 THREAD_NAME = "mcsched"
@@ -159,9 +162,20 @@ def _interval_value(raw: Any) -> int:
         return DEFAULT_INTERVAL_HOURS
 
 
-def system_context(pid: str) -> RequestContext:
+def _normalized_workspace(workspace_id: Optional[str]) -> str:
+    text = str(workspace_id or "").strip()
+    return LEGACY_WORKSPACE if not text else text
+
+
+def system_context(pid: str, workspace_id: str = LEGACY_WORKSPACE) -> RequestContext:
     """后台提交的上下文：`actor=None` ⇒ `tasks._actor_of()` 给出 `system`（§7.10）。"""
-    return RequestContext(ip="", cid=None, profile_id=pid, actor=None)
+    return RequestContext(
+        ip="",
+        cid=None,
+        profile_id=pid,
+        workspace_id=_normalized_workspace(workspace_id),
+        actor=None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,14 +215,37 @@ def _profile_ids() -> Optional[List[str]]:
     return [str(model.get("id")) for model in models if str(model.get("id") or "").strip()]
 
 
-def _read_schedule_cfg(pid: str) -> Dict[str, Any]:
+def _scopes() -> Optional[List[Tuple[str, str]]]:
+    """全部 (W, P) 调度作用域；legacy 机型表读坏时返回 None（保留旧计划）。"""
+    ids = _profile_ids()
+    if ids is None:
+        return None
+    scopes: List[Tuple[str, str]] = [(LEGACY_WORKSPACE, pid) for pid in ids]
+    try:
+        workspaces = workspace_catalog.list_workspaces()
+    except Exception as exc:
+        # catalog 损坏只影响新工作区；legacy 计划仍可继续跑。
+        logger.warning("读取工作区目录失败，本轮只调度 legacy：%s", exc)
+        return scopes
+    for row in workspaces:
+        wid = str(row.get("id") or "")
+        if not wid or wid == LEGACY_WORKSPACE:
+            continue
+        for profile in row.get("profiles") or []:
+            pid = str(profile.get("id") or "").strip()
+            if pid:
+                scopes.append((wid, pid))
+    return scopes
+
+
+def _read_schedule_cfg(pid: str, workspace_id: str = LEGACY_WORKSPACE) -> Dict[str, Any]:
     """读一份 `schedule.json`（只读，不加写锁）。
 
     `_save_json` 走原子写，所以读到的永远是完整文件；读坏损/缺文件时回落默认值，
     一条机型的读失败不许把整个计划清空。
     """
     try:
-        with storage.use_profile(pid):
+        with storage.use_workspace(workspace_id), storage.use_profile(pid):
             cfg = storage.load_schedule()
     except Exception as exc:
         logger.warning("读取机型 %s 的定时配置失败，本轮按未启用处理：%s", pid, exc)
@@ -234,11 +271,20 @@ def sweep_derived_caches(
     """
     moment = now if now is not None else datetime.now()
     cutoff = moment.timestamp() - max(0.0, float(max_age_seconds))
-    ids = _profile_ids()
-    if ids is None:
+    scopes = _scopes()
+    if scopes is None:
         return 0
     removed = 0
-    for pid in ids:
+    for workspace_id, pid in scopes:
+        removed += _sweep_cache_scope(workspace_id, pid, cutoff)
+    if removed:
+        logger.info("定时清理：派生缓存删除 %d 个文件", removed)
+    return removed
+
+
+def _sweep_cache_scope(workspace_id: str, pid: str, cutoff: float) -> int:
+    removed = 0
+    with storage.use_workspace(workspace_id):
         for dirname in DERIVED_CACHE_DIRNAMES:
             directory = os.path.join(storage.get_cache_root_dir(pid), dirname)
             if not os.path.isdir(directory):
@@ -255,8 +301,6 @@ def sweep_derived_caches(
                 except OSError as exc:
                     # 别人正在删 / 刚被删掉：派生数据少删一个不叫故障，下一轮再来。
                     logger.debug("定时清理跳过 %s：%s", path, exc)
-    if removed:
-        logger.info("定时清理：派生缓存删除 %d 个文件", removed)
     return removed
 
 
@@ -298,7 +342,7 @@ class Scheduler(threading.Thread):
         self._stopping = threading.Event()
         self._sleep_fn = sleep_fn or self._wakeup.wait
         self._lock = threading.Lock()
-        self._plans: Dict[str, _Plan] = {}
+        self._plans: Dict[Tuple[str, str], _Plan] = {}
         now = self._now_fn()
         # 清理的账从构造那一刻起算：启动那一轮**不**删任何东西。
         self._next_temp_sweep = now + timedelta(seconds=TEMP_SWEEP_SECONDS)
@@ -332,7 +376,9 @@ class Scheduler(threading.Thread):
             self._plans = plans
         self._wakeup.set()
 
-    def next_run_at(self, pid: str) -> Optional[datetime]:
+    def next_run_at(
+        self, pid: str, workspace_id: Optional[str] = None
+    ) -> Optional[datetime]:
         """§7.9 的 `next_run_at`：只有启用、有排期、且**这条线程还没收摊**时才有值；不持久化。
 
         `stop()` 之后一律报 None：`ordered_stop` 的顺序是「调度器 → 排空队列 → 关 HTTP」，
@@ -341,8 +387,10 @@ class Scheduler(threading.Thread):
         """
         if self._stopping.is_set():
             return None
+        wid = workspace_id if workspace_id is not None else storage.get_active_workspace()
+        key = (_normalized_workspace(wid), pid)
         with self._lock:
-            plan = self._plans.get(pid)
+            plan = self._plans.get(key)
         if plan is None or not plan.enabled:
             return None
         return plan.next_run
@@ -406,10 +454,10 @@ class Scheduler(threading.Thread):
         fired: List[str] = []
         with self._lock:
             snapshot = list(self._plans.items())
-        for pid, plan in snapshot:
+        for (workspace_id, pid), plan in snapshot:
             if not plan.enabled or plan.next_run is None or plan.next_run > moment:
                 continue
-            if self._fire(pid, plan, moment):
+            if self._fire(workspace_id, pid, plan, moment):
                 fired.append(pid)
         self._sweep_if_due(moment)
         return fired
@@ -418,28 +466,32 @@ class Scheduler(threading.Thread):
     # 内部
     # ------------------------------------------------------------------
 
-    def _read_plans(self) -> Optional[Dict[str, _Plan]]:
-        ids = _profile_ids()
-        if ids is None:
+    def _read_plans(self) -> Optional[Dict[Tuple[str, str], _Plan]]:
+        scopes = _scopes()
+        if scopes is None:
             return None  # 注册表读坏了：保留上一轮计划，别把已有排期清空
         moment = self._now_fn()
-        plans: Dict[str, _Plan] = {}
-        for pid in ids:
-            cfg = _read_schedule_cfg(pid)
+        plans: Dict[Tuple[str, str], _Plan] = {}
+        for workspace_id, pid in scopes:
+            cfg = _read_schedule_cfg(pid, workspace_id)
             enabled = bool(cfg.get("enabled", False))
             hours = _interval_value(cfg.get("interval_hours", DEFAULT_INTERVAL_HOURS))
             next_run = compute_next_run(cfg.get("last_run"), hours, moment) if enabled else None
-            plans[pid] = _Plan(enabled=enabled, interval_hours=hours, next_run=next_run)
+            plans[(workspace_id, pid)] = _Plan(
+                enabled=enabled, interval_hours=hours, next_run=next_run
+            )
         return plans
 
-    def _fire(self, pid: str, plan: _Plan, moment: datetime) -> bool:
+    def _fire(self, workspace_id: str, pid: str, plan: _Plan, moment: datetime) -> bool:
         """投一条 `update_all`；这是循环对「执行更新」的全部参与方式。"""
         handler = tasks.handler_for(TASK_TYPE)
         if handler is None:  # pragma: no cover - tasks 模块导入期就注册好了
             logger.error("任务类型 %s 没有执行体，机型 %s 本轮跳过", TASK_TYPE, pid)
             return False
         try:
-            task = self.runner.submit(system_context(pid), TASK_TYPE, None, handler)
+            task = self.runner.submit(
+                system_context(pid, workspace_id), TASK_TYPE, None, handler
+            )
         except AppError as exc:
             return self._reschedule(pid, plan, moment, exc)
         except Exception:
@@ -448,7 +500,8 @@ class Scheduler(threading.Thread):
             return False
         self._set_next_run(plan, moment + timedelta(hours=plan.interval_hours))
         logger.info(
-            "定时更新已提交：机型=%s 间隔=%d 小时 id=%s actor=%s",
+            "定时更新已提交：工作区=%s 机型=%s 间隔=%d 小时 id=%s actor=%s",
+            workspace_id,
             pid,
             plan.interval_hours,
             task.id,
@@ -511,19 +564,20 @@ def _format(moment: Optional[datetime]) -> Optional[str]:
     return moment.strftime(TIME_FORMAT) if moment is not None else None
 
 
-def schedule_view(pid: str) -> Dict[str, Any]:
+def schedule_view(pid: str, workspace_id: Optional[str] = None) -> Dict[str, Any]:
     """`GET /p/{pid}/schedule` 的载荷（§7.9）。读接口，永不递增修订号。
 
     `next_run_at` 只由**在跑的调度器**给出：没有调度器时报 `None`，界面显示「—」。
     凭空算一个「下次执行时间」是在撒谎——那个进程里没有人会去执行它。
     """
-    cfg = _read_schedule_cfg(pid)
+    wid = workspace_id if workspace_id is not None else storage.get_active_workspace()
+    cfg = _read_schedule_cfg(pid, wid)
     sched = get_scheduler()
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "interval_hours": _interval_value(cfg.get("interval_hours", DEFAULT_INTERVAL_HOURS)),
         "last_run": cfg.get("last_run"),
-        "next_run_at": _format(sched.next_run_at(pid)) if sched is not None else None,
+        "next_run_at": _format(sched.next_run_at(pid, wid)) if sched is not None else None,
     }
 
 
