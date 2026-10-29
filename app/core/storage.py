@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 PROFILES_DIR = os.path.join(DATA_DIR, "profiles")
+#: V3 Workspace 数据根：`data/workspaces/<wid>/profiles/<pid>/...`。
+#: 放在 DATA_DIR 下，`configure_data_dir` 会随数据根一起重写。
+WORKSPACES_DIR = os.path.join(DATA_DIR, "workspaces")
 
 CONFIGS_DIR = os.path.join(DATA_DIR, "configs")
 ARCHIVE_DIR = os.path.join(DATA_DIR, "archive")
@@ -44,11 +47,15 @@ DEFAULT_PROFILE = "default"
 #: `secrets.token_urlsafe` 的字符集；同时用来挡住把 token 当路径用的穿越尝试。
 _TEMP_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _profile_var: contextvars.ContextVar[str] = contextvars.ContextVar("mc_profile", default=DEFAULT_PROFILE)
+#: 空串 = legacy 根（`data/profiles`）；非空 = `data/workspaces/<wid>/profiles`。
+_workspace_var: contextvars.ContextVar[str] = contextvars.ContextVar("mc_workspace", default="")
 
 #: 机型 id 的合法字符（规范 §5.2 `[A-Za-z0-9_-]+`）。
 _PROFILE_ID_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 )
+#: 工作区 id 与机型 id 同一安全字符集；实际 id 由 catalog 生成（`w-...`）。
+_WORKSPACE_ID_CHARS = _PROFILE_ID_CHARS
 
 
 def _normalize_profile_id(profile_id: Optional[str]) -> str:
@@ -95,6 +102,36 @@ def use_profile(profile_id: Optional[str]):
         _profile_var.reset(token)
 
 
+def _normalize_workspace_id(workspace_id: Optional[str]) -> str:
+    """规范化工作区 id；`None`/空串表示 legacy 根。"""
+    if workspace_id is None:
+        return ""
+    text = str(workspace_id).strip()
+    if not text or text == "default":
+        return ""
+    if text in (".", "..") or any(ch not in _WORKSPACE_ID_CHARS for ch in text):
+        raise AppError(NOT_FOUND, "工作区不存在", workspace=text)
+    return text
+
+
+def set_active_workspace(workspace_id: Optional[str]) -> None:
+    _workspace_var.set(_normalize_workspace_id(workspace_id))
+
+
+def get_active_workspace() -> str:
+    return _normalize_workspace_id(_workspace_var.get())
+
+
+@contextmanager
+def use_workspace(workspace_id: Optional[str]):
+    """显式进入工作区数据根；`None`/空串回到 legacy `data/profiles`。"""
+    token = _workspace_var.set(_normalize_workspace_id(workspace_id))
+    try:
+        yield
+    finally:
+        _workspace_var.reset(token)
+
+
 def configure_data_dir(data_dir: str) -> str:
     """把数据根切到 `data_dir`（§3.6 的 `--data-dir` / `MCHECKER_DATA_DIR`）。
 
@@ -124,13 +161,16 @@ def configure_data_dir(data_dir: str) -> str:
 
 def _profile_base_dir(profile_id: Optional[str] = None) -> str:
     pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
+    wid = get_active_workspace()
+    if wid:
+        return os.path.join(WORKSPACES_DIR, wid, "profiles", pid)
     return os.path.join(PROFILES_DIR, pid)
 
 
 def get_configs_dir(profile_id: Optional[str] = None) -> str:
     pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
     target = os.path.join(_profile_base_dir(pid), "configs")
-    if pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(CONFIGS_DIR):
+    if not get_active_workspace() and pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(CONFIGS_DIR):
         return CONFIGS_DIR
     return target
 
@@ -138,7 +178,7 @@ def get_configs_dir(profile_id: Optional[str] = None) -> str:
 def get_archive_root_dir(profile_id: Optional[str] = None) -> str:
     pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
     target = os.path.join(_profile_base_dir(pid), "archive")
-    if pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(ARCHIVE_DIR):
+    if not get_active_workspace() and pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(ARCHIVE_DIR):
         return ARCHIVE_DIR
     return target
 
@@ -146,7 +186,7 @@ def get_archive_root_dir(profile_id: Optional[str] = None) -> str:
 def get_cache_root_dir(profile_id: Optional[str] = None) -> str:
     pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
     target = os.path.join(_profile_base_dir(pid), "cache")
-    if pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(CACHE_DIR):
+    if not get_active_workspace() and pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(CACHE_DIR):
         return CACHE_DIR
     return target
 
@@ -183,7 +223,7 @@ def validate_temp_token(token: Any) -> str:
 def get_parse_cache_dir(profile_id: Optional[str] = None) -> str:
     pid = _normalize_profile_id(profile_id) if profile_id is not None else get_active_profile()
     target = os.path.join(get_cache_root_dir(pid), "parse_tree")
-    if pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(PARSE_CACHE_DIR):
+    if not get_active_workspace() and pid == DEFAULT_PROFILE and not os.path.exists(target) and os.path.exists(PARSE_CACHE_DIR):
         return PARSE_CACHE_DIR
     return target
 

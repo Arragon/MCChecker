@@ -157,6 +157,7 @@ RUNNER_DRAIN_TIMEOUT = 30.0
 # 业务目录树中需要真实存在的一级/二级目录。
 DATA_SUBDIRS = (
     "profiles",
+    "workspaces",
     "configs",
     "archive",
     "records",

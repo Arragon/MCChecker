@@ -128,6 +128,9 @@ WRITE_ROUTE_ACTIONS = {
     # M7-12：软退役/恢复与配置类别生命周期；退役机型仍可读。
     ("POST", "/api/v1/profiles/{pid}/retire"): "settings_write",
     ("POST", "/api/v1/profiles/{pid}/restore"): "settings_write",
+    # M9-02（INH-2119）：V3 workspace 元数据写接口，仅管理员。
+    ("POST", "/api/v3/workspaces"): "settings_write",
+    ("PATCH", "/api/v3/workspaces/{wid}"): "settings_write",
     ("POST", "/api/v1/config/families/{fid}/retire"): "config_registry_write",
     ("POST", "/api/v1/config/families/{fid}/reactivate"): "config_registry_write",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks_run",
@@ -187,6 +190,7 @@ WRITE_ROUTE_ACTIONS = {
 ROUTE_VALUES = {
     "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
     "item": "pp_energy", "group": "g1", "hid": "ch_000001",
+    "wid": "w-00000001",
     # 配置域对象 ID（M6-01/02）：形状必须是 `<prefix>_<6 位>`，否则会先撞上 ID 校验
     # 而不是权限矩阵——这里要验的是"权限先于存在性"。
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",

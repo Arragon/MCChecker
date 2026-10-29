@@ -135,6 +135,7 @@ def build_router(settings: Settings) -> Router:
         api_temp,
         api_tools,
         api_upload,
+        api_workspaces,
         legacy,
     )
 
@@ -143,6 +144,7 @@ def build_router(settings: Settings) -> Router:
     # 但顺序写在这里，避免以后新增通配路由时被抢先）。
     legacy.register(router)
     api_session.register(router, settings)
+    api_workspaces.register(router, settings)
     router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)

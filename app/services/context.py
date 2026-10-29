@@ -27,6 +27,8 @@ class RequestContext:
     ip: str
     cid: Optional[str] = None
     profile_id: str = ""
+    #: V3 工作区 id；空串 = legacy `data/profiles`。M9-02 只落字段，wid 解析归 2120。
+    workspace_id: str = ""
     actor: Optional[Actor] = None
     #: 上传类请求的原始文件名（`X-Filename`，已在 HTTP 层做过百分号解码，C26）。
     #: 合法性由各服务用 `fsutil.validate_filename` 判定——上下文不做策略。
