@@ -154,8 +154,10 @@ def now_string() -> str:
     return datetime.now().strftime(TIME_FORMAT)
 
 
-def _key(pid: str, ttype: str, target: Optional[str]) -> Tuple[str, str, str]:
-    return (pid, ttype, target or ANY_TARGET)
+def _key(
+    workspace: str, pid: str, ttype: str, target: Optional[str]
+) -> Tuple[str, str, str, str]:
+    return (workspace or "default", pid, ttype, target or ANY_TARGET)
 
 
 def _state_from_items(items: List[Dict[str, Any]]) -> str:
@@ -310,7 +312,7 @@ class TaskRunner:
         )
         self._lock = threading.Lock()
         self._tasks: "OrderedDict[str, Task]" = OrderedDict()
-        self._active: Dict[Tuple[str, str, str], Task] = {}
+        self._active: Dict[Tuple[str, str, str, str], Task] = {}
         self._closed = False
 
     # ------------------------------------------------------------------
@@ -333,11 +335,12 @@ class TaskRunner:
         `ttype` 必须在 `TASK_TYPES` 里，否则 `INVALID_INPUT`——见 `_run` 上方与
         `_CONFLICTING_TYPES` 的说明（卡 6 复审 F4）。
 
-        互斥规则：key = `(pid, ttype, target or '*')`，同 key 已有 queued/running →
+        互斥规则：key = `(workspace, pid, ttype, target or '*')`，同 key 已有 queued/running →
         `AppError(BUSY, task_id=第一次的 id)`；同机型内 `update_all` 与**任意**
         `update_source` 互斥（同一机型同时只允许一个「更新类」任务改同一批文件），
         而只要有一方是 `refresh_records`，就按**机型**互斥、不看 target——判据全在
-        `_CONFLICTING_TYPES` 那张表里（卡 6 复审 F2）。
+        `_CONFLICTING_TYPES` 那张表里（卡 6 复审 F2）。M10-05 起 W 进入 key：
+        两个工作区的同名机型/源不再互相挡住。
         """
         if ttype not in TASK_TYPES:
             # 类型清单是 key 语义的一部分：`_CONFLICTING_TYPES` 与 `FINISH_PARTS` 都按它取值。
@@ -352,12 +355,13 @@ class TaskRunner:
             )
         pid = _profile_of(ctx)
         clean_target = target or None
-        key = _key(pid, ttype, clean_target)
+        workspace = str(getattr(ctx, "workspace_id", "") or "default")
+        key = _key(workspace, pid, ttype, clean_target)
         with self._lock:
             if self._closed:
                 raise AppError(MAINTENANCE, "服务器正在停止，不再接收新任务")
             self._purge_locked()
-            conflict = self._conflict_locked(pid, ttype, key)
+            conflict = self._conflict_locked(workspace, pid, ttype, key)
             if conflict is not None:
                 raise AppError(
                     BUSY,
@@ -365,12 +369,15 @@ class TaskRunner:
                     task_id=conflict.id,
                 )
             task = Task(profile=pid, ttype=ttype, target=clean_target, actor=_actor_of(ctx))
-            task.workspace = str(getattr(ctx, "workspace_id", "") or "default")
+            task.workspace = workspace
             task.observe(self._on_progress)
             self._tasks[task.id] = task
             self._active[key] = task
 
-        revision.bump(pid, TASK_PART)  # queued 入队也要让人看见
+        from ..core import storage as storage_module
+
+        with storage_module.use_workspace(workspace):
+            revision.bump(pid, TASK_PART)  # queued 入队也要让人看见
         try:
             future = self._pool.submit(self._run, task, fn)
         except RuntimeError as exc:  # 池刚好在并发的 shutdown 里关掉了
@@ -390,14 +397,16 @@ class TaskRunner:
             self._purge_locked()
             return self._tasks.get(task_id)
 
-    def list(self, pid: str, active_only: bool) -> List[Task]:
-        """按机型列任务，入队顺序（§7.10 的 `{"items": [task]}`）。"""
+    def list(self, pid: str, active_only: bool, workspace: str = "default") -> List[Task]:
+        """按 W/P 列任务，入队顺序（§7.10 的 `{"items": [task]}`）。"""
         with self._lock:
             self._purge_locked()
             return [
                 task
                 for task in self._tasks.values()
-                if task.profile == pid and (not active_only or task.state in ACTIVE_STATES)
+                if task.profile == pid
+                and getattr(task, "workspace", "default") == (workspace or "default")
+                and (not active_only or task.state in ACTIVE_STATES)
             ]
 
     # ------------------------------------------------------------------
@@ -472,14 +481,14 @@ class TaskRunner:
     # ------------------------------------------------------------------
 
     def _conflict_locked(
-        self, pid: str, ttype: str, key: Tuple[str, str, str]
+        self, workspace: str, pid: str, ttype: str, key: Tuple[str, str, str, str]
     ) -> Optional[Task]:
         same = self._active.get(key)
         if same is not None:
-            return same  # 同 (机型, 类型, target) 的快路径；`update_all` 之间也是靠它挡住
+            return same  # 同 (W, 机型, 类型, target) 的快路径；`update_all` 之间也是靠它挡住
         blocked = _CONFLICTING_TYPES.get(ttype, ())
-        for (other_pid, other_type, _), task in self._active.items():
-            if other_pid == pid and other_type in blocked:
+        for (other_workspace, other_pid, other_type, _), task in self._active.items():
+            if other_workspace == workspace and other_pid == pid and other_type in blocked:
                 return task
         return None
 
@@ -536,7 +545,15 @@ class TaskRunner:
         不递增），但 `tasks` 必须递增，否则别人的界面永远停在「进行中」。
         """
         with self._lock:
-            self._active.pop(_key(task.profile, task.type, task.target), None)
+            self._active.pop(
+                _key(
+                    getattr(task, "workspace", "default"),
+                    task.profile,
+                    task.type,
+                    task.target,
+                ),
+                None,
+            )
         task.mark_finished(state, error=error)
         revision.bump(task.profile, TASK_PART)
         if error is None:

@@ -75,13 +75,7 @@ def list_tasks(
     runner = tasks.get_runner()
     workspace = ctx.workspace_id or "default"
     return Response(
-        payload={
-            "items": [
-                task.to_payload()
-                for task in runner.list(params["pid"], active_only)
-                if getattr(task, "workspace", "default") == workspace
-            ]
-        }
+        payload={"items": [t.to_payload() for t in runner.list(params["pid"], active_only, workspace)]}
     )
 
 
