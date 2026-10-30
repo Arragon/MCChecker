@@ -7,7 +7,7 @@
 **架构设计：`docs/MCChecker_ARCHITECTURE.md`**  
 **Linear Project：MCChecker / Inhandy**
 
-> 本文件是 MCChecker 的正式开发计划与任务定义源。Linear 用于反映执行状态与真实 blocking/blockedBy；`MCChecker_ROADMAP_v2.md` 为历史审查版本，不再作为当前执行计划。Issue 创建、文档更新或 Milestone 建立均不代表功能完成。
+> 本文件是 T01–T20 的任务定义。Linear 只反映执行状态与 blocking/blockedBy。Issue 创建、文档更新或 Milestone 建立均不代表功能完成。v2 落地后的卡级执行记录见 `docs/MCChecker_DELIVERY_PLAN.md`。
 
 ---
 
