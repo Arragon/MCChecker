@@ -81,6 +81,8 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v3/workspaces/{wid}/sync/sources/{sid}/run"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/runs"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry"): "tasks (retry queued; no business part)",
+    ("POST", "/api/v3/workspaces/{wid}/sync/candidates/{cid}/apply-preview"): None,
+    ("POST", "/api/v3/workspaces/{wid}/sync/candidates/{cid}/apply"): None,
     ("PUT", "/api/v3/workspaces/{wid}/sync/policy"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/previews"): None,

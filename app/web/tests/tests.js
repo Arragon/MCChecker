@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 113;  // + M16-31/32/33/34/35 更新管理
+  var EXPECTED_CASES = 114;  // + M16-31/32/33/34/35/36 更新管理
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4475,7 +4475,7 @@
         retry.click();
         return tick().then(function () {
           ok(calls.some(function (c) { return c.method === "POST" && c.path.indexOf("/retry") >= 0; }), "重试走 POST /retry");
-          modal.querySelector(".modal-footer .btn").click();
+          [].filter.call(modal.querySelectorAll(".modal-footer .btn"), function (b) { return b.textContent === "关闭"; })[0].click();
         });
       })
       .then(function () {
@@ -4492,7 +4492,7 @@
           return tick().then(function () {
             var modal = document.querySelector(".modal");
             ok(!modal.querySelector("[data-sync-retry]"), "只读身份无重试");
-            modal.querySelector(".modal-footer .btn").click();
+            [].filter.call(modal.querySelectorAll(".modal-footer .btn"), function (b) { return b.textContent === "关闭"; })[0].click();
             view.destroy();
             view.el.remove();
             inst.destroy();
@@ -4506,6 +4506,113 @@
         throw err;
       });
   });
+
+  test("SYNC-36：候选差异预览、冲突决议与写入草稿", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalWid = MC.workspaces && MC.workspaces.scopeId;
+    var candidate = {
+      candidate_id: "cand-36", source_id: "src-36", profile_id: "default",
+      state: "pending", content_hash: "a".repeat(64), created_at: "2026-11-02T00:00:00Z",
+      file_version_id: "v-36",
+    };
+    var preview = {
+      preview_id: "prev-36", candidate_id: "cand-36", draft_revision: 3,
+      d0_frozen: false, blockers: [], allowed_decisions: ["use_new", "inherit_old", "manual"],
+      items: [
+        { parameter_id: "p1", name: "Pulse", action: "from_new", ours: { value: { type: "int", text: "1" } }, theirs: { value: { type: "int", text: "2" } } },
+        { parameter_id: "p2", name: "Enabled", action: "conflict", allowed: ["use_new", "inherit_old", "manual"], ours: { value: { type: "bool", text: "false" } }, theirs: { value: { type: "bool", text: "true" } } },
+      ],
+    };
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-cand"; };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && path.indexOf("/sync/candidates") >= 0) {
+        return Promise.resolve({ items: [candidate], total: 1, next_cursor: null });
+      }
+      if (method === "GET" && path.indexOf("/configs") >= 0 && path.indexOf("/releases") >= 0) {
+        return Promise.resolve({ items: [{ release_id: "rel-36", version: "690" }] });
+      }
+      if (method === "GET" && path.indexOf("/configs") >= 0) {
+        return Promise.resolve({ items: [{ config_id: "cfg-36", code: "MC-1", name: "配置" }] });
+      }
+      if (method === "POST" && path.indexOf("/apply-preview") >= 0) {
+        return Promise.resolve(preview);
+      }
+      return Promise.resolve({ changed: ["p1", "p2"], draft_revision: 4 });
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalWid) MC.workspaces.scopeId = originalWid;
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "candidates", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        var row = host.querySelector("[data-sync-candidate]");
+        ok(row, "候选列表可点开");
+        row.click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        ok(modal, "打开候选抽屉");
+        ok(modal.textContent.indexOf("无文件版本") < 0, "候选有关联文件版本");
+        var previewBtn = modal.querySelector("[data-sync-preview]");
+        ok(previewBtn, "有生成预览按钮");
+        previewBtn.click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        ok(modal.textContent.indexOf("Pulse") >= 0 && modal.textContent.indexOf("Enabled") >= 0, "显示参数差异");
+        var decision = modal.querySelector("[data-sync-decision]");
+        ok(decision, "冲突参数有决议下拉");
+        decision.value = "use_new";
+        decision.dispatchEvent(new Event("change"));
+        var apply = modal.querySelector("[data-sync-apply]");
+        ok(apply && !apply.disabled, "可写身份可应用");
+        apply.click();
+        return tick().then(function () {
+          var call = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply") >= 0 && c.path.indexOf("preview") < 0; })[0];
+          ok(call, "应用走 POST /apply");
+          ok(call.opts.body.preview_id === "prev-36", "携带预览 id");
+          ok(call.opts.body.decisions.p2 === "use_new", "决议随请求发送");
+          ok(document.body.textContent.indexOf("已写入") >= 0, "成功只提示写入草稿");
+          modal.querySelector(".modal-footer .btn").click();
+        });
+      })
+      .then(function () {
+        var ro = settingsApp(false);
+        ro.can = function () { return false; };
+        var view = MC.views.updates(ro, { kind: "updates", arg: "candidates", query: {} });
+        return tick().then(function () {
+          view.el.querySelector("[data-sync-candidate]").click();
+          return tick().then(function () {
+            var modal = document.querySelector(".modal");
+            var previewBtn = modal.querySelector("[data-sync-preview]");
+            previewBtn.click();
+            return tick().then(function () {
+              var apply = modal.querySelector("[data-sync-apply]");
+              ok(apply && apply.disabled, "只读身份应用禁用");
+              modal.querySelector(".modal-footer .btn").click();
+              view.destroy();
+              view.el.remove();
+              inst.destroy();
+              inst.el.remove();
+              restore();
+            });
+          });
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链
    * 清空之后——串行队列本身是一条长微任务链，不 flush 的话最后几条用例的迟到拒绝
