@@ -1,6 +1,7 @@
 """M16-33 workspace sync run API tests."""
 
 import json
+import time
 
 from authz_fixtures import as_role, make_server, seed_roles
 
@@ -254,3 +255,56 @@ def test_partial_busy_returns_409_with_safe_detail(monkeypatch):
         assert "task-secret" not in raw
         assert "sda.example.invalid" not in raw
         assert seen == [(wid, "default", "manual"), (wid, p2, "manual")]
+
+
+def _wait_run(caller, wid, run_id, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        status, _headers, doc = caller.json(
+            "GET", "/api/v3/workspaces/%s/sync/runs/%s" % (wid, run_id)
+        )
+        assert status == 200, doc
+        if doc["run"]["state"] in ("partial", "succeeded", "failed", "canceled", "interrupted"):
+            return doc
+        time.sleep(0.02)
+    raise AssertionError("run timeout")
+
+
+def test_run_items_events_and_retry_use_persisted_manifest():
+    seed_roles("sync-runs-retry")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        visitor = as_role(server, "visitor")
+        wid = make_workspace(admin, "W-retry")
+        cid = make_connection(wid)
+        source = make_source(wid, cid, "default", "A.xml")
+
+        status, _headers, created = admin.json(
+            "POST", runs_url(wid), {"scope": "workspace_all"}
+        )
+        assert status == 202, created
+        run_id = created["runs"][0]["run"]["run_id"]
+        doc = _wait_run(admin, wid, run_id)
+        assert doc["run"]["state"] == "failed"
+        assert doc["items"][0]["source_id"] == source["source_id"]
+        assert doc["items"][0]["state"] == "blocked"
+
+        status, _headers, listing = admin.json("GET", runs_url(wid))
+        assert status == 200 and listing["total"] >= 1
+        status, _headers, events = admin.json(
+            "GET", "/api/v3/workspaces/%s/sync/runs/%s/events" % (wid, run_id)
+        )
+        assert status == 200 and events["items"]
+        assert "Cookie" not in json.dumps(events)
+
+        status, _headers, denied = visitor.json(
+            "POST", "/api/v3/workspaces/%s/sync/runs/%s/retry" % (wid, run_id), {}
+        )
+        assert status == 403, denied
+        status, _headers, retried = admin.json(
+            "POST", "/api/v3/workspaces/%s/sync/runs/%s/retry" % (wid, run_id), {}
+        )
+        assert status == 202, retried
+        assert retried["parent_run_id"] == run_id
+        assert retried["runs"][0]["run"]["trigger"] == "retry"
+        assert retried["runs"][0]["run"]["parent_run_id"] == run_id

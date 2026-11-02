@@ -414,14 +414,20 @@ def _execute(
         counts = aggregate_counts(item["state"] for item in items)
         counts["file_updated"] = sum(1 for item in items if item.get("committed"))
         counts["candidate_created"] = sum(1 for item in items if item.get("candidate_id"))
-        _finish_run(workspace_id, run_id, state, counts)
+        _finish_run(workspace_id, run_id, state, counts, items=items)
     except Exception:
         logger.exception("同步 run 执行失败：%s", run_id)
         try:
             states = [item["state"] for item in items]
             state = aggregate_run_state(states) if states else "failed"
             counts = aggregate_counts(states) if states else {"total": total, "failed": total}
-            _finish_run(workspace_id, run_id, state if state != "running" else "failed", counts)
+            _finish_run(
+                workspace_id,
+                run_id,
+                state if state != "running" else "failed",
+                counts,
+                items=items,
+            )
         except Exception:
             logger.exception("同步 run 失败收口也失败：%s", run_id)
         raise
@@ -430,7 +436,11 @@ def _execute(
 
 
 def _finish_run(
-    workspace_id: str, run_id: str, state: str, counts: Dict[str, int]
+    workspace_id: str,
+    run_id: str,
+    state: str,
+    counts: Dict[str, int],
+    items: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     current = sync_run_store.get_run(workspace_id, run_id)
     if current["run"]["state"] in ("partial", "succeeded", "failed", "canceled", "interrupted"):
@@ -443,6 +453,27 @@ def _finish_run(
         state,
         counts=counts,
         finished_at=_now(),
+        items=[
+            {
+                key: item.get(key)
+                for key in (
+                    "item_id",
+                    "source_id",
+                    "profile_id",
+                    "state",
+                    "stage",
+                    "reason_code",
+                    "name",
+                    "reason",
+                    "committed",
+                    "candidate_id",
+                    "sha256",
+                    "bytes",
+                )
+                if item.get(key) is not None
+            }
+            for item in (items or [])
+        ],
         expected_manifest_revision=current["manifest_revision"],
     )
     try:

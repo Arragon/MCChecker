@@ -16,14 +16,25 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..core.errors import BUSY, INVALID_INPUT, AppError
-from ..services import authz, sync_preview, sync_sources, sync_tasks, workspace_catalog
+from ..core.errors import BUSY, INVALID_INPUT, NOT_FOUND, AppError
+from ..services import (
+    authz,
+    sync_preview,
+    sync_run_store,
+    sync_sources,
+    sync_tasks,
+    workspace_catalog,
+)
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
 
 def register(router: Router) -> None:
     router.add("POST", "/api/v3/workspaces/{wid}/sync/runs", create_run)
+    router.add("GET", "/api/v3/workspaces/{wid}/sync/runs", list_runs)
+    router.add("GET", "/api/v3/workspaces/{wid}/sync/runs/{run_id}", get_run)
+    router.add("GET", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/events", get_events)
+    router.add("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry", retry_run)
 
 
 def _scope(wid: str) -> None:
@@ -117,3 +128,124 @@ def create_run(
             "runs": runs,
         },
     )
+
+
+def list_runs(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    authz.authorize(ctx, "read")
+    wid = params["wid"]
+    _scope(wid)
+    try:
+        limit = int(str((query.get("limit") or ["50"])[-1]))
+        cursor = str((query.get("cursor") or ["0"])[-1])
+    except ValueError:
+        raise AppError(INVALID_INPUT, "分页参数非法", field="limit")
+    return Response(
+        payload=sync_run_store.list_runs(
+            wid,
+            state=(query.get("state") or [None])[-1],
+            trigger=(query.get("trigger") or [None])[-1],
+            limit=max(1, min(limit, 200)),
+            cursor=cursor,
+        )
+    )
+
+
+def get_run(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    authz.authorize(ctx, "read")
+    wid = params["wid"]
+    _scope(wid)
+    return Response(payload=sync_run_store.get_run(wid, params["run_id"]))
+
+
+def get_events(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    authz.authorize(ctx, "read")
+    wid = params["wid"]
+    _scope(wid)
+    try:
+        after = int(str((query.get("after_seq") or ["0"])[-1]))
+    except ValueError:
+        raise AppError(INVALID_INPUT, "after_seq 非法", field="after_seq")
+    return Response(
+        payload={
+            "items": sync_run_store.read_events(
+                wid, params["run_id"], after_seq=max(0, after)
+            )
+        }
+    )
+
+
+def retry_run(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    authz.authorize(ctx, "tasks_run")
+    wid = params["wid"]
+    _scope(wid)
+    run_id = params["run_id"]
+    doc = sync_run_store.get_run(wid, run_id)
+    retry_states = ("failed", "blocked", "interrupted")
+    failed = [
+        item
+        for item in doc.get("items") or []
+        if item.get("state") in retry_states and item.get("source_id")
+    ]
+    if not failed:
+        raise AppError(INVALID_INPUT, "没有可重试的失败来源", field="items")
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for item in failed:
+        pid = str(item.get("profile_id") or "")
+        if not pid:
+            continue
+        try:
+            source = sync_sources.get_source(wid, item["source_id"])
+        except AppError:
+            continue
+        groups.setdefault(pid, []).append(source)
+    if not groups:
+        raise AppError(NOT_FOUND, "失败来源已不存在", field="source_id")
+    runs = []
+    for pid, sources in groups.items():
+        run_ctx = RequestContext(
+            ip=ctx.ip,
+            cid=ctx.cid,
+            profile_id=pid,
+            workspace_id=wid,
+            actor=ctx.actor,
+            headers=ctx.headers,
+        )
+        try:
+            result = sync_tasks.submit_sync_run(
+                run_ctx,
+                sources,
+                trigger="retry",
+                parent_run_id=run_id,
+            )
+        except AppError as exc:
+            if exc.code == BUSY:
+                raise AppError(
+                    BUSY,
+                    "重试任务与现有任务冲突",
+                    field="runs",
+                    parent_run_id=run_id,
+                    profile_id=pid,
+                )
+            raise
+        runs.append({"profile_id": pid, "run": result["run"], "task": result["task"]})
+    return Response(status=202, payload={"parent_run_id": run_id, "runs": runs})
