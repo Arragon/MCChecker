@@ -289,6 +289,7 @@
       var keywordInput = h("input.input", { value: draft.keyword, placeholder: "压缩包内文件名/正则（可选）" });
       var catalogItems = [];
       var catalogPicker = null;
+      var wantedCatalogKind = source.kind === "sda_table" ? "table" : "file";
       if ((source.kind === "sda_table" || source.kind === "sda_file") && source.connection_id) {
         var catalogMsg = h("span.xsmall.muted", { "data-sync-catalog-msg": "1" }, "ID 与展示路径必须来自当前连接目录。");
         var catalogSelect = h("select.input", { style: "display:none", "data-sync-catalog-select": "1" },
@@ -310,7 +311,9 @@
             var path = "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
               "/connections/" + encodeURIComponent(source.connection_id) + "/catalog";
             MC.api.requestV3("GET", path).then(function (data) {
-              catalogItems = (data && data.items) || [];
+              catalogItems = ((data && data.items) || []).filter(function (item) {
+                return item.kind === wantedCatalogKind;
+              });
               util.clear(catalogSelect);
               catalogSelect.appendChild(h("option", { value: "" }, "选择目录条目…"));
               catalogItems.forEach(function (item, index) {
