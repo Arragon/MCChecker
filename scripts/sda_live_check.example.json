@@ -1,0 +1,9 @@
+{
+  "_comment": "M16-41 验收配置样例：只放地址与路径，绝不放账号/密码/Cookie。复制到授权内网后按实际值填写。",
+  "origin": "https://sda.example.internal",
+  "login_path": "/login",
+  "probe_path": "/api/session/keepalive",
+  "table_path": "/api/catalog/table/TP-0001",
+  "file_path": "/api/catalog/file/F-0001",
+  "idle_window_minutes": 30
+}
