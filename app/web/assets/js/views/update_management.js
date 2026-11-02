@@ -287,6 +287,50 @@
       var displayInput = h("input.input", { value: draft.display_path, placeholder: "业务路径，例如 /synthetic/A.xml" });
       var recordInput = h("input.input", { value: draft.record_source, placeholder: "修改记录链接（可选）" });
       var keywordInput = h("input.input", { value: draft.keyword, placeholder: "压缩包内文件名/正则（可选）" });
+      var catalogItems = [];
+      var catalogPicker = null;
+      if ((source.kind === "sda_table" || source.kind === "sda_file") && source.connection_id) {
+        var catalogMsg = h("span.xsmall.muted", { "data-sync-catalog-msg": "1" }, "ID 与展示路径必须来自当前连接目录。");
+        var catalogSelect = h("select.input", { style: "display:none", "data-sync-catalog-select": "1" },
+          h("option", { value: "" }, "选择目录条目…")
+        );
+        catalogSelect.addEventListener("change", function () {
+          var picked = catalogItems[Number(catalogSelect.value)];
+          if (!picked) return;
+          refInput.value = picked.resource_ref;
+          displayInput.value = picked.display_path;
+          catalogMsg.textContent = "已填入 " + picked.name + "（保存时服务端会再次校验）";
+        });
+        var catalogButton = h("button.btn.btn-sm", {
+          type: "button",
+          "data-sync-catalog": "1",
+          onclick: function () {
+            catalogButton.disabled = true;
+            catalogMsg.textContent = "正在读取 SDA 目录…";
+            var path = "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
+              "/connections/" + encodeURIComponent(source.connection_id) + "/catalog";
+            MC.api.requestV3("GET", path).then(function (data) {
+              catalogItems = (data && data.items) || [];
+              util.clear(catalogSelect);
+              catalogSelect.appendChild(h("option", { value: "" }, "选择目录条目…"));
+              catalogItems.forEach(function (item, index) {
+                catalogSelect.appendChild(h("option", { value: String(index) },
+                  (item.kind === "table" ? "表" : "文件") + " · " + item.name + " · " + item.display_path));
+              });
+              catalogSelect.style.display = "";
+              catalogButton.disabled = false;
+              catalogMsg.textContent = catalogItems.length
+                ? "共 " + catalogItems.length + " 项；选中后自动填入 ID/路径。"
+                : "当前目录没有可选项。";
+            }, function (err) {
+              catalogButton.disabled = false;
+              catalogMsg.textContent = (err && (err.message || err.code)) || "目录读取失败";
+            });
+          },
+        }, "从 SDA 目录选择");
+        catalogPicker = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" },
+          catalogButton, catalogSelect, catalogMsg);
+      }
       var enabledInput = h("input", { type: "checkbox", checked: draft.enabled });
       var modeSelect = h("select.input", {},
         h("option", { value: "inherit" }, "继承工作区计划"),
@@ -315,6 +359,7 @@
           field("名称", nameInput),
           field("资源引用", refInput),
           field("业务路径", displayInput),
+          catalogPicker,
           field("修改记录链接", recordInput),
           field("关键词", keywordInput),
           h("div.row", { style: "gap:18px;align-items:center" },
@@ -354,9 +399,25 @@
                 MC.api.requestV3("PATCH", sourcePath(source), {
                   body: payload,
                   headers: { "If-Match": String(source.revision) },
-                }).then(function () {
+                }).then(function (data) {
                   close();
                   MC.toast.success("更新源已保存");
+                  // 局部刷新：保留当前搜索/分页/排序，只替换这一行。
+                  if (data && data.source_id) {
+                    var items = state.sources.items;
+                    var replaced = false;
+                    for (var i = 0; i < items.length; i += 1) {
+                      if (items[i].source_id === data.source_id) {
+                        items[i] = data;
+                        replaced = true;
+                        break;
+                      }
+                    }
+                    if (replaced) {
+                      if (state.tab === "sources") renderBody();
+                      return;
+                    }
+                  }
                   loadSources(true);
                 }, function (err) {
                   showError(errorText(err));
