@@ -114,15 +114,18 @@
 
 - `docs/M16_OPERATIONS.md`：安装/升级/备份回退/保活调参/凭据恢复/安全清理/collector/诊断/发布前清单。
 - `README.md` 新增 V3.1 章节：五个 tab 的职责、关键命令与「不得宣称已发布」的边界。
-- CI（`.github/workflows/v3-cross-platform.yml`）：触发分支加入 `feat/mc-v3.1`；
-  Ubuntu + Windows 双平台跑 compileall、pytest 与 `scan_secrets.py --tree --all-history`；
-  `fetch-depth: 0` 保证全历史扫描可用。
 - `scripts/collector_bundle.py` + `tests/test_collector_bundle.py`：collector 独立包打包/校验，
   篡改成员、夹带额外文件、secret 标记、`__pycache__` 都会让校验失败。
+- **CI 未扩展**：本轮试过把 `feat/mc-v3.1` 加入触发分支并新增 compileall + secret 扫描两步，
+  Ubuntu 侧 4m46s 全绿；**Windows job 在 `Pytest` 步骤长时间不结束**（>60 分钟，历史同类运行为 9–11 分钟），
+  定位成本高且与本卡验收无关，已回退该改动（commit 见 PR #252），留作独立排查项：
+  建议加 `--faulthandler-timeout` 与 `timeout-minutes` 先抓出具体挂起用例，再决定是否纳入。
 
 ## 6. 未完成与下一步
 
 1. M16-02 / 20 / 41：真实 SDA 与真实 idle（E2/E3），按 `docs/M16_LIVE_ACCEPTANCE.md` 执行并回填。
 2. M16-14 / 42：Windows/Linux 目标机的 Python 3.12 + Playwright + Chromium 安装、进程树回收、断网安装（E4/E5）；
    拿到 wheel 与 Chromium 后用 `collector_bundle.py --wheels/--chromium` 重新打包并回填 manifest。
-3. 本门禁全绿只代表**本地自动化**通过；在 E2–E5 补齐前，M16-42 保持 `In Progress / BLOCKED-EXTERNAL`。
+3. **Windows CI 挂起排查**：`feat/mc-v3.1` 上的 Windows job 在 `Pytest` 步骤长时间不结束；
+   先用 `-o faulthandler_timeout=180` + 步骤级 `timeout-minutes` 抓出具体用例，再决定是否把该分支纳入触发。
+4. 本门禁全绿只代表**本地自动化**通过；在 E2–E5 补齐前，M16-42 保持 `In Progress / BLOCKED-EXTERNAL`。
