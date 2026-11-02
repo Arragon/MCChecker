@@ -32,6 +32,7 @@ from app.core.errors import (
     AppError,
 )
 from app.core.sync_models import (
+    REASON_CODES,
     SyncItem,
     SyncRun,
     SyncSource,
@@ -46,6 +47,7 @@ from app.core.sync_models import (
 
 from . import (
     documents,
+    sync_candidates,
     sync_commit,
     sync_http_adapter,
     sync_run_store,
@@ -54,12 +56,14 @@ from . import (
     workspace_context,
 )
 from .context import RequestContext
+from .sync_http_adapter import HttpFetchItem, HttpFetchResult
 
 logger = logging.getLogger(__name__)
 
 TRIGGER_DEFAULT = "manual"
 #: 本卡尚未接 SDA 路由（M16-23）；这类来源明确 blocked，绝不伪造成功。
 SDA_REASON = "collector_offline"
+_SDA_REASONS = REASON_CODES
 RUN_ID_PREFIX = "run-"
 IDEMPOTENCY_MAX = 200
 
@@ -74,6 +78,14 @@ class _Handle:
 
 _HANDLES: Dict[Tuple[str, str], _Handle] = {}
 _HANDLE_LOCK = threading.Lock()
+#: SDA 真取数由 collector 接入方登记（M16-23 只冻结路由，不 import collector）。
+_SDA_READER: Optional[Any] = None
+
+
+def register_sda_reader(reader: Optional[Any]) -> None:
+    """登记 SDA 取数回调；None 表示尚未接入，SDA 来源明确 blocked。"""
+    global _SDA_READER
+    _SDA_READER = reader
 
 
 def _now() -> str:
@@ -163,6 +175,7 @@ def submit_sync_run(
     parent_run_id: Optional[Any] = None,
     plan_id: Optional[Any] = None,
     runner: Optional[tasks.TaskRunner] = None,
+    sda_reader: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """入队一次 Sync run；返回 `{run, task, reused}`，不等待网络。"""
     workspace_id = validate_workspace_id(str(getattr(ctx, "workspace_id", "") or "").strip())
@@ -223,7 +236,15 @@ def submit_sync_run(
     target_runner = runner or tasks.get_runner()
 
     def execute(task: tasks.Task) -> None:
-        _execute(task, workspace_id, profile_id, run_id, normalized, handle.cancel)
+        _execute(
+            task,
+            workspace_id,
+            profile_id,
+            run_id,
+            normalized,
+            handle.cancel,
+            sda_reader or _SDA_READER,
+        )
 
     try:
         task = target_runner.submit(ctx, "sync_run", None, execute)
@@ -288,6 +309,33 @@ def cancel_run(workspace_id: str, run_id: str) -> Dict[str, Any]:
     return finished
 
 
+def recover_interrupted_runs(workspace_id: str) -> int:
+    """启动时把没有活任务的 queued/running run 收成 interrupted，绝不谎称成功。"""
+    wid = validate_workspace_id(workspace_id)
+    with _HANDLE_LOCK:
+        active = {run_id for (workspace, run_id) in _HANDLES if workspace == wid}
+    recovered = 0
+    for item in sync_run_store.list_runs(wid, limit=200)["items"]:
+        run = item["run"]
+        run_id = str(run["run_id"])
+        if run.get("state") not in ("queued", "running") or run_id in active:
+            continue
+        total = int((run.get("counts") or {}).get("total") or 0)
+        try:
+            sync_run_store.finish_run(
+                wid,
+                run_id,
+                "interrupted",
+                counts={"total": total, "interrupted": total},
+                receipt={"reason_code": "interrupted"},
+                expected_manifest_revision=item["manifest_revision"],
+            )
+        except AppError:
+            continue
+        recovered += 1
+    return recovered
+
+
 def _abort_created_run(workspace_id: str, run_id: str, exc: AppError) -> None:
     try:
         current = sync_run_store.get_run(workspace_id, run_id)
@@ -325,6 +373,7 @@ def _execute(
     run_id: str,
     sources: List[Dict[str, Any]],
     cancel: threading.Event,
+    sda_reader: Optional[Any] = None,
 ) -> None:
     items: List[Dict[str, Any]] = []
     total = len(sources)
@@ -353,7 +402,9 @@ def _execute(
                     message="已取消，未开始",
                 )
             else:
-                item = _run_source(workspace_id, profile_id, run_id, source, cancel)
+                item = _run_source(
+                    workspace_id, profile_id, run_id, source, cancel, sda_reader
+                )
             items.append(item)
             task.result["items"].append(_task_item(source, item))
             task.progress["total"] = total
@@ -362,6 +413,7 @@ def _execute(
         state = aggregate_run_state(item["state"] for item in items)
         counts = aggregate_counts(item["state"] for item in items)
         counts["file_updated"] = sum(1 for item in items if item.get("committed"))
+        counts["candidate_created"] = sum(1 for item in items if item.get("candidate_id"))
         _finish_run(workspace_id, run_id, state, counts)
     except Exception:
         logger.exception("同步 run 执行失败：%s", run_id)
@@ -414,14 +466,20 @@ def _run_source(
     run_id: str,
     source: Dict[str, Any],
     cancel: threading.Event,
+    sda_reader: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    if source.get("kind") not in ("http_file", "http_record"):
+    kind = str(source.get("kind") or "")
+    if kind.startswith("sda_"):
+        return _run_sda_source(
+            workspace_id, profile_id, run_id, source, cancel, sda_reader
+        )
+    if kind not in ("http_file", "http_record"):
         return _item(
             run_id,
             source,
             "blocked",
             reason_code=SDA_REASON,
-            message="SDA 执行路由由 M16-23 接入；本卡不伪造成功",
+            message="未知来源类型",
         )
     try:
         model = SyncSource.from_dict(source)
@@ -509,6 +567,150 @@ def _run_source(
         )
 
 
+def _run_sda_source(
+    workspace_id: str,
+    profile_id: str,
+    run_id: str,
+    source: Dict[str, Any],
+    cancel: threading.Event,
+    sda_reader: Optional[Any],
+) -> Dict[str, Any]:
+    """SDA 路由：collector 只回安全 envelope，提交/候选仍由主应用决定。"""
+    kind = str(source.get("kind") or "")
+    if sda_reader is None:
+        return _item(
+            run_id,
+            source,
+            "blocked",
+            reason_code=SDA_REASON,
+            message="SDA collector 尚未接入；不伪造成功",
+        )
+    try:
+        result = sda_reader(source, cancel)
+        if not isinstance(result, dict):
+            return _item(run_id, source, "failed", reason_code="protocol_mismatch", message="SDA 结果形状非法")
+        if cancel.is_set():
+            return _item(run_id, source, "canceled", reason_code="canceled", message="已取消，未提交")
+        status = str(result.get("status") or "")
+        reason = str(result.get("reason_code") or "unknown")
+        if reason not in _SDA_REASONS:
+            reason = "unknown"
+        if status == "blocked":
+            return _item(run_id, source, "blocked", reason_code=reason, message=result.get("message") or "SDA 阻断")
+        if status != "succeeded":
+            return _item(run_id, source, "failed", reason_code=reason, message=result.get("message") or "SDA 取数失败")
+        if kind == "sda_catalog":
+            return _item(
+                run_id,
+                source,
+                "succeeded",
+                reason_code="validated",
+                message="目录已读取；匿名 catalog 不计为会话验证",
+            )
+        if kind == "sda_table":
+            content = result.get("content")
+            if not isinstance(content, (bytes, bytearray)):
+                return _item(run_id, source, "failed", reason_code="invalid_payload", message="表内容缺失")
+            body = bytes(content)
+            digest = str(result.get("sha256") or hashlib.sha256(body).hexdigest())
+            try:
+                candidate = sync_candidates.create_candidate(
+                    workspace_id,
+                    profile_id,
+                    source["source_id"],
+                    int(source.get("revision") or 0),
+                    digest,
+                    "%s:%s" % (kind, source.get("resource_ref") or source["source_id"]),
+                )
+            except AppError as exc:
+                return _item(run_id, source, "failed", reason_code=exc.code.lower() if exc.code == "TOO_LARGE" else "unknown", message=exc.message)
+            return _item(
+                run_id,
+                source,
+                "succeeded",
+                reason_code="validated",
+                message="表内容已生成候选",
+                sha256=digest,
+                byte_size=len(body),
+                candidate_id=candidate["candidate_id"],
+            )
+        if kind != "sda_file":
+            return _item(run_id, source, "blocked", reason_code="protocol_mismatch", message="不支持的 SDA 来源")
+
+        raw_items = result.get("items")
+        if not isinstance(raw_items, (list, tuple)) or not raw_items:
+            content = result.get("content")
+            raw_items = [
+                {
+                    "name": source.get("name"),
+                    "content": content,
+                    "sha256": result.get("sha256"),
+                    "size": len(content) if isinstance(content, (bytes, bytearray)) else None,
+                }
+            ]
+        fetched = []
+        for entry in raw_items:
+            if not isinstance(entry, dict) or not isinstance(entry.get("content"), (bytes, bytearray)):
+                return _item(run_id, source, "failed", reason_code="invalid_payload", message="SDA 文件内容缺失")
+            body = bytes(entry["content"])
+            fetched.append(
+                HttpFetchItem(
+                    basename=str(entry.get("name") or source.get("name") or "file"),
+                    content=body,
+                    size=len(body),
+                    sha256=str(entry.get("sha256") or hashlib.sha256(body).hexdigest()),
+                )
+            )
+        fetch = HttpFetchResult(
+            kind="http_file",
+            status="succeeded",
+            source_id=source["source_id"],
+            profile_id=profile_id,
+            message=result.get("message") or "SDA 文件已读取",
+            items=tuple(fetched),
+        )
+        model = SyncSource.from_dict(source)
+        raw = _current_file(workspace_id, profile_id, model.name)
+        committed = sync_commit.commit_fetch_result(
+            workspace_id,
+            profile_id,
+            source,
+            fetch,
+            base_sha=raw.sha256 if raw is not None else None,
+        )
+        state = _commit_state(committed)
+        reason_code = committed.get("reason_code")
+        if state == "succeeded":
+            reason_code = "validated"
+        elif state == "unchanged":
+            reason_code = "unchanged"
+        elif state == "blocked":
+            reason_code = reason_code or "target_missing"
+        else:
+            reason_code = reason_code or "storage_failure"
+        return _item(
+            run_id,
+            source,
+            state,
+            reason_code=reason_code,
+            message=committed.get("message") or fetch.message,
+            sha256=fetched[0].sha256,
+            committed=any(item.get("status") == "success" for item in committed.get("items") or []),
+            byte_size=fetched[0].size,
+        )
+    except AppError as exc:
+        return _item(
+            run_id,
+            source,
+            "failed",
+            reason_code="too_large" if exc.code == "TOO_LARGE" else "unknown",
+            message=exc.message,
+        )
+    except Exception:
+        logger.exception("SDA 来源执行异常：%s", source.get("source_id"))
+        return _item(run_id, source, "failed", reason_code="unknown", message="SDA 来源执行失败（内部错误）")
+
+
 def _commit_state(committed: Dict[str, Any]) -> str:
     status = committed.get("status")
     if status == "succeeded":
@@ -546,6 +748,8 @@ def _item(
     sha256: Optional[str] = None,
     committed: bool = False,
     byte_size: Optional[int] = None,
+    candidate_id: Optional[str] = None,
+    stage: str = "finished",
 ) -> Dict[str, Any]:
     item = SyncItem(
         item_id=make_item_id(run_id, source["source_id"], source["profile_id"]),
@@ -554,10 +758,11 @@ def _item(
         workspace_id=source["workspace_id"],
         profile_id=source["profile_id"],
         state=state,
-        stage="finished",
+        stage=stage,
         reason_code=reason_code,
         using_last_good=False,
         last_verified_at=_now() if state in ("succeeded", "unchanged") else None,
+        candidate_id=candidate_id,
     )
     payload = item.to_dict()
     payload.update(
