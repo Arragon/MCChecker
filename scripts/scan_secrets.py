@@ -23,6 +23,7 @@ import os
 import re
 import subprocess  # nosec B404 - 只调用 git，参数全部走列表形式，不经 shell
 import sys
+import threading
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 DEFAULT_ALLOWLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "secret_scan_allowlist.json")
@@ -248,7 +249,11 @@ def iter_diff(root: str, range_spec: Optional[str], staged: bool) -> Iterator[Tu
 
 
 def _read_batch(root: str, shas: Sequence[str]) -> Iterator[Tuple[str, bytes]]:
-    """流式读 `git cat-file --batch`：避免每个 blob 起一个子进程。"""
+    """流式读 `git cat-file --batch`：避免每个 blob 起一个子进程。
+
+    写入必须放到独立线程：Windows 的管道缓冲区远小于 macOS/Linux，一次性写几百个
+    sha 会与 git 的 stdout 同时塞满 → 双向阻塞（CI 上表现为 pytest 永久挂起）。
+    """
     proc = subprocess.Popen(  # nosec B603 - 固定 git 子命令
         ["git", "cat-file", "--batch"],
         cwd=root,
@@ -258,9 +263,22 @@ def _read_batch(root: str, shas: Sequence[str]) -> Iterator[Tuple[str, bytes]]:
     )
     assert proc.stdin is not None and proc.stdout is not None
     payload = ("\n".join(shas) + "\n").encode("utf-8")
+
+    def _feed() -> None:
+        try:
+            proc.stdin.write(payload)
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+
+    writer = threading.Thread(target=_feed, name="scan-secrets-feed", daemon=True)
+    writer.start()
     try:
-        proc.stdin.write(payload)
-        proc.stdin.flush()
         for _sha in shas:
             header = proc.stdout.readline().decode("utf-8", "replace").strip()
             if not header:
@@ -287,10 +305,7 @@ def _read_batch(root: str, shas: Sequence[str]) -> Iterator[Tuple[str, bytes]]:
             proc.stdout.read(1)
             yield parts[0], data
     finally:
-        try:
-            proc.stdin.close()
-        except OSError:
-            pass
+        writer.join(timeout=5)
         try:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
