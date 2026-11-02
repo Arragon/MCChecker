@@ -172,7 +172,7 @@ class TestApiSession:
         # 不支持 chunked：没有 Content-Length 按 §3.4 第 3 步处理（写请求需带自定义头）
         data = raw_request(
             server,
-            "POST /api/v1/session HTTP/1.1\r\nHost: test\r\n"
+            "POST /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1\r\n"
             "X-Requested-With: MCChecker\r\nConnection: close\r\n\r\n",
         )
         assert b"413" in data.split(b"\r\n", 1)[0]
@@ -183,7 +183,7 @@ class TestApiSession:
 
         data = raw_request(
             server,
-            "POST /api/v1/session HTTP/1.1\r\nHost: test\r\n"
+            "POST /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1\r\n"
             "X-Requested-With: MCChecker\r\n"
             "Content-Type: application/json\r\n"
             "Content-Length: %d\r\nConnection: close\r\n\r\n" % (JSON_BODY_LIMIT + 1),
