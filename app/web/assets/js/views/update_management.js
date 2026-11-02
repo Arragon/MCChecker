@@ -158,6 +158,18 @@
         failuresOnly: false,
         failedSourceIds: {},
       },
+      connections: {
+        loadedFor: "",
+        loading: false,
+        error: "",
+        items: [],
+        heartbeats: {},
+        heartbeatErrors: {},
+        operations: {},
+        pollAttempts: {},
+        pollTimers: [],
+        loadSeq: 0,
+      },
     };
     var el = h("div");
     var tabbar = h("div.row", { role: "tablist", "aria-label": "更新管理分类", style: "gap:6px;flex-wrap:wrap;margin:10px 0 14px" });
@@ -790,6 +802,655 @@
       ));
     }
 
+    /* ===================== M16-34 连接设置 / 保活 ===================== */
+
+    var CREDENTIAL_LABELS = {
+      unconfigured: "未配置",
+      valid: "有效",
+      locked: "已锁定",
+      invalid: "无效",
+    };
+    var CREDENTIAL_ERROR_TEXT = {
+      CONFIG_DISABLED: "凭据存储未配置",
+      FORBIDDEN: "需要管理员能力与运维授权",
+      INVALID_INPUT: "输入不符合要求",
+      REVISION_CONFLICT: "状态已变化，请刷新后重试",
+      NOT_FOUND: "连接或凭据候选不存在",
+      STORAGE_FAILURE: "服务器写入失败，凭据未改变",
+      BUSY: "该连接已有操作在进行",
+    };
+    var OPERATION_STATES = { queued: "排队中", running: "执行中", succeeded: "已完成", failed: "失败", blocked: "已阻止" };
+    var OPERATION_REASONS = {
+      disabled: "保活未启用",
+      collector_offline: "collector 未连接",
+      bad_credentials: "密码错误",
+      locked: "凭据已锁定",
+      auth_failed: "认证失败",
+      network_error: "网络错误",
+      revision_conflict: "revision 已变化",
+      source_changed: "认证纪元已变化",
+    };
+
+    function connectionsPath() {
+      return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/connections";
+    }
+
+    function connectionPath(cid) {
+      return connectionsPath() + "/" + encodeURIComponent(cid);
+    }
+
+    function heartbeatPath(cid) {
+      return connectionPath(cid) + "/heartbeat";
+    }
+
+    function canManageCredentials() {
+      return !!(app && app.can && app.can("integration_credentials_manage"));
+    }
+
+    function credentialLabel(cred) {
+      if (!cred || !cred.state) return "未配置";
+      return CREDENTIAL_LABELS[cred.state] || String(cred.state);
+    }
+
+    function credentialBadge(cred) {
+      if (cred && cred.state === "valid") return "badge badge-success";
+      if (cred && cred.state === "locked") return "badge badge-danger";
+      if (cred && cred.state && cred.state !== "unconfigured") return "badge badge-warning";
+      return "badge badge-count";
+    }
+
+    function credentialErrorText(err) {
+      var code = (err && err.code) || (err && err.status ? "HTTP_" + err.status : "UNKNOWN");
+      var label = CREDENTIAL_ERROR_TEXT[code];
+      return "凭据操作失败：" + (label ? label + "（" + code + "）" : code);
+    }
+
+    function heartbeatStatusText(hb) {
+      if (!hb) return "未能读取保活状态";
+      var parts = [hb.enabled ? "已启用" : "已停用"];
+      parts.push("间隔 " + (hb.interval_minutes || 10) + " 分钟");
+      if (hb.last_heartbeat_at) parts.push("上次 " + hb.last_heartbeat_at);
+      if (hb.last_result) parts.push(hb.last_result === "success" ? "成功" : "失败");
+      if (hb.reason_code) parts.push("原因 " + hb.reason_code);
+      if (hb.next_due_at) parts.push("下次到期 " + hb.next_due_at);
+      if (hb.heartbeat_validated) parts.push("已通过真实 idle 验证");
+      else parts.push("未通过真实 idle 验证");
+      return parts.join(" · ");
+    }
+
+    /** 自动重登没有独立服务端开关：由凭据状态/失败原因推导，只读展示。 */
+    function autoReloginText(conn) {
+      var cred = (conn && conn.credential) || {};
+      if (cred.state === "valid") {
+        return "自动重登：凭据有效，由 collector 在会话失效后续登；与保活开关相互独立。";
+      }
+      if (cred.state === "locked") {
+        return "自动重登：已暂停（凭据锁定）；需人工更换凭据后恢复，系统不会自动重试。";
+      }
+      if (cred.last_error) {
+        return "自动重登：已暂停（" + cred.last_error + "）；需人工重试或更换凭据。";
+      }
+      return "自动重登：未配置凭据，暂不自动重登；与保活开关相互独立。";
+    }
+
+    function refreshConnectionsView() {
+      if (state.tab !== "connections") return;
+      util.clear(body);
+      renderConnections();
+    }
+
+    function updateCredential(cid, credential) {
+      if (!credential) return;
+      state.connections.items = state.connections.items.map(function (item) {
+        if (item.connection_id !== cid) return item;
+        return Object.assign({}, item, { credential: credential });
+      });
+    }
+
+    function operationNote(cid) {
+      var op = state.connections.operations[cid];
+      if (!op) return null;
+      var stateText = OPERATION_STATES[op.state] || op.state;
+      var reason = op.reason_code ? (OPERATION_REASONS[op.reason_code] || op.reason_code) : "";
+      return h("div.small.muted", { "data-sync-operation": cid },
+        "最近操作：" + stateText + (op.kind ? " · " + op.kind : "") + (reason ? " · " + reason : "")
+      );
+    }
+
+    function trackOperation(cid, op) {
+      if (!op || !op.op_id) return;
+      var C = state.connections;
+      C.operations[cid] = op;
+      var terminal = op.state !== "queued" && op.state !== "running";
+      if (terminal) {
+        var result = op.result || {};
+        if (result.heartbeat) C.heartbeats[cid] = result.heartbeat;
+        if (result.credential) updateCredential(cid, result.credential);
+      }
+      refreshConnectionsView();
+      if (terminal) return;
+      var attempts = C.pollAttempts[cid] || 0;
+      if (attempts >= 10) return;
+      C.pollAttempts[cid] = attempts + 1;
+      var timer = setTimeout(function () {
+        if (C.loadedFor !== workspaceId()) return;
+        MC.api.requestV3("GET", connectionPath(cid) + "/operations/" + encodeURIComponent(op.op_id)).then(function (data) {
+          if (C.loadedFor !== workspaceId()) return;
+          trackOperation(cid, data && data.operation);
+        }, function (err) {
+          if (C.loadedFor !== workspaceId()) return;
+          C.error = errorText(err);
+          refreshConnectionsView();
+        });
+      }, 700);
+      C.pollTimers.push(timer);
+    }
+
+    function loadConnections(reset) {
+      var C = state.connections;
+      if (C.loading && C.loadedFor === workspaceId()) return Promise.resolve();
+      var wid = workspaceId();
+      var seq = (C.loadSeq || 0) + 1;
+      C.loadSeq = seq;
+      C.loading = true;
+      C.error = "";
+      C.loadedFor = wid;
+      if (reset) {
+        C.items = [];
+        C.heartbeats = {};
+        C.heartbeatErrors = {};
+        C.operations = {};
+        C.pollAttempts = {};
+      }
+      function current() {
+        return seq === C.loadSeq && C.loadedFor === workspaceId();
+      }
+      refreshConnectionsView();
+      return MC.api.requestV3("GET", connectionsPath()).then(function (data) {
+        if (!current()) return;
+        C.items = (data && data.items) || [];
+        var jobs = C.items.map(function (item) {
+          var cid = item.connection_id;
+          return MC.api.requestV3("GET", heartbeatPath(cid)).then(function (hb) {
+            if (!current()) return;
+            C.heartbeats[cid] = hb;
+            delete C.heartbeatErrors[cid];
+          }, function (err) {
+            if (!current()) return;
+            C.heartbeats[cid] = null;
+            C.heartbeatErrors[cid] = errorText(err);
+          });
+        });
+        return Promise.all(jobs).then(function () {
+          if (!current()) return;
+          C.loading = false;
+          refreshConnectionsView();
+        });
+      }, function (err) {
+        if (!current()) return;
+        C.loading = false;
+        C.error = errorText(err);
+        refreshConnectionsView();
+      });
+    }
+
+    function saveHeartbeat(conn, enabledInput, intervalInput, tokenInput, errorNode) {
+      var cid = conn.connection_id;
+      var hb = state.connections.heartbeats[cid] || { revision: 0 };
+      var interval = Number(intervalInput.value);
+      if (!isFinite(interval) || interval < 1 || interval > 60) {
+        errorNode.textContent = "保活间隔必须在 1–60 分钟";
+        errorNode.style.display = "";
+        return;
+      }
+      var token = tokenInput.value.trim();
+      if (!token) {
+        errorNode.textContent = "请输入运维 token";
+        errorNode.style.display = "";
+        return;
+      }
+      errorNode.style.display = "none";
+      MC.api.requestV3("PUT", heartbeatPath(cid), {
+        body: { interval_minutes: interval, enabled: !!enabledInput.checked },
+        headers: { "If-Match": String(hb.revision == null ? 0 : hb.revision), "X-Operator-Token": token },
+      }).then(function (saved) {
+        state.connections.heartbeats[cid] = saved;
+        tokenInput.value = "";
+        MC.toast.success("保活设置已保存");
+        refreshConnectionsView();
+      }, function (err) {
+        errorNode.textContent = errorText(err);
+        errorNode.style.display = "";
+      });
+    }
+
+    function runHeartbeat(conn, tokenInput, errorNode) {
+      var cid = conn.connection_id;
+      var token = tokenInput.value.trim();
+      if (!token) {
+        errorNode.textContent = "请输入运维 token";
+        errorNode.style.display = "";
+        return;
+      }
+      errorNode.style.display = "none";
+      MC.api.requestV3("POST", heartbeatPath(cid) + "/run", {
+        body: {},
+        headers: { "X-Operator-Token": token },
+      }).then(function (data) {
+        var op = data && data.operation;
+        if (!op) {
+          errorNode.textContent = "保活运行未返回操作状态";
+          errorNode.style.display = "";
+          return;
+        }
+        trackOperation(cid, op);
+        if (op.state === "blocked") {
+          MC.toast.warning("保活未执行", OPERATION_REASONS[op.reason_code] || op.reason_code || "");
+        } else if (op.state === "failed") {
+          MC.toast.error("保活失败", OPERATION_REASONS[op.reason_code] || op.reason_code || "");
+        } else {
+          MC.toast.success("保活已执行");
+        }
+      }, function (err) {
+        errorNode.textContent = errorText(err);
+        errorNode.style.display = "";
+      });
+    }
+
+    function openCreateConnection() {
+      var nameInput = h("input.input", { autofocus: true, "data-conn-name": "1" });
+      var originInput = h("input.input", { placeholder: "SDA Origin（部署端内网地址）", "data-conn-origin": "1" });
+      var enabledInput = h("input", { type: "checkbox", checked: true, "data-conn-enabled": "1" });
+      var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", "data-conn-token": "1" });
+      var error = h("div.form-error", { style: "display:none", "data-conn-error": "1" });
+
+      function showError(message) {
+        error.textContent = message;
+        error.style.display = message ? "" : "none";
+      }
+
+      var modal = MC.modal({
+        title: "新建连接",
+        body: h("div.col", { style: "gap:12px" },
+          error,
+          field("名称", nameInput),
+          field("SDA Origin", originInput),
+          h("label.row", { style: "gap:6px;align-items:center" }, enabledInput, h("span", "启用连接")),
+          field("运维 token（仅本次输入，不保存）", tokenInput),
+          h("p.xsmall.muted", "连接只保存名称、Origin、协议与启用状态，不内嵌任何密码/Cookie。")
+        ),
+        footer: function (close) {
+          return [
+            h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"),
+            h("button.btn.btn-primary", {
+              type: "button",
+              "data-conn-create-submit": "1",
+              onclick: function () {
+                var name = nameInput.value.trim();
+                var origin = originInput.value.trim();
+                var token = tokenInput.value.trim();
+                if (!name || !origin) { showError("名称与 Origin 不能为空"); return; }
+                if (!token) { showError("请输入运维 token"); return; }
+                showError("");
+                MC.api.requestV3("POST", connectionsPath(), {
+                  body: { name: name, origin: origin, enabled: !!enabledInput.checked },
+                  headers: { "X-Operator-Token": token },
+                }).then(function () {
+                  close();
+                  MC.toast.success("连接已创建");
+                  loadConnections(true);
+                }, function (err) {
+                  showError(errorText(err));
+                });
+              },
+            }, "创建"),
+          ];
+        },
+        onClose: function () { tokenInput.value = ""; },
+      });
+      return modal;
+    }
+
+    function openConnectionEditor(conn) {
+      var nameInput = h("input.input", { value: conn.name || "", autofocus: true, "data-conn-name": "1" });
+      var originInput = h("input.input", { value: conn.origin || "", "data-conn-origin": "1" });
+      var enabledInput = h("input", { type: "checkbox", checked: conn.enabled !== false, "data-conn-enabled": "1" });
+      var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", "data-conn-token": "1" });
+      var error = h("div.form-error", { style: "display:none", "data-conn-error": "1" });
+
+      function showError(message) {
+        error.textContent = message;
+        error.style.display = message ? "" : "none";
+      }
+
+      var modal = MC.modal({
+        title: "编辑连接",
+        subtitle: conn.name + " · " + conn.connection_id,
+        body: h("div.col", { style: "gap:12px" },
+          error,
+          field("名称", nameInput),
+          field("SDA Origin", originInput),
+          h("label.row", { style: "gap:6px;align-items:center" }, enabledInput, h("span", "启用连接")),
+          field("运维 token（仅本次输入，不保存）", tokenInput),
+          h("p.xsmall.muted", "保存使用连接 revision " + conn.policy_revision + " 做 CAS；过期时 409 并保留当前输入。")
+        ),
+        footer: function (close) {
+          return [
+            h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"),
+            h("button.btn.btn-primary", {
+              type: "button",
+              "data-conn-save": "1",
+              onclick: function () {
+                var name = nameInput.value.trim();
+                var origin = originInput.value.trim();
+                var token = tokenInput.value.trim();
+                if (!name || !origin) { showError("名称与 Origin 不能为空"); return; }
+                if (!token) { showError("请输入运维 token"); return; }
+                showError("");
+                MC.api.requestV3("PATCH", connectionPath(conn.connection_id), {
+                  body: { name: name, origin: origin, enabled: !!enabledInput.checked },
+                  headers: { "If-Match": String(conn.policy_revision), "X-Operator-Token": token },
+                }).then(function (updated) {
+                  var credential = conn.credential;
+                  state.connections.items = state.connections.items.map(function (item) {
+                    if (item.connection_id !== conn.connection_id) return item;
+                    return Object.assign({}, item, updated || {}, { credential: credential });
+                  });
+                  close();
+                  MC.toast.success("连接已保存");
+                  refreshConnectionsView();
+                }, function (err) {
+                  showError(errorText(err));
+                });
+              },
+            }, "保存"),
+          ];
+        },
+        onClose: function () { tokenInput.value = ""; },
+      });
+      return modal;
+    }
+
+    function openCredentialForm(conn) {
+      var usernameInput = h("input.input", { autofocus: true, autocomplete: "off", "data-cred-username": "1" });
+      var passwordInput = h("input.input", { type: "password", autocomplete: "new-password", "data-cred-password": "1" });
+      var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", "data-cred-token": "1" });
+      var error = h("div.form-error", { style: "display:none", "data-cred-error": "1" });
+      var cred = conn.credential || {};
+
+      function showError(message) {
+        error.textContent = message;
+        error.style.display = message ? "" : "none";
+      }
+
+      var modal = MC.modal({
+        title: "更换凭据",
+        subtitle: conn.name + " · 当前状态 " + credentialLabel(cred),
+        body: h("div.col", { style: "gap:12px" },
+          error,
+          field("账号", usernameInput),
+          field("密码", passwordInput),
+          field("运维 token（仅本次输入，不保存）", tokenInput),
+          h("p.xsmall.muted", "提交只创建待验证候选；验证/激活需人工单独触发。失败时密码框清空，且不会回显明文。")
+        ),
+        footer: function (close) {
+          return [
+            h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"),
+            h("button.btn.btn-primary", {
+              type: "button",
+              "data-cred-submit": "1",
+              onclick: function () {
+                var username = usernameInput.value.trim();
+                var password = passwordInput.value;
+                var token = tokenInput.value.trim();
+                if (!username || !password) { showError("账号与密码不能为空"); return; }
+                if (!token) { showError("请输入运维 token"); return; }
+                showError("");
+                MC.api.requestV3("POST", connectionPath(conn.connection_id) + "/credentials/candidates", {
+                  body: { username: username, password: password },
+                  headers: { "X-Operator-Token": token },
+                }).then(function (statePayload) {
+                  passwordInput.value = "";
+                  updateCredential(conn.connection_id, statePayload);
+                  close();
+                  MC.toast.success("已创建待验证凭据候选");
+                  refreshConnectionsView();
+                }, function (err) {
+                  // 失败只显示安全错误码；密码框立即清空，绝不把明文带回界面。
+                  passwordInput.value = "";
+                  showError(credentialErrorText(err));
+                });
+              },
+            }, "创建候选"),
+          ];
+        },
+        onClose: function () {
+          passwordInput.value = "";
+          tokenInput.value = "";
+        },
+      });
+      return modal;
+    }
+
+    function openOperatorAction(conn, title, description, submitLabel, action) {
+      var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", autofocus: true, "data-cred-token": "1" });
+      var error = h("div.form-error", { style: "display:none", "data-cred-error": "1" });
+
+      function showError(message) {
+        error.textContent = message;
+        error.style.display = message ? "" : "none";
+      }
+
+      var modal = MC.modal({
+        title: title,
+        subtitle: conn.name,
+        body: h("div.col", { style: "gap:12px" },
+          error,
+          h("p.small", description),
+          field("运维 token（仅本次输入，不保存）", tokenInput)
+        ),
+        footer: function (close) {
+          return [
+            h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"),
+            h("button.btn.btn-primary", {
+              type: "button",
+              "data-cred-action-submit": "1",
+              onclick: function () {
+                var token = tokenInput.value.trim();
+                if (!token) { showError("请输入运维 token"); return; }
+                showError("");
+                action(token).then(function (op) {
+                  close();
+                  if (op) trackOperation(conn.connection_id, op);
+                }, function (err) {
+                  showError(credentialErrorText(err));
+                });
+              },
+            }, submitLabel),
+          ];
+        },
+        onClose: function () { tokenInput.value = ""; },
+      });
+      return modal;
+    }
+
+    function openProbe(conn) {
+      var candidate = (conn.credential || {}).candidate || {};
+      return openOperatorAction(
+        conn,
+        "验证凭据",
+        "验证只提交一次探测；密码错误会锁存凭据，需要人工重试或更换凭据，不会自动重复尝试。",
+        "开始验证",
+        function (token) {
+          return MC.api.requestV3("POST", connectionPath(conn.connection_id) + "/credentials/probe", {
+            body: { candidate_id: candidate.candidate_id },
+            headers: { "X-Operator-Token": token },
+          }).then(function (data) { return data && data.operation; });
+        }
+      );
+    }
+
+    function openActivate(conn) {
+      var candidate = (conn.credential || {}).candidate || {};
+      return openOperatorAction(
+        conn,
+        "激活凭据",
+        "激活会覆盖当前有效凭据；probe_epoch 必须与候选一致，晚到的验证结果不能激活。",
+        "激活",
+        function (token) {
+          return MC.api.requestV3(
+            "POST",
+            connectionPath(conn.connection_id) + "/credentials/candidates/"
+              + encodeURIComponent(candidate.candidate_id) + "/activate",
+            {
+              body: { probe_epoch: candidate.auth_epoch == null ? 0 : candidate.auth_epoch },
+              headers: { "X-Operator-Token": token },
+            }
+          ).then(function (data) { return data && data.operation; });
+        }
+      );
+    }
+
+    function renderHeartbeatCard(conn, manage) {
+      var cid = conn.connection_id;
+      var C = state.connections;
+      var hb = C.heartbeats[cid];
+      var cred = conn.credential || {};
+      var error = h("div.form-error", { style: "display:none" });
+      var controls = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" });
+      var tokenInput = null;
+
+      if (manage) {
+        var enabledInput = h("input", { type: "checkbox", checked: !!(hb && hb.enabled), "data-hb-enabled": cid });
+        var intervalInput = h("input.input", {
+          type: "number", min: "1", max: "60",
+          value: String((hb && hb.interval_minutes) || 10),
+          "data-hb-interval": cid,
+          style: "max-width:100px",
+        });
+        tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", "data-hb-token": cid, style: "max-width:180px" });
+        controls.appendChild(h("label.row", { style: "gap:6px;align-items:center" }, enabledInput, h("span", "启用保活")));
+        controls.appendChild(h("span.small.muted", "间隔"));
+        controls.appendChild(intervalInput);
+        controls.appendChild(h("span.small.muted", "分钟"));
+        controls.appendChild(tokenInput);
+        controls.appendChild(h("button.btn.btn-sm", {
+          type: "button", "data-hb-save": cid,
+          onclick: function () { saveHeartbeat(conn, enabledInput, intervalInput, tokenInput, error); },
+        }, "保存保活"));
+        controls.appendChild(h("button.btn.btn-sm", {
+          type: "button", "data-hb-run": cid,
+          onclick: function () { runHeartbeat(conn, tokenInput, error); },
+        }, "立即保活"));
+      } else {
+        controls.appendChild(h("span.small.muted", { "data-hb-readonly": cid },
+          "只读身份：不能修改保活开关或立即运行。"));
+      }
+
+      var candidate = cred.candidate;
+      return h("div.card", h("div.card-b",
+        h("div.row", { style: "gap:10px;flex-wrap:wrap;align-items:center" },
+          h("strong", "保活与自动重登"),
+          h("span.muted.small", conn.name + " · " + cid)
+        ),
+        h("p.small", { "data-hb-status": cid }, heartbeatStatusText(hb)),
+        C.heartbeatErrors[cid] ? h("p.form-error", C.heartbeatErrors[cid]) : null,
+        h("p.small.muted", { "data-auto-relogin": cid }, autoReloginText(conn)),
+        controls,
+        error,
+        (cred.state === "locked" || cred.last_error === "bad_credentials"
+          || (C.operations[cid] && (C.operations[cid].reason_code === "bad_credentials" || C.operations[cid].reason_code === "locked")))
+          ? h("p.small", { "data-cred-manual": cid }, "需人工重试/更换凭据：系统不会自动重复提交凭据。")
+          : null,
+        candidate && candidate.state === "pending"
+          ? h("p.xsmall.muted", "候选 " + candidate.candidate_id + " 待验证；验证与激活需人工分别触发。")
+          : null,
+        operationNote(cid)
+      ));
+    }
+
+    function renderConnections() {
+      var C = state.connections;
+      var manage = canManageCredentials();
+
+      if (C.error) {
+        body.appendChild(h("div.form-error", C.error));
+      }
+      if (C.loading && !C.items.length) {
+        body.appendChild(h("p.muted", "正在读取连接与保活状态…"));
+        return;
+      }
+      var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
+      toolbar.appendChild(h("button.btn.btn-sm", { type: "button", "data-connections-refresh": "1", onclick: function () { loadConnections(true); } }, "刷新"));
+      if (manage) {
+        toolbar.appendChild(h("button.btn.btn-sm.btn-primary", {
+          type: "button", "data-conn-create": "1",
+          onclick: function () { openCreateConnection(); },
+        }, "新建连接"));
+      } else {
+        body.appendChild(h("p.small.muted", { "data-connections-readonly": "1" },
+          "只读身份：可查看连接、凭据与保活状态，不能编辑连接、更换凭据或修改保活。"));
+      }
+
+      if (!C.items.length) {
+        body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted", "当前工作区还没有连接。"))));
+        return;
+      }
+
+      var tbody = h("tbody");
+      C.items.forEach(function (conn) {
+        var cred = conn.credential || {};
+        var actions = h("td.row", { style: "gap:6px;flex-wrap:wrap" });
+        if (manage) {
+          actions.appendChild(h("button.btn.btn-sm", {
+            type: "button", "data-conn-edit": conn.connection_id,
+            onclick: function () { openConnectionEditor(conn); },
+          }, "编辑"));
+          actions.appendChild(h("button.btn.btn-sm", {
+            type: "button", "data-conn-cred": conn.connection_id,
+            onclick: function () { openCredentialForm(conn); },
+          }, "更换凭据"));
+          if (cred.candidate && cred.candidate.state === "pending") {
+            actions.appendChild(h("button.btn.btn-sm", {
+              type: "button", "data-cred-probe": conn.connection_id,
+              onclick: function () { openProbe(conn); },
+            }, "验证"));
+            actions.appendChild(h("button.btn.btn-sm", {
+              type: "button", "data-cred-activate": conn.connection_id,
+              onclick: function () { openActivate(conn); },
+            }, "激活"));
+          }
+        } else {
+          actions.appendChild(h("span.muted.xsmall", "只读"));
+        }
+        tbody.appendChild(h("tr", { "data-connection": conn.connection_id },
+          h("td", h("div", h("strong", conn.name)), h("div.xsmall.muted", conn.connection_id)),
+          h("td", h("span.small", conn.origin || "—")),
+          h("td", conn.enabled === false
+            ? h("span.badge.badge-count", "已停用")
+            : h("span.badge.badge-success", "已启用")),
+          h("td", h("span", { class: credentialBadge(cred), "data-cred-state": conn.connection_id }, credentialLabel(cred))),
+          h("td", h("span.small", { "data-cred-epoch": conn.connection_id }, String(cred.auth_epoch == null ? 0 : cred.auth_epoch))),
+          h("td", h("span.xsmall.muted", { "data-cred-error": conn.connection_id }, cred.last_error || "—")),
+          actions
+        ));
+      });
+
+      body.appendChild(h("div.card",
+        h("div.card-h", h("strong", "连接"), h("span.muted.small", "工作区 " + workspaceId())),
+        h("div.card-b", toolbar,
+          h("table.table", h("thead", h("tr",
+            h("th", "名称"), h("th", "Origin"), h("th", "启用"),
+            h("th", "凭据状态"), h("th", "auth_epoch"), h("th", "最近错误"), h("th", "")
+          )), tbody)
+        )
+      ));
+
+      C.items.forEach(function (conn) {
+        body.appendChild(renderHeartbeatCard(conn, manage));
+      });
+    }
+
     function renderSources() {
       var S = state.sources;
       var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
@@ -1068,6 +1729,11 @@
         if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
       } else if (tab.id === "runs") {
         renderRuns();
+      } else if (tab.id === "connections") {
+        renderConnections();
+        if (state.connections.loadedFor !== workspaceId() && !state.connections.loading) {
+          loadConnections(true);
+        }
       } else {
         renderPlaceholder(tab);
       }
@@ -1095,7 +1761,10 @@
         if (state.tab === "runs") loadRuns(true);
       },
       isDirty: function () { return false; },
-      destroy: function () {},
+      destroy: function () {
+        (state.connections.pollTimers || []).forEach(function (timer) { clearTimeout(timer); });
+        state.connections.pollTimers = [];
+      },
     };
   };
 })(typeof window !== "undefined" ? window : this);

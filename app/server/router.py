@@ -133,6 +133,7 @@ def build_router(settings: Settings) -> Router:
         api_session,
         api_sources,
         api_sync_candidates,
+        api_sync_heartbeat,
         api_sync_policy,
         api_sync_preview,
         api_sync_runs,
@@ -162,6 +163,7 @@ def build_router(settings: Settings) -> Router:
     api_v3_exports.register(router)
     api_v3_events.register(router)
     api_connections.register(router)
+    api_sync_heartbeat.register(router)
     api_sync_sources.register(router)
     api_sync_policy.register(router)
     api_sync_preview.register(router)

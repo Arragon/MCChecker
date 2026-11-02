@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 112;  // + M16-31 壳、M16-32 来源、M16-33 计划、M16-35 运行记录、M16-33 计划/预览/手动任务
+  var EXPECTED_CASES = 113;  // + M16-31/32/33/34/35 更新管理
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4249,6 +4249,177 @@
   });
 
 
+  test("SYNC-34：连接/凭据状态、只读门控、失败不泄密与保活独立", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalScope = MC.workspaces.scopeId;
+    var originalCurrent = MC.workspaces.current;
+    var scope = "w-conn";
+    var connection = {
+      connection_id: "conn-34", workspace_id: "w-conn", name: "SDA 主连接",
+      origin: "https://sda.example.invalid", protocol: "sda_v1",
+      policy_revision: 2, enabled: true,
+      credential: {
+        connection_id: "conn-34", state: "locked", auth_epoch: 2,
+        active_generation: null, revision: 3, last_error: "bad_credentials",
+        candidate: {
+          candidate_id: "cred-00000034", generation: 1, auth_epoch: 2,
+          state: "failed", reason_code: "bad_credentials",
+        },
+      },
+    };
+    var heartbeat = {
+      connection_id: "conn-34", enabled: false, interval_minutes: 10,
+      last_heartbeat_at: null, last_renewing_activity: null, next_due_at: null,
+      heartbeat_validated: false, validated_at: null, evidence: {},
+      last_result: null, reason_code: null, revision: 0,
+    };
+    var runOp = {
+      op_id: "op-00000034", workspace_id: "w-conn", connection_id: "conn-34",
+      kind: "heartbeat_run", state: "blocked", reason_code: "disabled",
+      result: { heartbeat: heartbeat },
+    };
+    MC.workspaces.scopeId = function () { return scope; };
+    MC.workspaces.current = function () {
+      return { id: scope, profiles: [{ id: "default", name: "默认机型" }] };
+    };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && /\/connections$/.test(path)) {
+        return Promise.resolve({ items: [JSON.parse(JSON.stringify(connection))] });
+      }
+      if (method === "GET" && /\/heartbeat$/.test(path)) {
+        return Promise.resolve(JSON.parse(JSON.stringify(heartbeat)));
+      }
+      if (method === "PUT" && /\/heartbeat$/.test(path)) {
+        return Promise.resolve(Object.assign({}, heartbeat, opts.body, { revision: 1 }));
+      }
+      if (method === "POST" && /\/heartbeat\/run$/.test(path)) {
+        return Promise.resolve({ operation: JSON.parse(JSON.stringify(runOp)) });
+      }
+      if (method === "POST" && /\/credentials\/candidates$/.test(path)) {
+        return Promise.reject({ status: 400, code: "INVALID_INPUT", message: "password=super-secret-pw" });
+      }
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      MC.workspaces.scopeId = originalScope;
+      MC.workspaces.current = originalCurrent;
+    }
+    var app = settingsApp(false);
+    app.can = function (name) { return name === "integration_credentials_manage"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "connections", query: {} });
+    document.body.appendChild(inst.el);
+    var pendingModal = null;
+    return tick()
+      .then(function () {
+        ok(inst.el.textContent.indexOf("SDA 主连接") >= 0, "列表显示连接名称");
+        ok(inst.el.textContent.indexOf("https://sda.example.invalid") >= 0, "显示 origin");
+        eq(inst.el.querySelector('[data-cred-state="conn-34"]').textContent, "已锁定");
+        eq(inst.el.querySelector('[data-cred-epoch="conn-34"]').textContent, "2");
+        ok(inst.el.querySelector('[data-cred-error="conn-34"]').textContent.indexOf("bad_credentials") >= 0, "显示最近错误");
+        ok(inst.el.querySelector('[data-hb-status="conn-34"]').textContent.indexOf("已停用") >= 0, "保活状态来自服务端");
+        ok(inst.el.querySelector('[data-auto-relogin="conn-34"]'), "自动重登只读展示");
+        ok(inst.el.querySelector('[data-cred-manual="conn-34"]'), "锁定后提示人工处理");
+        ok(inst.el.querySelector('[data-hb-enabled="conn-34"]'), "可写身份有保活开关");
+        inst.el.querySelector('[data-conn-cred="conn-34"]').click();
+        pendingModal = document.querySelector(".modal");
+        ok(pendingModal, "打开更换凭据表单");
+        var user = pendingModal.querySelector("[data-cred-username]");
+        var pwd = pendingModal.querySelector("[data-cred-password]");
+        var token = pendingModal.querySelector("[data-cred-token]");
+        eq(token.type, "password", "运维 token 是密码框");
+        user.value = "operator-account";
+        pwd.value = "super-secret-pw";
+        token.value = "operator-token-34";
+        pendingModal.querySelector("[data-cred-submit]").click();
+        return tick().then(function () {
+          eq(pwd.value, "", "失败后密码框清空");
+          ok(pendingModal.textContent.indexOf("super-secret-pw") < 0, "失败不回显秘密");
+          ok(pendingModal.textContent.indexOf("INVALID_INPUT") >= 0, "显示安全错误码");
+          ok(document.querySelector(".modal"), "失败不关闭表单");
+          pendingModal.querySelector(".modal-footer .btn").click();
+          eq(token.value, "", "关闭后运维 token 清空");
+        });
+      })
+      .then(function () {
+        var autoBefore = inst.el.querySelector('[data-auto-relogin="conn-34"]').textContent;
+        var enabled = inst.el.querySelector('[data-hb-enabled="conn-34"]');
+        var interval = inst.el.querySelector('[data-hb-interval="conn-34"]');
+        var token = inst.el.querySelector('[data-hb-token="conn-34"]');
+        enabled.checked = true;
+        interval.value = "15";
+        token.value = "operator-token-34";
+        inst.el.querySelector('[data-hb-save="conn-34"]').click();
+        return tick().then(function () {
+          var put = calls.filter(function (c) { return c.method === "PUT" && /\/heartbeat$/.test(c.path); })[0];
+          ok(put, "保存保活发 PUT");
+          eq(put.opts.body, { interval_minutes: 15, enabled: true });
+          eq(put.opts.headers["If-Match"], "0", "保活保存带 revision CAS");
+          eq(put.opts.headers["X-Operator-Token"], "operator-token-34");
+          eq(inst.el.querySelector('[data-auto-relogin="conn-34"]').textContent, autoBefore,
+            "切换保活不改变自动重登展示");
+          ok(inst.el.querySelector('[data-hb-status="conn-34"]').textContent.indexOf("已启用") >= 0,
+            "保活开关反映服务端返回");
+          eq(calls.filter(function (c) { return c.path.indexOf("/credentials/") >= 0; }).length, 1,
+            "保存保活不触碰凭据接口（只有前面的候选失败一次）");
+          token = inst.el.querySelector('[data-hb-token="conn-34"]');
+          token.value = "operator-token-34";
+          inst.el.querySelector('[data-hb-run="conn-34"]').click();
+          return tick();
+        });
+      })
+      .then(function () {
+        var run = calls.filter(function (c) { return c.method === "POST" && /\/heartbeat\/run$/.test(c.path); })[0];
+        ok(run, "立即保活走 POST /heartbeat/run");
+        ok(inst.el.querySelector('[data-sync-operation="conn-34"]'), "显示安全操作状态");
+        ok(inst.el.textContent.indexOf("保活未启用") >= 0, "blocked 原因来自服务端，不伪造成功");
+        scope = "w-conn-2";
+        inst.update({ kind: "updates", arg: "connections", query: {} });
+        return tick().then(function () {
+          ok(calls.some(function (c) {
+            return c.method === "GET" && c.path.indexOf("/workspaces/w-conn-2/connections") >= 0;
+          }), "切换工作区后按新 W 重新加载");
+          ok(inst.el.isConnected, "切换只重画视图，整页未刷新");
+        });
+      })
+      .then(function () {
+        var readOnly = settingsApp(false);
+        readOnly.can = function () { return false; };
+        var ro = MC.views.updates(readOnly, { kind: "updates", arg: "connections", query: {} });
+        document.body.appendChild(ro.el);
+        return tick().then(function () {
+          ok(!ro.el.querySelector("[data-conn-edit]"), "只读身份无编辑入口");
+          ok(!ro.el.querySelector("[data-conn-create]"), "只读身份无新建入口");
+          ok(!ro.el.querySelector("[data-conn-cred]"), "只读身份无凭据操作");
+          ok(!ro.el.querySelector("[data-hb-enabled]"), "只读身份无保活开关");
+          ok(!ro.el.querySelector("[data-hb-save]"), "只读身份无保活保存");
+          ok(ro.el.querySelector('[data-cred-state="conn-34"]'), "只读身份仍看凭据状态");
+          ok(ro.el.querySelector('[data-hb-status="conn-34"]'), "只读身份仍看保活状态");
+          ok(ro.el.textContent.indexOf("只读身份") >= 0, "只读身份有说明");
+          ro.destroy();
+          ro.el.remove();
+          inst.destroy();
+          inst.el.remove();
+          restore();
+        });
+      })
+      .catch(function (err) {
+        try {
+          if (pendingModal) {
+            var cancel = pendingModal.querySelector(".modal-footer .btn");
+            if (cancel) cancel.click();
+          }
+        } catch (e) { /* 已在关闭流程中 */ }
+        inst.destroy();
+        inst.el.remove();
+        restore();
+        throw err;
+      });
+  });
+
+
   test("SYNC-35：运行记录列表、items/events 与失败项重试", function () {
     var calls = [];
     var original = MC.api.requestV3;
@@ -4335,7 +4506,6 @@
         throw err;
       });
   });
-
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链
    * 清空之后——串行队列本身是一条长微任务链，不 flush 的话最后几条用例的迟到拒绝
