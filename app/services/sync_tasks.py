@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from app.core import storage
 from app.core.errors import (
     BUSY,
+    REVISION_CONFLICT,
     INVALID_INPUT,
     NOT_FOUND,
     REVISION_CONFLICT,
@@ -50,6 +51,7 @@ from . import (
     sync_bindings,
     sync_candidates,
     sync_commit,
+    sync_connections,
     sync_credentials,
     sync_http_adapter,
     sync_run_store,
@@ -514,11 +516,14 @@ def _freeze_guards(
         cid = source.get("connection_id")
         if cid and str(source.get("kind") or "").startswith("sda_"):
             try:
+                connection = sync_connections.get_connection(workspace_id, cid)
+                guard["enabled"] = bool(connection.get("enabled"))
                 guard["epoch"] = sync_credentials.get_credential_state(
                     workspace_id, cid
                 )["auth_epoch"]
             except AppError:
                 guard["epoch"] = None
+                guard["enabled"] = None
         target = source.get("target") or {}
         if target.get("kind") in ("file_archive", "default_candidate") and target.get("file_id"):
             try:
@@ -537,6 +542,18 @@ def _guard_error(
     if not guard:
         return None
     cid = guard.get("connection_id")
+    enabled = guard.get("enabled")
+    if cid and enabled is not None:
+        try:
+            connection = sync_connections.get_connection(workspace_id, cid)
+        except AppError as exc:
+            return exc
+        if not connection.get("enabled"):
+            return AppError(
+                REVISION_CONFLICT,
+                "连接已停用，旧回包不能提交",
+                field="connection_id",
+            )
     epoch = guard.get("epoch")
     if cid and epoch is not None:
         try:
