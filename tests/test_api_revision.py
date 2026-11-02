@@ -72,6 +72,10 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v3/workspaces/{wid}/profiles"): None,
     ("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}"): None,
     ("DELETE", "/api/v3/workspaces/{wid}/profiles/{pid}"): None,
+    # M16-05：Sync 来源是独立 V3 域，不递增旧 5 段。
+    ("POST", "/api/v3/workspaces/{wid}/sync/sources"): None,
+    ("PATCH", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): None,
+    ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): None,
     # M12-01：固定配置/版本图是独立 V3 域，不递增旧 5 段。
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases"): None,
