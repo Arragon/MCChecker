@@ -149,6 +149,7 @@
         state: "",
         loading: false,
         error: "",
+        loadedFor: "",
       },
       plan: {
         loadedFor: "",
@@ -1738,9 +1739,11 @@
         C.total = data && typeof data.total === "number" ? data.total : C.items.length;
         C.next_cursor = data ? data.next_cursor : null;
         C.loading = false;
+        C.loadedFor = workspaceId();
         renderBody();
       }, function (err) {
         C.loading = false;
+        C.loadedFor = workspaceId();
         C.error = errorText(err);
         renderBody();
       });
@@ -1904,7 +1907,9 @@
         renderRuns();
       } else if (tab.id === "candidates") {
         renderCandidates();
-        if (!state.candidates.loading && !state.candidates.items.length) loadCandidates(true);
+        if (state.candidates.loadedFor !== workspaceId() && !state.candidates.loading) {
+          loadCandidates(true);
+        }
       } else if (tab.id === "connections") {
         renderConnections();
         if (state.connections.loadedFor !== workspaceId() && !state.connections.loading) {
@@ -1924,7 +1929,6 @@
     renderBody();
     if (state.tab === "sources") loadSources(true);
     if (state.tab === "runs") loadRuns(true);
-    if (state.tab === "candidates") loadCandidates(true);
 
     return {
       el: el,
@@ -1936,7 +1940,6 @@
         renderBody();
         if (state.tab === "sources") loadSources(true);
         if (state.tab === "runs") loadRuns(true);
-    if (state.tab === "candidates") loadCandidates(true);
       },
       isDirty: function () { return false; },
       destroy: function () {

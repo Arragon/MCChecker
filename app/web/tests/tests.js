@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 114;  // + M16-31/32/33/34/35/36 更新管理
+  var EXPECTED_CASES = 115;  // + M16-31/32/33/34/35/36 更新管理 + 空候选防抖
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4609,6 +4609,33 @@
       })
       .catch(function (err) {
         restore();
+        throw err;
+      });
+  });
+
+
+  test("SYNC-36：空候选列表只请求一次，不自我刷新循环", function () {
+    var count = 0;
+    var original = MC.api.requestV3;
+    MC.api.requestV3 = function (method, path) {
+      if (method === "GET" && path.indexOf("/sync/candidates") >= 0) count++;
+      return Promise.resolve({ items: [], total: 0, next_cursor: null });
+    };
+    var app = settingsApp(true);
+    var inst = MC.views.updates(app, { kind: "updates", arg: "candidates", query: {} });
+    return tick()
+      .then(function () {
+        return new Promise(function (resolve) { setTimeout(resolve, 50); });
+      })
+      .then(function () {
+        eq(count, 1, "空候选只发一次 GET，不得在 renderBody 里递归重载");
+        ok(inst.el.textContent.indexOf("还没有更新候选") >= 0, "显示空态");
+        inst.destroy();
+        inst.el.remove();
+        MC.api.requestV3 = original;
+      })
+      .catch(function (err) {
+        MC.api.requestV3 = original;
         throw err;
       });
   });
