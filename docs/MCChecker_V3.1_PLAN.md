@@ -7,7 +7,7 @@
 
 ## Context
 
-V3.0 的 M9–M15 已收口：M15 6/6 Done，其中 2160/2161 是 2026-11-02 负责人试用后的书面豁免（ACCEPTED-WITH-EXEMPTION），**不是外部证据 PASS**；V3.0 未合 main、未发布。当前 `main@429dafa`，`feat/mc-v3@1c10582`，feat 领先 main 143 个 commit。M16 是 V3.1 的唯一里程碑，共 43 张卡 `INH-2165–INH-2207`（M16-00…M16-42），全部 Backlog；设计事实源是 INH-2165 的两个附件，执行索引是 Linear 文档 `0729099b-bc2b-4af3-9235-b569fac2a59f`。
+V3.0 的 M9–M15 已收口：M15 6/6 Done，其中 2160/2161 是 2026-11-02 负责人试用后的书面豁免（ACCEPTED-WITH-EXEMPTION），**不是外部证据 PASS**；V3.0 未合 main、未发布。M16-00 冻结时 `origin/main@b964c6e`、`feat/mc-v3@1c10582`、`feat/mc-v3.1@6b018a7`；main 在计划研究快照后新增 3 个非 V3 的 UI 提交，feat/mc-v3.1 领先 main 146 个 commit、落后 3 个。M16 是 V3.1 的唯一里程碑，共 43 张卡 `INH-2165–INH-2207`（M16-00…M16-42），全部 Backlog；设计事实源是 INH-2165 的两个附件，执行索引是 Linear 文档 `0729099b-bc2b-4af3-9235-b569fac2a59f`。
 
 V3.1 的目标不是重写 V3，而是在既有 workspace、唯一 FileResource/FileVersion、FixedConfig、D0/Bn/rn、原 remarks/review、文件、DL、设置、任务之上，增量加入工作区级更新管理、SDA 会话自治与可信同步。**编号代表功能边界，不等于必须按数字串行；按真实 `blockedBy` 调度。**
 
@@ -41,10 +41,11 @@ V3.1 的目标不是重写 V3，而是在既有 workspace、唯一 FileResource/
 
 ### 1.3 代码与分支基线
 
-- `main@429dafaa4938ee42f59807b1720e56c225d8cbfa`；`feat/mc-v3@1c1058270ea27b7396573fa7540142897aee4e0c`。
-- `main` 是 `feat/mc-v3` 的祖先；feat 领先 143 个 commit、148 个文件（+17474/-154）；main 上没有 V3 的 workspace/FileResource/D0-Bn-rn 代码。
+- `origin/main@b964c6e`（2026-11-02 实际；计划研究快照是 `429dafa`，之后 main 新增 3 个非 V3 的 UI 提交）。
+- `feat/mc-v3@1c10582`（M15 代码 tip）；`feat/mc-v3.1@6b018a7`（计划/ADR 合并后）。
+- main 不是 `feat/mc-v3.1` 的祖先；feat/mc-v3.1 领先 146、落后 3；`origin/main..feat/mc-v3.1` 为 161 个文件（+18176/-558）；main 上没有 V3 的 workspace/FileResource/D0-Bn-rn 代码（V3 文件 0，feat 23）。
 - M16 集成分支 `feat/mc-v3.1` 从 `feat/mc-v3` 的 M15 豁免文档提交后 tip 派生；不先合 main。
-- 当前工作树如有未提交的 M15 豁免文档，先按 docs-only chore PR 合入 `feat/mc-v3`，再建 `feat/mc-v3.1`；否则基线 SHA 不可复现。
+- M15 豁免文档 PR #193 在 M16-00 冻结时仍 open；`feat/mc-v3.1` 已包含该文档提交 `df96271`；合入 #193 后用 merge commit 保留谱系。
 
 ### 1.4 M15 已完成能力与豁免
 
@@ -99,7 +100,7 @@ V3.1 的目标不是重写 V3，而是在既有 workspace、唯一 FileResource/
 |---|---|---|---|
 | D1 | 分支与基线 | `feat/mc-v3.1` 从 `feat/mc-v3` 文档提交后 tip 派生；不合 main；记录 main/feat 双 SHA | 全部，尤其 00/01/42 |
 | D2 | M15 豁免口径 | 2160/2161 = `ACCEPTED-WITH-EXEMPTION`，不是 PASS；2161 Done 只满足 42 的 blockedBy，不代表 V3.0 已发布 | 00/01/42 |
-| D3 | 代码基线 | `main@429dafa` + `feat/mc-v3@1c10582` + `feat/mc-v3.1@<docs-tip>`；M16-01 审计实际 HEAD | 01/03/05/07/08/10/11/12/14/18/23/24/25/26/30/37/42 |
+| D3 | 代码基线 | `origin/main@b964c6e` + `feat/mc-v3@1c10582` + `feat/mc-v3.1@6b018a7`；M16-01 审计实际 HEAD | 01/03/05/07/08/10/11/12/14/18/23/24/25/26/30/37/42 |
 | D4 | 卡面调整 | 保持 43 卡原样；只在计划/ADR 写建议，不改 Linear 状态/关系 | 全部 |
 | D5 | API 命名与归属 | 新 API 统一 `/api/v3/workspaces/{wid}/...`；废卡面 `/api/v1/w/...`；source-check→24，catalog→16+30，session-candidates→19+30，connection create→04+30 | 05/08/10/11/12/23/30/32–36/38 |
 | D6 | 06/37 迁移边界 | 一个 `sync_migration` service + 一个 CLI；06 只 plan/dry-run，37 才 execute/backup/rollback | 06/37/42 |
@@ -389,7 +390,7 @@ M16-23 是第一道完整 Sync 编排门；M16-42 是最终发布门。
 
 **风险**
 
-- V3.0 未合 main，M16 会叠加 143 个 commit；M16-01 必须审计 main/feat 差异，不在 M16 开工时合 main。
+- V3.0 未合 main，M16 会叠加 146 个 commit、落后 main 3 个；M16-01 必须审计 main/feat 差异，不在 M16 开工时合 main。
 - 真实 SDA 不可得，02/20/41/42 会停在 `BLOCKED-EXTERNAL`；先做 E1 合成 fixture 与代码主体，不用 mock/HTML/CI runner 冒充。
 - 31–36 都改 `shell.js`/`api.js`/`tests.js`/`index.html`；先拆文件，31 owner 审共享文件，单 `tests.js` + `EXPECTED_CASES`。
 - SecretStore/候选/观测若直接改 V3 权威 head 或漏 `DATA_SUBDIRS`/备份，会出现“测试全绿但权威数据被改/备份漏项”。
