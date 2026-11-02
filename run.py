@@ -3,8 +3,8 @@
 `main.py` 仍是 `from run import main; main()`，保持旧命令行兼容。
 
 本模块只做：解析配置 → 初始化（数据根、日志、布局、单实例锁、后台任务队列、定时调度）→
-启动 HTTP → 有序停止（`ordered_stop` 先停调度器再排空任务队列、最后关 HTTP；
-`stop_and_release` 再等后台工作线程散尽才删单实例锁，C1）。业务接口挂在
+启动 HTTP → 有序停止（`ordered_stop` 先停调度器、排空任务队列、停受管 collector，最后关
+HTTP；`stop_and_release` 再等后台工作线程散尽才删单实例锁，C1）。业务接口挂在
 `app/server/router.py`（M1 起逐步补齐）。
 """
 
@@ -24,6 +24,7 @@ from app import __version__
 from app.config import SettingsError, load_settings
 from app.core.errors import AppError
 from app.core import storage
+from app.services import collector_manager
 from app.services import scheduler as services_scheduler
 from app.services import tasks
 
@@ -100,11 +101,22 @@ def ordered_stop(
 
     `timeout=None` 时在**调用那一刻**读 `tasks.DEFAULT_SHUTDOWN_TIMEOUT`（§10.1 的 30 秒
     只有一个出处），这样用例能把它改短去模拟「排空预算到期」，不必真等 30 秒。
+
+    M16-14（INH-2179）：受管 collector 也在这一条停止序列里。它排在任务队列之后、
+    关 HTTP 之前，`stop_all()` 要等子进程树真正退出才返回——因此 SIGTERM 路径不会
+    在 Chromium 还在跑的时候往下走，更不会提前释放单实例锁。没有启动过 collector
+    时它是无副作用的 no-op（普通 MCChecker 不依赖 collector）。
     """
     scheduler = services_scheduler.get_scheduler()
     if scheduler is not None:
         scheduler.stop()
     runner.shutdown(tasks.DEFAULT_SHUTDOWN_TIMEOUT if timeout is None else timeout)
+    if not collector_manager.stop_all():
+        # 强制结束仍回收不了（例如不可中断的系统调用）：不静默，状态可从 collector_manager 读。
+        logger.error(
+            "受管 collector 未能在停止预算内回收，进程可能仍在运行；详见 "
+            "collector_manager.status() 的 collector_stop_timeout"
+        )
     server.shutdown()
 
 
