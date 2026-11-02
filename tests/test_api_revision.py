@@ -80,6 +80,16 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/previews"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/previews/{preview_id}/validate"): None,
+    # M16-30：连接/凭据是独立 V3 域，不动旧 5 段修订号。
+    ("POST", "/api/v3/workspaces/{wid}/connections"): None,
+    ("PATCH", "/api/v3/workspaces/{wid}/connections/{cid}"): None,
+    ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/credentials/candidates"): None,
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/connections/{cid}/credentials/candidates/{candidate_id}/activate",
+    ): None,
+    ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/credentials/probe"): None,
+    ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/credentials/revoke"): None,
     # M12-01：固定配置/版本图是独立 V3 域，不递增旧 5 段。
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases"): None,

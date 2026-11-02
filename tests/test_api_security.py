@@ -143,6 +143,26 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): "settings_write",
     ("POST", "/api/v3/workspaces/{wid}/sync/previews"): "settings_write",
     ("POST", "/api/v3/workspaces/{wid}/sync/previews/{preview_id}/validate"): None,
+    # M16-30：连接/凭据写接口使用独立能力键；运维 token 的 403 由
+    # tests/test_api_connections.py 单独覆盖（权限矩阵先于 token 校验）。
+    ("POST", "/api/v3/workspaces/{wid}/connections"): "integration_credentials_manage",
+    ("PATCH", "/api/v3/workspaces/{wid}/connections/{cid}"): "integration_credentials_manage",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/connections/{cid}/credentials/candidates",
+    ): "integration_credentials_manage",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/connections/{cid}/credentials/candidates/{candidate_id}/activate",
+    ): "integration_credentials_manage",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/connections/{cid}/credentials/probe",
+    ): "integration_credentials_manage",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/connections/{cid}/credentials/revoke",
+    ): "integration_credentials_manage",
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",
@@ -308,6 +328,8 @@ ROUTE_VALUES = {
     "cid": "cs_000001", "aid": "ar_000001", "parameter_id": "p_000001",
     "did": "d0-rel_000001", "bid": "bl_000001", "mid": "m_000001",
     "plan_id": "ep_000001",
+    # M16-30：凭据候选与异步操作 ID（形状必须过 `validate_id`，才能测到权限层）。
+    "candidate_id": "cred-00000001", "opid": "op-00000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

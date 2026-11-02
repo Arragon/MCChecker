@@ -211,6 +211,9 @@ class TestEntryPoints:
             "config_change_submit": authz.ADMIN,
             "config_change_approve": authz.ADMIN,
             "config_artifact_generate": authz.ADMIN,
+            # M16-30：凭据管理是独立能力键，仍为管理员档；独立运维 token 在
+            # handler 入口另行校验，不属于这张矩阵。
+            "integration_credentials_manage": authz.ADMIN,
         }
 
     def test_unknown_action_fails_fast(self):
