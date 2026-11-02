@@ -51,7 +51,14 @@ PY
 # 375/768 通过 Emulation.setDeviceMetricsOverride 后读取 scrollWidth/clientWidth 并截图
 ```
 
-## 6. 未完成项（因此不标 Done）
+## 6. 键盘、409 与旧 V3 路由补充（同一 Chrome/CDP 会话）
+
+- 打开更新源编辑抽屉后，初始焦点落在名称输入框（`document.activeElement` 为 input，值 `A.xml`）。
+- 在抽屉内把名称改为 `E2E-rename` 后，用另一个客户端把该来源 revision 从 1 推到 2；点击保存返回 409，错误文案为“来源已在其他客户端更新；当前草稿已保留，请刷新后重试”，输入框仍保留 `E2E-rename`，抽屉未关闭。截图：`docs/evidence/m16-40/updates-sources-409-draft-retained.png`。
+- 合成 Escape 键关闭抽屉成功；由于抽屉是程序化 click 打开、初始焦点不在编辑按钮，关闭后焦点回退的浏览器级证据不足，留作未完成项。
+- 旧 V3 路由逐个打开，标题均正确可达：速览、全局搜索、配置管理、设置、外部工具、DL 计算、文件 `A.xml`、审阅修改。未逐项执行收藏/remarks/参数编辑等交互。
+
+## 7. 未完成项（因此不标 Done）
 
 1. 原 V3 F01–F28 的完整回归（文件/收藏/搜索/remarks/DL/参数界面）只抽样了路由，没有逐项截图与交互。
 2. 未保存草稿、409 冲突、键盘 Tab 焦点、modal 关闭/恢复焦点尚未在本 E2E 中记录（前端单元页有部分覆盖）。
