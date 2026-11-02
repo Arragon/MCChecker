@@ -7,7 +7,7 @@ Linear：[MCChecker › Overview](https://linear.app/inhandy/project/mcchecker-9
 
 > **决策变更（2026-10-15）**：项目负责人决定采用“Python 标准库 HTTP + JSON API + 原生前端、零运行时依赖”的重构方案，取代本文 §1 与 §17 中“保留 NiceGUI 单体、不做独立前端重写”的结论。新目标设计见 [`MCChecker_REDESIGN_SPEC.md`](MCChecker_REDESIGN_SPEC.md)；本文其余的数据安全、原子写、定位符、审阅校验、离线发布原则继续有效，并已落入新设计。
 >
-> 本文件是架构事实源。`MCChecker_ARCHITECTURE_v2.md`、`docs/architecture.md` 和其他旧设计文档只作为历史记录或兼容入口；实现状态仍以实际代码与测试为准。
+> 本文件记录目标架构与仍然有效的数据安全原则。`docs/architecture.md` 只摘要当前实现并指向本文件；实现状态以代码与测试为准。2026-09 的 NiceGUI 审查稿已从仓库删除。
 >
 > **2026-10-23 实现状态（覆盖 §1 的历史结论）**：M0–M8 已按“Python 标准库 HTTP + JSON API + 原生 JS、零运行时第三方依赖”实现；§1 及以下关于 NiceGUI/APScheduler 的段落是 2026-10-15 之前的历史决策记录，不再描述当前运行代码（NiceGUI 页面已在 M4-07 移除）。当前运行结构：
 >
@@ -368,6 +368,5 @@ T19 是最终发布门，不替代每个 P0 随修复提交的回归。
 2. `docs/MCChecker_ROADMAP.md`：T01–T20 的阶段、依赖、验收与 Linear 映射。
 3. Linear：执行状态、Milestone 和真实 blocks/blockedBy。
 4. `docs/architecture.md`：Agent 兼容入口，只摘要当前实现并指向本文件。
-5. `MCChecker_ARCHITECTURE_v2.md` / `MCChecker_ROADMAP_v2.md`：历史审查记录，不再作为执行状态源。
 
 任何实现完成状态必须由代码与测试证明；更新文档或 Linear 不等于功能已经完成。
