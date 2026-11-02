@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 111;  // + M16-31 壳、M16-32 更新源列表/编辑、M16-33 计划/预览/手动任务
+  var EXPECTED_CASES = 112;  // + M16-31 壳、M16-32 来源、M16-33 计划、M16-35 运行记录、M16-33 计划/预览/手动任务
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4240,6 +4240,94 @@
           inst.destroy();
           inst.el.remove();
           restore();
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+
+  test("SYNC-35：运行记录列表、items/events 与失败项重试", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalWid = MC.workspaces && MC.workspaces.scopeId;
+    var run = {
+      run_id: "run-test-1", trigger: "manual", state: "partial",
+      counts: { total: 2, succeeded: 1, failed: 1, blocked: 0 },
+      created_at: "2026-11-02T00:00:00Z", finished_at: "2026-11-02T00:01:00Z",
+      parent_run_id: null,
+    };
+    var items = [
+      { item_id: "item-1", source_id: "src-1", name: "A.xml", state: "succeeded", stage: "finished", reason_code: "validated", committed: true },
+      { item_id: "item-2", source_id: "src-2", name: "B.xml", state: "blocked", stage: "finished", reason_code: "collector_offline", committed: false },
+    ];
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-runs"; };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && path.indexOf("/events") >= 0) {
+        return Promise.resolve({ items: [{ seq: 1, at: "2026-11-02T00:00:10Z", status: "succeeded", message: "A 已提交" }] });
+      }
+      if (method === "GET" && path.indexOf("/runs/") >= 0) {
+        return Promise.resolve({ run: run, items: items });
+      }
+      if (method === "GET") {
+        return Promise.resolve({ items: [{ run: run, items: items }], total: 1, next_cursor: null });
+      }
+      return Promise.resolve({ parent_run_id: run.run_id, runs: [] });
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalWid) MC.workspaces.scopeId = originalWid;
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "tasks_run" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "runs", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        ok(host.textContent.indexOf("run-test-1") >= 0, "列表显示运行");
+        var row = host.querySelector("[data-sync-run]");
+        ok(row, "运行行可点开");
+        row.click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        ok(modal, "打开运行详情");
+        ok(modal.textContent.indexOf("A.xml") >= 0 && modal.textContent.indexOf("B.xml") >= 0, "items 可见");
+        ok(modal.textContent.indexOf("collector_offline") >= 0, "失败原因可见");
+        ok(modal.textContent.indexOf("A 已提交") >= 0, "事件日志可见");
+        var retry = modal.querySelector("[data-sync-retry]");
+        ok(retry, "失败项有重试入口");
+        retry.click();
+        return tick().then(function () {
+          ok(calls.some(function (c) { return c.method === "POST" && c.path.indexOf("/retry") >= 0; }), "重试走 POST /retry");
+          modal.querySelector(".modal-footer .btn").click();
+        });
+      })
+      .then(function () {
+        var ro = settingsApp(false);
+        ro.can = function () { return false; };
+        MC.api.requestV3 = function (method, path) {
+          if (method === "GET" && path.indexOf("/events") >= 0) return Promise.resolve({ items: [] });
+          if (method === "GET" && path.indexOf("/runs/") >= 0) return Promise.resolve({ run: run, items: items });
+          return Promise.resolve({ items: [{ run: run, items: items }], total: 1, next_cursor: null });
+        };
+        var view = MC.views.updates(ro, { kind: "updates", arg: "runs", query: {} });
+        return tick().then(function () {
+          view.el.querySelector("[data-sync-run]").click();
+          return tick().then(function () {
+            var modal = document.querySelector(".modal");
+            ok(!modal.querySelector("[data-sync-retry]"), "只读身份无重试");
+            modal.querySelector(".modal-footer .btn").click();
+            view.destroy();
+            view.el.remove();
+            inst.destroy();
+            inst.el.remove();
+            restore();
+          });
         });
       })
       .catch(function (err) {

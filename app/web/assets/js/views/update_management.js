@@ -133,6 +133,15 @@
         error: "",
         expanded: false,
       },
+      runs: {
+        items: [],
+        total: 0,
+        next_cursor: null,
+        state: "",
+        loading: false,
+        error: "",
+        expanded: false,
+      },
       plan: {
         loadedFor: "",
         loading: false,
@@ -180,6 +189,10 @@
 
     function canWrite() {
       return !!(app && app.can && app.can("settings_write"));
+    }
+
+    function canRun() {
+      return !!(app && app.can && app.can("tasks_run"));
     }
 
     function canSavePlan() {
@@ -853,6 +866,191 @@
       ));
     }
 
+    function runsPath() {
+      return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/sync/runs";
+    }
+
+    function runPath(runId) {
+      return runsPath() + "/" + encodeURIComponent(runId);
+    }
+
+    function runStateText(state) {
+      return {
+        queued: "排队中",
+        running: "进行中",
+        succeeded: "已完成",
+        partial: "部分失败",
+        failed: "失败",
+        canceled: "已取消",
+        interrupted: "中断",
+      }[state] || state;
+    }
+
+    function runCounts(run) {
+      var counts = run.counts || {};
+      return "共 " + (counts.total || 0) + " · 成功 " + (counts.succeeded || 0) +
+        " · 失败 " + (counts.failed || 0) + " · 阻断 " + (counts.blocked || 0);
+    }
+
+    function loadRuns(reset) {
+      var R = state.runs;
+      if (R.loading) return Promise.resolve();
+      R.loading = true;
+      R.error = "";
+      if (reset) {
+        R.items = [];
+        R.next_cursor = null;
+        R.expanded = false;
+      }
+      renderBody();
+      return MC.api.requestV3("GET", runsPath(), {
+        query: {
+          state: R.state || undefined,
+          limit: 50,
+          cursor: R.expanded && R.next_cursor ? R.next_cursor : "0",
+        },
+      }).then(function (data) {
+        var incoming = (data && data.items) || [];
+        R.items = R.expanded ? R.items.concat(incoming) : incoming;
+        R.total = data && typeof data.total === "number" ? data.total : R.items.length;
+        R.next_cursor = data ? data.next_cursor : null;
+        R.loading = false;
+        renderBody();
+      }, function (err) {
+        R.loading = false;
+        R.error = errorText(err);
+        renderBody();
+      });
+    }
+
+    function downloadDiagnostics(run) {
+      var eventsUrl = runPath(run.run_id) + "/events";
+      MC.api.requestV3("GET", eventsUrl, {}).then(function (data) {
+        var payload = {
+          run: run,
+          events: (data && data.items) || [],
+          exported_at: new Date().toISOString(),
+          note: "MCChecker sync diagnostics; no secrets are included",
+        };
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = "sync-run-" + run.run_id + "-diagnostics.json";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      }, function (err) {
+        MC.toast.error("诊断下载失败", errorText(err));
+      });
+    }
+
+    function retryRun(run, close) {
+      MC.api.requestV3("POST", runPath(run.run_id) + "/retry", { body: {} }).then(function () {
+        MC.toast.success("失败项已重新入队");
+        if (close) close();
+        loadRuns(true);
+      }, function (err) {
+        MC.toast.error("重试提交失败", errorText(err));
+      });
+    }
+
+    function openRun(run) {
+      var bodyNode = h("div.col", { style: "gap:12px" }, h("p.muted.small", "正在读取运行详情…"));
+      var modal = MC.modal({
+        title: "运行 " + run.run_id,
+        subtitle: run.trigger + " · " + runStateText(run.state) + " · " + runCounts(run),
+        size: "xwide",
+        body: bodyNode,
+        footer: function (close) {
+          var buttons = [];
+          if (canRun() && ["partial", "failed", "interrupted"].indexOf(run.state) >= 0) {
+            buttons.push(h("button.btn.btn-primary", { type: "button", "data-sync-retry": "1", onclick: function () { retryRun(run, close); } }, "重试失败项"));
+          }
+          buttons.push(h("button.btn", { type: "button", onclick: function () { downloadDiagnostics(run); } }, "下载诊断"));
+          buttons.push(h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"));
+          return buttons;
+        },
+      });
+      Promise.all([
+        MC.api.requestV3("GET", runPath(run.run_id), {}),
+        MC.api.requestV3("GET", runPath(run.run_id) + "/events", { query: { after_seq: 0 } }),
+      ]).then(function (results) {
+        var detail = results[0] || {};
+        var events = (results[1] && results[1].items) || [];
+        var items = detail.items || [];
+        util.clear(bodyNode);
+        var itemRows = items.length ? items.map(function (item) {
+          return h("tr",
+            h("td", h("div.small", item.name || item.source_id), h("div.xsmall.muted", item.source_id || "")),
+            h("td", runStateText(item.state)),
+            h("td", item.stage || "—"),
+            h("td", item.reason_code || "—"),
+            h("td", item.committed ? "是" : "否")
+          );
+        }) : [h("tr", h("td", { colspan: "5" }, h("span.muted", "没有 item 记录。")))];
+        bodyNode.appendChild(h("table.table",
+          h("thead", h("tr", h("th", "来源"), h("th", "状态"), h("th", "阶段"), h("th", "原因"), h("th", "已提交"))),
+          h("tbody", itemRows)
+        ));
+        bodyNode.appendChild(h("h3", "事件日志"));
+        var eventRows = events.length ? events.map(function (event) {
+          return h("li", h("span.muted.xsmall", event.at || ""), " · ",
+            h("strong", event.status || event.level || ""), " ", event.message || "", event.reason_code ? h("span.xsmall.muted", " (" + event.reason_code + ")") : null);
+        }) : [h("li.muted", "没有事件日志。")];
+        bodyNode.appendChild(h("ul.mini-list", eventRows));
+        if (detail.run) run = detail.run;
+      }, function (err) {
+        util.clear(bodyNode);
+        bodyNode.appendChild(h("div.form-error", errorText(err)));
+      });
+    }
+
+    function renderRuns() {
+      var R = state.runs;
+      var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
+      var filter = h("select.input", {},
+        h("option", { value: "" }, "全部状态"),
+        ["running", "partial", "failed", "succeeded", "canceled", "interrupted"].map(function (value) {
+          return h("option", { value: value }, runStateText(value));
+        })
+      );
+      filter.value = R.state;
+      filter.addEventListener("change", function () { R.state = filter.value; loadRuns(true); });
+      toolbar.appendChild(filter);
+      toolbar.appendChild(h("button.btn.btn-sm", { type: "button", onclick: function () { loadRuns(true); } }, "刷新"));
+      if (R.error) body.appendChild(h("div.form-error", R.error));
+      if (R.loading && !R.items.length) {
+        body.appendChild(h("p.muted", "正在读取运行记录…"));
+        return;
+      }
+      if (!R.items.length) {
+        body.appendChild(h("div.card", h("div.card-b", h("p.muted", "还没有同步运行记录。"))));
+        return;
+      }
+      var tbody = h("tbody");
+      R.items.forEach(function (doc) {
+        var run = doc.run || doc;
+        var row = h("tr", { "data-sync-run": run.run_id, style: "cursor:pointer" },
+          h("td", h("div.small", run.run_id), h("div.xsmall.muted", run.parent_run_id ? "父 " + run.parent_run_id : "")),
+          h("td", run.trigger),
+          h("td", runStateText(run.state)),
+          h("td", runCounts(run)),
+          h("td", h("div.small", util.formatTime(run.created_at)), h("div.xsmall.muted", run.finished_at ? util.formatTime(run.finished_at) : "未结束"))
+        );
+        row.addEventListener("click", function () { openRun(run); });
+        tbody.appendChild(row);
+      });
+      body.appendChild(h("div.card",
+        h("div.card-h", h("strong", "运行记录"), h("span.muted.small", "共 " + R.total + " 条")),
+        h("div.card-b", toolbar, h("table.table",
+          h("thead", h("tr", h("th", "运行"), h("th", "触发"), h("th", "状态"), h("th", "计数"), h("th", "时间"))),
+          tbody
+        ), R.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { R.expanded = true; loadRuns(false); } }, "加载更多") : null)
+      ));
+    }
+
     function renderPlaceholder(tab) {
       body.appendChild(h("div.card",
         h("div.card-h", h("strong", tab.label), h("span.muted.small", "工作区级")),
@@ -868,6 +1066,8 @@
       } else if (tab.id === "plan") {
         renderPlan();
         if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
+      } else if (tab.id === "runs") {
+        renderRuns();
       } else {
         renderPlaceholder(tab);
       }
@@ -881,6 +1081,7 @@
     renderTabs();
     renderBody();
     if (state.tab === "sources") loadSources(true);
+    if (state.tab === "runs") loadRuns(true);
 
     return {
       el: el,
@@ -891,6 +1092,7 @@
         renderTabs();
         renderBody();
         if (state.tab === "sources") loadSources(true);
+        if (state.tab === "runs") loadRuns(true);
       },
       isDirty: function () { return false; },
       destroy: function () {},
