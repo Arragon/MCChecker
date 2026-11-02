@@ -142,6 +142,14 @@
         error: "",
         expanded: false,
       },
+      candidates: {
+        items: [],
+        total: 0,
+        next_cursor: null,
+        state: "",
+        loading: false,
+        error: "",
+      },
       plan: {
         loadedFor: "",
         loading: false,
@@ -1712,6 +1720,171 @@
       ));
     }
 
+    function candidatesPath() {
+      return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/sync/candidates";
+    }
+
+    function loadCandidates(reset) {
+      var C = state.candidates;
+      if (C.loading) return Promise.resolve();
+      C.loading = true;
+      C.error = "";
+      if (reset) { C.items = []; C.next_cursor = null; }
+      renderBody();
+      return MC.api.requestV3("GET", candidatesPath(), {
+        query: { state: C.state || undefined, limit: 50, cursor: "0" },
+      }).then(function (data) {
+        C.items = (data && data.items) || [];
+        C.total = data && typeof data.total === "number" ? data.total : C.items.length;
+        C.next_cursor = data ? data.next_cursor : null;
+        C.loading = false;
+        renderBody();
+      }, function (err) {
+        C.loading = false;
+        C.error = errorText(err);
+        renderBody();
+      });
+    }
+
+    function openCandidate(candidate) {
+      var error = h("div.form-error", { style: "display:none" });
+      var configs = [];
+      var configSelect = h("select.input", {});
+      var releaseSelect = h("select.input", {});
+      var previewBox = h("div");
+      var configPath = "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
+        "/profiles/" + encodeURIComponent(candidate.profile_id) + "/configs";
+      function showError(message) {
+        error.textContent = message;
+        error.style.display = message ? "" : "none";
+      }
+      function loadReleases() {
+        var config = configs.filter(function (item) { return item.config_id === configSelect.value; })[0];
+        if (!config) return;
+        MC.api.requestV3("GET", configPath + "/" + encodeURIComponent(config.config_id) + "/releases", {})
+          .then(function (data) {
+            util.clear(releaseSelect);
+            (data.items || []).forEach(function (release) {
+              releaseSelect.appendChild(h("option", { value: release.release_id }, "版本 " + (release.version || release.release_id)));
+            });
+            releaseSelect.disabled = !releaseSelect.options.length;
+          }, function (err) { showError(errorText(err)); });
+      }
+      var modal = MC.modal({
+        title: "候选 " + candidate.candidate_id,
+        subtitle: "来源 " + candidate.source_id + " · " + candidate.state,
+        size: "xwide",
+        body: h("div.col", { style: "gap:12px" },
+          error,
+          h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+            h("div.col", { style: "gap:4px" }, h("label.small.muted", "固定配置"), configSelect),
+            h("div.col", { style: "gap:4px" }, h("label.small.muted", "软件版本"), releaseSelect)
+          ),
+          h("div.row", { style: "gap:8px" },
+            h("button.btn.btn-sm", { type: "button", "data-sync-preview": "1", onclick: function () {
+              var config = configs.filter(function (item) { return item.config_id === configSelect.value; })[0];
+              if (!config || !releaseSelect.value) { showError("先选择固定配置与软件版本"); return; }
+              previewBox.appendChild(h("p.muted", "正在生成差异…"));
+              MC.api.requestV3("POST", candidatesPath() + "/" + encodeURIComponent(candidate.candidate_id) + "/apply-preview", {
+                body: { config_id: config.config_id, draft_id: "d0-" + releaseSelect.value },
+              }).then(function (preview) { renderPreview(preview); }, function (err) { showError(errorText(err)); util.clear(previewBox); });
+            } }, "生成差异预览")
+          ),
+          previewBox
+        ),
+        footer: function (close) {
+          return [h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭")];
+        },
+      });
+      if (!candidate.file_version_id) {
+        showError("该候选没有关联文件版本，无法生成参数差异（SDA 表候选需后续协议支持）");
+      }
+      MC.api.requestV3("GET", configPath, {}).then(function (data) {
+        configs = data.items || [];
+        util.clear(configSelect);
+        configs.forEach(function (config) {
+          configSelect.appendChild(h("option", { value: config.config_id }, (config.code || "") + " " + (config.name || config.config_id)));
+        });
+        configSelect.addEventListener("change", loadReleases);
+        if (configs.length) loadReleases();
+      }, function (err) { showError(errorText(err)); });
+
+      function renderPreview(preview) {
+        util.clear(previewBox);
+        var items = preview.items || [];
+        var decisions = {};
+        var tableRows = items.map(function (item) {
+          var decision = null;
+          if (item.action === "conflict") {
+            decision = h("select.input", { "data-sync-decision": item.parameter_id },
+              h("option", { value: "" }, "请选择"),
+              h("option", { value: "use_new" }, "采用新值"),
+              h("option", { value: "inherit_old" }, "保留当前"),
+              h("option", { value: "manual" }, "人工处理")
+            );
+            decision.addEventListener("change", function () { decisions[item.parameter_id] = decision.value; });
+          }
+          return h("tr",
+            h("td", h("div.small", item.name || item.parameter_id), h("div.xsmall.muted", item.parameter_id)),
+            h("td", h("span.badge", item.action)),
+            h("td", JSON.stringify(item.ours && item.ours.value || null)),
+            h("td", JSON.stringify(item.theirs && item.theirs.value || null)),
+            h("td", decision || h("span.muted", item.action === "keep" ? "保留" : "—"))
+          );
+        });
+        previewBox.appendChild(h("table.table",
+          h("thead", h("tr", h("th", "参数"), h("th", "计划"), h("th", "当前"), h("th", "候选"), h("th", "决议"))),
+          h("tbody", tableRows)
+        ));
+        if (preview.blockers && preview.blockers.length) {
+          previewBox.appendChild(h("div.form-error", preview.blockers.map(function (row) { return row.message || row.code; }).join("；")));
+        }
+        if (preview.d0_frozen) {
+          previewBox.appendChild(h("p.form-error", "D0 已冻结，不提供覆盖；请选择新的 Bn 草稿。"));
+        }
+        var apply = h("button.btn.btn-primary", { type: "button", "data-sync-apply": "1", onclick: function () {
+          if (!canWrite()) return;
+          var requestId = "apply-" + Date.now();
+          MC.api.requestV3("POST", candidatesPath() + "/" + encodeURIComponent(candidate.candidate_id) + "/apply", {
+            body: { preview_id: preview.preview_id, request_id: requestId, decisions: decisions },
+          }).then(function (result) {
+            MC.toast.success("已写入 V3 草稿（rev " + result.draft_revision + "）；发布请到配置管理");
+            loadCandidates(true);
+          }, function (err) { showError(errorText(err)); });
+        } }, "写入 V3 草稿");
+        if (!canWrite()) apply.disabled = true;
+        if (preview.d0_frozen) apply.disabled = true;
+        previewBox.appendChild(h("div.row", { style: "gap:8px;margin-top:8px" }, apply,
+          h("span.xsmall.muted", "只写草稿，不发布 D0/Bn/rn")
+        ));
+      }
+    }
+
+    function renderCandidates() {
+      var C = state.candidates;
+      if (C.error) body.appendChild(h("div.form-error", C.error));
+      if (C.loading && !C.items.length) { body.appendChild(h("p.muted", "正在读取候选…")); return; }
+      if (!C.items.length) { body.appendChild(h("div.card", h("div.card-b", h("p.muted", "还没有更新候选。")))); return; }
+      var tbody = h("tbody");
+      C.items.forEach(function (candidate) {
+        var row = h("tr", { "data-sync-candidate": candidate.candidate_id, style: "cursor:pointer" },
+          h("td", h("div.small", candidate.candidate_id), h("div.xsmall.muted", candidate.source_id)),
+          h("td", candidate.state),
+          h("td", h("div.xsmall", candidate.content_hash || "—")),
+          h("td", h("div.small", util.formatTime(candidate.created_at)), h("div.xsmall.muted", candidate.file_version_id ? "关联文件版本" : "无文件版本"))
+        );
+        row.addEventListener("click", function () { openCandidate(candidate); });
+        tbody.appendChild(row);
+      });
+      body.appendChild(h("div.card",
+        h("div.card-h", h("strong", "更新候选"), h("span.muted.small", "共 " + C.total + " 条")),
+        h("div.card-b", h("table.table",
+          h("thead", h("tr", h("th", "候选"), h("th", "状态"), h("th", "内容指纹"), h("th", "时间/来源"))),
+          tbody
+        ))
+      ));
+    }
+
     function renderPlaceholder(tab) {
       body.appendChild(h("div.card",
         h("div.card-h", h("strong", tab.label), h("span.muted.small", "工作区级")),
@@ -1729,6 +1902,9 @@
         if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
       } else if (tab.id === "runs") {
         renderRuns();
+      } else if (tab.id === "candidates") {
+        renderCandidates();
+        if (!state.candidates.loading && !state.candidates.items.length) loadCandidates(true);
       } else if (tab.id === "connections") {
         renderConnections();
         if (state.connections.loadedFor !== workspaceId() && !state.connections.loading) {
@@ -1748,6 +1924,7 @@
     renderBody();
     if (state.tab === "sources") loadSources(true);
     if (state.tab === "runs") loadRuns(true);
+    if (state.tab === "candidates") loadCandidates(true);
 
     return {
       el: el,
@@ -1759,6 +1936,7 @@
         renderBody();
         if (state.tab === "sources") loadSources(true);
         if (state.tab === "runs") loadRuns(true);
+    if (state.tab === "candidates") loadCandidates(true);
       },
       isDirty: function () { return false; },
       destroy: function () {
