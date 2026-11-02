@@ -37,18 +37,19 @@ from app.core.sync_models import (
     validate_workspace_id,
 )
 
-from . import sync_connections, sync_credentials, sync_store
+from . import sync_connections, sync_credentials, sync_heartbeat, sync_store
 
 FILE = "operations.json"
 DEFAULT_DOC: Dict[str, Any] = {"items": []}
 OPERATION_LIMIT = 500
-KINDS = ("credential_probe", "credential_activate", "credential_revoke")
+KINDS = ("credential_probe", "credential_activate", "credential_revoke", "heartbeat_run")
 STATES = ("queued", "running", "succeeded", "failed", "blocked")
 TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked"})
 PAYLOAD_KEYS = {
     "credential_probe": frozenset({"candidate_id", "probe_epoch"}),
     "credential_activate": frozenset({"candidate_id", "probe_epoch"}),
     "credential_revoke": frozenset({"expected_revision"}),
+    "heartbeat_run": frozenset(),
 }
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,9 @@ def _safe_result(value: Any) -> Dict[str, Any]:
     probe = value.get("probe")
     if probe in ("succeeded", "failed", "blocked"):
         result["probe"] = probe
+    heartbeat = value.get("heartbeat")
+    if isinstance(heartbeat, dict):
+        result["heartbeat"] = dict(heartbeat)
     candidate_id = value.get("candidate_id")
     if isinstance(candidate_id, str):
         result["candidate_id"] = candidate_id
@@ -135,7 +139,7 @@ def _validated_payload(kind: str, payload: Optional[Dict[str, Any]]) -> Dict[str
             data["probe_epoch"] = validate_revision(data["probe_epoch"], "probe_epoch")
     elif kind == "credential_activate":
         data["probe_epoch"] = validate_revision(data.get("probe_epoch"), "probe_epoch")
-    else:
+    elif kind == "credential_revoke":
         data["expected_revision"] = validate_revision(data.get("expected_revision"), "expected_revision")
     return data
 
@@ -432,11 +436,61 @@ def _revoke_result(
     return "succeeded", None, {"credential": latest}
 
 
+def _heartbeat_result(
+    workspace_id: str,
+    connection_id: str,
+    heartbeat_probe: Optional[Callable[[str, str], Dict[str, Any]]],
+) -> Tuple[str, Optional[str], Dict[str, Any]]:
+    """保活运行：未启用/未注入 probe 都 blocked，绝不伪造成功。"""
+    state = sync_heartbeat.get_state(workspace_id, connection_id)
+    if not state.get("enabled"):
+        return "blocked", "disabled", {"heartbeat": state}
+    if heartbeat_probe is None:
+        return "blocked", "collector_offline", {"heartbeat": state}
+    try:
+        outcome = sync_heartbeat.run_heartbeat(
+            workspace_id,
+            connection_id,
+            lambda: heartbeat_probe(workspace_id, connection_id),
+        )
+    except Exception:
+        logger.exception("心跳运行失败（connection=%s）", connection_id)
+        return "failed", "network_error", {
+            "heartbeat": sync_heartbeat.get_state(workspace_id, connection_id)
+        }
+    status = str(outcome.get("status") or "")
+    latest = outcome.get("state") or sync_heartbeat.get_state(workspace_id, connection_id)
+    if status == "succeeded":
+        return "succeeded", None, {"heartbeat": latest}
+    if status == "failed":
+        reason = str(outcome.get("reason_code") or "auth_failed")
+        if reason not in sync_credentials.FAIL_REASONS:
+            reason = "auth_failed"
+        return "failed", reason, {"heartbeat": latest}
+    if status == "skipped":
+        return "blocked", "disabled", {"heartbeat": latest}
+    if status == "busy":
+        return "blocked", "interrupted", {"heartbeat": latest}
+    if status == "conflict":
+        return "blocked", "revision_conflict", {"heartbeat": latest}
+    return "blocked", "collector_offline", {"heartbeat": latest}
+
+
+def _failure_result(workspace_id: str, connection_id: str, kind: str) -> Dict[str, Any]:
+    if kind == "heartbeat_run":
+        try:
+            return {"heartbeat": sync_heartbeat.get_state(workspace_id, connection_id)}
+        except AppError:
+            return {}
+    return {"credential": _safe_credential(workspace_id, connection_id)}
+
+
 def run_operation(
     workspace_id: str,
     op_id: str,
     probe: Optional[ProbeCallable] = None,
     vault: Any = None,
+    heartbeat_probe: Optional[Callable[[str, str], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """同步执行一个操作（测试/单进程部署用）；重复调用不会重复执行。"""
     wid = validate_workspace_id(workspace_id)
@@ -457,13 +511,15 @@ def run_operation(
             state, reason, result = _activate_result(wid, connection_id, payload, vault)
         elif kind == "credential_revoke":
             state, reason, result = _revoke_result(wid, connection_id, payload, vault)
+        elif kind == "heartbeat_run":
+            state, reason, result = _heartbeat_result(wid, connection_id, heartbeat_probe)
         else:
             state, reason, result = "failed", "unknown", {}
     except AppError as exc:
         state, reason = "failed", _reason_for_error(exc)
-        result = {"credential": _safe_credential(wid, connection_id)}
+        result = _failure_result(wid, connection_id, kind)
     except Exception:
-        logger.exception("凭据操作执行失败（kind=%s）", kind)
+        logger.exception("同步操作执行失败（kind=%s）", kind)
         state, reason = "failed", "unknown"
-        result = {"credential": _safe_credential(wid, connection_id)}
+        result = _failure_result(wid, connection_id, kind)
     return _finish(wid, oid, state, reason, result)

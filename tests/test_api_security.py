@@ -163,6 +163,15 @@ WRITE_ROUTE_ACTIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/connections/{cid}/credentials/revoke",
     ): "integration_credentials_manage",
+    # M16-34：保活配置/立即运行为运维写动作，沿用连接凭据能力键 + 运维 token。
+    (
+        "PUT",
+        "/api/v3/workspaces/{wid}/connections/{cid}/heartbeat",
+    ): "integration_credentials_manage",
+    (
+        "POST",
+        "/api/v3/workspaces/{wid}/connections/{cid}/heartbeat/run",
+    ): "integration_credentials_manage",
     # M16-33：手动/批量同步任务走同一个 tasks_run 权限档（只读身份不能触发）。
     ("POST", "/api/v3/workspaces/{wid}/sync/runs"): "tasks_run",
     ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry"): "tasks_run",

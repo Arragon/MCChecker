@@ -95,6 +95,9 @@ WRITE_ROUTE_EXPECTATIONS = {
     ): None,
     ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/credentials/probe"): None,
     ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/credentials/revoke"): None,
+    # M16-34：保活配置/运行动的是 `sync/heartbeat.json`，不递增旧 5 段。
+    ("PUT", "/api/v3/workspaces/{wid}/connections/{cid}/heartbeat"): None,
+    ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/heartbeat/run"): None,
     # M12-01：固定配置/版本图是独立 V3 域，不递增旧 5 段。
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases"): None,
