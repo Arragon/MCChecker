@@ -138,6 +138,8 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v3/workspaces/{wid}/sync/sources"): "settings_write",
     ("PATCH", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): "settings_write",
     ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): "settings_write",
+    ("PUT", "/api/v3/workspaces/{wid}/sync/policy"): "settings_write",
+    ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): "settings_write",
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",

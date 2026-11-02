@@ -131,6 +131,7 @@ def build_router(settings: Settings) -> Router:
         api_search,
         api_session,
         api_sources,
+        api_sync_policy,
         api_sync_sources,
         api_tasks,
         api_temp,
@@ -157,6 +158,7 @@ def build_router(settings: Settings) -> Router:
     api_v3_exports.register(router)
     api_v3_events.register(router)
     api_sync_sources.register(router)
+    api_sync_policy.register(router)
     router.add("GET", "/api/v1/p/{pid}/files", api_documents.list_files)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/document", api_documents.get_document)
     router.add("GET", "/api/v1/p/{pid}/files/{name}/raw", api_documents.get_raw)
