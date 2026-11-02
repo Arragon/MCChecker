@@ -56,6 +56,8 @@ def _safe(item: Dict[str, Any]) -> Dict[str, Any]:
     payload["seen_count"] = int(item.get("seen_count", 1))
     payload["last_seen_at"] = item.get("last_seen_at") or candidate.created_at
     payload["superseded_by"] = item.get("superseded_by")
+    payload["applied_revision"] = item.get("applied_revision")
+    payload["applied_at"] = item.get("applied_at")
     return payload
 
 
@@ -138,6 +140,47 @@ def get_candidate(workspace_id: str, candidate_id: str) -> Dict[str, Any]:
     if item is None:
         raise AppError(NOT_FOUND, "候选不存在", field="candidate_id")
     return _safe(item)
+
+
+def mark_state(
+    workspace_id: str,
+    candidate_id: str,
+    state: str,
+    applied_revision: Optional[int] = None,
+    applied_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """M16-36：候选决议后回写状态（applied/dismissed/...）。
+
+    只改候选自身状态与回执字段；不移动 D0/Bn/rn 已发布 head，不改文件/blob。
+    - `superseded` 候选不回写（已被同绑定新 hash 取代，回写会误导列表）；
+    - 已是目标状态且回执字段一致时不写盘（幂等重放不制造 revision 抖动）。
+    """
+    wid = validate_workspace_id(workspace_id)
+    cid = validate_id(candidate_id, "candidate_id")
+    target_state = validate_enum(state, CANDIDATE_STATES, "state")
+    revision = None if applied_revision is None else validate_revision(applied_revision, "applied_revision")
+    moment = applied_at or _now()
+
+    def mutate(doc: Dict[str, Any]) -> Dict[str, Any]:
+        item = _find(doc, cid)
+        if item is None:
+            raise AppError(NOT_FOUND, "候选不存在", field="candidate_id")
+        if item.get("state") == "superseded":
+            return doc
+        same = item.get("state") == target_state and (
+            revision is None or item.get("applied_revision") == revision
+        )
+        if same:
+            return doc
+        item["state"] = target_state
+        if revision is not None:
+            item["applied_revision"] = revision
+            item["applied_at"] = moment
+        doc["revision"] = int(doc.get("revision", 0)) + 1
+        return doc
+
+    sync_store.update_doc(wid, FILE, mutate, DEFAULT_DOC)
+    return get_candidate(wid, cid)
 
 
 def list_candidates(

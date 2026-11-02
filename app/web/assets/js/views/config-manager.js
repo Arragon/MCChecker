@@ -13,11 +13,13 @@
 
   function enc(v) { return encodeURIComponent(String(v)); }
 
-  MC.views.configv3 = function (app) {
+  MC.views.configv3 = function (app, route) {
     var el = h("div.view");
+    // M16-36：支持从更新候选"写入草稿"后深链直达指定配置/版本（不自动发布）。
+    var q = (route && route.query) || {};
     var S = {
-      configs: [], cid: null, detail: null, graph: null, params: null, branch: null,
-      machines: [], releaseId: null, tab: "versions", draft: null, loading: true, error: null,
+      configs: [], cid: q.config || null, detail: null, graph: null, params: null, branch: null,
+      machines: [], releaseId: q.release || null, tab: "versions", draft: null, loading: true, error: null,
       filter: "", overview: null, overviewMachine: "", overviewCompare: "",
       overviewOffset: 0, overviewLimit: 100, overviewTotal: 0,
       paramMode: "list", selectedParam: null, paramTree: null,
@@ -1227,7 +1229,7 @@
     }
 
     var unsub = [MC.bus.on("changed:settings", function () { load(S.cid); })];
-    load();
+    load(S.cid || undefined);
     return {
       el: el, title: "配置管理", icon: "list",
       update: function () {},

@@ -77,3 +77,45 @@ def test_candidate_does_not_touch_config_or_publish():
     with storage.use_workspace(wid), storage.use_profile("default"):
         after = storage.load_config_file("A.xml")
     assert before == after
+
+
+def test_mark_state_applied_is_idempotent_and_does_not_touch_published_head():
+    """M16-36：决议后回写状态；重复回写不制造 revision 抖动，也不动 D0/Bn/rn。"""
+    wid, version_id = make_workspace()
+    candidate = create(wid, version_id)
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        before = storage.load_config_file("A.xml")
+
+    applied = sync_candidates.mark_state(
+        wid, candidate["candidate_id"], "applied", applied_revision=7, applied_at="2026-11-02T01:00:00Z"
+    )
+    assert applied["state"] == "applied"
+    assert applied["applied_revision"] == 7
+    assert applied["applied_at"] == "2026-11-02T01:00:00Z"
+    assert sync_candidates.list_candidates(wid, state="applied")["total"] == 1
+    assert sync_candidates.list_candidates(wid, state="pending")["total"] == 0
+
+    revision_after_first = sync_candidates._load(wid)["revision"]
+    again = sync_candidates.mark_state(
+        wid, candidate["candidate_id"], "applied", applied_revision=7, applied_at="2026-11-03T00:00:00Z"
+    )
+    assert again["applied_at"] == "2026-11-02T01:00:00Z"
+    assert sync_candidates._load(wid)["revision"] == revision_after_first
+
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        after = storage.load_config_file("A.xml")
+    assert before == after
+
+
+def test_mark_state_does_not_resurrect_superseded_and_validates_state():
+    wid, version_id = make_workspace()
+    old = create(wid, version_id)
+    create(wid, version_id, content_hash=HASH_B)
+    assert sync_candidates.get_candidate(wid, old["candidate_id"])["state"] == "superseded"
+
+    kept = sync_candidates.mark_state(wid, old["candidate_id"], "applied", applied_revision=1)
+    assert kept["state"] == "superseded"
+    assert kept["applied_revision"] is None
+
+    with pytest.raises(AppError):
+        sync_candidates.mark_state(wid, old["candidate_id"], "not-a-state")

@@ -13,6 +13,7 @@ from app.services import (
     config_v3_drafts,
     sync_candidate_apply,
     sync_candidate_plans,
+    sync_candidates,
     workspace_catalog,
 )
 
@@ -101,6 +102,49 @@ def test_ten_params_apply_in_one_transaction_and_keep_head():
     assert again["replayed"] is True
     assert again["draft_revision"] == result["draft_revision"]
     assert sync_candidate_apply.get_apply(wid, preview["preview_id"], "apply-1")["changed"] == result["changed"]
+
+
+def test_apply_marks_candidate_applied_and_replay_keeps_it_stable():
+    """M16-36：写入草稿后候选置 applied；幂等重放不重复写、不抖动回执时间。"""
+    wid, cid, did, pids = make_config(2)
+    seed_current(wid, cid, did, pids)
+    candidate = sync_candidates.create_candidate(
+        wid, "default", "src-apply", 1, "f" * 64, "default:%s" % cid
+    )
+    assert candidate["state"] == "pending"
+    preview = sync_candidate_plans.create_preview(
+        wid,
+        "default",
+        cid,
+        did,
+        candidate["candidate_id"],
+        values(pids, "1"),
+        values(pids, "2"),
+    )
+
+    result = sync_candidate_apply.apply_preview(wid, "default", preview["preview_id"], "apply-mark", {})
+    marked = sync_candidates.get_candidate(wid, candidate["candidate_id"])
+    assert marked["state"] == "applied"
+    assert marked["applied_revision"] == result["draft_revision"]
+    assert marked["applied_at"] == result["applied_at"]
+
+    again = sync_candidate_apply.apply_preview(wid, "default", preview["preview_id"], "apply-mark", {})
+    assert again["replayed"] is True
+    still = sync_candidates.get_candidate(wid, candidate["candidate_id"])
+    assert still["state"] == "applied"
+    assert still["applied_at"] == marked["applied_at"]
+    with storage.use_workspace(wid):
+        draft = config_v3_drafts.get_draft("default", cid, did)
+    assert draft["revision"] == result["draft_revision"]
+
+
+def test_apply_without_candidate_record_still_writes_draft():
+    """预览可能引用尚未落库的候选 id：写入草稿不能被状态回写拖失败。"""
+    wid, cid, did, pids = make_config(2)
+    preview = make_preview(wid, cid, did, pids)
+    result = sync_candidate_apply.apply_preview(wid, "default", preview["preview_id"], "apply-nocand", {})
+    assert result["status"] == "applied"
+    assert result["changed"]
 
 
 def test_invalid_type_rejects_all_writes():

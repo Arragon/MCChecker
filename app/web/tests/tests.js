@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 116;  // + M16-31/32/33/34/35/36 更新管理 + SDA 目录选择
+  var EXPECTED_CASES = 120;  // + M16-31/32/33/34/35/36 更新管理 + SDA 目录选择 + 32 新建/批量/草稿 + 36 批量决议
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4063,7 +4063,7 @@
       if (MC.workspaces && originalWid) MC.workspaces.scopeId = originalWid;
     }
     var app = settingsApp(true);
-    app.can = function (name) { return name === "settings_write" || name === "deployer" || name === "admin"; };
+    app.can = function (name) { return name === "settings_write" || name === "tasks_run" || name === "deployer" || name === "admin"; };
     var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
     var host = inst.el;
     return tick()
@@ -4088,7 +4088,8 @@
         return tick().then(function () {
           ok(modal.textContent.indexOf("保留") >= 0, "409 保留草稿并提示");
           ok(document.querySelector(".modal"), "409 不关闭编辑框");
-          modal.querySelector(".modal-footer .btn").click();
+          ok(modal.querySelector("[data-sync-reload]"), "409 提供重新载入最新版本入口");
+          cleanOverlays();
         });
       })
       .then(function () {
@@ -4113,6 +4114,219 @@
           inst.el.remove();
           restore();
         });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+
+  function lastModal() {
+    var all = document.querySelectorAll(".modal");
+    return all[all.length - 1] || null;
+  }
+  function modalButton(root, text) {
+    if (!root) return null;
+    return [].slice.call(root.querySelectorAll("button")).filter(function (b) {
+      return (b.textContent || "").trim() === text;
+    })[0] || null;
+  }
+
+  test("SYNC-32B：新建来源含类型/连接/目标绑定，删除与批量动作保持筛选", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalScope = MC.workspaces && MC.workspaces.scopeId;
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-32b"; };
+    var rows = [
+      { source_id: "s1", revision: 1, name: "A.xml", kind: "http_file", enabled: true, schedule_mode: "inherit", target: { kind: "file_archive", file_id: "file-1" } },
+      { source_id: "s2", revision: 2, name: "B.xml", kind: "http_file", enabled: true, schedule_mode: "inherit", target: { kind: "file_archive", file_id: "file-2" } },
+    ];
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && /\/sync\/sources$/.test(path)) return Promise.resolve({ items: rows.slice(), total: 2, next_cursor: null });
+      if (method === "GET" && /\/connections$/.test(path)) return Promise.resolve({ items: [{ connection_id: "c1", name: "SDA 一", enabled: true }] });
+      if (method === "GET" && /file-selector/.test(path)) return Promise.resolve({ items: [{ file_id: "file-1", name: "A.xml", current_version: "3" }] });
+      if (method === "POST" && /\/sync\/previews$/.test(path)) {
+        return Promise.resolve({ items: [{ source_id: "s1", target: { kind: "file_archive" }, binding: { file_id: "file-1" } }], excluded: [] });
+      }
+      if (method === "POST" && /\/sync\/sources$/.test(path)) {
+        return Promise.resolve({ source_id: "s3", revision: 1, name: "新来源", kind: "http_file", enabled: true });
+      }
+      if (method === "DELETE") return Promise.resolve({});
+      if (method === "PATCH") return Promise.resolve({ source_id: path.split("/").pop(), revision: 9, enabled: opts.body.enabled });
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalScope) MC.workspaces.scopeId = originalScope;
+      cleanOverlays();
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "tasks_run" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        ok(host.querySelector("[data-sync-new]"), "可写身份有新建入口");
+        eq(host.querySelectorAll("[data-sync-select]").length, 2, "每行都有勾选框");
+        ok(host.querySelector("[data-sync-batch]"), "有批量工具条");
+        host.querySelector('[data-sync-test="s1"]').click();
+        return tick().then(tick);
+      })
+      .then(function () {
+        var preview = calls.filter(function (c) { return c.method === "POST" && /\/sync\/previews$/.test(c.path); })[0];
+        ok(preview, "来源测试走只读预览");
+        eq(preview.opts.body.scope, "selected_sources");
+        eq(preview.opts.body.source_ids, ["s1"]);
+        ok(/可解析/.test(host.textContent), "测试结果显示可解析");
+        var checks = host.querySelectorAll("[data-sync-select]");
+        checks[0].checked = true;
+        checks[0].dispatchEvent(new Event("change"));
+        checks[1].checked = true;
+        checks[1].dispatchEvent(new Event("change"));
+        return tick();
+      })
+      .then(function () {
+        var disable = host.querySelector("[data-sync-batch-disable]");
+        ok(disable && !disable.disabled, "选中后批量停用可用");
+        disable.click();
+        return tick().then(function () {
+          var confirm = lastModal();
+          ok(confirm && confirm.textContent.indexOf("批量停用") >= 0, "批量为危险操作需确认");
+          modalButton(confirm, "批量停用").click();
+          return tick().then(tick);
+        });
+      })
+      .then(function () {
+        var patches = calls.filter(function (c) { return c.method === "PATCH"; });
+        eq(patches.length, 2, "批量停用逐项 CAS");
+        ok(patches.every(function (c) { return c.opts.body.enabled === false; }), "逐项写入 enabled=false");
+        ok(patches.some(function (c) { return c.opts.headers["If-Match"] === "1"; }), "按各自 revision 做 If-Match");
+        host.querySelector('[data-sync-delete="s1"]').click();
+        return tick().then(function () {
+          var confirm = lastModal();
+          ok(confirm && confirm.textContent.indexOf("tombstone") >= 0, "删除说明 tombstone 语义");
+          modalButton(confirm, "删除来源").click();
+          return tick().then(tick);
+        });
+      })
+      .then(function () {
+        var del = calls.filter(function (c) { return c.method === "DELETE"; })[0];
+        eq(del.path, "/api/v3/workspaces/w-32b/sync/sources/s1", "删除当前行来源");
+        eq(del.opts.headers["If-Match"], "9", "删除用批量后的最新 revision 做 CAS");
+        ok(!host.querySelector('[data-sync-source="s1"]'), "删除后局部移除该行");
+        host.querySelector("[data-sync-new]").click();
+        var modal = document.querySelector(".modal");
+        ok(modal, "打开新建抽屉");
+        eq(modal.querySelector("[data-sync-kind]").options.length, 4, "类型只列真实 kind");
+        var name = modal.querySelectorAll("input.input")[0];
+        name.value = "新来源";
+        name.dispatchEvent(new Event("input"));
+        var ref = modal.querySelectorAll("input.input")[1];
+        ref.value = "https://example.invalid/new.xml";
+        ref.dispatchEvent(new Event("input"));
+        return tick().then(function () {
+          var fileSelect = modal.querySelector("[data-sync-target-file]");
+          ok(fileSelect, "目标绑定提供 FileResource 选择");
+          fileSelect.value = "file-1";
+          fileSelect.dispatchEvent(new Event("change"));
+          modal.querySelector("[data-sync-save]").click();
+          return tick().then(tick);
+        });
+      })
+      .then(function () {
+        var created = calls.filter(function (c) { return c.method === "POST" && /\/sync\/sources$/.test(c.path); })[0];
+        ok(created, "新建走 POST /sync/sources");
+        eq(created.opts.body.profile_id, "default", "新建带机型");
+        eq(created.opts.body.target.kind, "file_archive");
+        eq(created.opts.body.target.file_id, "file-1", "目标绑定写入 file_id");
+        inst.destroy();
+        inst.el.remove();
+        restore();
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+  test("SYNC-32C：未保存草稿提示、失败重试与停用来源禁止更新", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalScope = MC.workspaces && MC.workspaces.scopeId;
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-32c"; };
+    var rows = [
+      { source_id: "s1", revision: 4, name: "A.xml", kind: "http_file", enabled: true, schedule_mode: "inherit" },
+      { source_id: "s2", revision: 1, name: "B.xml", kind: "http_file", enabled: false, schedule_mode: "inherit" },
+    ];
+    var failList = false;
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && /\/sync\/sources$/.test(path)) {
+        if (failList) return Promise.reject({ status: 503, code: "STORAGE_FAILURE", message: "服务器写入失败" });
+        return Promise.resolve({ items: rows.slice(), total: 2, next_cursor: null });
+      }
+      if (method === "GET" && /file-selector/.test(path)) return Promise.resolve({ items: [] });
+      if (method === "GET" && /\/connections$/.test(path)) return Promise.resolve({ items: [] });
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalScope) MC.workspaces.scopeId = originalScope;
+      cleanOverlays();
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "tasks_run" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        var disabledRun = host.querySelector('[data-sync-run="s2"]');
+        ok(disabledRun && disabledRun.disabled, "停用来源不能直接更新");
+        host.querySelector('[data-sync-edit="s1"]').click();
+        var modal = document.querySelector(".modal");
+        ok(modal, "打开编辑抽屉");
+        var name = modal.querySelectorAll("input.input")[0];
+        name.value = "A2.xml";
+        name.dispatchEvent(new Event("input"));
+        ok(inst.isDirty(), "改动后视图报告脏状态");
+        modalButton(modal, "取消").click();
+        return tick().then(function () {
+          var confirm = lastModal();
+          ok(confirm && confirm.textContent.indexOf("放弃") >= 0, "关闭前提示未保存草稿");
+          modalButton(confirm, "取消").click();
+          return tick().then(function () {
+            ok(document.querySelector(".modal") === modal, "取消放弃后抽屉仍打开");
+            modalButton(modal, "取消").click();
+            return tick().then(function () {
+              modalButton(lastModal(), "放弃修改").click();
+              return tick();
+            });
+          });
+        });
+      })
+      .then(function () {
+        ok(!document.querySelector(".modal"), "确认放弃后抽屉关闭");
+        ok(!inst.isDirty(), "关闭后脏状态复位");
+        failList = true;
+        host.querySelector("[data-sync-refresh]").click();
+        return tick().then(tick);
+      })
+      .then(function () {
+        var retry = host.querySelector("[data-sync-retry]");
+        ok(retry, "列表失败给出显式重试");
+        ok(host.querySelector("[data-sync-new]"), "失败时工具栏保留");
+        failList = false;
+        retry.click();
+        return tick().then(tick);
+      })
+      .then(function () {
+        ok(host.textContent.indexOf("A.xml") >= 0, "重试后列表恢复");
+        ok(!host.querySelector("[data-sync-error]"), "成功后清除错误区");
+        inst.destroy();
+        inst.el.remove();
+        restore();
       })
       .catch(function (err) {
         restore();
@@ -4185,7 +4399,7 @@
             eq(patch.opts.headers["If-Match"], "2");
             ok(modal.textContent.indexOf("不一致") >= 0, "服务端不一致拒绝保存并提示");
             ok(document.querySelector(".modal"), "拒绝时不关闭抽屉");
-            modal.querySelector(".modal-footer .btn").click();
+            cleanOverlays();
             inst.destroy();
             inst.el.remove();
             restore();
@@ -4683,6 +4897,205 @@
               restore();
             });
           });
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+
+  test("SYNC-36B：未决冲突禁止写入、批量决议一键套用与 409 重新预览", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalWid = MC.workspaces && MC.workspaces.scopeId;
+    var candidate = {
+      candidate_id: "cand-36b", source_id: "src-36b", profile_id: "default",
+      state: "pending", content_hash: "b".repeat(64), created_at: "2026-11-02T00:00:00Z",
+      file_version_id: "v-36b",
+    };
+    function makePreview() {
+      return {
+        preview_id: "prev-36b", candidate_id: "cand-36b", draft_revision: 5,
+        d0_frozen: false, blockers: [], can_apply: false,
+        summary: { conflict: 2 },
+        items: [
+          { parameter_id: "p1", name: "Pulse", action: "conflict", allowed: ["use_new", "inherit_old"], base: { value: { text: "0" } }, ours: { value: { text: "1" } }, theirs: { value: { text: "2" } } },
+          { parameter_id: "p2", name: "Enabled", action: "conflict", allowed: ["use_new", "inherit_old"], base: { value: { text: "0" } }, ours: { value: { text: "0" } }, theirs: { value: { text: "1" } } },
+        ],
+      };
+    }
+    var applyAttempt = 0;
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-36b"; };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && path.indexOf("/sync/candidates") >= 0) {
+        return Promise.resolve({ items: [candidate], total: 1, next_cursor: null });
+      }
+      if (method === "GET" && path.indexOf("/releases") >= 0) return Promise.resolve({ items: [{ release_id: "rel-36b", version: "1" }] });
+      if (method === "GET" && path.indexOf("/configs") >= 0) return Promise.resolve({ items: [{ config_id: "cfg-36b", code: "C", name: "配置" }] });
+      if (method === "POST" && path.indexOf("/apply-preview") >= 0) return Promise.resolve(makePreview());
+      if (method === "POST" && path.indexOf("/apply") >= 0) {
+        applyAttempt += 1;
+        return Promise.reject({ status: 409, code: "REVISION_CONFLICT", message: "draft changed" });
+      }
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalWid) MC.workspaces.scopeId = originalWid;
+      cleanOverlays();
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "tasks_run" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "candidates", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        host.querySelector("[data-sync-candidate]").click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        modal.querySelector("[data-sync-preview]").click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        var rows = modal.querySelectorAll("[data-sync-diff]");
+        eq(rows.length, 2, "两行冲突都渲染");
+        ok(rows[0].textContent.indexOf("0") >= 0, "展示基线列");
+        var apply = modal.querySelector("[data-sync-apply]");
+        ok(apply.disabled, "有未决冲突时禁止写入");
+        ok(modal.textContent.indexOf("待决议") >= 0, "提示待决议数量");
+        modal.querySelector("[data-sync-all-new]").click();
+        ok(!apply.disabled, "一键全部采用新值后可写入");
+        modal.querySelector("[data-sync-clear-decisions]").click();
+        ok(apply.disabled, "清空决议后再次禁止写入");
+        modal.querySelector("[data-sync-all-old]").click();
+        var selects = modal.querySelectorAll("[data-sync-decision]");
+        eq(selects[0].value, "inherit_old", "批量保留当前写入下拉");
+        apply.click();
+        return tick().then(tick);
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        ok(modal.textContent.indexOf("409") >= 0, "409 提示草稿变化");
+        var rePreview = modal.querySelector("[data-sync-repreview]");
+        ok(rePreview, "409 提供重新预览入口");
+        var before = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply-preview") >= 0; }).length;
+        rePreview.click();
+        return tick().then(function () {
+          var modal2 = document.querySelector(".modal");
+          var after = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply-preview") >= 0; }).length;
+          ok(after > before, "重新预览重新请求 apply-preview");
+          var selects = modal2.querySelectorAll("[data-sync-decision]");
+          eq(selects[0].value, "inherit_old", "重新预览后保留已选决议");
+          eq(applyAttempt, 1, "只提交过一次写入");
+          inst.destroy();
+          inst.el.remove();
+          restore();
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+  test("SYNC-36C：候选筛选/多选批量写入与跳转配置管理", function () {
+    var calls = [];
+    var goArgs = [];
+    var original = MC.api.requestV3;
+    var originalWid = MC.workspaces && MC.workspaces.scopeId;
+    var rows = [
+      { candidate_id: "cand-a", source_id: "s-a", profile_id: "default", state: "pending", content_hash: "a".repeat(64), created_at: "2026-11-02T00:00:00Z", file_version_id: "v-a" },
+      { candidate_id: "cand-b", source_id: "s-b", profile_id: "default", state: "pending", content_hash: "b".repeat(64), created_at: "2026-11-01T00:00:00Z", file_version_id: "v-b" },
+    ];
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-36c"; };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && path.indexOf("/sync/candidates") >= 0) {
+        return Promise.resolve({ items: rows.slice(), total: 2, next_cursor: null });
+      }
+      if (method === "GET" && path.indexOf("/releases") >= 0) return Promise.resolve({ items: [{ release_id: "rel-c", version: "9" }] });
+      if (method === "GET" && path.indexOf("/configs") >= 0) return Promise.resolve({ items: [{ config_id: "cfg-c", code: "C", name: "配置" }] });
+      if (method === "POST" && path.indexOf("/apply-preview") >= 0) {
+        var cid = path.split("/")[path.split("/").length - 2];
+        return Promise.resolve({ preview_id: "prev-" + cid, candidate_id: cid, draft_revision: 1, d0_frozen: false, blockers: [], can_apply: true, needs_decision: [], items: [] });
+      }
+      if (method === "POST" && path.indexOf("/apply") >= 0) return Promise.resolve({ draft_revision: 2, changed: [] });
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalWid) MC.workspaces.scopeId = originalWid;
+      cleanOverlays();
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "tasks_run" || name === "deployer" || name === "admin"; };
+    app.go = function (route) { goArgs.push(route); };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "candidates", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        ok(host.querySelector("[data-sync-candidate-state]"), "有状态筛选");
+        ok(host.querySelector("[data-sync-candidate-profile]"), "有机型筛选");
+        var checks = host.querySelectorAll("[data-sync-candidate-select]");
+        eq(checks.length, 2, "每行有勾选框");
+        checks[0].checked = true;
+        checks[0].dispatchEvent(new Event("change"));
+        checks[1].checked = true;
+        checks[1].dispatchEvent(new Event("change"));
+        return tick();
+      })
+      .then(function () {
+        var batch = host.querySelector("[data-sync-candidate-batch-apply]");
+        ok(batch && !batch.disabled, "选中后可批量写入");
+        batch.click();
+        return tick().then(tick);
+      })
+      .then(function () {
+        var modal = lastModal();
+        ok(modal && modal.textContent.indexOf("批量写入草稿") >= 0, "批量写入抽屉");
+        var config = modal.querySelector("[data-sync-batch-config]");
+        config.value = "cfg-c";
+        config.dispatchEvent(new Event("change"));
+        var release = modal.querySelector("[data-sync-batch-release]");
+        release.value = "rel-c";
+        release.dispatchEvent(new Event("change"));
+        modal.querySelector("[data-sync-batch-apply]").click();
+        return tick().then(tick).then(tick);
+      })
+      .then(function () {
+        var previews = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply-preview") >= 0; });
+        var applies = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply") >= 0 && c.path.indexOf("preview") < 0; });
+        eq(previews.length, 2, "批量逐候选预览");
+        eq(applies.length, 2, "批量逐候选写入");
+        ok(applies[0].opts.body.request_id.indexOf("batch-") === 0, "批量使用幂等 request_id");
+        host.querySelector('[data-sync-candidate="cand-a"]').click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        modal.querySelector("[data-sync-preview]").click();
+        return tick();
+      })
+      .then(function () {
+        var modal = document.querySelector(".modal");
+        modal.querySelector("[data-sync-apply]").click();
+        return tick().then(function () {
+          var goto = document.querySelector("[data-sync-goto-v3]");
+          ok(goto, "写入成功提供去配置管理入口");
+          goto.click();
+          eq(goArgs.length, 1, "跳转走 app.go，不整页刷新");
+          eq(goArgs[0].kind, "configv3");
+          eq(goArgs[0].query.config, "cfg-c");
+          eq(goArgs[0].query.release, "rel-c");
+          inst.destroy();
+          inst.el.remove();
+          restore();
         });
       })
       .catch(function (err) {
