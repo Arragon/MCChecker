@@ -1,0 +1,41 @@
+{
+  "fixture_version": 1,
+  "synthetic": true,
+  "source": "M16-02 synthetic SDA contract; not real SDA data",
+  "cases": [
+    {
+      "case": "success",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": true,
+        "resource_kind": "table",
+        "table": {
+          "table_id": "tbl-001",
+          "row_count": 2,
+          "etag": "sha256:placeholder",
+          "rows": [
+            {"parameter_id": "p-001", "name": "synthetic_param", "value": 0},
+            {"parameter_id": "p-002", "name": "synthetic_flag", "value": true}
+          ]
+        }
+      }
+    },
+    {
+      "case": "auth_failed",
+      "http_status": 500,
+      "headers": {"content-type": "text/plain; charset=utf-8"},
+      "body": null,
+      "notes": "Known SDA auth failure shape: 500 empty body; must not be treated as business data."
+    },
+    {
+      "case": "business_error",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": false,
+        "error": {"code": "TABLE_NOT_FOUND", "message": "synthetic business error"}
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "fixture_version": 1,
+  "synthetic": true,
+  "source": "M16-02 synthetic SDA contract; not real SDA data",
+  "cases": [
+    {
+      "case": "heartbeat_renewed",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": true,
+        "renewal_observed": true,
+        "cookie_rotated": true,
+        "heartbeat_validated": false,
+        "note": "Synthetic only; a real idle-window session is required before heartbeat_validated can become true."
+      }
+    },
+    {
+      "case": "heartbeat_not_renewed",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": true,
+        "renewal_observed": false,
+        "cookie_rotated": false,
+        "heartbeat_validated": false,
+        "note": "A 200 response is not proof of session renewal."
+      }
+    },
+    {
+      "case": "heartbeat_expired",
+      "http_status": 500,
+      "headers": {"content-type": "text/plain; charset=utf-8"},
+      "body": null,
+      "notes": "Known auth failure shape; one recovery attempt only after a real idle-window experiment."
+    }
+  ]
+}
