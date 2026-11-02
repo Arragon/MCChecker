@@ -46,6 +46,7 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("PATCH", "/api/v1/p/{pid}/sources/{name}"): "settings",
     ("DELETE", "/api/v1/p/{pid}/sources/{name}"): "settings (only if removed)",
     ("POST", "/api/v1/p/{pid}/tasks"): "tasks (finish also files/settings)",
+    ("POST", "/api/v3/workspaces/{wid}/sync/sources/{sid}/run"): "tasks (queued; run finish bumps tasks only)",
     ("PUT", "/api/v1/p/{pid}/schedule"): "settings",
     ("PUT", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings",
     ("DELETE", "/api/v1/p/{pid}/ip-mapping/{ip}"): "settings (only if removed)",
