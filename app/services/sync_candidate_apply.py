@@ -15,10 +15,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core import storage
-from app.core.errors import INVALID_INPUT, REVISION_CONFLICT, AppError
+from app.core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
 from app.core.sync_models import validate_id, validate_workspace_id
 
-from . import config_v3_catalog, config_v3_drafts, sync_candidate_plans, sync_store, workspace_context
+from . import config_v3_catalog, config_v3_drafts, sync_candidate_plans, sync_candidates, sync_store, workspace_context
 
 FILE = "candidate_applies.json"
 DEFAULT_DOC: Dict[str, Any] = {"items": {}}
@@ -54,6 +54,24 @@ def _patch_for(typed: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(text, str):
         raise AppError(INVALID_INPUT, "候选值缺少文本", field="candidate")
     return {"value_state": "present", "value": text}
+
+
+def _mark_applied(wid: str, candidate_id: Any, revision: Any, applied_at: Any) -> None:
+    """回写候选状态；候选记录缺失时不影响已成功的草稿写入。"""
+    if not candidate_id:
+        return
+    try:
+        sync_candidates.mark_state(
+            wid,
+            str(candidate_id),
+            "applied",
+            applied_revision=revision,
+            applied_at=applied_at,
+        )
+    except AppError as exc:
+        if exc.code == NOT_FOUND:
+            return
+        raise
 
 
 def _existing_draft_receipt(
@@ -105,6 +123,13 @@ def apply_preview(
         if isinstance(receipt, dict):
             if receipt.get("request_hash") != digest:
                 raise AppError(REVISION_CONFLICT, "幂等键已用于不同决议", field="request_id")
+            # 幂等重放：回执已存在，补齐可能因崩溃未落盘的候选状态（不产生第二次写入）。
+            _mark_applied(
+                wid,
+                receipt.get("candidate_id"),
+                receipt.get("draft_revision"),
+                receipt.get("applied_at"),
+            )
             return dict(receipt, replayed=True)
 
         preview = sync_candidate_plans.get_preview(wid, pid)
@@ -214,6 +239,14 @@ def apply_preview(
             return doc
 
         sync_store.update_doc(wid, FILE, mutate, DEFAULT_DOC)
+        # M16-36：写入成功后回写候选状态，列表才不会永远显示 pending（重复 apply）。
+        # 只改候选状态与回执字段；D0/Bn/rn 已发布 head 不动。
+        _mark_applied(
+            wid,
+            preview["candidate_id"],
+            result.get("draft_revision"),
+            result.get("applied_at"),
+        )
         return result
 
 
