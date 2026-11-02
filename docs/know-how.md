@@ -89,6 +89,7 @@
 - Windows 下 Python 输出需 `sys.stdout.reconfigure(encoding='utf-8')` 避免编码错误
 - 子类只覆盖 `HTTPRedirectHandler.http_error_302` 是**不够的**：基类里 `http_error_301 = http_error_303 = http_error_307 = http_error_302` 是在类体求值时绑定的别名，指向基类函数本身，301/303/307 仍会绕过子类的实现（M3-04 自定义重定向策略时发现；308 基类压根不处理）。要么在本类里重新赋一遍别名，要么像本卡这样自己接管 3xx（校验的 URL 与请求的 URL 必须是同一个）。
 - PowerShell 写入文件内容过长时可能触发文件名过长错误，需拆分文件
+- **Collector 是独立进程边界，不是“另一个 app 模块”**（M16-14 / INH-2179）：`collector/` 只跑在 Python 3.12 环境，主应用（3.9 + 标准库）不得 `import collector`，也不得把它加进核心 `requirements.txt` / `make_release.RELEASE_ENTRIES`。生命周期唯一入口是 `app/services/collector_manager.py`：`start()` 先跑 `--self-test` 再 `Popen([python, entry])`（`shell=False`，argv 里永远没有凭据）；POSIX 用 `start_new_session` + `killpg`，Windows 用 `CREATE_NEW_PROCESS_GROUP` + `taskkill /T /F`（尽力而为，Job Object 留到实机证据）。`run.ordered_stop` 的停止序是「调度器 → 排空任务 → collector → 关 HTTP」，`stop()` 等到 `Popen.wait()` 返回才放行，所以 SIGTERM 路径不会在 collector 还活着时释放单实例锁。子进程 stdout/stderr 目前是 `DEVNULL`（骨架没有协议输出，避免管道写满死锁），M16-15 接 IPC 时再接管管道；不要在那之前把 stdout 改成 `PIPE` 却不读。`requirements.lock` 在目标环境回填前保持 BLOCKED-EXTERNAL，禁止猜版本。
 
 ## 4. Testing Notes
 - 使用 pytest 运行测试，`pytest tests/ -v`

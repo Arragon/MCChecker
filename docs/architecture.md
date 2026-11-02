@@ -13,6 +13,19 @@
 >
 > 下方“Current Implementation”已按 v2 运行代码更新；NiceGUI 页面与 APScheduler 已在 M4-07 移除。
 
+## V3.1（M16，进行中）
+
+设计/计划/ADR：`docs/MCChecker_V3.1_PLAN.md`、`docs/adr/ADR-012-020-v3.1-sync-contract.md`；
+当前实现审计：`docs/M16_CURRENT_STATE.md`；采集器边界：`docs/M16_COLLECTOR.md`。
+
+- 主应用仍是 Python 3.9.11 + 标准库；Sync/Collector 只做增量，不替换旧 v1 入口。
+- Collector 是独立目录 `collector/`（Python 3.12 + Playwright/Chromium/cryptography），
+  主应用不 import、不进核心 `requirements.txt`、不进核心发布白名单；由
+  `app/services/collector_manager.py` 以受管子进程启动/停止/诊断，并纳入
+  `run.ordered_stop`（排空任务后、关 HTTP/释放单实例锁之前）。
+- 采集不可用只影响采集能力：无 collector 时普通 MCChecker 照常启动，状态显式
+  `unavailable`/`collector_offline`。
+
 ## V3.0（代码已实现于 `feat/mc-v3`，未发布）
 
 V3.0 的设计事实源是 Linear INH-2117 的原型 HTML + 后端设计 MD，仓库镜像与验收记录：

@@ -1,0 +1,27 @@
+# MCChecker collector 依赖锁（M16-14 / INH-2179）
+#
+# 状态：BLOCKED-EXTERNAL —— 本仓库的开发机不是目标环境，**没有**在此锁定任何版本。
+# 这里刻意不写 “最新版” 猜测：Playwright / Chromium / cryptography 的精确版本必须由
+# 目标 Windows / Linux 机器（Python 3.12）实机安装、断网安装验证后回填。
+#
+# 回填步骤（在有网的同版本目标机上执行，把生成的行原样提交）：
+#   1. 创建 Python 3.12 独立环境（不要复用主应用 3.9 环境）：
+#        py -3.12 -m venv collector/.venv        # Windows
+#        python3.12 -m venv collector/.venv     # Linux
+#   2. 锁定**精确版本**（示例形状，版本号由第 1 步环境里的 `pip freeze` 决定）：
+#        collector/.venv/bin/python -m pip install playwright==<目标环境验证过的版本> cryptography==<...>
+#        collector/.venv/bin/python -m pip freeze --exclude-editable > collector/requirements.lock
+#   3. 安装 Chromium 并记录版本：
+#        collector/.venv/bin/python -m playwright install chromium
+#        collector/.venv/bin/python -m playwright --version
+#        # Chromium 版本写入 docs/M16_COLLECTOR.md 的证据表，不在本文件猜。
+#   4. 断网安装留证：在有网机器上 `pip download --only-binary=:all: --dest wheels -r requirements.lock`，
+#      把 wheels 与 Chromium 目录一起带进断网机，用
+#        pip install --no-index --find-links wheels -r requirements.lock
+#      安装并重跑 `python collector/main.py --self-test`，原始输出进 M16-42 证据包。
+#
+# 约束：
+#   * 本文件只属于 collector 环境，**不得**被主应用 `requirements.txt` 引用；
+#   * 不写 `-e .`、不写本机路径、不写索引 URL（离线安装只认 wheels 目录）；
+#   * 精确版本回填前，`collector/main.py --self-test` 在目标机上只能报告
+#     `collector_browser_missing` / `collector_version_mismatch`，这是预期行为。
