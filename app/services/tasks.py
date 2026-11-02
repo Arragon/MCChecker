@@ -56,9 +56,11 @@ from .context import RequestContext
 
 logger = logging.getLogger(__name__)
 
-#: 任务类型清单（§7.10）。三类都已接入：卡 8 的调度器到点投 `update_all`，
+#: 任务类型清单（§7.10）。三类旧任务都已接入：卡 8 的调度器到点投 `update_all`，
 #: `refresh_records` 的主体由卡 9（M3-09 / INH-1894）在 `updates.py` 里填上。
-TASK_TYPES = ("update_source", "update_all", "refresh_records")
+#: `sync_run` 是 V3.1（M16-12）的 Sync 执行体，由 `services.sync_tasks` 直接传入闭包，
+#: 不进 `_HANDLERS`；旧 `/tasks` API 没有对应入参，暂不暴露。
+TASK_TYPES = ("update_source", "update_all", "refresh_records", "sync_run")
 #: 已结束任务在内存里的保留窗口（§7.10：1 小时 / 最近 200 条）。
 RETAIN_SECONDS = 3600
 RETAIN_MAX = 200
@@ -91,12 +93,17 @@ RUNNING = "running"
 SUCCEEDED = "succeeded"
 PARTIAL = "partial"
 FAILED = "failed"
+#: 只有 `sync_run`（M16-12）会产出：用户取消且没有任何已提交项。
+CANCELED = "canceled"
 ACTIVE_STATES = (QUEUED, RUNNING)
-FINISHED_STATES = (SUCCEEDED, PARTIAL, FAILED)
+FINISHED_STATES = (SUCCEEDED, PARTIAL, FAILED, CANCELED)
 
 #: `result.items[].status` 里算「这一项失败」的取值，与 `updates._last_run` 的
-#: 失败口径一致（success/unchanged/skipped/not_found 都不算失败）。
-FAILED_ITEM_STATUSES = frozenset({"download_failed", "rejected", "too_large", "error"})
+#: 失败口径一致（success/unchanged/skipped/not_found 都不算失败）。Sync item
+#: 状态（blocked/failed/interrupted/canceled）由 M16-12 直接写进同一字段。
+FAILED_ITEM_STATUSES = frozenset(
+    {"download_failed", "rejected", "too_large", "error", "blocked", "failed", "interrupted", "canceled"}
+)
 
 #: 结束时按类型递增的修订分量（§10.1）。
 #:
@@ -113,6 +120,8 @@ FINISH_PARTS: Dict[str, Tuple[str, ...]] = {
     "update_source": (),
     "update_all": ("settings",),
     "refresh_records": (),
+    # 提交层已在字节真的变化时递增 files（sync_commit）；runner 不再重复通知。
+    "sync_run": (),
 }
 
 #: 互斥面（§10.1 + 卡 6 复审 F2）：`ttype` -> 同一机型内要挡掉的在途类型。
@@ -161,8 +170,15 @@ def _key(
 
 
 def _state_from_items(items: List[Dict[str, Any]]) -> str:
-    """任务状态由结果条目推出：全成 `succeeded`，全败 `failed`，部分 `partial`。"""
-    failed = [item for item in items if str(item.get("status") or "") in FAILED_ITEM_STATUSES]
+    """任务状态由结果条目推出：全成 `succeeded`，全败 `failed`，部分 `partial`。
+
+    `sync_run` 的全部条目被取消且没有失败时返回 `canceled`（skip 是中性项，
+    不影响这条分支；旧任务不会产出 canceled 条目）。
+    """
+    states = [str(item.get("status") or "") for item in items]
+    if states and all(state in ("canceled", "skipped") for state in states):
+        return CANCELED if "canceled" in states else SUCCEEDED
+    failed = [state for state in states if state in FAILED_ITEM_STATUSES]
     if not items or not failed:
         return SUCCEEDED
     return FAILED if len(failed) == len(items) else PARTIAL
@@ -488,7 +504,13 @@ class TaskRunner:
             return same  # 同 (W, 机型, 类型, target) 的快路径；`update_all` 之间也是靠它挡住
         blocked = _CONFLICTING_TYPES.get(ttype, ())
         for (other_workspace, other_pid, other_type, _), task in self._active.items():
-            if other_workspace == workspace and other_pid == pid and other_type in blocked:
+            if other_workspace != workspace or other_pid != pid:
+                continue
+            if other_type in blocked:
+                return task
+            # Sync run 与三类旧更新任务写同一批 configs/records，必须同机型互斥；
+            # 分开判断是为了不改旧表、也不影响 refresh_records 的精确断言。
+            if (ttype == "sync_run") != (other_type == "sync_run"):
                 return task
         return None
 

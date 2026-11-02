@@ -924,7 +924,13 @@ class TestShutdown:
         """卡面契约：类型清单、注册入口、单例入口都在这儿，卡 8 / 卡 9 照此调用。"""
         from app.services import tasks
 
-        assert tasks.TASK_TYPES == ("update_source", "update_all", "refresh_records")
+        # M16-12 在旧三类的末尾追加 `sync_run`；前三项与顺序保持不变，旧卡调用不受影响。
+        assert tasks.TASK_TYPES == (
+            "update_source",
+            "update_all",
+            "refresh_records",
+            "sync_run",
+        )
         assert callable(tasks.register_handler)
         assert callable(tasks.get_runner)
         assert tasks.handler_for("update_all") is not None
