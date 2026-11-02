@@ -278,15 +278,15 @@ def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
             "/api/v3/workspaces/%s/connections" % wid1,
             headers={"Host": "attacker.example"},
         )
-        assert status == 200
-        assert json.loads(forged.decode("utf-8"))["items"][0]["connection_id"] == cid
+        assert status in (403, 421), forged
         status, _headers, payload = admin.json(
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/revoke" % (wid1, cid),
-            headers=dict({"Host": "attacker.example"}, **{"If-Match": "1"}),
+            headers=dict(
+                {"Host": "attacker.example", "If-Match": "1"}, **operator_header()
+            ),
         )
-        assert status == 403, payload
-        assert payload["error"]["detail"]["field"] == "operator_token"
+        assert status in (403, 421), payload
 
         # 跨站写：缺少 X-Requested-With → 403 且不产生操作。
         status, _headers, raw = admin.request(

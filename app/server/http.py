@@ -9,10 +9,12 @@ handler 不得直接写文件（§3.3）。业务接口从 M1 起挂到 `router.
 from __future__ import annotations
 
 import gzip
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import time
 import urllib.parse
 import uuid
@@ -38,6 +40,46 @@ from ..services.context import RequestContext
 from .router import Response, Router
 
 logger = logging.getLogger(__name__)
+
+#: 额外允许的 Host（逗号分隔，部署 DNS/反代域名用）；IP 字面量始终允许。
+ENV_ALLOWED_HOSTS = "MCHECKER_ALLOWED_HOSTS"
+
+
+def _host_name(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if text.startswith("["):
+        end = text.find("]")
+        return text[1:end] if end > 0 else text
+    if text.count(":") == 1:
+        return text.rsplit(":", 1)[0]
+    return text
+
+
+def _host_allowed(value: Any, settings: Settings) -> bool:
+    """拒绝 DNS rebinding / 伪造 Host；允许 IP 字面量、本机名与显式白名单。"""
+    host = _host_name(value)
+    if not host:
+        return True  # HTTP/1.0 或缺头：交给后续协议处理，不把兼容请求直接打死
+    host = host.rstrip(".")
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    allowed = {"localhost", "127.0.0.1", "::1"}
+    bound = str(settings.host or "").strip().lower().strip("[]")
+    if bound and bound not in ("0.0.0.0", "::"):
+        allowed.add(bound)
+    for name in (socket.gethostname(), socket.getfqdn()):
+        if name:
+            allowed.add(name.lower().rstrip("."))
+    for item in str(os.environ.get(ENV_ALLOWED_HOSTS) or "").split(","):
+        item = item.strip().lower().rstrip(".")
+        if item:
+            allowed.add(item)
+    return host in allowed
 
 #: §3.4 第 3 步：JSON 请求体上限 1 MB；原文上传用 `settings.upload_max_bytes`。
 JSON_BODY_LIMIT = 1024 * 1024
@@ -288,6 +330,9 @@ class MCRequestHandler(BaseHTTPRequestHandler):
         self._access_ip = auth.client_ip(self)
         self._access_pid = "-"
         try:
+            if not _host_allowed(self.headers.get("Host"), self.settings):
+                self.close_connection = True
+                raise AppError(FORBIDDEN, "Host 不在允许范围")
             if method in WRITE_METHODS and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
                 # 未读 body 即拒绝：连接里可能残留未读数据，必须关闭连接
                 self.close_connection = True

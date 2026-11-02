@@ -674,28 +674,21 @@ def test_csrf_origin_and_forged_host_do_not_cross_workspace_boundaries():
             assert _is_csrf_error(raw), (origin, raw)
         assert _source_total(visitor, w1) == before
 
-        # 伪造 Host 读 W1：仍然只看到 W1 的对象。
+        # 伪造 Host：直接 421/403，不进入路由；读/写都不落对象。
         status, _headers, raw = admin.request(
             "GET",
             "/api/v3/workspaces/%s/sync/sources" % w1,
             headers={"Host": "attacker.example"},
         )
-        assert status == 200, raw
-        forged_list = json.loads(raw.decode("utf-8"))
-        assert [item["name"] for item in forged_list["items"]] == ["one.xml"]
-
-        # 伪造 Host + 指向 W2 的 X-Workspace-Id 写 W1 路径：仍落在 W1。
+        assert status in (403, 421), raw
         status, _headers, raw = admin.request(
             "POST",
             "/api/v3/workspaces/%s/sync/sources" % w1,
             body=_source_payload("host-scope.xml", "https://source.example.invalid/host.xml"),
             headers={"Host": "attacker.example", "X-Workspace-Id": w2},
         )
-        assert status == 201, raw
-        created = json.loads(raw.decode("utf-8"))
-        assert created["workspace_id"] == w1
-        assert created["name"] == "host-scope.xml"
-        assert _source_total(visitor, w1) == before + 1
+        assert status in (403, 421), raw
+        assert _source_total(visitor, w1) == before
         w2_names = [
             item["name"]
             for item in visitor.json(
