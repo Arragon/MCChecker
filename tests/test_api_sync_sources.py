@@ -154,3 +154,29 @@ def test_source_pagination_and_filters():
         assert status == 200, filtered
         assert filtered["total"] == 1
         assert filtered["items"][0]["name"] == "B.xml"
+
+
+def test_single_source_run_is_admin_only_and_returns_202():
+    seed_roles("sync-sources-run")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        visitor = as_role(server, "visitor")
+        wid = make_workspace(admin, "W-run")
+        cid = make_connection(wid)
+        status, _headers, created = admin.json(
+            "POST", "/api/v3/workspaces/%s/sync/sources" % wid, source_payload(cid)
+        )
+        assert status == 201, created
+        sid = created["source_id"]
+
+        status, _headers, denied = visitor.json(
+            "POST", "/api/v3/workspaces/%s/sync/sources/%s/run" % (wid, sid), {}
+        )
+        assert status == 403, denied
+
+        status, _headers, accepted = admin.json(
+            "POST", "/api/v3/workspaces/%s/sync/sources/%s/run" % (wid, sid), {}
+        )
+        assert status == 202, accepted
+        assert accepted["run"]["trigger"] == "manual"
+        assert accepted["task"]["type"] == "sync_run"
