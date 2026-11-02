@@ -117,6 +117,7 @@ def build_router(settings: Settings) -> Router:
         api_config_reconcile,
         api_config_registry,
         api_config_tracking,
+        api_connections,
         api_delete,
         api_dl,
         api_documents,
@@ -159,6 +160,7 @@ def build_router(settings: Settings) -> Router:
     api_v3_plans.register(router)
     api_v3_exports.register(router)
     api_v3_events.register(router)
+    api_connections.register(router)
     api_sync_sources.register(router)
     api_sync_policy.register(router)
     api_sync_preview.register(router)

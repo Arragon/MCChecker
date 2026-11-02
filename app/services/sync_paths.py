@@ -25,6 +25,7 @@ SYNC_FILES: FrozenSet[str] = frozenset(
         "previews.json",
         "candidates.json",
         "credentials.json",
+        "operations.json",
         "heartbeat.json",
         "observations.json",
         "candidate_previews.json",

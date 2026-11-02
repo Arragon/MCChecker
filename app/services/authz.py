@@ -46,6 +46,10 @@ ACTIONS: Dict[str, str] = {
     "config_change_submit": ADMIN,
     "config_change_approve": ADMIN,
     "config_artifact_generate": ADMIN,
+    # --- V3.1 Sync 凭据管理（M16-30）---
+    # 只用于连接/凭据写接口的能力键；真正的放行还要求独立运维 token
+    # （`sync_operator_auth.require_operator`），全局管理员单独不足以操作凭据。
+    "integration_credentials_manage": ADMIN,
 }
 
 #: 配置域动作 → 前端能力键。与动作同名，便于前后端一一对账。
