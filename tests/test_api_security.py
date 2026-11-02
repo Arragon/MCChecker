@@ -165,6 +165,7 @@ WRITE_ROUTE_ACTIONS = {
     ): "integration_credentials_manage",
     # M16-33：手动/批量同步任务走同一个 tasks_run 权限档（只读身份不能触发）。
     ("POST", "/api/v3/workspaces/{wid}/sync/runs"): "tasks_run",
+    ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry"): "tasks_run",
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",
@@ -332,6 +333,7 @@ ROUTE_VALUES = {
     "plan_id": "ep_000001",
     # M16-30：凭据候选与异步操作 ID（形状必须过 `validate_id`，才能测到权限层）。
     "candidate_id": "cred-00000001", "opid": "op-00000001",
+    "run_id": "run-00000001",
 }
 
 #: 想读数据根之外哨兵的形态：编码分隔符、点段、Windows 绝对路径、NUL、二次编码。

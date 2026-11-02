@@ -35,6 +35,7 @@ TERMINAL_STATES = frozenset({"partial", "succeeded", "failed", "canceled", "inte
 RUN_PATCH_FIELDS = frozenset(
     {"state", "counts", "started_at", "finished_at", "parent_run_id", "plan_id", "request_id"}
 )
+MAX_ITEMS = 500
 
 
 def _now() -> str:
@@ -43,6 +44,16 @@ def _now() -> str:
 
 def _manifest_path(workspace_id: str, run_id: str) -> str:
     return os.path.join(run_dir(workspace_id, run_id), MANIFEST)
+
+
+def _safe_items(value: Any) -> List[Dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AppError(INVALID_INPUT, "items 必须是数组", field="items")
+    if len(value) > MAX_ITEMS:
+        raise AppError(INVALID_INPUT, "items 过多", field="items")
+    return [validate_safe_details(item, "items") for item in value]
 
 
 def _read(workspace_id: str, run_id: str) -> Dict[str, Any]:
@@ -59,6 +70,7 @@ def _read(workspace_id: str, run_id: str) -> Dict[str, Any]:
         "run": run.to_dict(),
         "frozen": validate_safe_details(raw.get("frozen") or {}, "frozen"),
         "receipt": validate_safe_details(raw.get("receipt") or {}, "receipt"),
+        "items": _safe_items(raw.get("items") or []),
     }
 
 
@@ -73,6 +85,7 @@ def create_run(
     run: SyncRun,
     frozen: Optional[Dict[str, Any]] = None,
     receipt: Optional[Dict[str, Any]] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     if not isinstance(run, SyncRun):
@@ -86,6 +99,7 @@ def create_run(
         "run": run.to_dict(),
         "frozen": validate_safe_details(frozen or {}, "frozen"),
         "receipt": validate_safe_details(receipt or {}, "receipt"),
+        "items": _safe_items(items or []),
     }
     with sync_store.workspace_lock(wid):
         if os.path.exists(_manifest_path(wid, run.run_id)):
@@ -108,6 +122,7 @@ def update_run(
     run: Optional[SyncRun] = None,
     receipt: Optional[Dict[str, Any]] = None,
     frozen: Optional[Dict[str, Any]] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
     expected_manifest_revision: Optional[Any] = None,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
@@ -148,6 +163,7 @@ def update_run(
                 if receipt is not None
                 else current["receipt"]
             ),
+            "items": _safe_items(items) if items is not None else current["items"],
         }
         _write(wid, rid, doc)
     return get_run(wid, rid)
@@ -160,6 +176,7 @@ def finish_run(
     counts: Optional[Dict[str, int]] = None,
     finished_at: Optional[str] = None,
     receipt: Optional[Dict[str, Any]] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
     expected_manifest_revision: Optional[Any] = None,
 ) -> Dict[str, Any]:
     state = validate_enum(state, RUN_STATES, "state")
@@ -174,6 +191,7 @@ def finish_run(
             "finished_at": validate_timestamp(finished_at or _now(), "finished_at"),
         },
         receipt=receipt,
+        items=items,
         expected_manifest_revision=expected_manifest_revision,
     )
 
