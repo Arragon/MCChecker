@@ -23,6 +23,7 @@ SYNC_FILES: FrozenSet[str] = frozenset(
         "policy.json",
         "status.json",
         "previews.json",
+        "candidates.json",
     }
 )
 
