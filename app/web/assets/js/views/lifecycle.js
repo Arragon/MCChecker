@@ -219,7 +219,7 @@
       }
 
       /* -- 上提 -- */
-      var promoteBody = h("div", h("p.small.muted", "还没算过。上提不是自动的：点一次，看一次影响。"));
+      var promoteBody = h("div");
       var promoteBtn = h(
         "button.btn.btn-sm.btn-primary",
         { type: "button" },
@@ -558,7 +558,7 @@
                 })
               : h("option", { value: "" }, "（还没有模板变体）")
           );
-          util.replace(promoteHost, h("p.small.muted", "还没算过。上提不是自动的：点一次，看一次影响。"));
+          util.clear(promoteHost);
         });
       }
 

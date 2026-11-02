@@ -1891,7 +1891,8 @@
       ok(field("PP出口功率 下限"), "有效范围要有 PP出口功率");
       eq(field("PP出口功率 下限").value, "20");
       eq(field("PP出口功率 上限").value, "40");
-      ok(inst.el.textContent.indexOf("PP@PF能量 = PP出口功率 ÷ 功率转换系数 × 传输系数") >= 0, "公式要写出出口功率关系");
+      ok(inst.el.textContent.indexOf("改一边会立即换算") < 0, "有效范围不再附带换算说明");
+      ok(inst.el.textContent.indexOf("都不能为 0") < 0, "系数约束改由校验提示，不常驻说明");
       typeInto(field("PP出口功率 下限"), "8");
       eq(field("PP@PF能量 下限").value, "4");
       eq(field("PP出口功率 下限").value, "8");

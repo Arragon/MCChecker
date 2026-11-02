@@ -14,7 +14,7 @@
     var el = h("div");
     var header = h(
       "div.view-header",
-      h("div.view-title", h("h1", "速览"), h("div.view-sub", "收藏变量按当前版本实时取值。源文件删除或节点缺失时予以标明。"))
+      h("div.view-title", h("h1", "速览"))
     );
     var bodyEl = h("div.view-body");
     el.append(header, bodyEl);

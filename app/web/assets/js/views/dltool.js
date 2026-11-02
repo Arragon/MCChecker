@@ -655,7 +655,7 @@
     marks.forEach(function (m) {
       if (m.status === "out_of_x_range" || m.status === "out_of_y_range") outCount++;
     });
-    var summary = !marks.length ? "输入数值后，计算点将标注在曲线上。" : ("已标注 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : ""));
+    var summary = !marks.length ? "" : ("已标注 " + marks.length + " 个计算点" + (outCount ? "，其中 " + outCount + " 个超出边界（空心橙点）" : ""));
     if (frame.turns.length) summary += "；已标注 " + frame.turns.length + " 个极值点坐标";
     return summary;
   }
@@ -821,13 +821,13 @@
           saveBtn.addEventListener("click", function () { doSave(saveBtn); });
           bits.push(abandon, saveBtn);
         } else {
-          bits.push(h("span.xsmall.muted", "在右侧保存修改，可以填写备注。保存后所有人共用，并记入历史。"), abandon);
+          bits.push(abandon);
         }
         save = h("div.dl-save", bits);
       }
       util.replace(
         header,
-        h("div.view-title", h("h1", "DL 快捷计算"), h("div.view-sub", "以八阶多项式进行正向求值与反向求解。计算项里的全部参数都可以保存，每次保存都留下历史，并可一键恢复。")),
+        h("div.view-title", h("h1", "DL 快捷计算")),
         seg,
         save
       );
@@ -963,12 +963,12 @@
       renderTiles();
       var sum = h(
         "div.dl-sum",
-        h("div.dl-sum-title", "固定和", h("span.xsmall.muted", "AOM2 delay + AOM2 width")),
+        h("div.dl-sum-title", "AOM2 delay + AOM2 width"),
         numField(item.aom_sum, function (v) { item.aom_sum = v; }, "AOM2 delay 与 width 的和", { unit: "ns", placeholder: "未设置" })
       );
       return h(
         "section.panel.dl-modes",
-        h("div.dl-modes-head", h("h2", "输出量"), h("span.xsmall.muted", "两种模式各自维护系数、有效范围与系数绑定。切换模式后，参数、曲线与结果同步切换。")),
+        h("div.dl-modes-head", h("h2", "输出量")),
         h("div.dl-modes-body", S.ui.tiles, sum)
       );
     }
@@ -998,7 +998,7 @@
         rows: 6,
         spellcheck: "false",
         "aria-label": "输入" + inLabel,
-        placeholder: (fwd ? "输入 x 值" : "输入目标 y 值") + "\n例如：10 20 35.5",
+        placeholder: "",
       }, S.inputs[key] || "");
       var parseEl = h("div.dl-parse");
       var runBtn = h("button.btn.btn-primary", { type: "button" }, icon(fwd ? "arrow-right" : "search"), fwd ? "计算" : "求解");
@@ -1025,7 +1025,7 @@
       S.ui.parseEl = parseEl;
 
       var canvas = h("canvas.dl-plot", { role: "img", "aria-label": "当前数值关系图" });
-      var caption = h("div.dl-plot-caption", "正在绘制…");
+      var caption = h("div.dl-plot-caption");
       var extrema = h("div.dl-extrema");
       S.ui.canvas = canvas;
       S.ui.caption = caption;
@@ -1308,7 +1308,7 @@
 
     function extremaNodes(set, id, axis) {
       var got = curveExtrema(set, id);
-      if (!got.bounded) return h("div.dl-extrema-note", "填写 x 的上下限后，将给出该范围内曲线上 x 与 y 的最大值和最小值。");
+      if (!got.bounded) return null;
       if (got.empty) return h("div.dl-extrema-note", "当前曲线在给定的 x、y 范围内没有采样点。");
       function cell(label, value, unit) {
         return h("div.dl-ext", h("span.dl-ext-k", label), h("span.mono", util.formatNumber(value)), unit ? h("span.dl-ext-u", unit) : null);
@@ -1349,12 +1349,7 @@
 
     /* ---------------- 参数卡片 ---------------- */
     function formulaNodes(id, set, axis) {
-      var lines = [h("div", "f(x) = " + polyText(set))];
-      if (id === "pp_energy") {
-        lines.push(h("div", axis.y + " = f(x) × 传输系数 ÷ 功率转换系数"));
-        lines.push(h("div", axis.y + " = PP出口功率 ÷ 功率转换系数 × 传输系数"));
-      }
-      return lines;
+      return [h("div", "f(x) = " + polyText(set))];
     }
 
     function updateFormula() {
@@ -1520,10 +1515,9 @@
         ),
         h(
           "div.dl-range",
-          h("div.dl-range-name", h("span.dl-var.is-y", { title: "由 PP@PF能量换算" }, "P"), nameNode("PP出口功率", "W")),
+          h("div.dl-range-name", h("span.dl-var.is-y", "P"), nameNode("PP出口功率", "W")),
           h("div.dl-range-pair", pLo, h("span.dl-range-sep", "~"), pHi)
         ),
-        h("div.field-help", "PP@PF能量 = PP出口功率 ÷ 功率转换系数 × 传输系数。改一边会立即换算另一边；留空表示不限制。"),
       ];
     }
 
@@ -1535,8 +1529,7 @@
           "div.dl-pair",
           h("div.field", h("label.field-label", "传输系数"), numField(set.trans_coeff, function (v) { set.trans_coeff = v; }, "传输系数", { placeholder: "1" })),
           h("div.field", h("label.field-label", "功率转换系数"), numField(set.power_conv_coeff, function (v) { set.power_conv_coeff = v; }, "功率转换系数", { placeholder: "1" }))
-        ),
-        h("div.field-help", "功率转换系数、传输系数都不能为 0。")
+        )
       );
     }
 
@@ -1554,7 +1547,7 @@
           h("div.row", h("button.btn.btn-sm", { type: "button", onclick: function (e) { extract(id, set, e.currentTarget); } }, icon("refresh"), "从配置刷新系数"), h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { bindingDialog(id); } }, "修改绑定"))
         );
       } else {
-        body = h("div.col", { style: "gap:8px" }, h("div.field-help", "尚未绑定。绑定后可从配置文件提取系数。"), h("div.row", h("button.btn.btn-sm", { type: "button", onclick: function () { bindingDialog(id); } }, icon("link"), "配置绑定")));
+        body = h("div.row", h("button.btn.btn-sm", { type: "button", onclick: function () { bindingDialog(id); } }, icon("link"), "配置绑定"));
       }
       return h("div.dl-group", h("div.section-title", "系数绑定"), body);
     }
@@ -1862,13 +1855,13 @@
         function sumText(v) { return v === null || v === undefined || v === "" ? "未设置" : util.formatNumber(Number(v)); }
         changes.push("固定和 " + sumText(S.saved[id].aom_sum) + " → " + sumText(S.draft[id].aom_sum));
       }
-      var note = h("textarea.textarea", { id: util.uid("dlnote"), rows: 3, maxlength: 200, placeholder: "可选。例如：按今天的测量改了范围和 k₁", "aria-label": "备注" });
+      var note = h("textarea.textarea", { id: util.uid("dlnote"), rows: 3, maxlength: 200, "aria-label": "备注" });
       var count = h("span.xsmall.muted", "0/200");
       note.addEventListener("input", function () { count.textContent = note.value.length + "/200"; });
       var saveBtn = h("button.btn.btn-primary", { type: "button" }, "保存修改");
       MC.modal({
         title: "保存修改",
-        subtitle: "写入这一计算项的全部参数。RP 脉宽会同时保存两种模式和固定和。",
+        subtitle: id === "rp_width" ? "同时保存两种模式和固定和。" : null,
         body: h(
           "div.col",
           h("div.dl-diff", changes.map(function (text) { return h("span.dl-chip", text); })),
@@ -1913,7 +1906,6 @@
         if (!entries.length) {
           util.replace(host, MC.stateBlock({
             title: "还没有修改记录",
-            desc: "保存一次后，修改人、备注、系数、上下限、绑定和换算会出现在这里。",
             icon: "history",
           }));
           return;

@@ -64,7 +64,7 @@
       var add = ro ? null : h("button.btn.btn-primary", { type: "button", onclick: function () { toolDialog(null); } }, icon("plus"), "添加");
       util.replace(
         header,
-        h("div.view-title", h("h1", "外部工具"), h("div.view-sub", "共 " + items.length + " 个链接，点击后在新窗口打开。")),
+        h("div.view-title", h("h1", "外部工具")),
         filter,
         add
       );
@@ -78,7 +78,7 @@
           kind: "empty",
           icon: "tool",
           title: "暂无外部工具",
-          desc: ro ? "由管理员添加后，此处将列出可打开的链接。" : "请通过「添加」登记常用的 http 或 https 地址。",
+          desc: ro ? "由管理员添加后，此处将列出可打开的链接。" : null,
         }));
         return;
       }

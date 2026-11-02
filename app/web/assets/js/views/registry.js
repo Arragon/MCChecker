@@ -518,8 +518,7 @@
         "div.view-header",
         h(
           "div.view-title",
-          h("h1", "参数登记"),
-          h("div.view-sub", "一个参数主档对应多个软件版本定义；横向对比各版本的 XML 名称、JSON 键、类型与单位。")
+          h("h1", "参数登记")
         )
       ),
       h(

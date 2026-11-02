@@ -19,7 +19,7 @@
     var resultHost = h("div", { style: "margin-top:16px" });
     var el = h(
       "div",
-      h("div.view-header", h("div.view-title", h("h1", "全局搜索"), h("div.view-sub", "在当前机型全部配置文件的当前版本中检索变量名、取值及收藏备注，不区分大小写。"))),
+      h("div.view-header", h("div.view-title", h("h1", "全局搜索"))),
       h("div.view-body", h("div.container", h("div.search-bar", h("div.input-wrap", icon("search"), input), scope, go), resultHost))
     );
 
@@ -43,7 +43,7 @@
 
     function run(append) {
       if (!S.q) {
-        util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "search", title: "输入关键词开始搜索", desc: "提示：按 Ctrl+K 可在任何页面快速搜索或跳转文件。" })));
+        util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "search", title: "输入关键词开始搜索" })));
         return;
       }
       if (!append) util.replace(resultHost, MC.stateBlock({ kind: "loading", title: "正在搜索…" }));

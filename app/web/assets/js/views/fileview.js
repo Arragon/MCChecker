@@ -478,7 +478,7 @@
       if (!box) return;
       var i = S.selected;
       if (i < 0 || !S.idx) {
-        util.replace(box, h("div.inspector-head", h("h3", "节点详情")), h("div.inspector-body", MC.stateBlock({ kind: "empty", icon: "info", title: "选择一个节点", desc: "在左侧选择节点，以查看完整取值、参数范围与路径，并可收藏或提交修改建议。" })));
+        util.replace(box, h("div.inspector-head", h("h3", "节点详情")), h("div.inspector-body", MC.stateBlock({ kind: "empty", icon: "info", title: "选择一个节点" })));
         return;
       }
       var idx = S.idx;
@@ -536,7 +536,6 @@
             "div.col",
             { style: "gap:8px" },
             h("div.copyable", h("span.copy-text", { style: "font-family:var(--font-ui)" }, idx.displayPath(i)), MC.copyButton(idx.displayPath(i, "/"), "复制路径")),
-            h("div.field-help", "绑定路径（用于「变量绑定」「DL 系数绑定」）"),
             h("div.copyable", h("span.copy-text", vpath), MC.copyButton(vpath, "复制绑定路径")),
             h("details", h("summary.xsmall.muted", { style: "cursor:pointer" }, "技术定位信息"), h("dl.kv", { style: "margin-top:6px" }, h("dt", "定位符"), h("dd.mono.xsmall", idx.loc[i]), h("dt", "节点 ID"), h("dd.mono.xsmall", id), h("dt", "类型"), h("dd.mono.xsmall", t)))
           )
@@ -716,9 +715,9 @@
                   h("div.panel-header", h("h2", "历史版本"), h("span.muted.small", res.items.length + " 个归档"), cmpSel),
                   res.items.length
                     ? h("div.table-wrap", table)
-                    : MC.stateBlock({ kind: "empty", icon: "history", title: "还没有历史版本", desc: "每次通过上传或更新源覆盖该文件时，旧版本会自动归档到这里。" })
+                    : MC.stateBlock({ kind: "empty", icon: "history", title: "还没有历史版本" })
                 ),
-                h("p.xsmall.muted", { style: "margin-top:10px" }, "勾选任意两个版本即可对比。变更统计：+ 新增，− 删除，~ 修改，⛓ 涉及绑定变量。")
+                h("p.xsmall.muted", { style: "margin-top:10px" }, "+ 新增，− 删除，~ 修改，⛓ 涉及绑定变量")
               )
             )
           );
@@ -819,7 +818,7 @@
         function renderResult() {
           var r = C.result;
           if (!r) {
-            util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "compare", title: "选择两个版本后开始对比", desc: "左侧为基准（旧），右侧为目标（新）。结果分为结构化差异与文本差异。" })));
+            util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "compare", title: "选择两个版本后开始对比" })));
             return;
           }
           if (!r.has_changes) {

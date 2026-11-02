@@ -181,7 +181,6 @@
 
     var m = MC.modal({
       title: "导入配置文件",
-      subtitle: "支持 XML 与 JSON，本地文件可一次选择多个。导入前将先校验文件能否解析。",
       body: body,
       size: null,
       footer: function (close) {

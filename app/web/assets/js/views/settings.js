@@ -11,12 +11,12 @@
   var api = MC.api;
 
   var SECTIONS = [
-    { id: "sources", label: "更新源", icon: "link", desc: "维护各配置文件的下载链接与修改记录链接，支持单条或全量立即更新。" },
-    { id: "schedule", label: "定时更新", icon: "clock", desc: "按设定间隔自动执行全量更新，包括修改记录的拉取。" },
-    { id: "people", label: "人员与权限", icon: "users", desc: "IP 对应表与管理员名单为全机型共用。IP 对应表用于识别建议提交人；管理员可审阅修改建议并删除文件。" },
-    { id: "bindings", label: "变量绑定", icon: "link", desc: "将不同文件中含义相同的变量编为一组，对比时以紫色标出。" },
-    { id: "tools", label: "工具菜单", icon: "tool", desc: "维护「外部工具」中的常用链接，点击后在新窗口打开。" },
-    { id: "profiles", label: "机型管理", icon: "device", desc: "各机型拥有独立的配置文件、历史版本、收藏、绑定与设置。" },
+    { id: "sources", label: "更新源", icon: "link" },
+    { id: "schedule", label: "定时更新", icon: "clock" },
+    { id: "people", label: "人员与权限", icon: "users" },
+    { id: "bindings", label: "变量绑定", icon: "link" },
+    { id: "tools", label: "工具菜单", icon: "tool" },
+    { id: "profiles", label: "机型管理", icon: "device" },
   ];
 
   function fieldError(fields, err) {
@@ -53,7 +53,7 @@
         });
       }
       return [
-        h("div.page-head", h("div.col", h("h1", sec.label), h("div.small.muted", sec.desc)), actions || null),
+        h("div.page-head", h("h1", sec.label), actions || null),
         locked ? h("div.banner.banner-neutral", { style: "margin-bottom:16px" }, icon("lock"), h("div.banner-body", "只读：当前身份为「" + app.identity.role_label + "」，只有管理员可以修改这些设置。")) : null,
       ];
     }
@@ -132,9 +132,14 @@
             "div.panel",
             res.items.length
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "文件"), h("th", "下载链接"), h("th", "最近结果"), h("th.cell-actions", "操作"))), h("tbody", rows)))
-              : MC.stateBlock({ kind: "empty", icon: "link", title: "还没有更新源", desc: "添加后可从链接拉取最新配置，原版本将自动归档。", actions: ro() ? null : [h("button.btn.btn-primary", { type: "button", onclick: function () { sourceDialog(null); } }, "新增更新源")] })
+              : MC.stateBlock({ kind: "empty", icon: "link", title: "还没有更新源", actions: ro() ? null : [h("button.btn.btn-primary", { type: "button", onclick: function () { sourceDialog(null); } }, "新增更新源")] })
           ),
-          h("p.xsmall.muted", { style: "margin-top:10px" }, "回读支持 XML、JSON 以及 zip、tar.gz。压缩包中的 XML 与 JSON 将解压进入文件列表。若填写正则关键词，文件名中的匹配片段将作为新文件名，例如关键词 MachineConstant 会将 Default_MachineConstant_basics.xml 保存为 MachineConstant.xml。校验通过后才替换当前版本；内容未变化时不生成新的历史版本。"),
+          h(
+            "details",
+            { style: "margin-top:10px" },
+            h("summary.xsmall.muted", "回读与替换"),
+            h("p.xsmall.muted", { style: "margin:8px 0 0" }, "回读支持 XML、JSON 以及 zip、tar.gz。压缩包中的 XML 与 JSON 会进入文件列表。正则关键词命中的片段会成为新文件名。校验通过后才替换当前版本；内容未变化时不生成新的历史版本。")
+          ),
         ];
       });
     }
@@ -148,7 +153,7 @@
       var F = {
         name: MC.field({ label: "文件名", required: true, control: name }),
         url: MC.field({ label: "下载链接", required: true, control: url }),
-        record_url: MC.field({ label: "修改记录链接", control: rec, help: "用于拉取上游的修改记录文件" }),
+        record_url: MC.field({ label: "修改记录链接", control: rec }),
         keyword: MC.field({ label: "正则关键词", control: keyword, help: "可选。匹配文件名中的一段，保存为「匹配文字 + 扩展名」。留空则单个文件按上面的文件名保存，压缩包按包内原名加入。" }),
       };
       var migrateRow = it ? h("label.check", migrate, "改名时同时迁移本地文件、历史版本、收藏与建议") : null;
@@ -201,7 +206,7 @@
           pageHead(sec),
           h(
             "div.panel",
-            h("div.panel-body.col", { style: "gap:16px;max-width:520px" }, sw, amountField, h("div.field-help", "保存后按新间隔重新计划。间隔以小时存储（「天」换算为 24 小时的整数倍），与既有配置兼容。")),
+            h("div.panel-body.col", { style: "gap:16px;max-width:520px" }, sw, amountField),
             h("div.panel-footer", save)
           ),
           h(
@@ -359,7 +364,7 @@
                     h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { bindingDialog(b); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removeBinding(b); } }, "删除"))
                   );
                 }))))
-              : MC.stateBlock({ kind: "empty", icon: "link", title: "暂无绑定组", desc: "可将不同文件中含义相同的变量编为一组，对比时一并标出。" })
+              : MC.stateBlock({ kind: "empty", icon: "link", title: "暂无绑定组" })
           ),
           h("p.xsmall.muted", { style: "margin-top:10px" }, "变量路径格式为「文件名/节点/节点…」，可在文件详情中通过「复制绑定路径」获取。"),
         ];
