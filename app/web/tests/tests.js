@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 109;  // + M16-31 更新管理壳
+  var EXPECTED_CASES = 110;  // + M16-31 壳、M16-32 更新源列表/编辑
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4020,6 +4020,8 @@
 
   test("M16-31：更新管理壳、五 tab 与旧设置入口收口", function () {
     var app = settingsApp(true);
+    var original = MC.api.requestV3;
+    MC.api.requestV3 = function () { return Promise.resolve({ items: [], total: 0, next_cursor: null }); };
     var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
     eq(inst.title, "更新管理");
     eq(inst.el.querySelectorAll("[data-sync-tab]").length, 5);
@@ -4031,6 +4033,91 @@
     ok(app.paints.go >= 1, "切换 tab 走 app.go，不整页刷新");
     inst.destroy();
     inst.el.remove();
+    MC.api.requestV3 = original;
+  });
+
+  test("SYNC-32：更新源列表、编辑 409 保留草稿与只读门控", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalWid = MC.workspaces && MC.workspaces.scopeId;
+    var source = {
+      source_id: "src-test-1", revision: 3, name: "A.xml", kind: "http_file",
+      display_path: "/synthetic/A.xml", resource_ref: "https://example.invalid/A.xml",
+      record_source: "https://example.invalid/records", keyword: "alpha",
+      enabled: true, schedule_mode: "custom", interval_hours: 6,
+      updated_at: "2026-11-02T00:00:00Z",
+    };
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-test"; };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET") {
+        return Promise.resolve({ items: [source], total: 1, next_cursor: null });
+      }
+      if (method === "PATCH") {
+        return Promise.reject({ status: 409, code: "REVISION_CONFLICT", message: "changed" });
+      }
+      return Promise.resolve({ run: { run_id: "run-test-1" }, task: { id: "t1" } });
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalWid) MC.workspaces.scopeId = originalWid;
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        ok(host.textContent.indexOf("A.xml") >= 0, "列表显示真实来源");
+        ok(host.textContent.indexOf("/synthetic/A.xml") >= 0, "显示路径");
+        ok(host.textContent.indexOf("6 小时") >= 0, "显示自定义频率");
+        var edit = host.querySelector("[data-sync-edit]");
+        ok(edit, "可写身份有编辑入口");
+        edit.click();
+        var modal = document.querySelector(".modal");
+        ok(modal, "打开编辑抽屉");
+        var inputs = modal.querySelectorAll("input.input");
+        var nameInput = inputs[0];
+        nameInput.value = "B.xml";
+        var recordInput = [].filter.call(inputs, function (input) { return input.placeholder && input.placeholder.indexOf("修改记录") >= 0; })[0];
+        ok(recordInput && recordInput.value.indexOf("records") >= 0, "旧 record_url 不丢");
+        var keywordInput = inputs[4];
+        ok(keywordInput && keywordInput.value === "alpha", "keyword 不丢");
+        var save = modal.querySelector("[data-sync-save]");
+        save.click();
+        return tick().then(function () {
+          ok(modal.textContent.indexOf("保留") >= 0, "409 保留草稿并提示");
+          ok(document.querySelector(".modal"), "409 不关闭编辑框");
+          modal.querySelector(".modal-footer .btn").click();
+        });
+      })
+      .then(function () {
+        var run = host.querySelector("[data-sync-run]");
+        ok(run, "可写身份有单项更新");
+        run.click();
+        return tick();
+      })
+      .then(function () {
+        ok(calls.some(function (c) { return c.method === "PATCH" && c.opts.headers && c.opts.headers["If-Match"] === "3"; }), "保存带 If-Match revision");
+        ok(calls.some(function (c) { return c.method === "POST" && c.path.indexOf("/run") >= 0; }), "单项更新投递 run");
+        var readOnly = settingsApp(false);
+        readOnly.can = function () { return false; };
+        MC.api.requestV3 = function () { return Promise.resolve({ items: [source], total: 1, next_cursor: null }); };
+        var ro = MC.views.updates(readOnly, { kind: "updates", arg: "sources", query: {} });
+        return tick().then(function () {
+          ok(!ro.el.querySelector("[data-sync-edit]"), "只读身份无编辑入口");
+          ok(ro.el.textContent.indexOf("只读") >= 0, "只读身份显示只读");
+          ro.destroy();
+          ro.el.remove();
+          inst.destroy();
+          inst.el.remove();
+          restore();
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
   });
 
 

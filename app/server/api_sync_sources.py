@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..core.errors import INVALID_INPUT, REVISION_CONFLICT, AppError
-from ..services import authz, sync_sources, workspace_catalog
+from ..services import authz, sync_sources, sync_tasks, workspace_catalog
 from ..services.context import RequestContext
 from .router import Response, Router, json_body, query_param
 
@@ -20,6 +20,7 @@ def register(router: Router) -> None:
     router.add("POST", "/api/v3/workspaces/{wid}/sync/sources", create_source)
     router.add("PATCH", "/api/v3/workspaces/{wid}/sync/sources/{sid}", update_source)
     router.add("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}", delete_source)
+    router.add("POST", "/api/v3/workspaces/{wid}/sync/sources/{sid}/run", run_source)
 
 
 def _scope(wid: str) -> None:
@@ -100,6 +101,29 @@ def update_source(
             payload,
         )
     )
+
+
+def run_source(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    """单项更新：用来源所属 profile 投一个 sync_run；不改来源本身。"""
+    authz.authorize(ctx, "tasks_run")
+    wid = params["wid"]
+    _scope(wid)
+    source = sync_sources.get_source(wid, params["sid"])
+    run_ctx = RequestContext(
+        ip=ctx.ip,
+        cid=ctx.cid,
+        profile_id=source["profile_id"],
+        workspace_id=wid,
+        actor=ctx.actor,
+        headers=ctx.headers,
+    )
+    result = sync_tasks.submit_sync_run(run_ctx, [source])
+    return Response(status=202, payload=result)
 
 
 def delete_source(
