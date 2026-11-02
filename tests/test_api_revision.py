@@ -77,6 +77,9 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("POST", "/api/v3/workspaces/{wid}/sync/sources"): None,
     ("PATCH", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): None,
     ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): None,
+    # M16-32/M16-33：单项与工作区级手动任务同样走 sync_run，不递增旧 5 段。
+    ("POST", "/api/v3/workspaces/{wid}/sync/sources/{sid}/run"): None,
+    ("POST", "/api/v3/workspaces/{wid}/sync/runs"): None,
     ("PUT", "/api/v3/workspaces/{wid}/sync/policy"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/previews"): None,

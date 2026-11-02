@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 110;  // + M16-31 壳、M16-32 更新源列表/编辑
+  var EXPECTED_CASES = 111;  // + M16-31 壳、M16-32 更新源列表/编辑、M16-33 计划/预览/手动任务
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4107,6 +4107,134 @@
         return tick().then(function () {
           ok(!ro.el.querySelector("[data-sync-edit]"), "只读身份无编辑入口");
           ok(ro.el.textContent.indexOf("只读") >= 0, "只读身份显示只读");
+          ro.destroy();
+          ro.el.remove();
+          inst.destroy();
+          inst.el.remove();
+          restore();
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+
+  test("SYNC-33：计划 CAS 409 保留草稿、workspace_all 预览与暂停后手动全量更新", function () {
+    var calls = [];
+    var previewBodies = [];
+    var runBodies = [];
+    var original = MC.api.requestV3;
+    var originalScope = MC.workspaces.scopeId;
+    var originalCurrent = MC.workspaces.current;
+    var policy = {
+      revision: 4, enabled: false, default_interval_hours: 6, anchor: null,
+      profile_overrides: { second: { enabled: true, interval_hours: 8 } },
+    };
+    var sourceRows = [
+      { source_id: "src-33-1", profile_id: "default", name: "A.xml", enabled: true, schedule_mode: "manual" },
+      { source_id: "src-33-2", profile_id: "second", name: "B.xml", enabled: true, schedule_mode: "inherit" },
+    ];
+    MC.workspaces.scopeId = function () { return "w-plan"; };
+    MC.workspaces.current = function () {
+      return {
+        id: "w-plan",
+        profiles: [{ id: "default", name: "默认机型" }, { id: "second", name: "第二机型" }],
+      };
+    };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && /\/sync\/policy$/.test(path)) {
+        return Promise.resolve(JSON.parse(JSON.stringify(policy)));
+      }
+      if (method === "GET" && /\/sync\/sources$/.test(path)) {
+        return Promise.resolve({ items: sourceRows.slice(), total: 2, next_cursor: null });
+      }
+      if (method === "PUT" && /\/sync\/policy$/.test(path)) {
+        return Promise.reject({ status: 409, code: "REVISION_CONFLICT", message: "changed" });
+      }
+      if (method === "POST" && /\/sync\/previews$/.test(path)) {
+        previewBodies.push(opts.body);
+        return Promise.resolve({
+          preview_id: "prev-33", total: 2, excluded: [],
+          read_set_sha256: "abcdef0123456789",
+          items: sourceRows.slice(),
+        });
+      }
+      if (method === "POST" && /\/sync\/runs$/.test(path)) {
+        runBodies.push(opts.body);
+        return Promise.resolve({
+          preview: { preview_id: "prev-33", total: 2, excluded: [], read_set_sha256: "abcdef0123456789" },
+          runs: [
+            { profile_id: "default", run: { run_id: "run-33-a", state: "queued", trigger: "manual" }, task: { id: "task-33-a", type: "sync_run", state: "queued", result: { items: [] } } },
+            { profile_id: "second", run: { run_id: "run-33-b", state: "queued", trigger: "manual" }, task: { id: "task-33-b", type: "sync_run", state: "queued", result: { items: [] } } },
+          ],
+        });
+      }
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      MC.workspaces.scopeId = originalScope;
+      MC.workspaces.current = originalCurrent;
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "tasks_run"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "plan", query: {} });
+    return tick()
+      .then(function () {
+        eq(inst.el.querySelector("[data-plan-enabled]").checked, false, "加载全局暂停状态");
+        eq(inst.el.querySelector("[data-plan-interval]").value, "6", "加载默认间隔");
+        eq(inst.el.querySelector('[data-plan-override-enabled="second"]').value, "true", "加载机型覆盖 enabled");
+        eq(inst.el.querySelector('[data-plan-override-interval="second"]').value, "8", "加载机型覆盖 interval");
+        var interval = inst.el.querySelector("[data-plan-interval]");
+        interval.value = "9";
+        interval.dispatchEvent(new Event("change"));
+        inst.el.querySelector("[data-plan-save]").click();
+        return tick();
+      })
+      .then(function () {
+        ok(inst.el.textContent.indexOf("保留") >= 0, "409 提示草稿保留");
+        eq(inst.el.querySelector("[data-plan-interval]").value, "9", "409 后草稿不被旧 revision 覆盖");
+        var failures = inst.el.querySelector("[data-plan-failures]");
+        failures.checked = true;
+        failures.dispatchEvent(new Event("change"));
+        inst.el.querySelector("[data-plan-preview]").click();
+        return tick();
+      })
+      .then(function () {
+        eq(previewBodies.length, 1, "只发一次预览");
+        eq(previewBodies[0].scope, "workspace_all", "失败筛选不缩小预览范围");
+        ok(
+          inst.el.querySelector("[data-plan-read-set]").textContent.indexOf("abcdef") >= 0,
+          "显示 read_set 指纹"
+        );
+        inst.el.querySelector("[data-plan-run]").click();
+        return tick();
+      })
+      .then(function () {
+        eq(runBodies.length, 1, "提交一次全量任务");
+        eq(runBodies[0].scope, "workspace_all", "暂停自动仍按 workspace_all 手动运行");
+        eq(runBodies[0].preview_id, "prev-33", "沿用当前预览的冻结 read_set");
+        ok(
+          calls.some(function (c) {
+            return c.method === "POST" && c.path.indexOf("/workspaces/w-plan/sync/runs") >= 0;
+          }),
+          "请求路径携带原始工作区"
+        );
+        ok(inst.el.textContent.indexOf("w-plan") >= 0, "UI 保留任务归属工作区");
+        ok(inst.el.textContent.indexOf("run-33-a") >= 0, "显示默认机型 run");
+        ok(inst.el.textContent.indexOf("run-33-b") >= 0, "显示第二机型 run");
+
+        var readOnly = settingsApp(false);
+        readOnly.can = function () { return false; };
+        var ro = MC.views.updates(readOnly, { kind: "updates", arg: "plan", query: {} });
+        return tick().then(function () {
+          ok(!ro.el.querySelector("[data-plan-save]"), "只读身份无保存入口");
+          ok(!ro.el.querySelector("[data-plan-run]"), "只读身份无手动任务入口");
+          ok(ro.el.querySelector("[data-plan-readonly]"), "只读身份有说明");
+          eq(ro.el.querySelector("[data-plan-interval]").disabled, true, "只读身份输入禁用");
           ro.destroy();
           ro.el.remove();
           inst.destroy();

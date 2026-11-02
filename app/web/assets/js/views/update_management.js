@@ -1,8 +1,10 @@
 /*
- * V3.1 更新管理工作区级入口（M16-31 / M16-32 / INH-2196、INH-2197）。
+ * V3.1 更新管理工作区级入口（M16-31 / M16-32 / M16-33 / INH-2196、INH-2197、INH-2198）。
  *
  * 壳：来源/计划/连接/运行记录/候选五个 tab 与旧设置深链收口。
  * M16-32：来源真实列表、筛选、分页、排序、编辑抽屉与单项更新；不加载 mock。
+ * M16-33：更新计划（全局/机型覆盖 CAS 保存）、工作区全量预览、失败筛选只做
+ * 客户端显示过滤（请求始终 scope=workspace_all）、暂停自动后仍可手动全量更新。
  */
 (function (global) {
   "use strict";
@@ -18,6 +20,11 @@
     { id: "runs", label: "运行记录", desc: "持久运行、阶段日志、失败重试与脱敏诊断。" },
     { id: "candidates", label: "更新候选", desc: "候选差异、冲突决议与写入 V3 草稿。" },
   ];
+
+  //: 手动/批量任务记录跨视图保留：切换 tab 或工作区后仍能看见 run 最初归属的 W。
+  var RUN_LOG = [];
+  var RUN_LOG_MAX = 20;
+  var FAILED_ITEM_STATUSES = ["failed", "blocked", "interrupted", "canceled"];
 
   var KIND_LABEL = { http_file: "HTTP 文件", http_record: "HTTP 修改记录", sda_catalog: "SDA 目录", sda_table: "SDA 表", sda_file: "SDA 文件" };
   var SOURCE_STATUS = [
@@ -43,6 +50,57 @@
 
   function sourcesPath() {
     return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/sync/sources";
+  }
+
+  function policyPath() {
+    return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/sync/policy";
+  }
+
+  function previewsPath() {
+    return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/sync/previews";
+  }
+
+  function runsPath() {
+    return "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) + "/sync/runs";
+  }
+
+  function workspaceProfiles() {
+    try {
+      var current = MC.workspaces && MC.workspaces.current ? MC.workspaces.current() : null;
+      var profiles = current && current.profiles;
+      if (Array.isArray(profiles) && profiles.length) {
+        return profiles.map(function (profile) {
+          return { id: String(profile.id), name: profile.name || String(profile.id) };
+        });
+      }
+    } catch (e) { /* 测试页/旧壳 */ }
+    return [{ id: "default", name: "默认机型" }];
+  }
+
+  function draftFromPolicy(policy) {
+    var overrides = {};
+    var raw = (policy && policy.profile_overrides) || {};
+    Object.keys(raw).forEach(function (pid) {
+      var item = raw[pid] || {};
+      overrides[pid] = {
+        enabled: item.enabled === true ? true : (item.enabled === false ? false : undefined),
+        interval_hours: item.interval_hours == null ? undefined : item.interval_hours,
+      };
+    });
+    return {
+      enabled: !!(policy && policy.enabled),
+      default_interval_hours:
+        policy && policy.default_interval_hours != null ? policy.default_interval_hours : 6,
+      overrides: overrides,
+    };
+  }
+
+  function planErrorText(err) {
+    if (err && err.code === "REVISION_CONFLICT") {
+      return "计划或预览已在其他客户端更新；当前草稿已保留，请刷新后重试";
+    }
+    if (err && err.code === "PLAN_STALE") return "预览已过期，请重新预览";
+    return errorText(err);
   }
 
   function scheduleText(source) {
@@ -75,6 +133,22 @@
         error: "",
         expanded: false,
       },
+      plan: {
+        loadedFor: "",
+        loading: false,
+        error: "",
+        policy: null,
+        draft: null,
+        sources: [],
+        preview: null,
+        previewWorkspaceId: "",
+        previewing: false,
+        validating: false,
+        saving: false,
+        running: false,
+        failuresOnly: false,
+        failedSourceIds: {},
+      },
     };
     var el = h("div");
     var tabbar = h("div.row", { role: "tablist", "aria-label": "更新管理分类", style: "gap:6px;flex-wrap:wrap;margin:10px 0 14px" });
@@ -106,6 +180,14 @@
 
     function canWrite() {
       return !!(app && app.can && app.can("settings_write"));
+    }
+
+    function canSavePlan() {
+      return !!(app && app.can && app.can("settings_write"));
+    }
+
+    function canRunPlan() {
+      return !!(app && app.can && app.can("tasks_run"));
     }
 
     function loadSources(reset) {
@@ -267,6 +349,434 @@
       });
     }
 
+    function rerenderPlan() {
+      if (state.tab === "plan") renderPlan();
+    }
+
+    function loadPlan() {
+      var P = state.plan;
+      if (P.loading) return Promise.resolve();
+      var wid = workspaceId();
+      P.loading = true;
+      P.loadedFor = wid;
+      P.error = "";
+      rerenderPlan();
+      return Promise.all([
+        MC.api.requestV3("GET", policyPath()),
+        MC.api.requestV3("GET", sourcesPath(), { query: { status: "all", limit: 200 } }),
+      ]).then(function (result) {
+        if (P.loadedFor !== workspaceId()) return;
+        P.policy = result[0] || {};
+        P.draft = draftFromPolicy(P.policy);
+        P.sources = (result[1] && result[1].items) || [];
+        P.loading = false;
+        P.error = "";
+        rerenderPlan();
+      }, function (err) {
+        if (P.loadedFor !== workspaceId()) return;
+        P.loading = false;
+        P.error = planErrorText(err);
+        rerenderPlan();
+      });
+    }
+
+    function setOverride(pid, key, value) {
+      var P = state.plan;
+      if (!P.draft) return;
+      var item = P.draft.overrides[pid] || {};
+      if (value === null || value === undefined || value === "") delete item[key];
+      else item[key] = value;
+      if (item.enabled === undefined && item.interval_hours === undefined) {
+        delete P.draft.overrides[pid];
+      } else {
+        P.draft.overrides[pid] = item;
+      }
+    }
+
+    function buildPolicyPayload() {
+      var draft = state.plan.draft;
+      var hours = Number(draft.default_interval_hours);
+      if (!isFinite(hours) || hours < 1 || hours > 2160) {
+        return { error: "默认间隔必须在 1–2160 小时" };
+      }
+      var overrides = {};
+      var bad = "";
+      Object.keys(draft.overrides).forEach(function (pid) {
+        var item = draft.overrides[pid] || {};
+        var clean = {};
+        if (item.enabled === true || item.enabled === false) clean.enabled = item.enabled;
+        if (item.interval_hours !== undefined && item.interval_hours !== null && String(item.interval_hours).trim() !== "") {
+          var value = Number(item.interval_hours);
+          if (!isFinite(value) || value < 1 || value > 2160) {
+            bad = "机型覆盖间隔必须在 1–2160 小时";
+          } else {
+            clean.interval_hours = value;
+          }
+        }
+        if (Object.keys(clean).length) overrides[pid] = clean;
+      });
+      if (bad) return { error: bad };
+      return {
+        body: {
+          enabled: !!draft.enabled,
+          default_interval_hours: hours,
+          profile_overrides: overrides,
+        },
+      };
+    }
+
+    function savePlan() {
+      var P = state.plan;
+      if (!canSavePlan() || P.saving || !P.draft) return;
+      var built = buildPolicyPayload();
+      if (built.error) {
+        P.error = built.error;
+        rerenderPlan();
+        return;
+      }
+      var revision = P.policy && P.policy.revision != null ? P.policy.revision : 0;
+      P.saving = true;
+      P.error = "";
+      rerenderPlan();
+      MC.api.requestV3("PUT", policyPath(), {
+        body: built.body,
+        headers: { "If-Match": String(revision) },
+      }).then(function (policy) {
+        P.policy = policy || P.policy;
+        P.draft = draftFromPolicy(P.policy);
+        P.saving = false;
+        P.error = "";
+        MC.toast.success("更新计划已保存");
+        rerenderPlan();
+      }, function (err) {
+        P.saving = false;
+        // 409：不覆盖 P.draft，输入框仍显示用户当前草稿。
+        P.error = err && err.code === "REVISION_CONFLICT"
+          ? "计划已在其他客户端更新；当前草稿已保留，请刷新后重试"
+          : planErrorText(err);
+        rerenderPlan();
+      });
+    }
+
+    function requestPlanPreview() {
+      var P = state.plan;
+      if (!canSavePlan() || P.previewing) return;
+      // 失败筛选只影响下方列表显示；预览请求始终冻结 workspace_all 全量 read_set。
+      var wid = workspaceId();
+      P.previewing = true;
+      P.error = "";
+      rerenderPlan();
+      MC.api.requestV3("POST", previewsPath(), { body: { scope: "workspace_all" } }).then(function (preview) {
+        P.previewing = false;
+        if (!preview || P.loadedFor !== workspaceId()) return;
+        P.preview = preview;
+        P.previewWorkspaceId = wid;
+        P.error = "";
+        rerenderPlan();
+      }, function (err) {
+        P.previewing = false;
+        P.error = planErrorText(err);
+        rerenderPlan();
+      });
+    }
+
+    function validatePlanPreview() {
+      var P = state.plan;
+      if (!canSavePlan() || !P.preview || P.validating) return;
+      var wid = P.previewWorkspaceId || workspaceId();
+      var path = "/api/v3/workspaces/" + encodeURIComponent(wid)
+        + "/sync/previews/" + encodeURIComponent(P.preview.preview_id) + "/validate";
+      P.validating = true;
+      P.error = "";
+      rerenderPlan();
+      MC.api.requestV3("POST", path, { body: {} }).then(function (fresh) {
+        P.validating = false;
+        if (fresh) {
+          P.preview = fresh;
+          P.previewWorkspaceId = wid;
+        }
+        MC.toast.success("预览仍然有效");
+        rerenderPlan();
+      }, function (err) {
+        P.validating = false;
+        P.error = planErrorText(err);
+        rerenderPlan();
+      });
+    }
+
+    function rememberFailures(runs) {
+      (runs || []).forEach(function (entry) {
+        var task = entry && entry.task;
+        var items = (task && task.result && task.result.items) || [];
+        items.forEach(function (item) {
+          if (item && item.source_id && FAILED_ITEM_STATUSES.indexOf(item.status) >= 0) {
+            state.plan.failedSourceIds[item.source_id] = true;
+          }
+        });
+      });
+    }
+
+    function runWorkspaceAll() {
+      var P = state.plan;
+      if (!canRunPlan() || P.running) return;
+      var wid = workspaceId();
+      var body = { scope: "workspace_all" };
+      if (P.preview && P.preview.preview_id && P.previewWorkspaceId === wid) {
+        body.preview_id = P.preview.preview_id;
+      }
+      P.running = true;
+      P.error = "";
+      rerenderPlan();
+      MC.api.requestV3("POST", runsPath(), { body: body }).then(function (data) {
+        P.running = false;
+        var runs = (data && data.runs) || [];
+        runs.forEach(function (entry) {
+          RUN_LOG.push({
+            workspace_id: wid,
+            profile_id: entry.profile_id,
+            run: entry.run,
+            task: entry.task,
+          });
+          if (MC.bus) MC.bus.emit("sync-run-started", entry.run);
+        });
+        while (RUN_LOG.length > RUN_LOG_MAX) RUN_LOG.shift();
+        rememberFailures(runs);
+        P.error = "";
+        if (!runs.length) MC.toast.info("没有可更新的来源");
+        else MC.toast.success("已提交全量更新", "共 " + runs.length + " 个机型任务");
+        rerenderPlan();
+      }, function (err) {
+        P.running = false;
+        P.error = err && err.code === "REVISION_CONFLICT"
+          ? "预览或计划已变化，未提交任务；请重新预览后重试"
+          : planErrorText(err);
+        rerenderPlan();
+      });
+    }
+
+    function renderPlan() {
+      var P = state.plan;
+      var save = canSavePlan();
+      var run = canRunPlan();
+      var draft = P.draft || draftFromPolicy(P.policy || {});
+      var profiles = workspaceProfiles();
+
+      if (P.error) body.appendChild(h("div.form-error", P.error));
+      if (P.loading && !P.policy) {
+        body.appendChild(h("p.muted", "正在读取更新计划…"));
+        return;
+      }
+      if (!P.policy) {
+        body.appendChild(h("div.card", h("div.card-b",
+          h("p.muted", "暂时无法读取更新计划。"),
+          h("button.btn.btn-sm", { type: "button", "data-plan-refresh": "1", onclick: loadPlan }, "刷新")
+        )));
+        return;
+      }
+      if (!save) {
+        body.appendChild(h("p.small.muted", { "data-plan-readonly": "1" }, "只读身份：可查看更新计划，不能保存或启动任务。"));
+      }
+
+      var enabledInput = h("input", {
+        type: "checkbox",
+        checked: draft.enabled,
+        disabled: !save,
+        "data-plan-enabled": "1",
+      });
+      enabledInput.addEventListener("change", function () {
+        draft.enabled = !!enabledInput.checked;
+      });
+      var intervalInput = h("input.input", {
+        type: "number",
+        min: "1",
+        max: "2160",
+        value: String(draft.default_interval_hours),
+        disabled: !save,
+        "data-plan-interval": "1",
+        style: "max-width:120px",
+      });
+      intervalInput.addEventListener("change", function () {
+        draft.default_interval_hours = intervalInput.value;
+      });
+
+      var overrideRows = profiles.map(function (profile) {
+        var item = draft.overrides[profile.id] || {};
+        var select = h("select.input", {
+          disabled: !save,
+          "data-plan-override-enabled": profile.id,
+        },
+          h("option", { value: "" }, "继承工作区"),
+          h("option", { value: "true" }, "启用"),
+          h("option", { value: "false" }, "暂停")
+        );
+        select.value = item.enabled === true ? "true" : (item.enabled === false ? "false" : "");
+        select.addEventListener("change", function () {
+          setOverride(profile.id, "enabled", select.value === "" ? null : select.value === "true");
+        });
+        var overrideInterval = h("input.input", {
+          type: "number",
+          min: "1",
+          max: "2160",
+          placeholder: "继承默认",
+          value: item.interval_hours == null ? "" : String(item.interval_hours),
+          disabled: !save,
+          "data-plan-override-interval": profile.id,
+          style: "max-width:120px",
+        });
+        overrideInterval.addEventListener("change", function () {
+          setOverride(profile.id, "interval_hours", overrideInterval.value.trim());
+        });
+        return h("tr", { "data-plan-profile": profile.id },
+          h("td", h("div", h("strong", profile.name)), h("div.xsmall.muted", profile.id)),
+          h("td", select),
+          h("td", overrideInterval)
+        );
+      });
+
+      var planActions = h("div.row", { style: "gap:8px;flex-wrap:wrap;margin-top:10px" });
+      if (save) {
+        planActions.appendChild(h("button.btn.btn-primary", {
+          type: "button",
+          "data-plan-save": "1",
+          disabled: P.saving,
+          onclick: savePlan,
+        }, P.saving ? "保存中…" : "保存计划"));
+      }
+      planActions.appendChild(h("button.btn.btn-sm", {
+        type: "button",
+        "data-plan-refresh": "1",
+        onclick: loadPlan,
+      }, "刷新"));
+      body.appendChild(h("div.card",
+        h("div.card-h", h("strong", "自动更新计划"), h("span.muted.small", "工作区 " + workspaceId())),
+        h("div.card-b",
+          h("div.row", { style: "gap:18px;flex-wrap:wrap;align-items:center" },
+            h("label.row", { style: "gap:6px;align-items:center" },
+              enabledInput, h("span", "启用自动更新")),
+            h("div.row", { style: "gap:6px;align-items:center" },
+              h("span.small.muted", "默认间隔"),
+              intervalInput,
+              h("span.small.muted", "小时")
+            )
+          ),
+          h("p.xsmall.muted", "暂停自动更新只影响自动投递；手动全量更新仍可随时启动。"),
+          h("table.table", { style: "margin-top:10px" },
+            h("thead", h("tr", h("th", "机型"), h("th", "自动状态覆盖"), h("th", "间隔覆盖（小时）"))),
+            h("tbody", overrideRows)
+          ),
+          planActions
+        )
+      ));
+
+      var pv = P.preview;
+      var previewActions = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" });
+      if (save) {
+        previewActions.appendChild(h("button.btn.btn-primary", {
+          type: "button",
+          "data-plan-preview": "1",
+          disabled: P.previewing,
+          onclick: requestPlanPreview,
+        }, P.previewing ? "预览中…" : "全量预览"));
+      }
+      var failures = h("input", {
+        type: "checkbox",
+        checked: P.failuresOnly,
+        disabled: !save,
+        "data-plan-failures": "1",
+      });
+      failures.addEventListener("change", function () {
+        P.failuresOnly = !!failures.checked;
+        rerenderPlan();
+      });
+      previewActions.appendChild(h("label.row", { style: "gap:6px;align-items:center" },
+        failures, h("span.small", "仅显示失败来源")));
+      if (save && pv) {
+        previewActions.appendChild(h("button.btn.btn-sm", {
+          type: "button",
+          "data-plan-validate": "1",
+          disabled: P.validating,
+          onclick: validatePlanPreview,
+        }, P.validating ? "校验中…" : "验证预览"));
+      }
+
+      var previewBody = h("div.card-b", previewActions);
+      if (pv) {
+        var fingerprint = pv.read_set_sha256 ? String(pv.read_set_sha256).slice(0, 16) : "—";
+        previewBody.appendChild(h("p.small", { "data-plan-read-set": pv.read_set_sha256 || "" },
+          "冻结来源 " + (pv.total || 0) + " 个 · 排除 " + ((pv.excluded || []).length)
+          + " 个 · read_set " + fingerprint
+        ));
+        previewBody.appendChild(h("p.xsmall.muted",
+          "失败筛选只影响本页显示；冻结 read_set 始终按 workspace_all 请求，不会缩成失败子集。"
+        ));
+        var rows = (pv.items || []).slice();
+        if (P.failuresOnly) {
+          rows = rows.filter(function (item) { return !!P.failedSourceIds[item.source_id]; });
+        }
+        if (!rows.length) {
+          previewBody.appendChild(h("p.muted.small", P.failuresOnly
+            ? "当前没有记录到失败来源；全量 read_set 仍包含上面的 " + (pv.total || 0) + " 个来源。"
+            : "预览中没有可用来源。"));
+        } else {
+          rows.forEach(function (item) {
+            previewBody.appendChild(h("div.row", {
+              "data-plan-preview-source": item.source_id,
+              style: "gap:10px;align-items:center;padding:4px 0;border-top:1px solid var(--border)",
+            },
+              h("span.small", item.name || item.source_id),
+              h("span.xsmall.muted", (item.profile_id || "") + " · " + (item.schedule_mode || "inherit"))
+            ));
+          });
+        }
+      } else {
+        previewBody.appendChild(h("p.muted.small", "尚未预览；全量预览会冻结所有机型下已启用来源。"));
+      }
+      body.appendChild(h("div.card",
+        h("div.card-h", h("strong", "全量预览"), h("span.muted.small", "workspace_all")),
+        previewBody
+      ));
+
+      var runRows = RUN_LOG.slice().reverse();
+      var runBody = h("div.card-b");
+      var runActions = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" });
+      if (run) {
+        runActions.appendChild(h("button.btn.btn-primary", {
+          type: "button",
+          "data-plan-run": "1",
+          disabled: P.running,
+          onclick: runWorkspaceAll,
+        }, P.running ? "提交中…" : "手动全量更新"));
+      }
+      runActions.appendChild(h("span.xsmall.muted", draft.enabled
+        ? "自动计划已启用；手动任务独立提交。"
+        : "自动计划已暂停；手动任务仍可启动。"));
+      runBody.appendChild(runActions);
+      if (runRows.length) {
+        runBody.appendChild(h("p.small", { "data-plan-run-wid": runRows[0].workspace_id },
+          "最近任务归属工作区：" + runRows[0].workspace_id));
+        runRows.slice(0, 10).forEach(function (entry) {
+          var runInfo = entry.run || {};
+          var task = entry.task || {};
+          runBody.appendChild(h("div.row", {
+            "data-plan-run-row": entry.workspace_id,
+            style: "gap:10px;align-items:center;padding:4px 0;border-top:1px solid var(--border)",
+          },
+            h("span.small", entry.profile_id),
+            h("span.xsmall.muted", "工作区 " + entry.workspace_id),
+            h("span.badge", runInfo.trigger || "manual"),
+            h("span.small", runInfo.state || task.state || "queued"),
+            h("span.xsmall.muted", runInfo.run_id || task.id || "")
+          ));
+        });
+      } else {
+        runBody.appendChild(h("p.muted.small", "尚未提交手动任务。"));
+      }
+      body.appendChild(h("div.card",
+        h("div.card-h", h("strong", "手动全量更新"), h("span.muted.small", "按机型分组投递 sync_run")),
+        runBody
+      ));
+    }
+
     function renderSources() {
       var S = state.sources;
       var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
@@ -355,6 +865,9 @@
       var tab = tabById(state.tab);
       if (tab.id === "sources") {
         renderSources();
+      } else if (tab.id === "plan") {
+        renderPlan();
+        if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
       } else {
         renderPlaceholder(tab);
       }
