@@ -1,66 +1,75 @@
 # M16 更新管理真实浏览器 E2E 记录（M16-40）
 
-> 状态：2026-11-02。**桌面 admin 五 tab、成员只读、跨工作区、375/768 窄屏已实测；原 V3 F01–F28 只抽样，键盘焦点/未保存 409 等项未完整执行，因此 M16-40 仍为 In Progress，不是 PASS。**
-> 环境：macOS + Google Chrome 156 headless（CDP `Emulation.setDeviceMetricsOverride`），临时数据根 `/tmp/mcc-e2e-40`，Python 3.9.11 主应用。未使用公司内网、未接触真实 SDA。
+> 状态：2026-11-02。**由可复跑脚本驱动**：`scripts/e2e_browser.py`（stdlib CDP）+ `scripts/e2e_scenarios.py`（场景清单），
+> 每次运行产出 JSON 报告与逐场景截图。最近一次全量：**interactive 13/13 通过、reachable 28/28 通过**。
+> 环境：macOS + Google Chrome 156 headless（CDP）、临时数据根（`~/.cache/mcc-e2e-40-*`）、Python 3.9.11 主应用。未使用公司内网、未接触真实 SDA。
+
+## 0. 怎么复跑
+
+```bash
+# 前端单测页（HTTP keep-alive + 只认 ALL PASSED）
+./.venv39/bin/python scripts/check_web_ui.py
+
+# 真实服务 + 真实 API 的浏览器 E2E（自动起服务、造数据、截图、写 report.json）
+./.venv39/bin/python scripts/e2e_browser.py --only all
+./.venv39/bin/python scripts/e2e_browser.py --only updates   # 只跑更新管理
+```
+
+脚本会：建临时数据根 → 播种（管理员身份、`A.xml`、一条启用 + 一条停用的 HTTP 来源）→ 起 `run.py --no-reload`
+→ Chrome CDP 逐场景点击/输入/断言/截图 → 写 `report.json`（在临时数据根，不入库）→ 截图落到 `docs/evidence/m16-40/`。
 
 ## 1. 测试数据与身份
 
-- 临时工作区 W1 `w-c61b6bab`（源 `A.xml`、SDA 连接），W2 `w-e996b504`（同名 `A.xml`、不同 `src-b83c69d54cf05a18` 与 `/synthetic/W2-A.xml`）。
-- 身份通过临时 `ip_mapping`/`admins` 切换：`127.0.0.1 → E2E管理员`（admin）与 `127.0.0.1 → 只读成员`（member）。全部只写 `/tmp/mcc-e2e-40`。
+- 临时工作区 `default`（legacy），机型 `default`；文件 `A.xml`（`<R><x>1</x><y>2</y><z>3</z></R>`）。
+- 来源：`E2E HTTP 来源`（启用，custom 6h）、`E2E 停用来源`（停用），target=`file_archive` 绑到 `A.xml` 的 FileResource。
+- 身份：`X-Forwarded-For: 10.9.9.1 → E2E管理员`（admin）、`10.9.9.2 → 成员`（read-only）；
+  服务以 `MCHECKER_TRUSTED_PROXIES=127.0.0.1` 启动才会采信该头。**换身份必须整页重载**（SPA 的 session 启动时拉取）。
+- 运维 token：`MCHECKER_OPERATOR_TOKEN` 由脚本注入，只出现在服务进程环境里，不进仓库、不进截图。
 
-## 2. 桌面 admin（1280×900）
+## 2. 更新管理交互（interactive，13 项全通过）
 
-| 页面 | 结果 | 截图 |
+| 场景 | 断言要点 | 截图 |
 |---|---|---|
-| 更新源 | 1 条真实来源，搜索/状态/排序/刷新、编辑/更新按钮可见；无 console error | `docs/evidence/m16-40/updates-sources-1280-admin.png` |
-| 更新计划 | 工作区 W1、默认 6h、profile override、全量预览、手动全量；无 `.form-error` | `docs/evidence/m16-40/updates-plan-1280-admin.png` |
-| 连接设置 | SDA 连接安全摘要、保活/自动重登信息；凭据/运维入口按能力显示 | `docs/evidence/m16-40/updates-connections-1280-admin.png` |
-| 运行记录 | 空态“还没有同步运行记录”，无报错 | `docs/evidence/m16-40/updates-runs-1280-admin.png` |
-| 更新候选 | 空态“还没有更新候选”，修复空列表自循环后只发一次 GET | `docs/evidence/m16-40/updates-candidates-1280-admin.png` |
+| `updates-sources-list` | 来源行、新建按钮、批量工具条齐备 | `updates-sources-list.png` |
+| `updates-source-create` | 抽屉含 kind / 连接 / 目标绑定三组控件；取消可关 | `updates-source-create.png` |
+| `updates-source-focus` | 抽屉内初始焦点、Esc **不**关闭未保存草稿抽屉、取消后焦点回到触发按钮 | 同上 |
+| `updates-plan` | 全量预览入口与保存按钮存在 | `updates-plan.png` |
+| `updates-connections` | 新建连接入口 → 运维 token 输入 → 提交按钮 | `updates-connections.png` |
+| `updates-runs` | 运行记录页渲染 | `updates-runs.png` |
+| `updates-candidates` | 状态/机型筛选与批量工具条 | `updates-candidates.png` |
+| `roles-admin-member` | 管理员有 `[data-sync-edit]`；成员重载后无编辑入口 | `updates-sources-1366-admin.png` / `-member.png` |
+| `viewport-1366 / 1920 / 768 / 375` | `scrollWidth - clientWidth <= 1`（四档全 0） | `updates-sources-{1366,1920,768,375}-admin.png` |
+| `operator-token` | 无 token 403、错 token 403 且不回显、正确 token 201 | `updates-connections-operator-token.png` |
 
-原 V3 导航 `速览/全局搜索/配置管理/设置` 标题可达；本次只做路由抽样，没有逐条执行 F01–F28 的完整交互。
+## 3. 旧 V3 F01–F28（reachable，28/28 通过）
 
-## 3. 成员只读与跨工作区
+逐项导航到对应路由，断言：视图挂载（`.view`）、无 `.form-error`、页面文本命中该面板关键词。
 
-- 同一 W1 切换为 member 后：更新源仍显示行与状态，但 **编辑/更新按钮数量为 0**，行尾显示“只读”，顶栏身份为“成员”，导航隐藏审阅修改。截图见 375/768 两张。
-- localStorage 切到 W2 并刷新后，更新源只剩 W2 的 `A.xml`（`src-b83c69d54cf05a18` / `/synthetic/W2-A.xml`），W1 同名源不可见；证明前端按 W 重新取数、没有复用旧列表。
+| F | 面板 | F | 面板 |
+|---|---|---|---|
+| F01/F02 | 导入/链接导入入口 | F15/F16 | 旧更新源/定时入口（已收口到更新管理） |
+| F03/F04 | 文件列表/结构树 | F17/F18 | 人员/管理员 |
+| F05 | 文件内搜索 | F19 | 变量绑定 |
+| F06/F07 | 收藏/速览 | F20 | 外部工具 |
+| F08 | 修改建议 remarks | F21 | DL 计算 |
+| F09 | 审阅 | F22 | 多机型 |
+| F10 | 全局搜索 | F23/F24 | 标签页/身份 |
+| F11/F12 | 历史/对比 | F25 | 删除文件 |
+| F13/F14 | 修改记录/下载 | F26–F28 | 迁移/解析缓存/启动端口（**服务层**，浏览器只验证不崩） |
 
-## 4. 窄屏 375/768
+> 口径：`reachable` 只证明「路由可达、视图渲染、无错误块、关键词命中」，**不等于**每项交互都已回归；
+> 交互级证据目前覆盖更新管理（上表）与文件页（F03/F04 的树与列表渲染）。
 
-用 Chrome CDP 将布局视口设为 375×812 与 768×812，打开 W2 的更新源：
+## 4. 与早期手工记录的差异
 
-| 宽度 | scrollWidth | clientWidth | 页面级横向溢出 | 来源行 |
-|---:|---:|---:|---|---:|
-| 375 | 375 | 375 | 否 | 1 |
-| 768 | 768 | 768 | 否 | 1 |
+早期（同日早些时候）是**一次性 CDP 会话**留下的手工截图：1280 五 tab、成员只读、375/768、编辑抽屉初始焦点与 409 草稿保留
+（`updates-sources-1280-admin.png`、`updates-sources-375-member.png`、`updates-sources-409-draft-retained.png` 等）。
+那些结论仍然有效，但不可复跑；本轮把它们改写成脚本化场景，并补上：焦点恢复、Esc 行为、运维 token 三段式、四档视口、
+F01–F28 逐项可达矩阵。
 
-截图：`updates-sources-375-member.png`、`updates-sources-768-member.png`。
+## 5. 仍未覆盖（因此 M16-40 的边界要写清）
 
-## 5. 复现命令（摘要）
-
-```bash
-# 临时数据根 + admin/member 映射
-./.venv39/bin/python - <<'PY'
-from app.core import storage
-storage.configure_data_dir('/tmp/mcc-e2e-40')
-storage.upsert_ip_mapping('127.0.0.1', 'E2E管理员')
-storage.upsert_admin_user('E2E管理员')
-PY
-./.venv39/bin/python run.py --data-dir /tmp/mcc-e2e-40 --host 127.0.0.1 --port 8975 --no-reload
-# Chrome headless CDP：打开 /#/p/default/updates/{sources,plan,connections,runs,candidates}
-# 375/768 通过 Emulation.setDeviceMetricsOverride 后读取 scrollWidth/clientWidth 并截图
-```
-
-## 6. 键盘、409 与旧 V3 路由补充（同一 Chrome/CDP 会话）
-
-- 打开更新源编辑抽屉后，初始焦点落在名称输入框（`document.activeElement` 为 input，值 `A.xml`）。
-- 在抽屉内把名称改为 `E2E-rename` 后，用另一个客户端把该来源 revision 从 1 推到 2；点击保存返回 409，错误文案为“来源已在其他客户端更新；当前草稿已保留，请刷新后重试”，输入框仍保留 `E2E-rename`，抽屉未关闭。截图：`docs/evidence/m16-40/updates-sources-409-draft-retained.png`。
-- 合成 Escape 键关闭抽屉成功；由于抽屉是程序化 click 打开、初始焦点不在编辑按钮，关闭后焦点回退的浏览器级证据不足，留作未完成项。
-- 旧 V3 路由逐个打开，标题均正确可达：速览、全局搜索、配置管理、设置、外部工具、DL 计算、文件 `A.xml`、审阅修改。未逐项执行收藏/remarks/参数编辑等交互。
-
-## 7. 未完成项（因此不标 Done）
-
-1. 原 V3 F01–F28 的完整回归（文件/收藏/搜索/remarks/DL/参数界面）只抽样了路由，没有逐项截图与交互。
-2. 未保存草稿、409 冲突、键盘 Tab 焦点、modal 关闭/恢复焦点尚未在本 E2E 中记录（前端单元页有部分覆盖）。
-3. 运维凭据的真实 `X-Operator-Token` 交互、密码错误锁存 UI、跨站/伪造 Host 的浏览器级验证未执行。
-4. 未做 Windows/Linux 实机与真实 SDA 内网；这些仍归 M16-41/42 的 `BLOCKED-EXTERNAL`。
+1. 真实 SDA 数据下的候选生成与决议 E2E：依赖 M16-02/41 的 `BLOCKED-EXTERNAL`，当前候选页只验证空态与筛选控件。
+2. 文件页的深度交互（收藏、remarks 提交、参数编辑、历史对比）只到「渲染 + 关键词」级别，未逐项点击断言。
+3. Windows/Linux 实机浏览器、真实窄屏设备、真实内网 SSO：归 M16-42 的 `BLOCKED-EXTERNAL`。
+4. 跨工作区同名来源的浏览器级切换断言沿用早期手工证据（`W1/W2` 两张截图），未纳入当前脚本场景。
