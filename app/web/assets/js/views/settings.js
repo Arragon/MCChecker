@@ -26,7 +26,7 @@
   }
 
   MC.views.settings = function (app, route) {
-    var S = { section: route.arg || "sources" };
+    var S = { section: route.arg || "people" };
     var nav = h("nav.settings-nav", { "aria-label": "设置分类" });
     var main = h("div.settings-main");
     var el = h("div", h("div.view-body.is-flush", h("div.settings-layout", nav, main)));
@@ -35,7 +35,7 @@
     function renderNav() {
       util.clear(nav);
       nav.append(h("div.section-title", { style: "padding:0 8px" }, "设置"));
-      SECTIONS.forEach(function (s) {
+      SECTIONS.filter(function (s) { return s.id !== "sources" && s.id !== "schedule"; }).forEach(function (s) {
         var b = h("button.nav-item", { type: "button", "aria-current": S.section === s.id ? "page" : null }, icon(s.icon), s.label);
         b.addEventListener("click", function () { app.go({ kind: "settings", arg: s.id }); });
         nav.append(b);

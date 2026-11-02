@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 108;  // + M13-PERF 50k 分页/目录模式
+  var EXPECTED_CASES = 109;  // + M16-31 更新管理壳
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4015,6 +4015,22 @@
         restore();
         throw err;
       });
+  });
+
+
+  test("M16-31：更新管理壳、五 tab 与旧设置入口收口", function () {
+    var app = settingsApp(true);
+    var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
+    eq(inst.title, "更新管理");
+    eq(inst.el.querySelectorAll("[data-sync-tab]").length, 5);
+    ok(inst.el.textContent.indexOf("更新源") >= 0, "默认展示更新源");
+    var runs = inst.el.querySelector('[data-sync-tab="runs"]');
+    ok(runs, "运行记录 tab 存在");
+    runs.click();
+    ok(inst.el.textContent.indexOf("运行记录") >= 0, "切换后展示运行记录");
+    ok(app.paints.go >= 1, "切换 tab 走 app.go，不整页刷新");
+    inst.destroy();
+    inst.el.remove();
   });
 
 
