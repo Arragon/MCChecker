@@ -163,6 +163,8 @@ WRITE_ROUTE_ACTIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/connections/{cid}/credentials/revoke",
     ): "integration_credentials_manage",
+    # M16-33：手动/批量同步任务走同一个 tasks_run 权限档（只读身份不能触发）。
+    ("POST", "/api/v3/workspaces/{wid}/sync/runs"): "tasks_run",
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",
