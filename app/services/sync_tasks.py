@@ -47,8 +47,10 @@ from app.core.sync_models import (
 
 from . import (
     documents,
+    sync_bindings,
     sync_candidates,
     sync_commit,
+    sync_credentials,
     sync_http_adapter,
     sync_run_store,
     tasks,
@@ -377,6 +379,7 @@ def _execute(
 ) -> None:
     items: List[Dict[str, Any]] = []
     total = len(sources)
+    guards = _freeze_guards(workspace_id, profile_id, sources)
     try:
         if not _mark_running(workspace_id, run_id):
             # run 已被取消/收口：任务侧也要留下取消项，不能以空结果收成 succeeded。
@@ -403,7 +406,13 @@ def _execute(
                 )
             else:
                 item = _run_source(
-                    workspace_id, profile_id, run_id, source, cancel, sda_reader
+                    workspace_id,
+                    profile_id,
+                    run_id,
+                    source,
+                    cancel,
+                    sda_reader,
+                    guards.get(source.get("source_id")),
                 )
             items.append(item)
             task.result["items"].append(_task_item(source, item))
@@ -491,6 +500,58 @@ def _finish_run(
         logger.warning("同步 run 结束事件写入失败：%s", run_id, exc_info=True)
 
 
+def _freeze_guards(
+    workspace_id: str, profile_id: str, sources: List[Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    """run 启动时冻结每个来源的凭据 epoch 与目标绑定；提交前必须仍一致。"""
+    out: Dict[str, Dict[str, Any]] = {}
+    for source in sources:
+        guard: Dict[str, Any] = {
+            "connection_id": source.get("connection_id"),
+            "epoch": None,
+            "binding": None,
+        }
+        cid = source.get("connection_id")
+        if cid and str(source.get("kind") or "").startswith("sda_"):
+            try:
+                guard["epoch"] = sync_credentials.get_credential_state(
+                    workspace_id, cid
+                )["auth_epoch"]
+            except AppError:
+                guard["epoch"] = None
+        target = source.get("target") or {}
+        if target.get("kind") in ("file_archive", "default_candidate") and target.get("file_id"):
+            try:
+                guard["binding"] = sync_bindings.resolve_binding(
+                    workspace_id, profile_id, target
+                )
+            except AppError:
+                guard["binding"] = None
+        out[str(source.get("source_id"))] = guard
+    return out
+
+
+def _guard_error(
+    workspace_id: str, profile_id: str, guard: Optional[Dict[str, Any]]
+) -> Optional[AppError]:
+    if not guard:
+        return None
+    cid = guard.get("connection_id")
+    epoch = guard.get("epoch")
+    if cid and epoch is not None:
+        try:
+            sync_credentials.assert_epoch(workspace_id, cid, epoch)
+        except AppError as exc:
+            return exc
+    binding = guard.get("binding")
+    if binding:
+        try:
+            sync_bindings.assert_binding_current(workspace_id, profile_id, binding)
+        except AppError as exc:
+            return exc
+    return None
+
+
 def _run_source(
     workspace_id: str,
     profile_id: str,
@@ -498,11 +559,12 @@ def _run_source(
     source: Dict[str, Any],
     cancel: threading.Event,
     sda_reader: Optional[Any] = None,
+    guard: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     kind = str(source.get("kind") or "")
     if kind.startswith("sda_"):
         return _run_sda_source(
-            workspace_id, profile_id, run_id, source, cancel, sda_reader
+            workspace_id, profile_id, run_id, source, cancel, sda_reader, guard
         )
     if kind not in ("http_file", "http_record"):
         return _item(
@@ -547,6 +609,15 @@ def _run_source(
                 reason_code=fetch.reason_code or "unknown",
                 message=fetch.message,
                 url=fetch.url,
+            )
+        guard_error = _guard_error(workspace_id, profile_id, guard)
+        if guard_error is not None:
+            return _item(
+                run_id,
+                source,
+                "blocked",
+                reason_code="source_changed",
+                message="来源凭据或目标绑定在取数期间已变化，未提交",
             )
         base_sha = None
         if model.kind == "http_file":
@@ -605,6 +676,7 @@ def _run_sda_source(
     source: Dict[str, Any],
     cancel: threading.Event,
     sda_reader: Optional[Any],
+    guard: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """SDA 路由：collector 只回安全 envelope，提交/候选仍由主应用决定。"""
     kind = str(source.get("kind") or "")
@@ -700,6 +772,15 @@ def _run_sda_source(
             message=result.get("message") or "SDA 文件已读取",
             items=tuple(fetched),
         )
+        guard_error = _guard_error(workspace_id, profile_id, guard)
+        if guard_error is not None:
+            return _item(
+                run_id,
+                source,
+                "blocked",
+                reason_code="source_changed",
+                message="来源凭据或目标绑定在取数期间已变化，未提交",
+            )
         model = SyncSource.from_dict(source)
         raw = _current_file(workspace_id, profile_id, model.name)
         committed = sync_commit.commit_fetch_result(
