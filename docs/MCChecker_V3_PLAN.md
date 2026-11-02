@@ -24,7 +24,7 @@ Linear 项目 `P-INH-14` 已在 2026-10-28 增加 V3.0 的 M9–M15 共 45 张�
 
 ### 1.1 Linear
 
-- 当前板面：**149 张 / 91 Done / 9 In Progress / 47 Backlog / 2 Canceled**。
+- 当前板面（2026-10-28 快照）：**149 张 / 91 Done / 9 In Progress / 47 Backlog / 2 Canceled**。
 - V3：**M9–M15 共 45 张全部 Backlog**（M9 7、M10 6、M11 6、M12 7、M13 7、M14 6、M15 6）。
 - 设计输入：
   - 前端 HTML：`MCChecker_V3.0_Frontend.html`，SHA-256 `f50888b9147aeff6dbedb5976238e63f75e44d4073799864522de857f989927c`。
@@ -33,7 +33,7 @@ Linear 项目 `P-INH-14` 已在 2026-10-28 增加 V3.0 的 M9–M15 共 45 张�
   - 附件说明：INH-2117 的附件 URL 带签名，会过期；M9-00 开工当天通过 Linear 附件接口重新获取，不把签名 URL 写进仓库。**HTML 附件的直连签名 URL 实测可能返回 401，必须用 Linear `get_attachment(format=content)` 取回并校验 SHA；MD 直连可用，但仍以内容 SHA 为准。**
 - 关键依赖缺口（需要在计划层兜底）：
   - `INH-2123`（M9-06 首轮门禁）的 `blocks` 为空；本计划规定 **M10-01 开工前必须贴 2123 绿证据**，否则 M10 抢跑。是否同步补 Linear relation 见 ADR-006。
-  - `INH-2161` 被旧卡 `INH-1910`（M4-08，仍 In Progress）阻塞；M4-08 未关闭或未取得书面豁免前，2161 不得 Done。
+  - `INH-2161` 被旧卡 `INH-1910`（M4-08，仍 In Progress）阻塞；M4-08 未关闭或未取得书面豁免前，2161 不得 Done。**2026-11-02 负责人 Lamires Asu 已书面豁免（人工试用通过），2161 已关闭；1910 保持原状态。**
   - `INH-1932`（100 文件档搜索 P50 约 2.4–2.7 s，预算 500 ms）只是 `relatedTo`，不会自动阻断 2160；2160 必须显式记录该风险，不得静默当已解决。
   - 2123 卡面写的 `scripts/check_py39.py` 与仓库实有的 `scripts/check_py39.sh` 不一致；开工时按 `.sh` 执行，并在卡面/PR 里注明是卡面笔误。
 
@@ -275,7 +275,7 @@ Linear relation 更新（2123→2124）需要在获批后单独写；若暂不�
 
 **风险**
 - 2123 未被 Linear 强制，M10 可能抢跑；先按计划层门禁执行。
-- 1910（M4-08）长期 In Progress 会卡住 2161；需要尽早决定补证据或书面豁免。
+- 1910（M4-08）长期 In Progress 会卡住 2161；需要尽早决定补证据或书面豁免。**2026-11-02 已按负责人书面豁免处理。**
 - M12 七卡串行是长关键路径；2140 前不能开 2144/2145/2153/2154，需提前准备 fixtures。
 - 全局 active profile、缓存、任务、临时 token 泄漏到其它 W；所有入口必须显式 W/P。
 - `tests/conftest.py::DATA_SUBDIRS` 漏 `workspaces` 会让 H3/备份/夹具假绿。
