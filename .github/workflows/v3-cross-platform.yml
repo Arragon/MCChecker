@@ -34,6 +34,8 @@ jobs:
         env:
           PYTHONUTF8: "1"
       - name: Secret scan (git side)
-        run: python scripts/scan_secrets.py --tree --all-history
+        run: |
+          python scripts/scan_secrets.py --tree
+          python scripts/scan_secrets.py --all-history
         env:
           PYTHONUTF8: "1"
