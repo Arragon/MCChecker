@@ -58,7 +58,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core import device_models, storage
 from ..core.errors import BUSY, INVALID_INPUT, MAINTENANCE, AppError
-from . import revision, tasks, temp_store, workspace_catalog
+from . import revision, sync_scheduler, tasks, temp_store, workspace_catalog
 from .context import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -343,6 +343,10 @@ class Scheduler(threading.Thread):
         self._sleep_fn = sleep_fn or self._wakeup.wait
         self._lock = threading.Lock()
         self._plans: Dict[Tuple[str, str], _Plan] = {}
+        #: M16-09：同步来源的进程内锚点与待投递清单。只是内存状态，不落盘。
+        #: 键统一用 `(workspace_id, source_id)`，避免同名来源跨工作区串锚。
+        self._sync_anchors: Dict[Tuple[str, str], datetime] = {}
+        self._sync_pending: List[sync_scheduler.DueSource] = []
         now = self._now_fn()
         # 清理的账从构造那一刻起算：启动那一轮**不**删任何东西。
         self._next_temp_sweep = now + timedelta(seconds=TEMP_SWEEP_SECONDS)
@@ -374,6 +378,8 @@ class Scheduler(threading.Thread):
             return  # 注册表读坏了：保留上一轮计划，别把已有排期清空
         with self._lock:
             self._plans = plans
+            # policy/anchor 可能随 reload 改变；进程内补跑锚点重新种，避免旧锚覆盖新计划。
+            self._sync_anchors.clear()
         self._wakeup.set()
 
     def next_run_at(
@@ -394,6 +400,128 @@ class Scheduler(threading.Thread):
         if plan is None or not plan.enabled:
             return None
         return plan.next_run
+
+    # ------------------------------------------------------------------
+    # M16-09：同步来源到期扫描（只读；不投递、不写盘）
+    # ------------------------------------------------------------------
+
+    @property
+    def pending_sync_sources(self) -> List[sync_scheduler.DueSource]:
+        """最近一次到期扫描形成的待投递清单（进程内，不落盘）。"""
+        with self._lock:
+            return list(self._sync_pending)
+
+    def due_sync_sources(
+        self,
+        now: Optional[datetime] = None,
+        last_attempts: Optional[Dict[Any, Any]] = None,
+        anchors: Optional[Dict[Any, Any]] = None,
+    ) -> List[sync_scheduler.DueSource]:
+        """按 workspace/source policy 形成同步待投递清单；只读，不写权威数据。
+
+        这是 M16-09 对既有到期扫描的薄扩展：**不启动第二个 timer、不网络、不授权、
+        不下载、不写 policy/source/run**。真正的投递必须由调用方拿到清单后经
+        `TaskRunner.submit` 进入工作线程；BUSY 时按 `sync_scheduler.BUSY_RETRY_SECONDS`
+        重排，不得绕过 runner 直接执行。
+
+        `last_attempts` / `anchors` 是只读输入（键可为 `source_id` 或
+        `(workspace_id, source_id)`），默认空；测试与后续 M16-12 可注入持久状态。
+        """
+        if self._stopping.is_set():
+            return []
+        moment_local = now if now is not None else self._now_fn()
+        attempts = last_attempts or {}
+        try:
+            moment = sync_scheduler.local_to_utc(moment_local)
+            policies, sources = sync_scheduler.load_workspace_inputs()
+        except Exception:
+            logger.exception("同步到期扫描读取失败（本轮跳过，不写任何数据）")
+            return []
+
+        # 没有 policy/anchor/自动 attempt 的来源：在内存里种下首次锚点，避免重启风暴。
+        self._seed_sync_anchors(moment, policies, sources, attempts)
+        with self._lock:
+            effective_anchors: Dict[Any, Any] = dict(self._sync_anchors)
+        if anchors:
+            effective_anchors.update(anchors)
+
+        try:
+            due = sync_scheduler.compute_due_sources(
+                moment, policies, sources, attempts, effective_anchors
+            )
+        except Exception:
+            logger.exception("同步到期计算失败（本轮跳过，不写任何数据）")
+            return []
+
+        # 只有真的有时，才去读 run manifest；有 queued/running SyncRun 的 workspace
+        # 不叠加新投递，等 runner 收口后再算。
+        if due:
+            try:
+                busy = sync_scheduler.active_workspace_ids(
+                    {item.workspace_id for item in due}
+                )
+            except Exception:
+                logger.exception("读取在途同步 run 失败（本轮按无在途处理）")
+                busy = set()
+            due = [item for item in due if item.workspace_id not in busy]
+        with self._lock:
+            self._sync_pending = list(due)
+        if due:
+            logger.info(
+                "同步到期扫描：%d 个来源待投递（%s）",
+                len(due),
+                ", ".join("%s:%s" % (item.source_id, item.reason) for item in due),
+            )
+        return list(due)
+
+    def mark_sync_delivered(self, item: sync_scheduler.DueSource) -> None:
+        """确认一条清单已交给 runner；只在内存里推进锚点，不写权威文件。
+
+        调用方必须在 `TaskRunner.submit` **成功之后**才调用它。BUSY/MAINTENANCE 不调用，
+        下一次扫描会保留这条 due，按 60 秒或下一轮重排。
+        """
+        anchor = sync_scheduler.parse_timestamp(item.next_anchor_at)
+        if anchor is None:
+            return
+        key = (item.workspace_id, item.source_id)
+        with self._lock:
+            self._sync_anchors[key] = anchor
+            self._sync_pending = [
+                row
+                for row in self._sync_pending
+                if (row.workspace_id, row.source_id) != key
+            ]
+
+    def _seed_sync_anchors(
+        self,
+        moment: datetime,
+        policies: Dict[str, Any],
+        sources: Dict[str, List[Dict[str, Any]]],
+        last_attempts: Dict[Any, Any],
+    ) -> None:
+        with self._lock:
+            for workspace_id, items in sources.items():
+                policy = policies.get(workspace_id)
+                if not isinstance(policy, dict) or policy.get("enabled") is not True:
+                    continue
+                if sync_scheduler.parse_timestamp(policy.get("anchor")) is not None:
+                    continue
+                for source in items:
+                    source_id = sync_scheduler.source_id_of(source)
+                    if not source_id:
+                        continue
+                    if not sync_scheduler.is_auto_source(policy, source):
+                        continue
+                    if (
+                        sync_scheduler.last_attempt_time(
+                            last_attempts, workspace_id, source_id
+                        )
+                        is not None
+                    ):
+                        continue
+                    key = (workspace_id, source_id)
+                    if key not in self._sync_anchors:
+                        self._sync_anchors[key] = moment
 
     def stop(self) -> None:
         """置位 + 唤醒，**不等 join**（R11），幂等（信号连按两次不会重复动作）。
@@ -459,6 +587,11 @@ class Scheduler(threading.Thread):
                 continue
             if self._fire(workspace_id, pid, plan, moment):
                 fired.append(pid)
+        # M16-09：同一条到期扫描里顺带形成同步待投递清单。只读；投递仍由调用方走 runner。
+        try:
+            self.due_sync_sources(moment)
+        except Exception:
+            logger.exception("同步到期扫描失败（本轮跳过，旧调度不受影响）")
         self._sweep_if_due(moment)
         return fired
 
