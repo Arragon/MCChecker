@@ -53,17 +53,18 @@ def list_sources(
     authz.authorize(ctx, "read")
     wid = params["wid"]
     _scope(wid)
-    return Response(
-        payload=sync_sources.list_sources(
-            wid,
+    listing = sync_sources.list_sources(
+        wid,
             profile_id=query_param(query, "profile_id") or None,
             kind=query_param(query, "kind") or None,
             status=query_param(query, "status") or None,
             query=query_param(query, "q") or "",
             limit=max(1, min(_int(query_param(query, "limit"), 50), 200)),
-            cursor=query_param(query, "cursor") or "0",
-        )
+        cursor=query_param(query, "cursor") or "0",
     )
+    if not authz.allowed(ctx.actor, "settings_write"):
+        listing["items"] = [sync_sources.project_for_read(row) for row in listing["items"]]
+    return Response(payload=listing)
 
 
 def create_source(

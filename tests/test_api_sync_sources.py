@@ -1,5 +1,7 @@
 """M16-05 workspace sync source API tests."""
 
+import json
+
 from authz_fixtures import as_role, make_server, seed_roles
 
 from app.services import sync_connections
@@ -180,3 +182,44 @@ def test_single_source_run_is_admin_only_and_returns_202():
         assert status == 202, accepted
         assert accepted["run"]["trigger"] == "manual"
         assert accepted["task"]["type"] == "sync_run"
+
+
+def test_source_url_userinfo_rejected_and_read_projection_masks_query():
+    seed_roles("sync-sources-url")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        visitor = as_role(server, "visitor")
+        wid = make_workspace(admin, "W-url")
+        cid = make_connection(wid)
+
+        payload = source_payload(cid, "Token.xml")
+        payload["resource_ref"] = "https://example.invalid/Token.xml?token=super-secret"
+        payload["record_source"] = "https://user:pass@example.invalid/records"
+        status, _headers, bad = admin.json(
+            "POST", "/api/v3/workspaces/%s/sync/sources" % wid, payload
+        )
+        assert status == 400, bad
+        assert bad["error"]["detail"]["field"] == "record_source"
+
+        payload["record_source"] = "https://example.invalid/records?token=record-secret"
+        status, _headers, created = admin.json(
+            "POST", "/api/v3/workspaces/%s/sync/sources" % wid, payload
+        )
+        assert status == 201, created
+
+        status, _headers, admin_list = admin.json(
+            "GET", "/api/v3/workspaces/%s/sync/sources" % wid
+        )
+        assert status == 200
+        assert "super-secret" in admin_list["items"][0]["resource_ref"]
+        assert "record-secret" in admin_list["items"][0]["record_source"]
+
+        status, _headers, visitor_list = visitor.json(
+            "GET", "/api/v3/workspaces/%s/sync/sources" % wid
+        )
+        assert status == 200
+        item = visitor_list["items"][0]
+        assert item["resource_ref"] == "https://example.invalid/Token.xml"
+        assert item["record_source"] == "https://example.invalid/records"
+        dumped = json.dumps(visitor_list)
+        assert "super-secret" not in dumped and "record-secret" not in dumped

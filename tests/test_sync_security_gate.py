@@ -743,11 +743,20 @@ def test_ssrf_metadata_private_redirect_and_collector_guard(http_server, monkeyp
         with make_server() as server:
             admin = as_role(server, "admin")
             w1 = _make_workspace(admin, "W-ssrf")
+            status, _headers, userinfo = admin.json(
+                "POST",
+                "/api/v3/workspaces/%s/sync/sources" % w1,
+                _source_payload(
+                    "meta-userinfo.xml",
+                    "http://%s:%s@169.254.169.254/latest/meta-data/"
+                    % (USERNAME, PASSWORD),
+                ),
+            )
+            assert status == 400, userinfo
+            assert userinfo["error"]["detail"]["field"] == "resource_ref"
+
             direct = _make_source(
-                admin,
-                w1,
-                "meta.xml",
-                "http://%s:%s@169.254.169.254/latest/meta-data/" % (USERNAME, PASSWORD),
+                admin, w1, "meta.xml", "http://169.254.169.254/latest/meta-data/"
             )
             redirect_meta = _make_source(
                 admin, w1, "redir-meta.xml", _url(httpd, "/redirect-metadata")
