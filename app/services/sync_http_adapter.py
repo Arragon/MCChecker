@@ -22,7 +22,7 @@
 
 结果状态用 SyncItem 口径：`succeeded` / `unchanged` / `skipped` / `failed`；
 `reason_code` 取 `core.sync_models.REASON_CODES` 里的值。错误消息来自 `downloader`，
-已脱敏（无 userinfo、query、响应正文）；`url` 只返回 `scheme://host/path`。
+已脱敏（无 userinfo、query、响应正文）；`url` 只返回 scheme/host/path 三段。
 
 `unchanged` 的比较基准由调用方传入：`fetch_source(..., current=...)` 是
 「目标文件名 → 当前字节」，`fetch_record(..., latest=...)` 是「最新一条记录字节」。
@@ -84,7 +84,7 @@ class HttpFetchResult:
     profile_id: str
     message: str
     reason_code: Optional[str] = None
-    #: 脱敏后的 `scheme://host/path`，绝不带 userinfo/query/fragment。
+    #: 脱敏后的 scheme/host/path 三段，绝不带 userinfo/query/fragment。
     url: Optional[str] = None
     remote_basename: Optional[str] = None
     keyword: str = ""
@@ -349,7 +349,7 @@ def _record_extension(url: str) -> str:
 
 
 def _mask(url: str) -> Optional[str]:
-    """URL → `scheme://host/path`：抹掉 userinfo、query、fragment（§11.5）。"""
+    """URL → scheme/host/path 三段：抹掉 userinfo、query、fragment（§11.5）。"""
     raw = str(url or "").strip()
     if not raw:
         return None
