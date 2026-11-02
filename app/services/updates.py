@@ -396,7 +396,12 @@ def delete_source(pid: str, name: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _commit_config(pid: str, name: str, content: bytes) -> Dict[str, Any]:
+def _commit_config(
+    pid: str,
+    name: str,
+    content: bytes,
+    base_sha: Optional[str] = None,
+) -> Dict[str, Any]:
     """校验并提交一份配置。不写状态文件、不递增修订号，由调用方汇总。
 
     M6-06 的策略守卫在**最前面**：受管模式下未登记的文件不再直接落盘，而是回
@@ -419,6 +424,8 @@ def _commit_config(pid: str, name: str, content: bytes) -> Dict[str, Any]:
         return _result(name, "rejected", reason)
 
     current = _current_bytes(name)
+    if base_sha is not None and _sha(current) != base_sha:
+        return _result(name, "rejected", RACE_REASON)
     if current is not None:
         old_fp = _root_fingerprint(current, name)
         new_fp = _fingerprint(document, content)
@@ -426,6 +433,8 @@ def _commit_config(pid: str, name: str, content: bytes) -> Dict[str, Any]:
             return _result(name, "rejected", ROOT_CHANGED_REASON % (old_fp[1], new_fp[1]))
 
     with storage.profile_write(pid):
+        if base_sha is not None and _sha(_current_bytes(name)) != base_sha:
+            return _result(name, "rejected", RACE_REASON)
         if _sha(current) != _sha(_current_bytes(name)):
             return _result(name, "rejected", RACE_REASON)
         saved = storage.save_config_file_detailed(name, content)
