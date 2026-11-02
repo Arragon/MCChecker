@@ -78,6 +78,8 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): None,
     ("PUT", "/api/v3/workspaces/{wid}/sync/policy"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): None,
+    ("POST", "/api/v3/workspaces/{wid}/sync/previews"): None,
+    ("POST", "/api/v3/workspaces/{wid}/sync/previews/{preview_id}/validate"): None,
     # M12-01：固定配置/版本图是独立 V3 域，不递增旧 5 段。
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases"): None,

@@ -140,6 +140,8 @@ WRITE_ROUTE_ACTIONS = {
     ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): "settings_write",
     ("PUT", "/api/v3/workspaces/{wid}/sync/policy"): "settings_write",
     ("POST", "/api/v3/workspaces/{wid}/sync/source-policy-batches"): "settings_write",
+    ("POST", "/api/v3/workspaces/{wid}/sync/previews"): "settings_write",
+    ("POST", "/api/v3/workspaces/{wid}/sync/previews/{preview_id}/validate"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",
@@ -296,7 +298,7 @@ WRITE_ROUTE_ACTIONS = {
 ROUTE_VALUES = {
     "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
     "item": "pp_energy", "group": "g1", "hid": "ch_000001",
-    "wid": "w-00000001", "sid": "src-000001",
+    "wid": "w-00000001", "sid": "src-000001", "preview_id": "prev-00000001",
     # 配置域对象 ID（M6-01/02）：形状必须是 `<prefix>_<6 位>`，否则会先撞上 ID 校验
     # 而不是权限矩阵——这里要验的是"权限先于存在性"。
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
