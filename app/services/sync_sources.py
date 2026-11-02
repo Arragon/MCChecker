@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from app.core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
 from app.core.sync_models import (
@@ -48,6 +49,45 @@ CREATE_FIELDS = frozenset(
     }
 )
 PATCH_FIELDS = frozenset(CREATE_FIELDS - {"profile_id"})
+
+
+def _check_url(value: Any, field: str) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    parts = urlsplit(text)
+    if parts.scheme.lower() not in ("http", "https"):
+        return
+    if parts.username or parts.password:
+        raise AppError(INVALID_INPUT, "URL 不允许内嵌账号密码", field=field)
+
+
+def _check_urls(payload: Dict[str, Any]) -> None:
+    _check_url(payload.get("resource_ref"), "resource_ref")
+    _check_url(payload.get("record_source"), "record_source")
+
+
+def safe_url(value: Any) -> Any:
+    """只读投影：去掉 userinfo/query/fragment，保留 scheme/host/path。"""
+    text = str(value or "").strip()
+    if not text:
+        return value
+    parts = urlsplit(text)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return value
+    host = parts.hostname
+    if ":" in host:
+        host = "[" + host + "]"
+    if parts.port and parts.port != (443 if parts.scheme.lower() == "https" else 80):
+        host = host + ":" + str(parts.port)
+    return parts.scheme.lower() + "://" + host + (parts.path or "/")
+
+
+def project_for_read(source: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(source)
+    payload["resource_ref"] = safe_url(payload.get("resource_ref"))
+    payload["record_source"] = safe_url(payload.get("record_source"))
+    return payload
 
 
 def _now() -> str:
@@ -201,6 +241,7 @@ def create_source(workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     name = str(payload.get("name") or "").strip()
     if not name:
         raise AppError(INVALID_INPUT, "来源名称不能为空", field="name")
+    _check_urls(payload)
     kind = payload.get("kind", "http_file")
     target = _target(payload.get("target"))
     connection_id = payload.get("connection_id")
@@ -269,6 +310,7 @@ def update_source(
         current = SyncSource.from_dict(item)
         values = current.to_dict()
         values.update(patch)
+        _check_urls(values)
         values["source_id"] = current.source_id
         values["workspace_id"] = current.workspace_id
         values["profile_id"] = current.profile_id
