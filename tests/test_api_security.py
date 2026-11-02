@@ -134,6 +134,10 @@ WRITE_ROUTE_ACTIONS = {
     ("POST", "/api/v3/workspaces/{wid}/profiles"): "settings_write",
     ("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}"): "settings_write",
     ("DELETE", "/api/v3/workspaces/{wid}/profiles/{pid}"): "settings_write",
+    # M16-05：Sync 来源写接口首版复用 settings_write；M16-30/38 收口独立 sync 能力。
+    ("POST", "/api/v3/workspaces/{wid}/sync/sources"): "settings_write",
+    ("PATCH", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): "settings_write",
+    ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): "settings_write",
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",
@@ -290,7 +294,7 @@ WRITE_ROUTE_ACTIONS = {
 ROUTE_VALUES = {
     "pid": "p1", "name": FILE_A, "token": "tk", "id": "t1", "ip": "10.7.7.7",
     "item": "pp_energy", "group": "g1", "hid": "ch_000001",
-    "wid": "w-00000001",
+    "wid": "w-00000001", "sid": "src-000001",
     # 配置域对象 ID（M6-01/02）：形状必须是 `<prefix>_<6 位>`，否则会先撞上 ID 校验
     # 而不是权限矩阵——这里要验的是"权限先于存在性"。
     "rid": "sr_000001", "fid": "cf_000001", "lid": "lf_000001",
