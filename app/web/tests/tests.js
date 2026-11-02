@@ -2703,7 +2703,7 @@
         })[0];
         ok(approve, "批准按钮必须渲染出来");
         eq(approve.disabled, false, "没有阻碍时按钮可用");
-        ok(host.textContent.indexOf("同一个事务") > 0, "要说清批准即发布");
+        ok(host.textContent.indexOf("批准即发布") > 0 && host.textContent.indexOf("已批准但未发布") > 0, "要说清批准即发布");
         MC.configApi.changeSets = origList;
         MC.configApi.changeSet = origDetail;
         host.remove();

@@ -345,8 +345,8 @@
       });
       var state = canGenerate(app, baseline);
       genBtn.disabled = !state.allowed;
-      genBtn.title = state.reason || "从这条基线生成（同输入同产物：已存在的直接复用）";
-      util.replace(hint, state.reason ? state.reason : "已选 " + (baseline ? baseline.id + "（" + (baseline.revision || "—") + "）" : "—"));
+      genBtn.title = state.reason || "";
+      util.replace(hint, state.reason ? state.reason : "已选 " + (baseline ? baseline.id + "（" + (baseline.revision || "—") + "）" : "—") + "。同内容的产物会直接复用。");
     }
 
     function drawList() {
@@ -357,7 +357,7 @@
             kind: "empty",
             icon: "download",
             title: "还没有交付产物",
-            desc: "先选中一条已批准基线，点「生成目标文件」。生成结果不可变，改值要新建变更单。",
+            desc: "生成结果不可变，改值要新建变更单。",
           })
         );
         return;
@@ -546,7 +546,7 @@
 
       function drawReports(items) {
         if (!items.length) {
-          util.replace(listHost, h("p.small.muted", "还没有核验报告。核验比对新采集的观测与这份产物的基线值，逐参数给结论。"));
+          util.replace(listHost, h("p.small.muted", "还没有核验报告。"));
           return;
         }
         util.replace(

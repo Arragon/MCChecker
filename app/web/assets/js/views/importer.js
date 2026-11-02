@@ -21,7 +21,7 @@
     var chosen = h("div.file-chip-list");
     var nameInput = h("input.input.input-mono", { type: "text", placeholder: "例如 config.xml", autocomplete: "off" });
     var urlInput = h("input.input.input-mono", { type: "url", placeholder: "http://10.20.1.15/cfg/config.xml", autocomplete: "off" });
-    var nameField = MC.field({ label: "文件名", required: true, control: nameInput, help: "决定服务器上的文件名；扩展名用于识别格式。选择多个文件时，各自使用原文件名。" });
+    var nameField = MC.field({ label: "文件名", required: true, control: nameInput, help: "选择多个文件时，各自使用原文件名。" });
     var nameWrap = h("div", nameField);
     var urlField = MC.field({ label: "下载链接", required: true, control: urlInput, help: "仅支持 http / https，服务器端下载，超时 30 秒" });
     var existsNote = h("div.banner.banner-warning.hidden", icon("alert"), h("div.banner-body"));

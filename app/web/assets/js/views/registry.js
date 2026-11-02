@@ -454,7 +454,7 @@
         kind: "locked",
         icon: "lock",
         title: "当前身份无权访问",
-        desc: "配置管理需要具备 read 能力；请联系管理员确认 IP 管理员名单。",
+        desc: "请联系管理员确认权限。",
       });
     }
     if (info.kind === "notfound") {
@@ -462,7 +462,7 @@
         kind: "empty",
         icon: "settings",
         title: "参数登记接口不可用",
-        desc: "服务端没有对应的接口（可能是版本不匹配）。这里不放行 mock 数据。",
+        desc: "服务端没有对应的接口，可能是版本不匹配。",
       });
     }
     if (info.kind === "corrupt") {
@@ -671,7 +671,7 @@
             field("下界", textInput(draft.min, function (v) { draft.min = v; renderDiff(); }, "可选", "下界")),
             field("上界", textInput(draft.max, function (v) { draft.max = v; renderDiff(); }, "可选", "上界"))
           ),
-          field("保存理由（必填）", textInput(draft.reason, function (v) { draft.reason = v; }, "写清为什么改，审计会记录这句话", "保存理由")),
+          field("保存理由（必填）", textInput(draft.reason, function (v) { draft.reason = v; }, "", "保存理由")),
           field("备注", textInput(draft.remarks, function (v) { draft.remarks = v; }, "可选", "备注")),
           diffHost
         );
@@ -780,9 +780,8 @@
         canWrite()
           ? [
               h("button.btn.btn-primary.btn-sm", { type: "button", onclick: openCreate }, icon("plus"), "新建参数"),
-              h("span.small.muted", "写入前需填写保存理由；并发冲突会保留草稿。"),
             ]
-          : h("span.small.muted", "只读：当前身份没有 config_registry_write 能力。")
+          : h("span.small.muted", "只读：当前身份不能修改参数登记。")
       );
     }
 
@@ -809,7 +808,7 @@
         return;
       }
       if (!items.length) {
-        util.replace(body, MC.stateBlock({ kind: "empty", icon: "search", title: "没有匹配的参数", desc: "换个关键词试试，检索覆盖历史名称、XML 名称与 JSON 键。" }));
+        util.replace(body, MC.stateBlock({ kind: "empty", icon: "search", title: "没有匹配的参数" }));
         return;
       }
       var columns = MC.configUi.versionColumns(items);
@@ -1182,7 +1181,7 @@
         h(
           "div",
           { style: "padding:0 16px 16px" },
-          h("p.small.muted", "核对说明只存在本机内存里，不会写入基线；切到别的分段再回来还在。"),
+          h("p.small.muted", "核对说明只留在本机，不会写入基线。"),
           note,
           footer
         )
@@ -1250,9 +1249,6 @@
               kind: "empty",
               icon: "settings",
               title: "该文件还没有登记为逻辑文件",
-              desc:
-                "配置管理按「逻辑文件 → 配置类别 → 参数主档」定位参数。" +
-                "先在配置类别里把这个文件登记成逻辑文件（含 role），这里才会出现三栏对账。",
               actions: [
                 h(
                   "a.btn.btn-sm",

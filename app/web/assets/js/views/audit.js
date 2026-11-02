@@ -71,7 +71,7 @@
     var moreBtn = h("button.btn.btn-sm", { type: "button" }, "加载更多");
 
     if (!MC.configApi) {
-      util.replace(host, MC.stateBlock({ kind: "empty", title: "审计模块未接入", desc: "config-api.js 未加载。" }));
+      util.replace(host, MC.stateBlock({ kind: "empty", title: "审计模块未接入" }));
       return;
     }
 
@@ -211,7 +211,6 @@
           h("input.input", { "data-audit": "reason", placeholder: "理由关键字", "aria-label": "理由" }),
           h("button.btn.btn-sm.btn-primary", { type: "button", onclick: function () { S.cursor = null; load(true); } }, icon("search"), "查询")
         ),
-        h("p.small.muted", { style: "margin:8px 0" }, "审计事件按 seq 倒序；筛选条件变化后游标会失效，需要重新查询。"),
         listHost,
         h("div.row", { style: "gap:8px;margin-top:8px" }, moreHost),
         detailHost

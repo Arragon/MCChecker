@@ -1769,7 +1769,7 @@
             "div.col",
             { style: "gap:12px" },
             MC.field({ label: "来源配置文件", control: fileSel }),
-            MC.field({ label: "变量路径", control: pathInput, help: "可在右侧选择变量，或填写、粘贴路径。" }),
+            MC.field({ label: "变量路径", control: pathInput }),
             mapField
           ),
           h(

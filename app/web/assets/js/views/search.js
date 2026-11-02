@@ -63,7 +63,7 @@
 
     function render() {
       if (!S.items.length) {
-        util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "search", title: "没有找到“" + S.q + "”", desc: "未找到匹配项。请核对拼写或缩短关键词。检索范围限于当前版本；历史版本请在文件的「对比」中查看。" })));
+        util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "search", title: "没有找到“" + S.q + "”", desc: "检索范围限于当前版本。" })));
         return;
       }
       var groups = {};

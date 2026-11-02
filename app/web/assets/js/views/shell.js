@@ -574,7 +574,6 @@
       MC.stateBlock({
         kind: "locked",
         title: defaultTitle({ route: r }) + " 尚未接入",
-        desc: "该页面还没有接入真实后端。",
         actions: [h("button.btn.btn-primary", { type: "button", onclick: function () { self.go({ kind: "overview" }); } }, "返回速览")],
       })
     );

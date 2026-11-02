@@ -822,7 +822,7 @@
             return;
           }
           if (!r.has_changes) {
-            util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "check-circle", title: "两个版本内容完全相同", desc: r.base.label + " 与 " + r.target.label + " 没有任何差异。" })));
+            util.replace(resultHost, h("div.panel", MC.stateBlock({ kind: "empty", icon: "check-circle", title: "两个版本内容完全相同", desc: r.base.label + " → " + r.target.label })));
             return;
           }
           var st = r.structural;
@@ -939,7 +939,7 @@
     function renderConfigSection() {
       if (S.tree) { S.tree.destroy(); S.tree = null; }
       if (!MC.configUi || !MC.configUi.renderFileSection) {
-        util.replace(body, MC.stateBlock({ kind: "empty", icon: "settings", title: "配置管理模块未加载", desc: "请确认 registry.js 已在 index.html 中引入。" }));
+        util.replace(body, MC.stateBlock({ kind: "empty", icon: "settings", title: "配置管理模块未加载" }));
         return;
       }
       MC.configUi.renderFileSection(app, { pid: app.pid, name: S.name, version: S.version }, body);
@@ -997,7 +997,7 @@
                     actions: !res.record_url && app.can("deployer") ? [h("button.btn", { type: "button", onclick: function () { app.go({ kind: "settings", arg: "sources" }); } }, "前往配置")] : null,
                   })
             ),
-            h("p.xsmall.muted", { style: "margin-top:10px" }, "修改记录由更新源提供，与本系统归档的「历史版本」分属不同数据。")
+            h("details", { style: "margin-top:10px" }, h("summary.xsmall.muted", "和历史版本的区别"), h("p.xsmall.muted", { style: "margin:8px 0 0" }, "修改记录来自更新源。历史版本是本系统覆盖文件时留下的归档。"))
           )
         )
       );

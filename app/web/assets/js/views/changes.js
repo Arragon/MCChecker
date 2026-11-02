@@ -495,7 +495,7 @@
         );
       }
       if (!maySubmit && !mayApprove) {
-        actions.append(h("span.small.muted", "当前身份只读：提交需要 config_change_submit，批准需要 config_change_approve。"));
+        actions.append(h("span.small.muted", "当前身份不能提交或批准。"));
       }
 
       return h(
@@ -545,8 +545,7 @@
           h(
             "p.small.muted",
             { style: "margin-top:10px" },
-            "批准即发布：服务端在同一个事务里写新基线修订与这张单的决议，不会出现" +
-              "「已批准但未发布」的中间状态。过期判定（基线又改过、定义集合变了）在批准那一刻重算。"
+            "批准即发布新基线修订，没有「已批准但未发布」的中间状态。基线或定义若已变化，批准时会重新判定。"
           )
         )
       );

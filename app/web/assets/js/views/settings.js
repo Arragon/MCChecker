@@ -266,7 +266,7 @@
           h(
             "div.panel",
             { style: "margin-top:16px" },
-            h("div.panel-header", h("h3", "管理员列表"), h("span.small.muted", "按 IP 授权，姓名只是助记"), addA),
+            h("div.panel-header", h("h3", "管理员列表"), addA),
             admins.length
               ? h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "IP 地址"), h("th", "助记名"), h("th", "更新时间"), h("th.cell-actions", ""))), h("tbody", admins.map(function (a) {
                   var label = a.name || (ppl.filter(function (p) { return p.ip === a.ip; })[0] || {}).name || "—";

@@ -83,7 +83,7 @@
         return;
       }
       if (!list.length) {
-        util.replace(body, MC.stateBlock({ kind: "empty", icon: "search", title: "没有匹配的工具", desc: "请调整名称或地址后重新筛选。" }));
+        util.replace(body, MC.stateBlock({ kind: "empty", icon: "search", title: "没有匹配的工具" }));
         return;
       }
       util.replace(body, h("div.tools-grid", { role: "list" }, list.map(function (t) { return tile(t, ro); })));

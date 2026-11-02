@@ -106,7 +106,6 @@
           kind: "empty",
           icon: "settings",
           title: "配置变更模块未加载",
-          desc: "请确认 changes.js 已在 index.html 中引入。",
         }))));
         if (MC.changesUi) MC.changesUi.render(app, changeHost);
         return;
@@ -117,7 +116,6 @@
           kind: "empty",
           icon: "settings",
           title: "版本升级模块未加载",
-          desc: "请确认 upgrade.js 已在 index.html 中引入。",
         }))));
         if (MC.upgradeUi) MC.upgradeUi.render(app, upgradeHost, { pid: app.pid });
         return;
@@ -128,7 +126,6 @@
           kind: "empty",
           icon: "settings",
           title: "经验与历史模块未加载",
-          desc: "请确认 lifecycle.js 已在 index.html 中引入。",
         }))));
         if (MC.lifecycleUi) MC.lifecycleUi.render(app, lifecycleHost, { pid: app.pid });
         return;
@@ -139,7 +136,6 @@
           kind: "empty",
           icon: "settings",
           title: "审计模块未加载",
-          desc: "请确认 audit.js 已在 index.html 中引入。",
         }))));
         if (MC.auditUi) MC.auditUi.render(app, auditHost, { pid: app.pid });
         return;
@@ -148,7 +144,7 @@
       if (!files.length) {
         util.replace(
           host,
-          h("div.view-body", h("div.container.is-narrow", S.lastResult ? resultBanner(S.lastResult) : null, h("div.panel", MC.stateBlock({ kind: "empty", icon: "check-circle", title: "没有待审的修改建议", desc: "成员在文件详情面板中提交建议后会出现在这里。" }))))
+          h("div.view-body", h("div.container.is-narrow", S.lastResult ? resultBanner(S.lastResult) : null, h("div.panel", MC.stateBlock({ kind: "empty", icon: "check-circle", title: "没有待审的修改建议" }))))
         );
         return;
       }
