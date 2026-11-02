@@ -1,0 +1,40 @@
+{
+  "fixture_version": 1,
+  "synthetic": true,
+  "source": "M16-02 synthetic SDA contract; not real SDA data",
+  "cases": [
+    {
+      "case": "success",
+      "http_status": 200,
+      "headers": {"content-type": "application/xml", "cache-control": "no-store"},
+      "body": {
+        "ok": true,
+        "resource_kind": "file",
+        "file": {
+          "resource_ref": "file-001",
+          "display_path": "/synthetic/file.xml",
+          "content_type": "application/xml",
+          "size": 29,
+          "content_sha256": "dc1fa3bd6fd4aa8ef34e45fe9c2d1c3cb314615bbe26f151b09fc2379c8cee40",
+          "content_base64": "PHJvb3Q+PHZhbHVlPjE8L3ZhbHVlPjwvcm9vdD4="
+        }
+      }
+    },
+    {
+      "case": "auth_failed",
+      "http_status": 500,
+      "headers": {"content-type": "text/plain; charset=utf-8"},
+      "body": null,
+      "notes": "Known SDA auth failure shape: 500 empty body; must not be treated as business data."
+    },
+    {
+      "case": "business_error",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": false,
+        "error": {"code": "FILE_UNREADABLE", "message": "synthetic business error"}
+      }
+    }
+  ]
+}

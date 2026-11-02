@@ -1,0 +1,39 @@
+{
+  "fixture_version": 1,
+  "synthetic": true,
+  "source": "M16-02 synthetic SDA contract; not real SDA data",
+  "cases": [
+    {
+      "case": "login_success",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": true,
+        "protected_capability": "table_read",
+        "sso_redirect_allowed": true,
+        "cookie_rotated": false,
+        "credentials_source": "runtime_secret_ref"
+      }
+    },
+    {
+      "case": "bad_credentials",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": false,
+        "locked": true,
+        "error": {"code": "BAD_CREDENTIALS", "message": "synthetic bad credentials"}
+      }
+    },
+    {
+      "case": "flow_changed",
+      "http_status": 200,
+      "headers": {"content-type": "application/json", "cache-control": "no-store"},
+      "body": {
+        "ok": false,
+        "locked": true,
+        "error": {"code": "LOGIN_FLOW_CHANGED", "message": "synthetic form change"}
+      }
+    }
+  ]
+}
