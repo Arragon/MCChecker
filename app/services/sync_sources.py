@@ -293,6 +293,68 @@ def update_source(
     return get_source(wid, sid)
 
 
+def batch_update_schedule(workspace_id: str, updates: Any) -> List[Dict[str, Any]]:
+    """一次性更新多个 source 的计划；任一项 stale/缺失则 0 项生效。"""
+    wid = validate_workspace_id(workspace_id)
+    if not isinstance(updates, list) or not updates:
+        raise AppError(INVALID_INPUT, "updates 必须是非空数组", field="updates")
+    if len(updates) > 100:
+        raise AppError(INVALID_INPUT, "updates 最多 100 项", field="updates")
+    parsed = []
+    seen = set()
+    for raw in updates:
+        if not isinstance(raw, dict):
+            raise AppError(INVALID_INPUT, "updates 每项必须是对象", field="updates")
+        unknown = set(raw) - {"source_id", "expected_revision", "schedule_mode", "interval_hours"}
+        if unknown:
+            raise AppError(INVALID_INPUT, "不允许的批量字段", field="updates", keys=sorted(unknown))
+        sid = validate_id(raw.get("source_id"), "source_id")
+        if sid in seen:
+            raise AppError(INVALID_INPUT, "同一来源不能重复", field="source_id")
+        seen.add(sid)
+        revision = validate_revision(raw.get("expected_revision"), "expected_revision")
+        mode = validate_enum(raw.get("schedule_mode"), SOURCE_SCHEDULE_MODES, "schedule_mode")
+        interval = validate_interval_hours(raw.get("interval_hours"))
+        if mode == "custom" and interval is None:
+            raise AppError(INVALID_INPUT, "custom 计划必须给 interval_hours", field="interval_hours")
+        if mode != "custom" and interval is not None:
+            raise AppError(INVALID_INPUT, "inherit/manual 不能带 interval_hours", field="interval_hours")
+        parsed.append((sid, revision, mode, interval))
+
+    now = _now()
+
+    def mutate(doc: Dict[str, Any]) -> Dict[str, Any]:
+        replacements = []
+        for sid, revision, mode, interval in parsed:
+            item = _find(doc, sid)
+            if item is None:
+                raise AppError(NOT_FOUND, "来源不存在", field="source_id")
+            if item.get("revision") != revision:
+                raise AppError(REVISION_CONFLICT, "来源 revision 已变化", field="expected_revision")
+            current = SyncSource.from_dict(item)
+            values = current.to_dict()
+            values["schedule_mode"] = mode
+            values["interval_hours"] = interval
+            values["revision"] = current.revision + 1
+            values["updated_at"] = now
+            values["target"] = _target(values.get("target"))
+            updated = SyncSource(**values)
+            merged = dict(item)
+            merged.update(updated.to_dict())
+            merged["deleted"] = False
+            replacements.append((sid, merged))
+        for sid, merged in replacements:
+            for index, item in enumerate(doc["items"]):
+                if isinstance(item, dict) and item.get("source_id") == sid:
+                    doc["items"][index] = merged
+                    break
+        doc["revision"] = doc["revision"] + 1
+        return doc
+
+    sync_store.update_doc(wid, FILE, mutate, DEFAULT_DOC)
+    return [get_source(wid, raw["source_id"]) for raw in updates]
+
+
 def delete_source(workspace_id: str, source_id: str, expected_revision: Any) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     sid = validate_id(source_id, "source_id")
