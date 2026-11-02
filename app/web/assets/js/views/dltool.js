@@ -5,6 +5,8 @@
  * - 输入数值后自动计算（防抖）；改参数同样自动重算，结果始终对应当前参数。
  * - RP 脉宽有两套独立的参数（AOM2 delay / AOM2 width）。顶层字段是 delay 这一套，item.aom_width 是 width 这一套；
  *   另一项 = 固定和（item.aom_sum）− y。
+ * - PP 能量的「PP出口功率」不单独保存：PP@PF能量 = PP出口功率 / 功率转换系数 * 传输系数，
+ *   有效范围里两边实时互化，计算结果也按该行的 PP@PF能量现算。配置里仍只存 y 上下限。
  */
 (function (global) {
   "use strict";
@@ -179,6 +181,29 @@
     var den = Number(set.power_conv_coeff);
     var num = Number(set.trans_coeff);
     return isFinite(den) && den !== 0 && isFinite(num);
+  }
+
+  /**
+   * PP@PF能量 = PP出口功率 / 功率转换系数 * 传输系数。
+   * 两侧系数都必须是非 0 有限数，否则不能互化（传输系数为 0 时功率无定义）。
+   */
+  function ppFactors(set) {
+    var power = Number(set && set.power_conv_coeff);
+    var trans = Number(set && set.trans_coeff);
+    if (!isFinite(power) || power === 0 || !isFinite(trans) || trans === 0) return null;
+    return { power: power, trans: trans };
+  }
+
+  function powerFromEnergy(set, energy) {
+    var f = ppFactors(set);
+    if (!f || energy === null || energy === undefined || energy === "" || !isFinite(Number(energy))) return null;
+    return Number(energy) * f.power / f.trans;
+  }
+
+  function energyFromPower(set, power) {
+    var f = ppFactors(set);
+    if (!f || power === null || power === undefined || power === "" || !isFinite(Number(power))) return null;
+    return Number(power) / f.power * f.trans;
   }
 
   /** 图上的计算点：优先用服务端结果（带状态）；结果还没回来时，正向用本地曲线预览。 */
@@ -637,6 +662,7 @@
 
   MC.dlCurveExtrema = curveExtrema;
   MC.dlPlotFrame = plotFrame;
+  MC.dlPpOutlet = { powerFromEnergy: powerFromEnergy, energyFromPower: energyFromPower };
 
   MC.views.dl = function (app, route) {
     var q = route.query || {};
@@ -862,6 +888,7 @@
       syncCoeffActions();
       updateFormula();
       renderTiles();
+      refreshPpLink(activeSet(S.item));
       renderResults();
       scheduleMultiCheck();
       scheduleSolve(220);
@@ -1146,11 +1173,37 @@
         else bad++;
       });
 
+      var powerLabel = id === "pp_energy" ? withUnit("PP出口功率", "W") : "";
+      function outletOf(row) {
+        if (!powerLabel) return null;
+        /* 能量先被舍入再除回来，会和 f(x) 差一截二进制余数。两者足够接近时显示 f(x)。 */
+        var fromY = powerFromEnergy(activeSet(id), row.y);
+        var base = row.y_base;
+        var hasBase = base !== undefined && base !== null && isFinite(Number(base));
+        if (fromY === null) return hasBase ? Number(base) : null;
+        if (hasBase) {
+          var b = Number(base);
+          var scale = Math.max(1, Math.abs(b), Math.abs(fromY));
+          if (Math.abs(b - fromY) <= 1e-6 * scale) return b;
+        }
+        return fromY;
+      }
+      function powerCell(row) {
+        if (!powerLabel) return null;
+        var p = outletOf(row);
+        return h("td.mono", p === null ? "—" : util.formatNumber(p));
+      }
+      function csvPower(row) {
+        if (!powerLabel) return null;
+        var p = outletOf(row);
+        return p === null ? "" : p;
+      }
+
       var table;
       if (dir === "forward") {
         table = h(
           "table.table.is-compact.dl-table",
-          h("thead", h("tr", h("th.num", "#"), th(axis.x, axis.xUnit), id === "pp_energy" ? th("f(x)") : null, th(axis.y, axis.yUnit), otherLabel ? th(axis.other, axis.otherUnit) : null, h("th", "状态"))),
+          h("thead", h("tr", h("th.num", "#"), th(axis.x, axis.xUnit), id === "pp_energy" ? th("f(x)") : null, th(axis.y, axis.yUnit), powerLabel ? th("PP出口功率", "W") : null, otherLabel ? th(axis.other, axis.otherUnit) : null, h("th", "状态"))),
           h("tbody", rs.map(function (r) {
             return rowHover(
               h(
@@ -1159,6 +1212,7 @@
                 h("td.mono", util.formatNumber(r.x)),
                 id === "pp_energy" ? h("td.mono.muted", r.y_base === undefined ? "—" : util.formatNumber(r.y_base)) : null,
                 h("td.mono.dl-out", r.y === undefined ? "—" : util.formatNumber(r.y)),
+                powerCell(r),
                 otherCell(r.y),
                 h("td", STATUS[r.status] ? badge("badge-warning", STATUS[r.status]) : badge("badge-success", "正常"))
               ),
@@ -1169,7 +1223,7 @@
       } else {
         table = h(
           "table.table.is-compact.dl-table",
-          h("thead", h("tr", h("th.num", "#"), th(axis.y, axis.yUnit), otherLabel ? th(axis.other, axis.otherUnit) : null, th("解 " + axis.x, axis.xUnit), h("th", "状态"))),
+          h("thead", h("tr", h("th.num", "#"), th(axis.y, axis.yUnit), powerLabel ? th("PP出口功率", "W") : null, otherLabel ? th(axis.other, axis.otherUnit) : null, th("解 " + axis.x, axis.xUnit), h("th", "状态"))),
           h("tbody", rs.map(function (r) {
             var cell;
             if (r.status === "multiple") {
@@ -1187,6 +1241,7 @@
                 "tr",
                 h("td.num.muted", String(r.input_index + 1)),
                 h("td.mono", util.formatNumber(r.y)),
+                powerCell(r),
                 otherCell(r.y),
                 cell,
                 h("td", r.status === "multiple" ? badge("badge-warning", r.x_values.length + " 个解") : STATUS[r.status] ? badge("badge-danger", STATUS[r.status]) : badge("badge-success", "唯一解"))
@@ -1200,10 +1255,12 @@
       function csv() {
         if (dir === "forward") {
           var head = [xLabel, yLabel];
+          if (powerLabel) head.push(powerLabel);
           if (otherLabel) head.push(otherLabel);
           head.push("状态");
           return [head.join(",")].concat(rs.map(function (r) {
             var row = [r.x, r.y === undefined ? "" : r.y];
+            if (powerLabel) row.push(csvPower(r));
             if (otherLabel) {
               var sum = finiteNum(item.aom_sum);
               row.push(sum === null || finiteNum(r.y) === null ? "" : sum - r.y);
@@ -1213,11 +1270,13 @@
           })).join("\n");
         }
         var revHead = ["目标" + yLabel];
+        if (powerLabel) revHead.push(powerLabel);
         if (otherLabel) revHead.push(otherLabel);
         revHead.push("解" + xLabel, "状态");
         return [revHead.join(",")].concat(rs.map(function (r) {
           var x = r.status === "multiple" ? (entry.choice[r.input_index] !== undefined ? entry.choice[r.input_index] : r.x_values.join(" | ")) : (r.x_values[0] !== undefined ? r.x_values[0] : "");
           var row = [r.y];
+          if (powerLabel) row.push(csvPower(r));
           if (otherLabel) {
             var sum2 = finiteNum(item.aom_sum);
             row.push(sum2 === null || finiteNum(r.y) === null ? "" : sum2 - r.y);
@@ -1291,7 +1350,10 @@
     /* ---------------- 参数卡片 ---------------- */
     function formulaNodes(id, set, axis) {
       var lines = [h("div", "f(x) = " + polyText(set))];
-      if (id === "pp_energy") lines.push(h("div", axis.y + " = f(x) × 传输系数 ÷ 功率转换系数"));
+      if (id === "pp_energy") {
+        lines.push(h("div", axis.y + " = f(x) × 传输系数 ÷ 功率转换系数"));
+        lines.push(h("div", axis.y + " = PP出口功率 ÷ 功率转换系数 × 传输系数"));
+      }
       return lines;
     }
 
@@ -1374,13 +1436,95 @@
       );
     }
 
-    function rangeGroup(set, axis) {
+    function rangeGroup(set, axis, id) {
       return h(
         "div.dl-group",
         h("div.section-title", "有效范围"),
         rangeRow(set, axis, "x"),
-        rangeRow(set, axis, "y")
+        id === "pp_energy" ? ppLinkedRanges(set, axis) : rangeRow(set, axis, "y")
       );
+    }
+
+    function shownBound(v) {
+      if (v === null || v === undefined || !isFinite(Number(v))) return "";
+      return util.formatNumber(v);
+    }
+
+    function writeLinked(input, text) {
+      if (!input || document.activeElement === input) return;
+      if (input.value !== text) input.value = text;
+      input.classList.remove("is-invalid");
+    }
+
+    /** y 上下限与 PP出口功率上下限按同一侧互化。正在编辑的那一格不改写，避免吃掉小数点。 */
+    function refreshPpLink(set) {
+      var link = S.ui && S.ui.ppLink;
+      if (!link || !set) return;
+      var convertible = !!ppFactors(set);
+      function one(yKey, yInput, pInput) {
+        if (document.activeElement === pInput) {
+          var raw = numOrNull(pInput.value);
+          if (Number.isNaN(raw)) return;
+          if (raw === null) {
+            set[yKey] = null;
+            writeLinked(yInput, "");
+            pInput.classList.remove("is-invalid");
+          } else if (!convertible) {
+            pInput.classList.add("is-invalid");
+          } else {
+            pInput.classList.remove("is-invalid");
+            set[yKey] = energyFromPower(set, raw);
+            writeLinked(yInput, shownBound(set[yKey]));
+          }
+        } else {
+          var y = finiteNum(set[yKey]);
+          writeLinked(pInput, y !== null && convertible ? shownBound(powerFromEnergy(set, y)) : "");
+        }
+        pInput.placeholder = convertible ? "不限" : "无法换算";
+      }
+      one("y_min", link.yMin, link.pMin);
+      one("y_max", link.yMax, link.pMax);
+    }
+
+    function ppLinkedRanges(set, axis) {
+      var convertible = !!ppFactors(set);
+      function initialPower(y) {
+        var text = shownBound(powerFromEnergy(set, y));
+        return text === "" ? null : text;
+      }
+      var yLo = numField(set.y_min, function (v) { set.y_min = v; }, axis.y + " 下限", { unit: axis.yUnit, placeholder: "不限" });
+      var yHi = numField(set.y_max, function (v) { set.y_max = v; }, axis.y + " 上限", { unit: axis.yUnit, placeholder: "不限" });
+      var pLo = numField(initialPower(set.y_min), function (v) { applyPower("y_min", v); }, "PP出口功率 下限", { unit: "W", placeholder: convertible ? "不限" : "无法换算" });
+      var pHi = numField(initialPower(set.y_max), function (v) { applyPower("y_max", v); }, "PP出口功率 上限", { unit: "W", placeholder: convertible ? "不限" : "无法换算" });
+      var yMin = yLo.querySelector("input");
+      var yMax = yHi.querySelector("input");
+      var pMin = pLo.querySelector("input");
+      var pMax = pHi.querySelector("input");
+      S.ui.ppLink = { yMin: yMin, yMax: yMax, pMin: pMin, pMax: pMax };
+      function applyPower(yKey, v) {
+        if (v === null) {
+          set[yKey] = null;
+          return;
+        }
+        if (!ppFactors(set)) return;
+        set[yKey] = energyFromPower(set, v);
+      }
+      [yMin, yMax, pMin, pMax].forEach(function (input) {
+        input.addEventListener("blur", function () { refreshPpLink(set); });
+      });
+      return [
+        h(
+          "div.dl-range",
+          h("div.dl-range-name", h("span.dl-var.is-y", "y"), nameNode(axis.y, axis.yUnit)),
+          h("div.dl-range-pair", yLo, h("span.dl-range-sep", "~"), yHi)
+        ),
+        h(
+          "div.dl-range",
+          h("div.dl-range-name", h("span.dl-var.is-y", { title: "由 PP@PF能量换算" }, "P"), nameNode("PP出口功率", "W")),
+          h("div.dl-range-pair", pLo, h("span.dl-range-sep", "~"), pHi)
+        ),
+        h("div.field-help", "PP@PF能量 = PP出口功率 ÷ 功率转换系数 × 传输系数。改一边会立即换算另一边；留空表示不限制。"),
+      ];
     }
 
     function ppGroup(set) {
@@ -1434,7 +1578,7 @@
           "div.panel-body.dl-params-body",
           S.ui.formula,
           S.ui.multi,
-          h("div.dl-params", coeffGroup(set), rangeGroup(set, axis), id === "pp_energy" ? ppGroup(set) : null, bindingGroup(id, set))
+          h("div.dl-params", coeffGroup(set), rangeGroup(set, axis, id), id === "pp_energy" ? ppGroup(set) : null, bindingGroup(id, set))
         )
       );
     }

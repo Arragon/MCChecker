@@ -25,6 +25,7 @@ def test_dl_item_and_axis_labels():
         "AOM2 width 模式",
         "调焦镜发散角",
         "BTS_ppz",
+        "PP出口功率",
     ):
         assert axis in DL, axis
     assert "SMSM1" not in DL

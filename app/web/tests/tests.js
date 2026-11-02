@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 96;  // 94 + 审计筛选/渲染（M7-11）
+  var EXPECTED_CASES = 98;  // 96 + PP出口功率换算与结果列
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -1781,6 +1781,191 @@
     eq(quad.xMax, 2);
     var blocked = MC.dlCurveExtrema({ coeffs: zero, x_min: 0, x_max: 1, y_min: null, y_max: null, trans_coeff: 1, power_conv_coeff: 0 }, "pp_energy");
     ok(blocked.ready === false, "功率转换系数为 0 时不算范围");
+  });
+
+  test("DL：PP出口功率与 PP@PF能量按传输系数和功率转换系数互化", function () {
+    var set = { trans_coeff: 2, power_conv_coeff: 4 };
+    eq(MC.dlPpOutlet.powerFromEnergy(set, 10), 20);
+    eq(MC.dlPpOutlet.energyFromPower(set, 20), 10);
+    eq(MC.dlPpOutlet.powerFromEnergy(set, 0), 0);
+    eq(MC.dlPpOutlet.powerFromEnergy(set, null), null);
+    eq(MC.dlPpOutlet.energyFromPower(set, null), null);
+    eq(MC.dlPpOutlet.energyFromPower({ trans_coeff: 0, power_conv_coeff: 4 }, 20), null);
+    eq(MC.dlPpOutlet.powerFromEnergy({ trans_coeff: 2, power_conv_coeff: 0 }, 10), null);
+    eq(MC.dlPpOutlet.powerFromEnergy({ trans_coeff: -2, power_conv_coeff: 4 }, 10), -20);
+    eq(MC.dlPpOutlet.energyFromPower({ trans_coeff: -2, power_conv_coeff: 4 }, -20), 10);
+    var y = 7.5;
+    var p = MC.dlPpOutlet.powerFromEnergy(set, y);
+    eq(y, p / set.power_conv_coeff * set.trans_coeff);
+  });
+
+  test("DL：PP出口功率范围与结果列随能量实时换算", function () {
+    function coeffs() {
+      return { k1: 1, k2: 0, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0, k8: 0, b: 0 };
+    }
+    function item(name, extra) {
+      var row = {
+        name: name,
+        coeffs: coeffs(),
+        binding: { source_file: "", variable_path: "", field_map: {} },
+        x_min: 0,
+        x_max: 100,
+        y_min: null,
+        y_max: null,
+      };
+      Object.keys(extra || {}).forEach(function (k) { row[k] = extra[k]; });
+      return row;
+    }
+    var payload = {
+      rev: "rev-pp",
+      items: {
+        pp_energy: item("计算PP能量", { trans_coeff: 2, power_conv_coeff: 4, y_min: 10, y_max: 20 }),
+        rp_energy: item("计算RP能量"),
+        rp_width: item("计算RP脉宽", { aom_sum: 100, aom_width: item("width") }),
+        ppz: item("计算PPz"),
+      },
+    };
+    var origGet = MC.api.get;
+    var origPost = MC.api.post;
+    var origDownload = MC.util.downloadBlob;
+    var csvText = "";
+    MC.api.get = function (path) {
+      if (/\/dl$/.test(path)) return Promise.resolve(JSON.parse(JSON.stringify(payload)));
+      return Promise.resolve({ entries: [], current_id: null });
+    };
+    MC.api.post = function (path, body) {
+      if (!/\/compute$/.test(path)) return Promise.resolve({});
+      if (body.mode === "multi_check") return Promise.resolve({ has_multi: false, cases: [] });
+      if (body.mode === "forward") {
+        return Promise.resolve({
+          results: [
+            { input_index: 0, x: body.values[0], y_base: 9, y: 1.5, status: "ok" },
+            { input_index: 1, x: body.values[1], status: "out_of_x_range" },
+          ],
+        });
+      }
+      return Promise.resolve({
+        exhaustive: false,
+        results: [
+          { input_index: 0, y: body.values[0], y_base: 1, x_values: [2], status: "single" },
+          { input_index: 1, y: body.values[1], x_values: [], status: "out_of_y_range" },
+        ],
+      });
+    };
+    MC.util.downloadBlob = function (text) { csvText = String(text).replace(/^\uFEFF/, ""); };
+    var app = {
+      pid: "default",
+      can: function () { return false; },
+      p: function (rest) { return "/p/default" + rest; },
+      go: function () {},
+      renderHeader: function () {},
+      renderNav: function () {},
+      renderTabbar: function () {},
+      openFile: function () {},
+      syncRevision: function () { return Promise.resolve(); },
+    };
+    var stage = MC.util.h("div", { style: "position:absolute;left:0;top:0;width:1100px;height:800px" });
+    document.body.append(stage);
+    var inst = MC.views.dl(app, { kind: "dl", query: { item: "pp_energy" } });
+    stage.append(inst.el);
+    function field(label) { return inst.el.querySelector('[aria-label="' + label + '"]'); }
+    function typeInto(input, text) {
+      input.focus();
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    function clickButton(text) {
+      var found = [...inst.el.querySelectorAll("button")].filter(function (b) { return b.textContent.indexOf(text) >= 0; })[0];
+      ok(found, "找不到按钮 " + text);
+      found.click();
+    }
+    function rows() {
+      return [...inst.el.querySelectorAll(".dl-table tbody tr")].map(function (tr) {
+        return [...tr.children].map(function (td) { return td.textContent; });
+      });
+    }
+    function later() {
+      return new Promise(function (resolve) { setTimeout(resolve, 0); });
+    }
+    return later().then(function () {
+      ok(field("PP出口功率 下限"), "有效范围要有 PP出口功率");
+      eq(field("PP出口功率 下限").value, "20");
+      eq(field("PP出口功率 上限").value, "40");
+      ok(inst.el.textContent.indexOf("PP@PF能量 = PP出口功率 ÷ 功率转换系数 × 传输系数") >= 0, "公式要写出出口功率关系");
+      typeInto(field("PP出口功率 下限"), "8");
+      eq(field("PP@PF能量 下限").value, "4");
+      eq(field("PP出口功率 下限").value, "8");
+      typeInto(field("PP@PF能量 上限"), "30");
+      eq(field("PP出口功率 上限").value, "60");
+      typeInto(field("传输系数"), "1");
+      eq(field("PP出口功率 下限").value, "16");
+      eq(field("PP出口功率 上限").value, "120");
+      eq(field("PP@PF能量 下限").value, "4");
+      typeInto(field("传输系数"), "0");
+      eq(field("PP出口功率 下限").value, "");
+      eq(field("PP出口功率 上限").value, "");
+      eq(field("PP出口功率 下限").placeholder, "无法换算");
+      eq(field("PP@PF能量 下限").value, "4");
+      var pMin = field("PP出口功率 下限");
+      pMin.focus();
+      pMin.value = "10";
+      pMin.dispatchEvent(new Event("input", { bubbles: true }));
+      ok(pMin.classList.contains("is-invalid"), "系数为 0 时出口功率标红且不改能量");
+      eq(field("PP@PF能量 下限").value, "4");
+      var trans = field("传输系数");
+      trans.value = "2";
+      trans.dispatchEvent(new Event("input", { bubbles: true }));
+      eq(document.activeElement, pMin);
+      eq(pMin.value, "10");
+      eq(field("PP@PF能量 下限").value, "5");
+      eq(field("PP出口功率 上限").value, "60");
+      typeInto(inst.el.querySelector("textarea"), "2 9");
+      clickButton("计算");
+      return later();
+    }).then(function () {
+      ok(inst.el.querySelector(".dl-table").textContent.indexOf("PP出口功率") >= 0, "正向结果要有出口功率列");
+      eq(rows(), [
+        ["1", "2", "9", "1.5", "3", "正常"],
+        ["2", "9", "—", "—", "—", "x 超出范围"],
+      ]);
+      csvText = "";
+      inst.el.querySelector('[aria-label="下载 CSV"]').click();
+      eq(csvText.split("\n")[0], "电动波片角度（urad）,PP@PF能量（mJ）,PP出口功率（W）,状态");
+      eq(csvText.split("\n")[1], "2,1.5,3,正常");
+      eq(csvText.split("\n")[2], "9,,,x 超出范围");
+      clickButton("反向 y → x");
+      typeInto(inst.el.querySelector("textarea"), "4 100");
+      clickButton("求解");
+      return later();
+    }).then(function () {
+      eq(rows(), [
+        ["1", "4", "8", "2", "唯一解"],
+        ["2", "100", "200", "—", "y 超出范围"],
+      ]);
+      csvText = "";
+      inst.el.querySelector('[aria-label="下载 CSV"]').click();
+      eq(csvText.split("\n")[0], "目标PP@PF能量（mJ）,PP出口功率（W）,解电动波片角度（urad）,状态");
+      eq(csvText.split("\n")[1], "4,8,2,唯一解");
+      eq(csvText.split("\n")[2], "100,200,,y 超出范围");
+      clickButton("RP 能量");
+      ok(!field("PP出口功率 下限"), "其他计算项不显示 PP出口功率");
+      ok(inst.el.textContent.indexOf("PP出口功率") < 0, "RP 能量页不出现出口功率文案");
+    }).then(function () {
+      inst.destroy();
+      stage.remove();
+      cleanOverlays();
+      MC.api.get = origGet;
+      MC.api.post = origPost;
+      MC.util.downloadBlob = origDownload;
+    }, function (err) {
+      inst.destroy();
+      stage.remove();
+      cleanOverlays();
+      MC.api.get = origGet;
+      MC.api.post = origPost;
+      MC.util.downloadBlob = origDownload;
+      throw err;
+    });
   });
 
   test("DL：缩放包住边界与计算点，并标出极值点", function () {
