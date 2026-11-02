@@ -149,3 +149,36 @@ def test_binding_change_blocks_commit():
     assert doc["run"]["state"] == "failed"
     assert doc["items"][0]["reason_code"] == "source_changed"
     assert current(wid, "A.xml") == b"<R><x>manual</x></R>"
+
+
+def test_connection_disabled_blocks_old_response():
+    wid, cid = make_connection("closed")
+    source = make_source(wid, cid, "Closed.xml")
+    entered = threading.Event()
+    release = threading.Event()
+    body = b"<R><x>closed</x></R>"
+
+    def reader(source_dict, cancel):
+        entered.set()
+        assert release.wait(5.0)
+        return {
+            "status": "succeeded",
+            "items": [
+                {
+                    "name": source_dict["name"],
+                    "content": body,
+                    "sha256": hashlib.sha256(body).hexdigest(),
+                }
+            ],
+        }
+
+    result = sync_tasks.submit_sync_run(ctx(wid), [source], sda_reader=reader)
+    assert entered.wait(5.0)
+    sync_connections.update_connection(wid, cid, 1, {"enabled": False})
+    release.set()
+    doc = wait_run(wid, result["run"]["run_id"])
+
+    assert doc["run"]["state"] == "failed"
+    assert doc["items"][0]["state"] == "blocked"
+    assert doc["items"][0]["reason_code"] == "source_changed"
+    assert current(wid, "Closed.xml") is None
