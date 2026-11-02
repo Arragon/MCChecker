@@ -29,6 +29,9 @@
 21. Authentication, permissions, input, files, commands, external requests, logs, or sensitive information -> Read `/agent/docs/security.md`.
 22. Table structure, migration, queries, transactions, persistence, or data consistency -> Read `/agent/docs/database.md`.
 
+## UI Verification
+23. For every user-visible interface in this repository, verify with Playwright and do not use the computer-use desktop agent. The full rule is in `/AGENTS.md`.
+
 ## Delivery Requirements
-23. Final response must state: completed content, main changes, dependency changes, test results, documentation updates, risks, or limitations.
-24. Explicitly list any unverified content, failed tests, pending environments, or manual operation steps.
+24. Final response must state: completed content, main changes, dependency changes, test results, documentation updates, risks, or limitations.
+25. Explicitly list any unverified content, failed tests, pending environments, or manual operation steps.
