@@ -296,7 +296,9 @@
           h("option", { value: "" }, "选择目录条目…")
         );
         catalogSelect.addEventListener("change", function () {
-          var picked = catalogItems[Number(catalogSelect.value)];
+          var raw = catalogSelect.value;
+          if (raw === "") return;
+          var picked = catalogItems[Number(raw)];
           if (!picked) return;
           refInput.value = picked.resource_ref;
           displayInput.value = picked.display_path;

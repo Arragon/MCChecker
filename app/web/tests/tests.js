@@ -4172,7 +4172,7 @@
           var select = modal.querySelector("[data-sync-catalog-select]");
           ok(select && select.style.display !== "none", "目录加载后可选择");
           eq(select.options.length, 2);
-          select.value = "1";
+          select.value = "0";
           select.dispatchEvent(new Event("change"));
           var inputs = modal.querySelectorAll("input.input");
           eq(inputs[1].value, "table:1", "回填资源 ID");
