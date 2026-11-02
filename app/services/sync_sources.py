@@ -28,7 +28,7 @@ from app.core.sync_models import (
 )
 from app.services import sync_connections, workspace_context
 
-from . import sync_store
+from . import sync_catalog, sync_store
 
 FILE = "sources.json"
 DEFAULT_DOC: Dict[str, Any] = {"revision": 0, "items": []}
@@ -248,6 +248,10 @@ def create_source(workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if connection_id:
         validate_id(connection_id, "connection_id")
     _check_connection(wid, kind, connection_id)
+    if kind in ("sda_table", "sda_file") and connection_id:
+        sync_catalog.validate_selection(
+            wid, connection_id, kind, payload.get("resource_ref"), payload.get("display_path")
+        )
     schedule_mode = payload.get("schedule_mode", "inherit")
     interval_hours = validate_interval_hours(payload.get("interval_hours"))
     source_id = make_source_id(wid, profile_id, name)
@@ -300,6 +304,27 @@ def update_source(
     if unknown:
         raise AppError(INVALID_INPUT, "不允许修改来源字段", field="patch", keys=sorted(unknown))
     now = _now()
+    # catalog 读取可能走 collector IPC，放在 workspace 锁外；锁内只做 CAS 与落盘。
+    existing = get_source(wid, sid)
+    values = dict(existing)
+    values.update(patch)
+    _check_urls(values)
+    values["source_id"] = existing["source_id"]
+    values["workspace_id"] = existing["workspace_id"]
+    values["profile_id"] = existing["profile_id"]
+    values["revision"] = existing["revision"] + 1
+    values["updated_at"] = now
+    values["target"] = _target(values.get("target"))
+    _check_connection(wid, values["kind"], values.get("connection_id"))
+    if values["kind"] in ("sda_table", "sda_file") and values.get("connection_id"):
+        sync_catalog.validate_selection(
+            wid,
+            values["connection_id"],
+            values["kind"],
+            values.get("resource_ref"),
+            values.get("display_path"),
+        )
+    updated = SyncSource(**values)
 
     def mutate(doc: Dict[str, Any]) -> Dict[str, Any]:
         item = _find(doc, sid)
@@ -307,25 +332,13 @@ def update_source(
             raise AppError(NOT_FOUND, "来源不存在", field="source_id")
         if item.get("revision") != revision:
             raise AppError(REVISION_CONFLICT, "来源 revision 已变化", field="expected_revision")
-        current = SyncSource.from_dict(item)
-        values = current.to_dict()
-        values.update(patch)
-        _check_urls(values)
-        values["source_id"] = current.source_id
-        values["workspace_id"] = current.workspace_id
-        values["profile_id"] = current.profile_id
-        values["revision"] = current.revision + 1
-        values["updated_at"] = now
-        values["target"] = _target(values.get("target"))
-        _check_connection(wid, values["kind"], values.get("connection_id"))
-        if _name_taken(doc, current.profile_id, str(values["name"]), exclude=sid):
+        if _name_taken(doc, updated.profile_id, str(updated.name), exclude=sid):
             raise AppError(INVALID_INPUT, "来源名称已存在", field="name")
-        updated = SyncSource(**values)
         merged = dict(item)
         merged.update(updated.to_dict())
         merged["deleted"] = False
-        for index, existing in enumerate(doc["items"]):
-            if isinstance(existing, dict) and existing.get("source_id") == sid:
+        for index, existing_item in enumerate(doc["items"]):
+            if isinstance(existing_item, dict) and existing_item.get("source_id") == sid:
                 doc["items"][index] = merged
                 break
         doc["revision"] = doc["revision"] + 1

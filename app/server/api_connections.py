@@ -26,6 +26,7 @@ from ..core.errors import (
 from ..core.sync_models import validate_id, validate_revision
 from ..services import (
     authz,
+    sync_catalog,
     sync_connections,
     sync_credentials,
     sync_operator_auth,
@@ -68,6 +69,7 @@ def register(router: Router) -> None:
     router.add("POST", base, create_connection)
     router.add("PATCH", base + "/{cid}", update_connection)
     router.add("GET", base + "/{cid}/credentials", get_credentials)
+    router.add("GET", base + "/{cid}/catalog", get_catalog)
     router.add("POST", base + "/{cid}/credentials/candidates", create_candidate)
     router.add(
         "POST",
@@ -342,3 +344,15 @@ def get_operation(
     if op.get("connection_id") != params["cid"]:
         raise AppError(NOT_FOUND, "操作不存在", field="op_id")
     return Response(payload={"operation": op})
+
+
+def get_catalog(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    authz.authorize(ctx, "read")
+    wid = params["wid"]
+    _connection(wid, params["cid"])
+    return Response(payload={"items": sync_catalog.read_catalog(wid, params["cid"])})

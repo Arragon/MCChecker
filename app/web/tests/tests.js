@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 115;  // + M16-31/32/33/34/35/36 更新管理 + 空候选防抖
+  var EXPECTED_CASES = 116;  // + M16-31/32/33/34/35/36 更新管理 + SDA 目录选择
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4112,6 +4112,84 @@
           inst.destroy();
           inst.el.remove();
           restore();
+        });
+      })
+      .catch(function (err) {
+        restore();
+        throw err;
+      });
+  });
+
+
+  test("SYNC-37：SDA 目录选择回填资源 ID/路径，服务端不一致拒绝保存", function () {
+    var calls = [];
+    var original = MC.api.requestV3;
+    var originalScope = MC.workspaces && MC.workspaces.scopeId;
+    if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-catalog"; };
+    var source = {
+      source_id: "src-cat-1", revision: 2, name: "表 A", kind: "sda_table",
+      connection_id: "conn-1", resource_ref: "table:old", display_path: "/tables/old",
+      record_source: "", keyword: "", enabled: true, schedule_mode: "inherit",
+      updated_at: "2026-11-02T00:00:00Z",
+    };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (method === "GET" && path.indexOf("/catalog") >= 0) {
+        return Promise.resolve({
+          items: [{ name: "表 A", kind: "table", resource_ref: "table:1", display_path: "/tables/a" }],
+        });
+      }
+      if (method === "GET") return Promise.resolve({ items: [source], total: 1, next_cursor: null });
+      if (method === "PATCH") {
+        return Promise.reject({
+          status: 400,
+          code: "INVALID_INPUT",
+          message: "SDA catalog 资源 ID 与展示路径不一致或不在当前目录",
+        });
+      }
+      return Promise.resolve({});
+    };
+    function restore() {
+      MC.api.requestV3 = original;
+      if (MC.workspaces && originalScope) MC.workspaces.scopeId = originalScope;
+    }
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write" || name === "deployer" || name === "admin"; };
+    var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
+    var host = inst.el;
+    return tick()
+      .then(function () {
+        host.querySelector("[data-sync-edit]").click();
+        var modal = document.querySelector(".modal");
+        ok(modal, "打开编辑抽屉");
+        var picker = modal.querySelector("[data-sync-catalog]");
+        ok(picker, "SDA 来源有目录选择入口");
+        picker.click();
+        return tick().then(function () {
+          ok(calls.some(function (c) {
+            return c.method === "GET" && c.path.indexOf("/workspaces/w-catalog/connections/conn-1/catalog") >= 0;
+          }), "按来源连接读取受控目录");
+          var select = modal.querySelector("[data-sync-catalog-select]");
+          ok(select && select.style.display !== "none", "目录加载后可选择");
+          eq(select.options.length, 2);
+          select.value = "0";
+          select.dispatchEvent(new Event("change"));
+          var inputs = modal.querySelectorAll("input.input");
+          eq(inputs[1].value, "table:1", "回填资源 ID");
+          eq(inputs[2].value, "/tables/a", "回填展示路径");
+          modal.querySelector("[data-sync-save]").click();
+          return tick().then(function () {
+            var patch = calls.filter(function (c) { return c.method === "PATCH"; })[0];
+            eq(patch.opts.body.resource_ref, "table:1");
+            eq(patch.opts.body.display_path, "/tables/a");
+            eq(patch.opts.headers["If-Match"], "2");
+            ok(modal.textContent.indexOf("不一致") >= 0, "服务端不一致拒绝保存并提示");
+            ok(document.querySelector(".modal"), "拒绝时不关闭抽屉");
+            modal.querySelector(".modal-footer .btn").click();
+            inst.destroy();
+            inst.el.remove();
+            restore();
+          });
         });
       })
       .catch(function (err) {
