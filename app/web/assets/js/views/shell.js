@@ -18,6 +18,7 @@
     { kind: "review", label: "审阅修改", icon: "review", admin: true },
     { kind: "dl", label: "DL 计算", icon: "calc" },
     { kind: "configv3", label: "配置管理", icon: "list" },
+    { kind: "updates", label: "更新管理", icon: "settings" },
     { kind: "tools", label: "外部工具", icon: "tool" },
     { kind: "settings", label: "设置", icon: "settings" },
   ];
@@ -777,6 +778,9 @@
   App.prototype.onRoute = function (r) {
     if (!r) return this.go({ kind: "overview" }, true);
     if (r.kind === "configspace") r = Object.assign({}, r, { kind: "configv3" });
+    if (r.kind === "settings" && (r.arg === "sources" || r.arg === "schedule")) {
+      r = Object.assign({}, r, { kind: "updates", arg: r.arg });
+    }
     if (r.query && r.query.workspace && r.query.workspace !== this.wid) {
       return this.switchWorkspace(r.query.workspace, r);
     }
@@ -970,11 +974,11 @@
   function defaultTitle(t) {
     var k = t.route.kind;
     if (k === "f") return t.route.arg;
-    return { overview: "速览", search: "全局搜索", review: "审阅修改", dl: "DL 计算", tools: "外部工具", settings: "设置", t: "临时文件", configv3: "配置管理" }[k] || k;
+    return { overview: "速览", search: "全局搜索", review: "审阅修改", dl: "DL 计算", tools: "外部工具", settings: "设置", updates: "更新管理", t: "临时文件", configv3: "配置管理" }[k] || k;
   }
 
   function defaultIcon(kind) {
-    return { overview: "overview", search: "search", review: "review", dl: "calc", tools: "tool", settings: "settings", f: "file", t: "file-temp", configv3: "list" }[kind] || "file";
+    return { overview: "overview", search: "search", review: "review", dl: "calc", tools: "tool", settings: "settings", updates: "settings", f: "file", t: "file-temp", configv3: "list" }[kind] || "file";
   }
 
   /* ===================== polling (multi-user) ===================== */
