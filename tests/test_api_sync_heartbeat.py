@@ -149,7 +149,7 @@ def test_put_uses_revision_cas_and_validates_fields():
         status, _headers, bad = admin.json(
             "PUT",
             url,
-            {"interval_minutes": 5, "enabled": True, "auto_relogin": True},
+            {"interval_minutes": 5, "enabled": True, "cookie": "nope"},
             headers=headers,
         )
         assert status == 400, bad

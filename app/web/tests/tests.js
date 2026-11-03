@@ -4018,13 +4018,13 @@
   });
 
 
-  test("M16-31：更新管理壳、五 tab 与旧设置入口收口", function () {
+  test("M16-31：更新管理壳、三个内容页与旧设置入口收口", function () {
     var app = settingsApp(true);
     var original = MC.api.requestV3;
     MC.api.requestV3 = function () { return Promise.resolve({ items: [], total: 0, next_cursor: null }); };
     var inst = MC.views.updates(app, { kind: "updates", arg: "sources", query: {} });
     eq(inst.title, "更新管理");
-    eq(inst.el.querySelectorAll("[data-sync-tab]").length, 5);
+    eq(inst.el.querySelectorAll("[data-sync-tab]").length, 3);
     ok(inst.el.textContent.indexOf("更新源") >= 0, "默认展示更新源");
     var runs = inst.el.querySelector('[data-sync-tab="runs"]');
     ok(runs, "运行记录 tab 存在");
@@ -4295,7 +4295,7 @@
         return tick().then(function () {
           var confirm = lastModal();
           ok(confirm && confirm.textContent.indexOf("放弃") >= 0, "关闭前提示未保存草稿");
-          modalButton(confirm, "取消").click();
+          modalButton(confirm, "保留").click();
           return tick().then(function () {
             ok(document.querySelector(".modal") === modal, "取消放弃后抽屉仍打开");
             modalButton(modal, "取消").click();
@@ -4647,7 +4647,7 @@
         return tick().then(function () {
           var put = calls.filter(function (c) { return c.method === "PUT" && /\/heartbeat$/.test(c.path); })[0];
           ok(put, "保存保活发 PUT");
-          eq(put.opts.body, { interval_minutes: 15, enabled: true });
+          eq(put.opts.body, { interval_minutes: 15, enabled: true, auto_relogin: true });
           eq(put.opts.headers["If-Match"], "0", "保活保存带 revision CAS");
           eq(put.opts.headers["X-Operator-Token"], "operator-token-34");
           eq(inst.el.querySelector('[data-auto-relogin="conn-34"]').textContent, autoBefore,

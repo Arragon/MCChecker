@@ -18,7 +18,7 @@
     { kind: "review", label: "审阅修改", icon: "review", admin: true },
     { kind: "dl", label: "DL 计算", icon: "calc" },
     { kind: "configv3", label: "配置管理", icon: "list" },
-    { kind: "updates", label: "更新管理", icon: "settings" },
+    { kind: "updates", label: "更新管理", icon: "refresh" },
     { kind: "tools", label: "外部工具", icon: "tool" },
     { kind: "settings", label: "设置", icon: "settings" },
   ];

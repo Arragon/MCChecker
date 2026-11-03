@@ -226,5 +226,6 @@ def candidate_apply(
         preview_id,
         payload.get("request_id"),
         payload.get("decisions") or {},
+        bool(payload.get("create_baseline")),
     )
     return Response(payload=result)

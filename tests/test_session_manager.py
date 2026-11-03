@@ -201,3 +201,20 @@ def test_exception_during_login_is_network_failure_with_backoff():
     clock.value += 10
     assert manager.execute(lambda session: ok_result()).reason_code == "network_error"
     assert login.calls == 1
+
+
+def test_auto_relogin_off_does_not_call_login():
+    login = FakeLogin([ok()])
+    calls = []
+    manager = SessionManager(
+        login, lambda: calls.append(1) or object(), Clock(), auto_relogin=False
+    )
+    outcome = manager.execute(lambda session: ok_result())
+    assert outcome.status == "failed"
+    assert outcome.reason_code == "auto_relogin_disabled"
+    assert login.calls == 0
+    assert calls == []
+
+    manager.auto_relogin = True
+    assert manager.execute(lambda session: ok_result()).status == "succeeded"
+    assert login.calls == 1

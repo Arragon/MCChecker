@@ -192,6 +192,18 @@
       var addRel = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本");
       var extract = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "从 JSON/XML 提取参数名称与层级，不导入值" : "只有管理员可以提取参数", onclick: extractDialog }, "从文件提取参数");
       var mergeBtn = h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), title: canWrite() ? "比较 O/L/N 并生成新草稿" : "只有管理员可以合并", onclick: mergeDialog }, "合并配置");
+      var updateNow = h("button.btn.btn-sm", {
+        type: "button",
+        "data-sync-config-now": "1",
+        title: "打开更新管理并预览工作区全量更新",
+        onclick: function () { app.go({ kind: "updates", arg: "plan" }); },
+      }, "立即更新");
+      var updateSettings = h("button.btn.btn-sm", {
+        type: "button",
+        "data-sync-config-settings": "1",
+        title: "当前固定配置的更新设置",
+        onclick: function () { app.go({ kind: "updates", arg: "sources" }); },
+      }, "更新设置");
       var tabs = MC.segmented([
         { value: "versions", label: "版本演进" },
         { value: "workbench", label: "参数工作台" },
@@ -207,7 +219,7 @@
       else if (S.tab === "history") body = historyView();
       else body = placeholder(S.tab);
       return h("section.panel.config-main",
-        h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, extract, mergeBtn, addRel),
+        h("div.panel-header.config-title", h("div.col", { style: "gap:2px" }, h("h2", S.detail.name), h("span.xsmall.muted", "固定配置 / " + S.detail.code)), h("span.spacer"), releaseSel, updateNow, updateSettings, extract, mergeBtn, addRel),
         h("div.panel-body", h("div.col", { style: "gap:14px" }, tabs, body)));
     }
 

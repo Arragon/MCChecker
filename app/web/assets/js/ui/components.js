@@ -102,9 +102,16 @@
     }
 
     function onKey(e) {
-      if (e.key === "Escape" && opts.dismissible !== false) {
-        e.stopPropagation();
-        close();
+      if (e.key === "Escape") {
+        if (opts.onDismiss) {
+          e.stopPropagation();
+          opts.onDismiss(close);
+          return;
+        }
+        if (opts.dismissible !== false) {
+          e.stopPropagation();
+          close();
+        }
       } else if (e.key === "Tab") {
         var items = dialog.querySelectorAll(FOCUSABLE);
         if (!items.length) return;
@@ -124,7 +131,7 @@
       h(
         "div.modal-header",
         h("div.grow", h("h2", { id: titleId }, opts.title), opts.subtitle ? h("div.modal-sub", opts.subtitle) : null),
-        opts.dismissible === false ? null : h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "关闭", onclick: function () { close(); } }, icon("x"))
+        opts.dismissible === false && !opts.onDismiss ? null : h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "关闭", onclick: function () { if (opts.onDismiss) opts.onDismiss(close); else close(); } }, icon("x"))
       )
     );
     dialog.appendChild(h("div.modal-body", opts.body));
@@ -132,7 +139,7 @@
     if (footer) dialog.appendChild(h("div.modal-footer", footer));
 
     backdrop.addEventListener("mousedown", function (e) {
-      if (e.target === backdrop && opts.dismissible !== false) close();
+      if (e.target === backdrop && opts.dismissible !== false && !opts.onDismiss) close();
     });
     document.addEventListener("keydown", onKey, true);
     document.body.appendChild(backdrop);
