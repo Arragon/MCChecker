@@ -63,7 +63,7 @@ from app.services import auth, people, revision
 
 @pytest.fixture(autouse=True)
 def loopback_writer_is_admin(monkeypatch):
-    """本文件用 127.0.0.1 当写请求的调用方。本机不再自动有权限，测试里单独放行这个地址，不写进名单。"""
+    """本文件用 127.0.0.1 当写请求的调用方。产品里本机地址已是管理员；这里仍把该地址放进 is_admin_ip，避免用例依赖网卡枚举。"""
     real = storage.is_admin_ip
 
     def wrapped(ip: str) -> bool:

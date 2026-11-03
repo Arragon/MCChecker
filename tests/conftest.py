@@ -41,7 +41,7 @@ REAL_IS_ADMIN_IP = storage.is_admin_ip
 def loopback_writer_in_tests(monkeypatch, request):
     """既有用例用 127.0.0.1 充当有写权限的调用方。
 
-    产品里本机不再自动是管理员。带 `production_identity` 标记的用例看到真实规则。
+    产品里回环和本机网卡地址本身就是管理员。带 `production_identity` 标记的用例看到真实规则；其余用例仍把 `127.0.0.1` 放进 `is_admin_ip`，兼容旧的写接口夹具。
     """
     if request.node.get_closest_marker("production_identity"):
         return
