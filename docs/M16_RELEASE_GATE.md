@@ -15,6 +15,7 @@
 | 浏览器 E2E | `./.venv39/bin/python scripts/e2e_browser.py --only all` | interactive **13/13**、reachable **28/28** |
 | Git secret 扫描 | `scan_secrets.py --tree` / `--all-history` / `--staged` | 命中 **0**（allowlist 9/10/0） |
 | 离线发布包 | `make_release.py --out …` + `--verify-only` | 成员 **213**、外部主机引用 **0**、哈希校验通过 |
+| collector 独立包 | `collector_bundle.py --out …`（构建+自校验） | 成员 **14**、manifest 逐文件 sha256、无 secret 标记、无 `__pycache__`；`chromium_bundled=false`（待 E4 回填） |
 | 备份/回退演练 | `backup_v3.py backup/verify/restore --dry-run` | 7 文件；`{"ok": true, "bad": []}`；dry-run 不改盘 |
 | SIGTERM 排空 | `run.py --data-dir /tmp/mcc-sigterm` + `kill -TERM` | exit 0；调度线程退出、任务队列停止、锁文件已删除、无残留进程 |
 
@@ -97,16 +98,34 @@
 
 ## 4. 发布包与回退
 
-- 产物：`dist/MCChecker-<版本>.zip`（本轮产物在 `/tmp/mcc-release-gate.zip`，未发布）：
+- 核心产物：`dist/MCChecker-<版本>.zip`（本轮产物在 `/tmp/mcc-release-gate.zip`，未发布）：
   成员 213、外部主机引用 0、逐文件 sha256 校验通过；不含 `data/`、`tests/`、`.qoder/`、mock。
+- collector 产物：`dist/collector-bundle.zip`（本轮在 `/tmp/mcc-collector-bundle.zip`）：
+  14 个成员（collector 源码 + `requirements.lock` + `MANIFEST.json`），manifest 记录
+  `python: 3.12`、`entry: collector/main.py`、逐文件 sha256；`chromium.bundled=false`、
+  `wheels.bundled=false` —— 二者必须由目标机（Windows/Linux，E4/E5）实机安装后
+  用 `--chromium/--wheels` 重新打包回填，不在本机伪造。
 - 版本号冻结留待真实发布时决定；本轮**不发布**、不改现网数据。
 - 回退演练：`backup_v3.py backup → verify(ok) → restore --dry-run`，7 个文件路径与哈希对齐，未写盘。
 - 已知限制：`2161`（M15 的负责人书面豁免）只能作为「已关闭的历史门禁」引用，
   **不得**写成「外部证据全部 PASS」；V3.0 未合 main、未发布。
 
-## 5. 未完成与下一步
+## 5. 运维与门禁接入（本轮新增）
+
+- `docs/M16_OPERATIONS.md`：安装/升级/备份回退/保活调参/凭据恢复/安全清理/collector/诊断/发布前清单。
+- `README.md` 新增 V3.1 章节：五个 tab 的职责、关键命令与「不得宣称已发布」的边界。
+- `scripts/collector_bundle.py` + `tests/test_collector_bundle.py`：collector 独立包打包/校验，
+  篡改成员、夹带额外文件、secret 标记、`__pycache__` 都会让校验失败。
+- **CI 未扩展**：本轮试过把 `feat/mc-v3.1` 加入触发分支并新增 compileall + secret 扫描两步，
+  Ubuntu 侧 4m46s 全绿；**Windows job 在 `Pytest` 步骤长时间不结束**（>60 分钟，历史同类运行为 9–11 分钟），
+  定位成本高且与本卡验收无关，已回退该改动（commit 见 PR #252），留作独立排查项：
+  建议加 `--faulthandler-timeout` 与 `timeout-minutes` 先抓出具体挂起用例，再决定是否纳入。
+
+## 6. 未完成与下一步
 
 1. M16-02 / 20 / 41：真实 SDA 与真实 idle（E2/E3），按 `docs/M16_LIVE_ACCEPTANCE.md` 执行并回填。
-2. M16-14 / 42：Windows/Linux 目标机的 Python 3.12 + Playwright + Chromium 安装、进程树回收、断网安装（E4/E5）。
-3. CI 目前只监听 `feat/mc-v3`；把 `feat/mc-v3.1` 纳入触发、并接入 `scan_secrets.py --range`，属发布前收口项。
+2. M16-14 / 42：Windows/Linux 目标机的 Python 3.12 + Playwright + Chromium 安装、进程树回收、断网安装（E4/E5）；
+   拿到 wheel 与 Chromium 后用 `collector_bundle.py --wheels/--chromium` 重新打包并回填 manifest。
+3. **Windows CI 挂起排查**：`feat/mc-v3.1` 上的 Windows job 在 `Pytest` 步骤长时间不结束；
+   先用 `-o faulthandler_timeout=180` + 步骤级 `timeout-minutes` 抓出具体用例，再决定是否把该分支纳入触发。
 4. 本门禁全绿只代表**本地自动化**通过；在 E2–E5 补齐前，M16-42 保持 `In Progress / BLOCKED-EXTERNAL`。

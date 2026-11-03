@@ -42,6 +42,10 @@ Linux 上要脱离终端运行时用 `./service.sh start`，停止用 `./service
 pytest tests/ -v
 ```
 
+V3.1（M16）的完整门禁（全量 + H3 + 前端浏览器 + E2E + secret 扫描）见
+[`docs/M16_OPERATIONS.md`](docs/M16_OPERATIONS.md) §8；结果台账见
+[`docs/M16_RELEASE_GATE.md`](docs/M16_RELEASE_GATE.md)。
+
 ## 技术栈
 
 - Python 3.9.11（本机安装，或按手册使用发布包可选运行时）
@@ -67,6 +71,32 @@ python scripts/migrate_v3.py rollback --data-dir data --yes
 ```
 
 发布包：`python scripts/make_release.py --out dist/`。V3 最终发布门禁仍受真实浏览器/真实模板/设备/Windows/Linux/离线证据与 `INH-1910`/`INH-1978` 阻塞，见 `docs/V3_RELEASE_GATE.md`；在此之前不要把 V3 称为“已发布”。
+
+## V3.1（M16）更新管理、SDA 会话与可信同步
+
+V3.1 是在 V3 之上的**增量**：新增左侧导航“更新管理”（更新源 / 更新计划 / 连接设置 / 运行记录 / 更新候选五个 tab），
+旧设置里的“更新源/定时更新”入口已收口到这里，原 remarks、速览、文件、搜索、DL、工具、设置与 D0/Bn/rn 规则不变。
+
+- **更新源**：工作区级 CRUD（删除只写 tombstone，保留 FileResource/文件版本/历史）、分页/搜索/状态筛选、
+  批量启停/删除、单项更新、来源测试（只读预览）、SDA catalog 受控选择、目标绑定（文件归档 / 默认配置候选 / 机台观测）。
+- **更新计划**：全局频率 + 机型覆盖（inherit/custom/manual）、全量预览与冻结 read_set、暂停自动后仍可手动全量。
+- **连接设置**：SDA 连接、凭据状态、保活/自动重登、运维 token（`MCHECKER_OPERATOR_TOKEN`）。
+- **运行记录**：持久 run/items/events、失败项重试、脱敏诊断下载。
+- **更新候选**：三方差异（基线/当前/候选）、逐项与批量决议、409 保留决议、只写 V3 草稿不自动发布。
+
+关键命令：
+
+```bash
+python scripts/sync_upgrade.py --data-dir data --dry-run     # 旧更新源/计划升级预检（幂等）
+python scripts/sync_migrate.py --data-dir data --dry-run     # 迁移 dry-run（--execute 才写）
+python scripts/collector_bundle.py --out dist/collector-bundle.zip   # collector 独立包（与核心包分离）
+python scripts/scan_secrets.py --tree                        # Git 侧 secret 自查
+```
+
+边界：collector 需要独立的 Python 3.12 + Playwright + Chromium 环境；**真实 SDA、真实 idle 保活、
+Windows/Linux 离线安装与首次启动尚未取得证据**（E2–E5），因此 V3.1 不得宣称“已发布”。
+详见 [`docs/M16_OPERATIONS.md`](docs/M16_OPERATIONS.md)、[`docs/M16_RELEASE_GATE.md`](docs/M16_RELEASE_GATE.md)、
+[`docs/M16_LIVE_ACCEPTANCE.md`](docs/M16_LIVE_ACCEPTANCE.md)。
 
 ## 配置管理（M5–M8，旧域只读兼容）
 
