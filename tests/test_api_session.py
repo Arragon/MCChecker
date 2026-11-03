@@ -79,17 +79,19 @@ class TestLocalDeployer:
             payload, _ = session(server)
         identity = payload["identity"]
         assert identity["ip"] == "127.0.0.1"
-        assert identity["is_deployer"] is False
-        assert identity["is_admin"] is False
-        assert identity["role_label"] == "访客"
+        assert identity["name"] == "Deployer"
+        assert identity["is_deployer"] is True
+        assert identity["is_admin"] is True
+        assert identity["role_label"] == "管理员"
 
     def test_local_access_without_registration_stays_deployer(self):
-        """本机访问不再显示「游客」（C18）。"""
+        """未登记姓名的本机访问显示 Deployer，并且是管理员。"""
         with running_server() as server:
             payload, _ = session(server)
         assert payload["identity"]["registered"] is False
-        assert payload["identity"]["role_label"] == "访客"
-        assert payload["identity"]["is_admin"] is False
+        assert payload["identity"]["name"] == "Deployer"
+        assert payload["identity"]["role_label"] == "管理员"
+        assert payload["identity"]["is_admin"] is True
 
     def test_deployer_and_admin_label(self):
         from app.core import storage
@@ -102,7 +104,8 @@ class TestLocalDeployer:
         with running_server() as server:
             payload, _ = session(server, "/api/v1/session?profile=%s" % p1)
         assert payload["identity"]["role_label"] == "管理员"
-        assert payload["identity"]["is_deployer"] is False
+        assert payload["identity"]["name"] == "本机管理员"
+        assert payload["identity"]["is_deployer"] is True
         assert payload["identity"]["is_admin"] is True
 
 
@@ -111,7 +114,8 @@ class TestForwardedFor:
         with running_server() as server:
             payload, _ = session(server, headers={"X-Forwarded-For": "10.9.9.9"})
         assert payload["identity"]["ip"] == "127.0.0.1"
-        assert payload["identity"]["is_admin"] is False
+        assert payload["identity"]["name"] == "Deployer"
+        assert payload["identity"]["is_admin"] is True
 
     def test_trusted_proxy_header_is_honored(self):
         with running_server(trusted_proxies=("127.0.0.1",)) as server:

@@ -39,7 +39,7 @@ class Actor:
 
     @property
     def role_label(self) -> str:
-        """角色标签（§4.1）：本机访问不再显示「游客」。"""
+        """角色标签（§4.1）。本机部署者按管理员显示。"""
         if self.is_admin:
             return "管理员"
         return "成员" if self.registered else "访客"
@@ -103,20 +103,34 @@ def _warn_untrusted_xff_once() -> None:
         logger.warning("收到 X-Forwarded-For 但未配置 MCHECKER_TRUSTED_PROXIES，已忽略该头（§11.1）")
 
 
+#: 本机地址未写入 IP 对应表时使用的显示名。
+DEPLOYER_NAME = "Deployer"
+
+
 def resolve_actor(ip: str, profile_id: str) -> Actor:
     """解析身份（§4.1）。IP 对应表与管理员名单全机型共用，不随机型变化。
+
+    回环地址和服务器本机网卡地址是部署者，直接具有管理员权限，不必先跑
+    `add-admin.sh`。已在 IP 对应表里的姓名优先于默认名 Deployer。
 
     `profile_id` 仍由调用方传入（路由都带机型），身份解析不再读机型目录。
     """
     del profile_id
+    normalized = normalize_ip(ip) or ip
+    is_deployer = normalized in deployer_ips()
     registered_name = storage.resolve_person_by_ip(ip)
-    name = registered_name or ip
+    if registered_name:
+        name = registered_name
+    elif is_deployer:
+        name = DEPLOYER_NAME
+    else:
+        name = ip
     return Actor(
         ip=ip,
         name=name,
         registered=bool(registered_name),
-        is_deployer=False,
-        is_admin=storage.is_admin_ip(ip),
+        is_deployer=is_deployer,
+        is_admin=is_deployer or storage.is_admin_ip(ip),
     )
 
 

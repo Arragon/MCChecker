@@ -110,7 +110,7 @@ sudo systemctl stop mcchecker
   - `IP 对应表`：给访问地址记一个姓名，只用于显示。
   - `管理员列表`：按 IP 授权。管理员是最高权限，可以审阅、删除文件、保存配置、改设置和机型。
 - 右上角身份：未登记姓名显示“访客”，登记了姓名但不是管理员显示“成员”，IP 在管理员列表中显示“管理员”。
-- 本机访问不再自动成为管理员。还没有管理员时，在服务器上用 sudo 写入。`sudo` 默认不继承当前环境变量；数据根以 `./service.sh status` 里的为准，不在发布目录下的 `data/` 时要写 `--data-dir`。
+- 从服务器本机打开（`127.0.0.1`、`::1` 或这台机器自己的网卡地址）时，身份就是管理员，显示名是 Deployer。不必先准备 `admin_users.json`。要给别的电脑授权时，再用 `add-admin.sh`。`sudo` 默认不继承当前环境变量；数据根以 `./service.sh status` 里的为准，不在发布目录下的 `data/` 时要写 `--data-dir`。
 
 ```bash
 sudo ./add-admin.sh --data-dir /var/lib/mcchecker --name 张三 --ip 10.1.2.3

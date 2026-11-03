@@ -109,7 +109,7 @@ def capabilities(actor) -> Dict[str, bool]:
 
     * 每个已登记 action 都给一个布尔值，前端据此禁用入口；
     * `admin` / `deployer` 是**兼容键**：两者同义，都等于"是管理员"。
-      `8a1d8ba` 取消部署者身份后，本机回环不再获得任何额外权力（决策 D4）；
+      本机地址在 `resolve_actor` 里已经把 `is_admin` 设为真，能力键跟着管理员走；
     * 未列出的能力一律视为 False —— 前端 `can()` 同样 deny-by-default，
       因此两边不会出现"前端放行、服务端 403"的错位。
     """

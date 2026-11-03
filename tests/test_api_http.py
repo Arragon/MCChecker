@@ -139,19 +139,20 @@ class TestStaticFiles:
 class TestApiSession:
     @pytest.mark.production_identity
     def test_session_shape_and_local_identity(self, server):
-        """本机回环地址不再自动成为管理员。"""
+        """本机回环地址是部署者，显示名 Deployer，并且是管理员。"""
         status, headers, body = request(server, "GET", "/api/v1/session")
         assert status == 200
         assert headers["Content-Type"].startswith("application/json")
-        assert "访客".encode("utf-8") in body
+        assert "Deployer".encode("utf-8") in body
         assert b"\\u8bbf" not in body
 
         payload = json.loads(body.decode("utf-8"))
         assert payload["identity"]["ip"] == "127.0.0.1"
-        assert payload["identity"]["is_deployer"] is False
-        assert payload["identity"]["is_admin"] is False
+        assert payload["identity"]["name"] == "Deployer"
+        assert payload["identity"]["is_deployer"] is True
+        assert payload["identity"]["is_admin"] is True
         assert payload["identity"]["registered"] is False
-        assert payload["identity"]["role_label"] == "访客"
+        assert payload["identity"]["role_label"] == "管理员"
         assert payload["profile"]["id"] == "default"
         assert payload["profiles"] == [{"id": "default", "name": "默认机型"}]
         assert payload["server"]["version"] == __version__
