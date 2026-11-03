@@ -1,5 +1,21 @@
 /* 各业务视图的专属样式。 */
 
+/* V3.1 更新管理：紧凑顶栏、状态条、三页签。颜色只用 tokens。 */
+.sync-page { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+.sync-head, .sync-head-actions, .sync-strip, .sync-subnav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sync-head { justify-content: space-between; }
+.sync-title { display: flex; align-items: baseline; gap: 8px; }
+.sync-caption { color: var(--c-text-3); font-size: var(--fs-xs); }
+.sync-strip { border: 1px solid var(--c-border); border-radius: var(--r); padding: 8px 12px; background: var(--c-surface); font-size: var(--fs-xs); }
+.sync-divider { width: 1px; height: 16px; background: var(--c-border); }
+.sync-subnav { border-bottom: 1px solid var(--c-border); }
+.sync-subnav .btn { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; }
+.sync-subnav .btn-primary { color: var(--c-primary-text); border-bottom-color: var(--c-primary); background: transparent; }
+.sync-sheet { margin-top: 8px; }
+.sync-sheet-card { border: 1px solid var(--c-border); border-radius: var(--r); background: var(--c-surface); padding: 12px; }
+.sync-page .table { font-size: var(--fs-xs); }
+.sync-page code, .sync-page .mono { font-family: var(--font-mono); }
+
 /* =================== File view =================== */
 .fv {
   display: grid;

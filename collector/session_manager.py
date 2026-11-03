@@ -69,10 +69,12 @@ class SessionManager:
         login: Any,
         credentials_provider: Callable[[], Any],
         clock: Callable[[], float] = time.monotonic,
+        auto_relogin: bool = True,
     ) -> None:
         self.login = login
         self.credentials_provider = credentials_provider
         self.clock = clock
+        self.auto_relogin = bool(auto_relogin)
         self._lock = threading.Lock()
         self._session = None
         self._generation = 0
@@ -121,6 +123,10 @@ class SessionManager:
                 generation = self._generation
                 replay = attempted
             else:
+                if not self.auto_relogin:
+                    return SessionOutcome(
+                        "failed", "auto_relogin_disabled", logins=self._login_count
+                    )
                 blocked = self._blocked_locked()
                 if blocked is not None:
                     return blocked

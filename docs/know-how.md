@@ -119,6 +119,7 @@
 - `tests.js` 的 `EXPECTED_CASES` 闸是**可自证伪**的，所以「ALL PASSED (n)」里的 n 就是页面自己数出来的注册数（M3-13 实测）：把副本里的常量从 51 改成 47，同一份页面报 `1 FAILED / 52` 并在列表里点名「用例注册数不符：预期 47，实际注册 51」。这条探测要在**改之前的 /tmp 副本**上做，别把它当成一次真实验收轮次记进计数。
 
 ## 5. UI/UX Notes
+- 更新管理按 V3.1 HTML 原型收成三页（更新源 / 运行记录 / 更新候选）。计划和连接是来源页上的层，不是平级页签。D0 未冻结时候选写入准备版草稿；D0 已冻结时 `create_baseline=true` 新建基线变更草稿并写入勾选的新值，不改 D0、不发布。保活 `enabled` 与 `auto_relogin` 分开保存；collector 的 `SessionManager(auto_relogin=False)` 不会调用登录。旧书签 `settings/schedule` 打开计划层。
 - 树形视图使用自定义 HTML (ui.html + ui.row + ui.column) 构建，折叠箭头为 CSS 三角形（无需 Material Icons），层级竖线使用不同颜色区分（8色循环，1.5px 细线）
 - 折叠展开通过原生 JavaScript `mct(this)` 实现 DOM 遍历（closest('.tree-row') → nextElementSibling），无需生成元素 ID，比 getElementById 方案更健壮
 - NiceGUI 3.0.4 要求 `ui.html()` 必须显式传入 `sanitize=False` 参数

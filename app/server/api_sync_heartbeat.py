@@ -10,7 +10,7 @@
 
 probe 由部署端通过 `configure_probe` 注入（`(workspace_id, connection_id) ->
 {status, session_valid, reason_code, renewal_observed}`）；本模块不联网、
-不接触凭据明文。自动重登不是独立开关：它由凭据状态/失败原因推导，UI 只读展示。
+不接触凭据明文。`auto_relogin` 与保活 `enabled` 分别保存：关掉其中一个不会改另一个。
 """
 
 from __future__ import annotations
@@ -112,13 +112,14 @@ def configure_heartbeat(
     wid = params["wid"]
     _connection(wid, params["cid"])
     payload = json_body(body)
-    _only_keys(payload, {"interval_minutes", "enabled"})
+    _only_keys(payload, {"interval_minutes", "enabled", "auto_relogin"})
     state = sync_heartbeat.configure(
         wid,
         params["cid"],
         payload.get("interval_minutes"),
         payload.get("enabled"),
         _if_match(ctx),
+        payload.get("auto_relogin") if "auto_relogin" in payload else None,
     )
     return Response(payload=state)
 

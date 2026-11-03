@@ -18,7 +18,15 @@ from app.core import storage
 from app.core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
 from app.core.sync_models import validate_id, validate_workspace_id
 
-from . import config_v3_catalog, config_v3_drafts, sync_candidate_plans, sync_candidates, sync_store, workspace_context
+from . import (
+    config_v3_baselines,
+    config_v3_catalog,
+    config_v3_drafts,
+    sync_candidate_plans,
+    sync_candidates,
+    sync_store,
+    workspace_context,
+)
 
 FILE = "candidate_applies.json"
 DEFAULT_DOC: Dict[str, Any] = {"items": {}}
@@ -94,12 +102,48 @@ def _existing_draft_receipt(
     }
 
 
+def _write_baseline_draft(
+    wid: str,
+    profile_id: str,
+    preview: Dict[str, Any],
+    patch_items: List[Dict[str, Any]],
+    request_id: str,
+) -> tuple:
+    """从当前基线复制一份变更草稿并写入勾选的新值。不改冻结的 D0，不发布。"""
+    snapshot = sync_candidate_plans._draft_snapshot(
+        wid, profile_id, preview["config_id"], preview["draft_id"]
+    )
+    release_id = snapshot["release"]["release_id"]
+    config_id = preview["config_id"]
+    with storage.use_workspace(wid):
+        try:
+            draft = config_v3_baselines.create_baseline_draft(profile_id, config_id, release_id)
+        except AppError as exc:
+            existing = (exc.detail or {}).get("draft_id")
+            if exc.code != REVISION_CONFLICT or not existing:
+                raise
+            draft = config_v3_baselines.get_baseline_draft(profile_id, config_id, existing)
+        draft_id = draft["draft_id"]
+        revision = int(draft.get("revision") or 0)
+        if not patch_items:
+            return draft_id, revision, []
+        patched, _etag = config_v3_baselines.patch_baseline_values(
+            profile_id,
+            config_id,
+            draft_id,
+            {"request_id": request_id, "items": patch_items, "expected_revision": revision},
+            '"%d"' % revision,
+        )
+    return draft_id, int(patched["revision"]), sorted((patched.get("values") or {}).keys())
+
+
 def apply_preview(
     workspace_id: str,
     profile_id: str,
     preview_id: str,
     request_id: Any,
     decisions: Any,
+    create_baseline: bool = False,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     workspace_context.assert_profile(wid, profile_id)
@@ -133,10 +177,15 @@ def apply_preview(
             return dict(receipt, replayed=True)
 
         preview = sync_candidate_plans.get_preview(wid, pid)
-        if preview.get("d0_frozen"):
+        frozen = bool(preview.get("d0_frozen"))
+        if frozen and not create_baseline:
             raise AppError(REVISION_CONFLICT, "D0 已冻结，不能应用候选", field="d0_frozen")
+        if create_baseline and not frozen:
+            raise AppError(INVALID_INPUT, "D0 仍是准备稿，请写入准备版草稿", field="create_baseline")
         blockers = [
-            row for row in preview.get("blockers") or [] if row.get("code") != "base_missing"
+            row for row in preview.get("blockers") or []
+            if row.get("code") != "base_missing"
+            and not (create_baseline and row.get("code") == "d0_frozen")
         ]
         if blockers:
             raise AppError(
@@ -156,7 +205,10 @@ def apply_preview(
         for parameter_id, item in items_by_id.items():
             action = item.get("action")
             decision = normalized.get(parameter_id)
-            if decision and decision not in (item.get("allowed") or []):
+            allowed = list(item.get("allowed") or [])
+            if create_baseline and not allowed:
+                allowed = ["use_new", "inherit_old", "manual"]
+            if decision and decision not in allowed:
                 raise AppError(
                     INVALID_INPUT,
                     "该参数不允许此决议",
@@ -191,7 +243,21 @@ def apply_preview(
             patch_items.append(patch)
             changed.append(parameter_id)
 
-        if not patch_items:
+        if create_baseline:
+            draft_id, draft_revision, changed = _write_baseline_draft(
+                wid, profile_id, preview, patch_items, key
+            )
+            result = {
+                "status": "applied",
+                "changed": changed,
+                "draft_revision": draft_revision,
+                "draft_id": draft_id,
+                "target": "baseline_draft",
+                "applied_at": _now(),
+                "request_hash": digest,
+                "preview_id": pid,
+            }
+        elif not patch_items:
             result = {
                 "status": "applied",
                 "changed": [],
@@ -228,11 +294,11 @@ def apply_preview(
                 "workspace_id": wid,
                 "profile_id": profile_id,
                 "config_id": preview["config_id"],
-                "draft_id": preview["draft_id"],
                 "candidate_id": preview["candidate_id"],
                 "request_id": key,
             }
         )
+        result.setdefault("draft_id", preview["draft_id"])
 
         def mutate(doc: Dict[str, Any]) -> Dict[str, Any]:
             doc["items"][receipt_key] = result

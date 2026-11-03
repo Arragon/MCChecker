@@ -62,6 +62,7 @@ def _default(connection_id: str) -> Dict[str, Any]:
     return {
         "connection_id": connection_id,
         "enabled": False,
+        "auto_relogin": True,
         "interval_minutes": DEFAULT_INTERVAL,
         "last_heartbeat_at": None,
         "last_renewing_activity": None,
@@ -97,6 +98,7 @@ def _safe(record: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "connection_id": record["connection_id"],
         "enabled": bool(record.get("enabled")),
+        "auto_relogin": bool(record.get("auto_relogin", True)),
         "interval_minutes": int(record.get("interval_minutes") or DEFAULT_INTERVAL),
         "last_heartbeat_at": record.get("last_heartbeat_at"),
         "last_renewing_activity": record.get("last_renewing_activity"),
@@ -152,8 +154,12 @@ def configure(
     interval_minutes: Any,
     enabled: Any,
     expected_revision: Any,
+    auto_relogin: Any = None,
 ) -> Dict[str, Any]:
-    """保存保活开关/间隔；不改 heartbeat_validated。"""
+    """保存保活开关/间隔，以及独立的自动重登开关；不改 heartbeat_validated。
+
+    `auto_relogin is None` 表示这次请求不改该开关。关闭保活不会顺带关掉自动重登。
+    """
     wid = validate_workspace_id(workspace_id)
     cid = validate_id(connection_id, "connection_id")
     sync_connections.get_connection(wid, cid)
@@ -163,6 +169,8 @@ def configure(
         raise AppError(INVALID_INPUT, "interval_minutes 必须在 1–60", field="interval_minutes")
     if not isinstance(enabled, bool):
         raise AppError(INVALID_INPUT, "enabled 必须是布尔值", field="enabled")
+    if auto_relogin is not None and not isinstance(auto_relogin, bool):
+        raise AppError(INVALID_INPUT, "auto_relogin 必须是布尔值", field="auto_relogin")
     expected = validate_revision(expected_revision, "expected_revision")
 
     def mutate(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -171,6 +179,10 @@ def configure(
             raise AppError(REVISION_CONFLICT, "心跳配置 revision 已变化", field="expected_revision")
         record["enabled"] = enabled
         record["interval_minutes"] = interval_minutes
+        if auto_relogin is not None:
+            record["auto_relogin"] = auto_relogin
+        elif "auto_relogin" not in record:
+            record["auto_relogin"] = True
         if not enabled:
             record["next_due_at"] = None
         record["revision"] = expected + 1

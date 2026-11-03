@@ -1047,7 +1047,7 @@
                     kind: "empty",
                     icon: "records",
                     title: "暂无修改记录",
-                    desc: res.record_url ? "定时更新时会自动拉取；也可点击「立即拉取」。" : "请在「设置 › 更新源」为该文件配置修改记录链接。",
+                    desc: res.record_url ? "定时更新时会自动拉取；也可点击「立即拉取」。" : "请在「更新管理」为该文件配置修改记录链接。",
                     actions: !res.record_url && app.can("deployer") ? [h("button.btn", { type: "button", onclick: function () { app.go({ kind: "settings", arg: "sources" }); } }, "前往配置")] : null,
                   })
             ),

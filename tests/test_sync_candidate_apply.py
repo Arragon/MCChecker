@@ -234,3 +234,31 @@ def test_no_op_decisions_do_not_create_a_draft_revision():
     assert result["changed"] == []
     with storage.use_workspace(wid):
         assert config_v3_drafts.get_draft("default", cid, did)["revision"] == 1
+
+
+def test_frozen_d0_apply_creates_baseline_draft_and_leaves_d0():
+    wid, cid, did, pids = make_config(1)
+    seed_current(wid, cid, did, pids, "1")
+    with storage.use_workspace(wid):
+        config_v3_drafts.freeze_default("default", cid, did, {"request_id": "freeze-1"})
+        before = config_v3_drafts.get_draft("default", cid, did)
+    preview = sync_candidate_plans.create_preview(
+        wid, "default", cid, did, "cand-frozen-apply",
+        values(pids, "1"), values(pids, "2"),
+    )
+    assert preview["d0_frozen"] is True
+    result = sync_candidate_apply.apply_preview(
+        wid, "default", preview["preview_id"], "baseline-1", {}, create_baseline=True
+    )
+    assert result["target"] == "baseline_draft"
+    assert result["changed"]
+    with storage.use_workspace(wid):
+        after = config_v3_drafts.get_draft("default", cid, did)
+        doc = config_v3_catalog._load("default")
+        release = next(iter(doc["configs"][cid]["releases"].values()))
+        draft = release["baseline_draft"]
+    assert after["revision"] == before["revision"]
+    assert after.get("frozen") is True or release["d0"]["frozen"] is True
+    member = draft["values"][pids[0]]
+    assert member["value"] == "2"
+    assert release["d0"]["values"][pids[0]]["value"] == "1"
