@@ -62,7 +62,7 @@
   ];
   var SORTS = [
     { id: "name", label: "按名称" },
-    { id: "updated", label: "按更新时间" },
+    { id: "updated", label: "按更新时间（已加载）" },
   ];
 
   function tabById(id) {
@@ -82,6 +82,17 @@
       if (MC.workspaces && MC.workspaces.scopeId) return MC.workspaces.scopeId();
     } catch (e) { /* 测试页/旧壳 */ }
     return "default";
+  }
+
+  function captureWorkspace() {
+    var wid = workspaceId();
+    var epoch = MC.workspaces && MC.workspaces.epoch ? MC.workspaces.epoch() : null;
+    return {
+      id: wid,
+      current: function () {
+        return workspaceId() === wid && (epoch === null || !MC.workspaces || !MC.workspaces.epoch || MC.workspaces.epoch() === epoch);
+      },
+    };
   }
 
   function sourcesPath() {
@@ -156,6 +167,11 @@
   }
 
   MC.views.updates = function (app, route) {
+    function freshPlan() {
+      return { loadedFor: "", loading: false, error: "", policy: null, draft: null, sources: [], preview: null,
+        previewWorkspaceId: "", previewing: false, validating: false, saving: false, conflict: false,
+        conflictLoading: false, conflictComparison: null, running: false, failuresOnly: false, failedSourceIds: {} };
+    }
     var state = {
       tab: tabById(route && route.arg).id,
       sheet: sheetFor(route),
@@ -165,7 +181,8 @@
         next_cursor: null,
         query: "",
         status: "",
-        scope: "workspace",
+        scope: "profile",
+        loadSeq: 0,
         sort: "name",
         loading: false,
         error: "",
@@ -183,6 +200,7 @@
         loading: false,
         error: "",
         expanded: false,
+        loadSeq: 0,
       },
       candidates: {
         items: [],
@@ -195,23 +213,9 @@
         loadedFor: "",
         selected: {},
         busy: "",
+        loadSeq: 0,
       },
-      plan: {
-        loadedFor: "",
-        loading: false,
-        error: "",
-        policy: null,
-        draft: null,
-        sources: [],
-        preview: null,
-        previewWorkspaceId: "",
-        previewing: false,
-        validating: false,
-        saving: false,
-        running: false,
-        failuresOnly: false,
-        failedSourceIds: {},
-      },
+      plan: freshPlan(),
       connections: {
         loadedFor: "",
         loading: false,
@@ -225,9 +229,10 @@
         loadSeq: 0,
       },
     };
-    var el = h("div");
+    var planErrorId = util.uid("plan-error");
+    var el = h("div.sync-root");
     var tabbar = h("div.sync-subnav", { role: "tablist", "aria-label": "更新管理内容" });
-    var body = h("div");
+    var body = h("div.sync-content", { role: "tabpanel", id: util.uid("sync-panel"), tabindex: "0" });
     //: 编辑抽屉是否有未保存草稿：驱动切 tab / 关抽屉 / 切工作区的提示。
     var activeEditorDirty = false;
 
@@ -241,6 +246,9 @@
             type: "button",
             role: "tab",
             "aria-selected": active ? "true" : "false",
+            "aria-controls": body.id,
+            id: body.id + "-" + tab.id,
+            tabindex: active ? "0" : "-1",
             "data-sync-tab": tab.id,
           },
           tab.label
@@ -269,6 +277,19 @@
           renderBody();
           if (app && app.go) app.go({ kind: "updates", arg: tab.id });
         });
+        button.addEventListener("keydown", function (event) {
+          var index = TABS.indexOf(tab);
+          var target = event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1
+            : event.key === "ArrowRight" ? (index + 1) % TABS.length
+            : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : -1;
+          if (target < 0) return;
+          event.preventDefault();
+          var next = tabbar.querySelector('[data-sync-tab="' + TABS[target].id + '"]');
+          next.click();
+          var focused = tabbar.querySelector('[data-sync-tab="' + TABS[target].id + '"]');
+          if (focused) focused.focus();
+        });
+        if (active) body.setAttribute("aria-labelledby", button.id);
         tabbar.appendChild(button);
       });
     }
@@ -291,7 +312,8 @@
 
     function loadSources(reset) {
       var S = state.sources;
-      if (S.loading) return Promise.resolve();
+      if (S.loading && !reset) return Promise.resolve();
+      var seq = ++S.loadSeq;
       S.loading = true;
       S.error = "";
       if (reset) {
@@ -303,10 +325,12 @@
       var query = {
         q: S.query,
         status: S.status || undefined,
+        profile_id: S.scope === "profile" ? ((app && app.pid) || (route && route.pid) || "default") : undefined,
         limit: 50,
         cursor: S.expanded && S.next_cursor ? S.next_cursor : "0",
       };
       return MC.api.requestV3("GET", sourcesPath(), { query: query }).then(function (data) {
+        if (seq !== S.loadSeq) return;
         var incoming = (data && data.items) || [];
         S.items = S.expanded ? S.items.concat(incoming) : incoming;
         S.total = data && typeof data.total === "number" ? data.total : S.items.length;
@@ -319,6 +343,7 @@
         S.error = "";
         renderBody();
       }, function (err) {
+        if (seq !== S.loadSeq) return;
         S.loading = false;
         S.error = errorText(err);
         renderBody();
@@ -336,7 +361,54 @@
     }
 
     function field(label, control) {
-      return h("div.col", { style: "gap:4px" }, h("label.small.muted", label), control);
+      if (!control.id) control.id = util.uid("sync-field");
+      return h("div.col", { style: "gap:4px" }, h("label.small.muted", { for: control.id }, label), control);
+    }
+
+    function fieldErrors(node) {
+      node.id = util.uid("field-error");
+      node.classList.add("sync-form-error");
+      node.setAttribute("role", "alert");
+      var invalid = null;
+      function clearInvalid() {
+        if (!invalid) return;
+        invalid.removeAttribute("aria-invalid");
+        invalid.removeAttribute("aria-describedby");
+        invalid.removeEventListener("input", onChange);
+        invalid.removeEventListener("change", onChange);
+        invalid = null;
+      }
+      function onChange() { clearInvalid(); node.textContent = ""; node.style.display = "none"; }
+      return function (message, control) {
+        clearInvalid();
+        node.textContent = message || "";
+        node.style.display = message ? "" : "none";
+        if (message && control && !control.disabled) {
+          invalid = control;
+          control.setAttribute("aria-invalid", "true");
+          control.setAttribute("aria-describedby", node.id);
+          control.addEventListener("input", onChange);
+          control.addEventListener("change", onChange);
+          control.focus();
+        }
+      };
+    }
+
+    function emptyState(title, description) {
+      return h("div.sync-empty", h("h3", title), h("p.muted.small", description));
+    }
+
+    function sourceText(value, kind) {
+      var text = String(value || "—");
+      var isPath = kind === "path";
+      var shortLimit = isPath ? 56 : 42;
+      if (text.length <= shortLimit) return isPath ? h("code.xsmall.sync-path", text) : h("strong", text);
+      var attrs = {};
+      attrs[isPath ? "data-sync-long-path" : "data-sync-long-name"] = "1";
+      return h("details.sync-long-text", attrs,
+        h("summary", { "aria-label": (isPath ? "来源路径：" : "来源名称：") + text },
+          isPath ? h("code.xsmall", text.slice(0, shortLimit) + "…") : h("strong", text.slice(0, shortLimit) + "…")),
+        isPath ? h("code.xsmall.sync-path", text) : h("div.small", text));
     }
 
     function targetOfSource(source) {
@@ -374,7 +446,8 @@
         target_release_id: target0.release_id,
         target_device_id: target0.device_id,
       };
-      var error = h("div.form-error", { style: "display:none" });
+      var error = h("div.form-error.sync-form-error", { id: util.uid("source-error"), role: "alert", style: "display:none" });
+      var invalidControl = null;
       var hint = h("p.xsmall.muted", { "data-sync-hint": "1" });
       var nameInput = h("input.input", { value: draft.name, autofocus: true });
       var refInput = h("input.input", { value: draft.resource_ref, placeholder: "下载 URL / SDA 资源引用" });
@@ -643,7 +716,7 @@
       );
       var intervalInput = h("input.input", { type: "number", min: "1", max: "2160", value: draft.interval_hours, placeholder: "小时" });
       modeSelect.value = draft.schedule_mode;
-      var intervalWrap = h("div.col", { style: "gap:4px" }, h("label.small.muted", "间隔（小时）"), intervalInput);
+      var intervalWrap = field("间隔（小时）", intervalInput);
       intervalWrap.style.display = draft.schedule_mode === "custom" ? "" : "none";
       modeSelect.addEventListener("change", function () {
         intervalWrap.style.display = modeSelect.value === "custom" ? "" : "none";
@@ -675,9 +748,31 @@
         markDirty();
       });
 
-      function showError(message) {
+      function clearInvalidControl() {
+        if (!invalidControl) return;
+        invalidControl.removeAttribute("aria-invalid");
+        invalidControl.removeAttribute("aria-describedby");
+        invalidControl.removeEventListener("input", onInvalidChange);
+        invalidControl.removeEventListener("change", onInvalidChange);
+        invalidControl = null;
+      }
+      function onInvalidChange() {
+        clearInvalidControl();
+        error.textContent = "";
+        error.style.display = "none";
+      }
+      function showError(message, control) {
+        clearInvalidControl();
         error.textContent = message;
         error.style.display = message ? "" : "none";
+        if (message && control && !control.disabled) {
+          invalidControl = control;
+          control.setAttribute("aria-invalid", "true");
+          control.setAttribute("aria-describedby", error.id);
+          control.addEventListener("input", onInvalidChange);
+          control.addEventListener("change", onInvalidChange);
+          control.focus();
+        }
       }
 
       function buildPayload() {
@@ -708,27 +803,27 @@
       }
 
       function validate(payload) {
-        if (!payload.name) return "名称不能为空";
-        if (needsConnection() && !payload.connection_id) return "SDA 来源必须选择已批准的连接";
+        if (!payload.name) return { message: "名称不能为空", control: nameInput };
+        if (needsConnection() && !payload.connection_id) return { message: "SDA 来源必须选择已批准的连接", control: connectionSelect };
         if (isCatalogKind() && (!payload.resource_ref || !payload.display_path)) {
-          return "SDA 表/文件必须从目录选择资源 ID 与业务路径";
+          return { message: "SDA 表/文件必须从目录选择资源 ID 与业务路径", control: !payload.resource_ref ? refInput : displayInput };
         }
         if (isCreate && payload.kind === "http_file" && !payload.resource_ref) {
-          return "HTTP 来源必须填写下载 URL";
+          return { message: "HTTP 来源必须填写下载 URL", control: refInput };
         }
         if (payload.display_path && payload.display_path.charAt(0) !== "/") {
-          return "业务路径必须以 / 开始（目录 ID 与路径不一致会被拒绝）";
+          return { message: "业务路径必须以 / 开始（目录 ID 与路径不一致会被拒绝）", control: displayInput };
         }
         if (payload.schedule_mode === "custom" && (!payload.interval_hours || payload.interval_hours < 1 || payload.interval_hours > 2160)) {
-          return "自定义间隔必须在 1–2160 小时";
+          return { message: "自定义间隔必须在 1–2160 小时", control: intervalInput };
         }
         if (!payload.target) return "";
-        if (payload.target.kind === "file_archive" && !payload.target.file_id) return "请选择目标文件（FileResource）";
+        if (payload.target.kind === "file_archive" && !payload.target.file_id) return { message: "请选择目标文件（FileResource）", control: targetBlock.querySelector("[data-sync-target-file]") };
         if (payload.target.kind === "default_candidate" && (!payload.target.configuration_id || !payload.target.release_id)) {
-          return "请选择固定配置与软件版本";
+          return { message: "请选择固定配置与软件版本", control: targetBlock.querySelector(payload.target.configuration_id ? "[data-sync-target-release]" : "[data-sync-target-config]") };
         }
         if (payload.target.kind === "machine_observation" && !payload.target.device_id) {
-          return "机台观测必须填写可信 device_id（不允许按文件名/IP 猜测）";
+          return { message: "机台观测必须填写可信 device_id（不允许按文件名/IP 猜测）", control: targetBlock.querySelector("[data-sync-target-device]") };
         }
         return "";
       }
@@ -741,13 +836,50 @@
       reloadButton.addEventListener("click", function () {
         if (isCreate) return;
         reloadButton.disabled = true;
-        MC.api.requestV3("GET", sourcePath(source)).then(function (fresh) {
+        hint.textContent = "正在查找服务端最新版本…";
+        var seenCursors = {};
+        var listingRevision = null;
+        function findSource(cursor) {
+          if (seenCursors[cursor]) return Promise.reject(new Error("来源列表分页异常，请重试"));
+          seenCursors[cursor] = true;
+          return MC.api.requestV3("GET", sourcesPath(), { query: {
+            profile_id: source.profile_id || undefined, status: "all", limit: 200, cursor: cursor,
+          } }).then(function (page) {
+            if (page.query_revision == null) throw new Error("来源列表未提供版本号，无法安全核对");
+            if (listingRevision === null) listingRevision = page.query_revision;
+            else if (listingRevision !== page.query_revision) throw new Error("来源列表在读取时发生变化，请重试");
+            var fresh = ((page && page.items) || []).filter(function (row) { return row.source_id === source.source_id; })[0];
+            if (fresh) return fresh;
+            if (page.next_cursor != null && String(page.next_cursor) !== "") return findSource(String(page.next_cursor));
+            throw new Error("来源已不存在或不在当前机型，草稿仍保留");
+          });
+        }
+        findSource("0").then(function (fresh) {
           reloadButton.disabled = false;
-          source.revision = fresh.revision;
-          hint.textContent = "已重新载入 revision " + fresh.revision + "；你的输入未改动，确认后再保存。";
-          showError("");
+          if (fresh.deleted) { showError("该来源已删除；草稿仍保留，不能覆盖已删除的来源。"); return; }
+          var payload = buildPayload();
+          var labels = { name: "名称", kind: "类型", resource_ref: "资源引用", record_source: "修改记录链接", keyword: "关键词", display_path: "业务路径", enabled: "启用状态", schedule_mode: "更新计划", interval_hours: "间隔", connection_id: "连接", target: "接收目标" };
+          var changes = Object.keys(labels).filter(function (key) {
+            return Object.prototype.hasOwnProperty.call(payload, key) && JSON.stringify(payload[key] == null ? null : payload[key]) !== JSON.stringify(fresh[key] == null ? null : fresh[key]);
+          });
+          var details = h("div.sync-conflict-comparison", h("p.small.muted", "以下是服务端最新值与当前输入；确认后再次保存将按当前输入覆盖这些字段。"));
+          changes.forEach(function (key) {
+            function shown(value) { return value == null ? "未设" : (typeof value === "object" ? JSON.stringify(value) : String(value)); }
+            details.appendChild(h("div.sync-conflict-field", h("strong.small", labels[key]),
+              h("div.small", "服务端：", h("code", shown(fresh[key]))),
+              h("div.small", "当前输入：", h("code", shown(payload[key])))));
+          });
+          if (!changes.length) details.appendChild(h("p.small", "当前输入与最新版本一致。"));
+          return MC.confirm({ title: "核对最新来源", message: "请确认本地输入与服务端最新版本的差异。", detail: details,
+            confirmText: "保留当前输入", cancelText: "取消", danger: true }).then(function (ok) {
+            if (!ok) { hint.textContent = "尚未采用最新版本；当前草稿保持不变。"; return; }
+            source.revision = fresh.revision;
+            hint.textContent = "已核对 revision " + fresh.revision + "；再次保存会按当前输入覆盖所示字段。";
+            showError("");
+          });
         }, function (err) {
           reloadButton.disabled = false;
+          hint.textContent = "未采用最新版本；当前草稿保持不变。";
           showError("重新载入失败：" + errorText(err));
         });
       });
@@ -785,7 +917,7 @@
           ))),
           h("div.row", { style: "gap:18px;align-items:center" },
             h("label.row", { style: "gap:6px;align-items:center" }, enabledInput, h("span", "启用")),
-            h("div.col", { style: "gap:4px" }, h("label.small.muted", "计划"), modeSelect)
+            field("计划", modeSelect)
           ),
           intervalWrap,
           casNote,
@@ -813,7 +945,7 @@
               onclick: function () {
                 var payload = buildPayload();
                 var problem = validate(payload);
-                if (problem) { showError(problem); return; }
+                if (problem) { showError(problem.message, problem.control); return; }
                 showError("");
                 reloadButton.style.display = "none";
                 var request = isCreate
@@ -854,6 +986,7 @@
         },
         onClose: function () { activeEditorDirty = false; },
       });
+      modal.el.classList.add("sync-source-dialog");
       baseline = readDraft();
       activeEditorDirty = false;
       syncConditional();
@@ -884,6 +1017,7 @@
     }
 
     function deleteSource(source) {
+      var origin = captureWorkspace();
       MC.confirm({
         title: "删除更新源「" + source.name + "」？",
         message: "删除只写 tombstone：来源不再参与同步与预览，但 FileResource、文件版本、历史记录与归档都会保留。",
@@ -891,13 +1025,17 @@
         danger: true,
       }).then(function (ok) {
         if (!ok) return;
-        MC.api.requestV3("DELETE", sourcePath(source), {
+        if (!origin.current()) { MC.toast.warning("工作区已切换", "来源未删除，请返回原工作区重新确认。"); return; }
+        var path = "/api/v3/workspaces/" + encodeURIComponent(origin.id) + "/sync/sources/" + encodeURIComponent(source.source_id);
+        MC.api.requestV3("DELETE", path, {
           headers: { "If-Match": String(source.revision) },
         }).then(function () {
+          if (!origin.current()) { MC.toast.warning("工作区 " + origin.id + " 的删除已提交", "请返回原工作区核对结果。"); return; }
           MC.toast.success("更新源已删除");
           // 删除后保持当前搜索/筛选/分页，只局部移除该行。
           dropSourceRow(source.source_id);
         }, function (err) {
+          if (!origin.current() || (err && err.code === "STALE_CONTEXT")) { MC.toast.warning("工作区 " + origin.id + " 的删除结果待核对", "请返回原工作区确认来源状态。"); return; }
           MC.toast.error("删除失败", errorText(err));
         });
       });
@@ -953,6 +1091,7 @@
       var rows = selectedSourceRows().filter(function (row) { return !row.deleted; });
       var S = state.sources;
       if (!rows.length || S.busy) return;
+      var origin = captureWorkspace();
       var label = action === "enable" ? "启用" : (action === "disable" ? "停用" : "删除");
       MC.confirm({
         title: "批量" + label + " " + rows.length + " 个来源？",
@@ -963,33 +1102,44 @@
         danger: action === "delete",
       }).then(function (ok) {
         if (!ok) return;
+        if (!origin.current()) { MC.toast.warning("工作区已切换", "未开始批量操作，请返回原工作区重新选择。"); return; }
         S.busy = action;
         if (state.tab === "sources") renderBody();
         var failures = [];
+        var stopped = false;
         var seq = Promise.resolve();
         rows.forEach(function (row) {
           seq = seq.then(function () {
+            if (stopped || !origin.current()) { stopped = true; return; }
+            var path = "/api/v3/workspaces/" + encodeURIComponent(origin.id) + "/sync/sources/" + encodeURIComponent(row.source_id);
             if (action === "delete") {
-              return MC.api.requestV3("DELETE", sourcePath(row), {
+              return MC.api.requestV3("DELETE", path, {
                 headers: { "If-Match": String(row.revision) },
-              }).then(function () { delete S.selected[row.source_id]; }, function (err) {
+              }).then(function () { if (!origin.current()) { stopped = true; return; } delete S.selected[row.source_id]; }, function (err) {
+                if (!origin.current() || (err && err.code === "STALE_CONTEXT")) { stopped = true; return; }
                 failures.push(row.name + "：" + errorText(err));
               });
             }
-            return MC.api.requestV3("PATCH", sourcePath(row), {
+            return MC.api.requestV3("PATCH", path, {
               headers: { "If-Match": String(row.revision) },
               body: { enabled: action === "enable" },
             }).then(function (data) {
+              if (!origin.current()) { stopped = true; return; }
               row.enabled = data.enabled;
               row.revision = data.revision;
               delete S.selected[row.source_id];
             }, function (err) {
+              if (!origin.current() || (err && err.code === "STALE_CONTEXT")) { stopped = true; return; }
               failures.push(row.name + "：" + errorText(err));
             });
           });
         });
         seq.then(function () {
           S.busy = "";
+          if (stopped || !origin.current()) {
+            MC.toast.warning("工作区 " + origin.id + " 的批量操作已停止", "尚未提交的来源不会继续处理；请返回原工作区核对已提交项。");
+            return;
+          }
           if (failures.length) {
             MC.toast.error("批量" + label + "部分失败（" + failures.length + "/" + rows.length + "）", failures.join("；"));
           } else {
@@ -1004,10 +1154,42 @@
       if (state.sheet === "plan") paintSheet();
     }
 
+    function planDirty() {
+      var P = state.plan;
+      if (!P.policy || !P.draft) return false;
+      function snapshot(draft) {
+        var overrides = draft.overrides || {};
+        return JSON.stringify({
+          enabled: !!draft.enabled,
+          hours: String(draft.default_interval_hours),
+          overrides: Object.keys(overrides).sort().map(function (pid) {
+            var item = overrides[pid];
+            return [pid, item.enabled == null ? null : item.enabled,
+              item.interval_hours == null ? null : String(item.interval_hours)];
+          }),
+        });
+      }
+      return snapshot(P.draft) !== snapshot(draftFromPolicy(P.policy));
+    }
+
+    function refreshPlan() {
+      if (!planDirty()) return loadPlan();
+      var P = state.plan;
+      var origin = captureWorkspace();
+      return MC.confirm({
+        title: "刷新更新计划？",
+        message: "刷新将放弃当前尚未保存的计划修改。",
+        confirmText: "放弃修改并刷新",
+        cancelText: "继续编辑",
+        danger: true,
+      }).then(function (ok) { if (ok && state.plan === P && origin.current()) return loadPlan(); });
+    }
+
     function loadPlan() {
       var P = state.plan;
       if (P.loading) return Promise.resolve();
-      var wid = workspaceId();
+      var origin = captureWorkspace();
+      var wid = origin.id;
       P.loading = true;
       P.loadedFor = wid;
       P.error = "";
@@ -1016,16 +1198,19 @@
         MC.api.requestV3("GET", policyPath()),
         MC.api.requestV3("GET", sourcesPath(), { query: { status: "all", limit: 200 } }),
       ]).then(function (result) {
-        if (P.loadedFor !== workspaceId()) return;
+        if (state.plan !== P || !origin.current() || P.loadedFor !== wid) return;
         P.policy = result[0] || {};
         P.draft = draftFromPolicy(P.policy);
+        P.invalidField = "";
+        P.conflict = false;
+        P.conflictComparison = null;
         P.sources = (result[1] && result[1].items) || [];
         P.loading = false;
         if (typeof paintChrome === "function") paintChrome();
         P.error = "";
         rerenderPlan();
       }, function (err) {
-        if (P.loadedFor !== workspaceId()) return;
+        if (state.plan !== P || !origin.current() || P.loadedFor !== wid) return;
         P.loading = false;
         P.error = planErrorText(err);
         rerenderPlan();
@@ -1049,10 +1234,11 @@
       var draft = state.plan.draft;
       var hours = Number(draft.default_interval_hours);
       if (!isFinite(hours) || hours < 1 || hours > 2160) {
-        return { error: "默认间隔必须在 1–2160 小时" };
+        return { error: "默认间隔必须在 1–2160 小时", field: "global" };
       }
       var overrides = {};
       var bad = "";
+      var badProfile = "";
       Object.keys(draft.overrides).forEach(function (pid) {
         var item = draft.overrides[pid] || {};
         var clean = {};
@@ -1061,13 +1247,14 @@
           var value = Number(item.interval_hours);
           if (!isFinite(value) || value < 1 || value > 2160) {
             bad = "机型覆盖间隔必须在 1–2160 小时";
+            badProfile = pid;
           } else {
             clean.interval_hours = value;
           }
         }
         if (Object.keys(clean).length) overrides[pid] = clean;
       });
-      if (bad) return { error: bad };
+      if (bad) return { error: bad, field: "profile:" + badProfile };
       return {
         body: {
           enabled: !!draft.enabled,
@@ -1079,13 +1266,21 @@
 
     function savePlan() {
       var P = state.plan;
-      if (!canSavePlan() || P.saving || !P.draft) return;
+      if (!canSavePlan() || P.saving || P.conflict || !P.draft) return;
       var built = buildPolicyPayload();
       if (built.error) {
         P.error = built.error;
+        P.invalidField = built.field;
         rerenderPlan();
+        var inputs = sheetHost ? sheetHost.querySelectorAll("[data-plan-interval], [data-plan-override-interval]") : [];
+        Array.prototype.some.call(inputs, function (input) {
+          if ((built.field === "global" && input.hasAttribute("data-plan-interval")) || "profile:" + input.getAttribute("data-plan-override-interval") === built.field) { input.focus(); return true; }
+          return false;
+        });
         return;
       }
+      P.invalidField = "";
+      var origin = captureWorkspace();
       var revision = P.policy && P.policy.revision != null ? P.policy.revision : 0;
       P.saving = true;
       P.error = "";
@@ -1094,38 +1289,87 @@
         body: built.body,
         headers: { "If-Match": String(revision) },
       }).then(function (policy) {
+        if (state.plan !== P || !origin.current()) { MC.toast.warning("工作区 " + origin.id + " 的计划保存结果待核对", "请返回原工作区查看计划状态。"); return; }
         P.policy = policy || P.policy;
         P.draft = draftFromPolicy(P.policy);
         P.saving = false;
         P.error = "";
+        P.conflict = false;
+        P.conflictComparison = null;
         MC.toast.success("更新计划已保存");
         rerenderPlan();
       }, function (err) {
+        if (state.plan !== P || !origin.current() || (err && err.code === "STALE_CONTEXT")) { MC.toast.warning("工作区 " + origin.id + " 的计划保存结果待核对", "请返回原工作区查看计划状态。"); return; }
         P.saving = false;
         // 409：不覆盖 P.draft，输入框仍显示用户当前草稿。
-        P.error = err && err.code === "REVISION_CONFLICT"
-          ? "计划已在其他客户端更新；当前草稿已保留，请刷新后重试"
-          : planErrorText(err);
+        P.conflict = !!(err && err.code === "REVISION_CONFLICT");
+        P.conflictComparison = null;
+        P.error = P.conflict ? "计划已在其他客户端更新；当前草稿已保留，请查看最新计划后决定如何继续。" : planErrorText(err);
         rerenderPlan();
       });
+    }
+
+    function loadPlanConflict() {
+      var P = state.plan;
+      if (!P.conflict || P.conflictLoading) return;
+      var origin = captureWorkspace();
+      var wid = origin.id;
+      P.conflictLoading = true;
+      P.conflictComparison = null;
+      rerenderPlan();
+      MC.api.requestV3("GET", policyPath()).then(function (latest) {
+        if (state.plan !== P || !origin.current() || P.loadedFor !== wid) return;
+        P.conflictLoading = false;
+        if (!latest || !Number.isSafeInteger(latest.revision) || latest.revision < 0) {
+          P.error = "最新计划缺少有效修订号，无法恢复；草稿仍保留。";
+        } else {
+          P.conflictComparison = { policy: latest, draft: JSON.stringify(P.draft) };
+          P.error = "请对照两份计划。确认后草稿仍未保存，下一次保存会替换服务端计划。";
+        }
+        rerenderPlan();
+      }, function (err) {
+        if (state.plan !== P || !origin.current() || P.loadedFor !== wid) return;
+        P.conflictLoading = false;
+        P.error = "读取最新计划失败：" + errorText(err) + "；草稿仍保留。";
+        rerenderPlan();
+      });
+    }
+
+    function adoptPlanRevision() {
+      var P = state.plan;
+      var comparison = P.conflictComparison;
+      if (!P.conflict || !comparison) return;
+      if (comparison.draft !== JSON.stringify(P.draft)) {
+        P.conflictComparison = null;
+        P.error = "草稿已变化，请重新查看最新计划并确认对比。";
+      } else {
+        P.policy = comparison.policy;
+        P.conflict = false;
+        P.conflictComparison = null;
+        P.error = "已采用显示的服务端修订，草稿仍未保存；请检查后保存。";
+      }
+      rerenderPlan();
     }
 
     function requestPlanPreview() {
       var P = state.plan;
       if (!canSavePlan() || P.previewing) return;
       // 失败筛选只影响下方列表显示；预览请求始终冻结 workspace_all 全量 read_set。
-      var wid = workspaceId();
+      var origin = captureWorkspace();
+      var wid = origin.id;
       P.previewing = true;
       P.error = "";
       rerenderPlan();
       MC.api.requestV3("POST", previewsPath(), { body: { scope: "workspace_all" } }).then(function (preview) {
+        if (state.plan !== P || !origin.current()) return;
         P.previewing = false;
-        if (!preview || P.loadedFor !== workspaceId()) return;
+        if (!preview || P.loadedFor !== wid) return;
         P.preview = preview;
         P.previewWorkspaceId = wid;
         P.error = "";
         rerenderPlan();
       }, function (err) {
+        if (state.plan !== P || !origin.current()) return;
         P.previewing = false;
         P.error = planErrorText(err);
         rerenderPlan();
@@ -1135,13 +1379,16 @@
     function validatePlanPreview() {
       var P = state.plan;
       if (!canSavePlan() || !P.preview || P.validating) return;
+      var origin = captureWorkspace();
       var wid = P.previewWorkspaceId || workspaceId();
+      if (wid !== origin.id) return;
       var path = "/api/v3/workspaces/" + encodeURIComponent(wid)
         + "/sync/previews/" + encodeURIComponent(P.preview.preview_id) + "/validate";
       P.validating = true;
       P.error = "";
       rerenderPlan();
       MC.api.requestV3("POST", path, { body: {} }).then(function (fresh) {
+        if (state.plan !== P || !origin.current()) return;
         P.validating = false;
         if (fresh) {
           P.preview = fresh;
@@ -1150,6 +1397,7 @@
         MC.toast.success("预览仍然有效");
         rerenderPlan();
       }, function (err) {
+        if (state.plan !== P || !origin.current()) return;
         P.validating = false;
         P.error = planErrorText(err);
         rerenderPlan();
@@ -1171,7 +1419,8 @@
     function runWorkspaceAll() {
       var P = state.plan;
       if (!canRunPlan() || P.running) return;
-      var wid = workspaceId();
+      var origin = captureWorkspace();
+      var wid = origin.id;
       var body = { scope: "workspace_all" };
       if (P.preview && P.preview.preview_id && P.previewWorkspaceId === wid) {
         body.preview_id = P.preview.preview_id;
@@ -1180,6 +1429,7 @@
       P.error = "";
       rerenderPlan();
       MC.api.requestV3("POST", runsPath(), { body: body }).then(function (data) {
+        if (state.plan !== P || !origin.current()) { MC.toast.warning("工作区 " + wid + " 的全量更新结果待核对", "请返回原工作区查看运行记录。"); return; }
         P.running = false;
         var runs = (data && data.runs) || [];
         runs.forEach(function (entry) {
@@ -1198,6 +1448,7 @@
         else MC.toast.success("已提交全量更新", "共 " + runs.length + " 个机型任务");
         rerenderPlan();
       }, function (err) {
+        if (state.plan !== P || !origin.current() || (err && err.code === "STALE_CONTEXT")) { MC.toast.warning("工作区 " + wid + " 的全量更新结果待核对", "请返回原工作区查看运行记录。"); return; }
         P.running = false;
         P.error = err && err.code === "REVISION_CONFLICT"
           ? "预览或计划已变化，未提交任务；请重新预览后重试"
@@ -1212,8 +1463,39 @@
       var run = canRunPlan();
       var draft = P.draft || draftFromPolicy(P.policy || {});
       var profiles = workspaceProfiles();
+      function clearFieldError(control, key) {
+        if (P.invalidField !== key) return;
+        P.invalidField = "";
+        P.error = "";
+        control.removeAttribute("aria-invalid");
+        control.removeAttribute("aria-describedby");
+        var errorNode = sheetHost && sheetHost.querySelector("#" + planErrorId);
+        if (errorNode) errorNode.remove();
+      }
 
-      if (P.error) body.appendChild(h("div.form-error", P.error));
+      if (P.error) body.appendChild(h("div.form-error", { id: planErrorId, role: "alert" }, P.error));
+      if (P.conflict) {
+        body.appendChild(h("button.btn.btn-sm", { type: "button", "data-plan-conflict-load": "1", disabled: P.conflictLoading, onclick: loadPlanConflict }, P.conflictLoading ? "读取中…" : "查看最新计划"));
+        if (P.conflictComparison) {
+          var comparison = P.conflictComparison;
+          var displayDraft = function (value) {
+            var overrides = value.overrides || {};
+            var lines = ["自动更新：" + (value.enabled ? "启用" : "暂停"), "默认间隔：" + value.default_interval_hours + " 小时"];
+            var ids = Object.keys(overrides).sort();
+            if (!ids.length) lines.push("机型覆盖：无");
+            ids.forEach(function (id) {
+              var item = overrides[id];
+              lines.push("机型 " + id + "：" + (item.enabled == null ? "继承状态" : (item.enabled ? "启用" : "暂停")) + "，" + (item.interval_hours == null ? "继承间隔" : item.interval_hours + " 小时"));
+            });
+            return lines.join("\n");
+          };
+          body.appendChild(h("div.sync-conflict-comparison", { "data-plan-conflict-compare": "1" },
+            h("div.sync-conflict-field", h("strong", "服务端最新计划 · 修订 " + comparison.policy.revision), h("pre", displayDraft(draftFromPolicy(comparison.policy)))),
+            h("div.sync-conflict-field", h("strong", "当前草稿"), h("pre", displayDraft(JSON.parse(comparison.draft)))),
+            h("button.btn.btn-sm", { type: "button", "data-plan-conflict-adopt": "1", onclick: adoptPlanRevision }, "保留草稿并使用此修订")
+          ));
+        }
+      }
       if (P.loading && !P.policy) {
         body.appendChild(h("p.muted", "正在读取更新计划…"));
         return;
@@ -1232,7 +1514,7 @@
       var enabledInput = h("input", {
         type: "checkbox",
         checked: draft.enabled,
-        disabled: !save,
+        disabled: !save || P.saving,
         "data-plan-enabled": "1",
       });
       enabledInput.addEventListener("change", function () {
@@ -1243,19 +1525,24 @@
         min: "1",
         max: "2160",
         value: String(draft.default_interval_hours),
-        disabled: !save,
+        disabled: !save || P.saving,
         "data-plan-interval": "1",
+        "aria-label": "默认间隔（小时）",
+        "aria-invalid": P.invalidField === "global" ? "true" : null,
+        "aria-describedby": P.invalidField === "global" ? planErrorId : null,
         style: "max-width:120px",
       });
-      intervalInput.addEventListener("change", function () {
+      intervalInput.addEventListener("input", function () {
         draft.default_interval_hours = intervalInput.value;
+        clearFieldError(intervalInput, "global");
       });
 
       var overrideRows = profiles.map(function (profile) {
         var item = draft.overrides[profile.id] || {};
         var select = h("select.input", {
-          disabled: !save,
+          disabled: !save || P.saving,
           "data-plan-override-enabled": profile.id,
+          "aria-label": profile.name + " 自动状态覆盖",
         },
           h("option", { value: "" }, "继承工作区"),
           h("option", { value: "true" }, "启用"),
@@ -1271,12 +1558,16 @@
           max: "2160",
           placeholder: "继承默认",
           value: item.interval_hours == null ? "" : String(item.interval_hours),
-          disabled: !save,
+          disabled: !save || P.saving,
           "data-plan-override-interval": profile.id,
+          "aria-label": profile.name + " 间隔覆盖（小时）",
+          "aria-invalid": P.invalidField === "profile:" + profile.id ? "true" : null,
+          "aria-describedby": P.invalidField === "profile:" + profile.id ? planErrorId : null,
           style: "max-width:120px",
         });
-        overrideInterval.addEventListener("change", function () {
+        overrideInterval.addEventListener("input", function () {
           setOverride(profile.id, "interval_hours", overrideInterval.value.trim());
+          clearFieldError(overrideInterval, "profile:" + profile.id);
         });
         return h("tr", { "data-plan-profile": profile.id },
           h("td", h("div", h("strong", profile.name)), h("div.xsmall.muted", profile.id)),
@@ -1290,14 +1581,14 @@
         planActions.appendChild(h("button.btn.btn-primary", {
           type: "button",
           "data-plan-save": "1",
-          disabled: P.saving,
+          disabled: P.saving || P.conflict,
           onclick: savePlan,
         }, P.saving ? "保存中…" : "保存计划"));
       }
       planActions.appendChild(h("button.btn.btn-sm", {
         type: "button",
         "data-plan-refresh": "1",
-        onclick: loadPlan,
+        onclick: refreshPlan,
       }, "刷新"));
       body.appendChild(h("div.card",
         h("div.card-h", h("strong", "自动更新计划"), h("span.muted.small", "工作区 " + workspaceId())),
@@ -1621,22 +1912,20 @@
       });
     }
 
-    function saveHeartbeat(conn, enabledInput, intervalInput, tokenInput, errorNode, autoInput) {
+    function saveHeartbeat(conn, enabledInput, intervalInput, tokenInput, showError, autoInput) {
       var cid = conn.connection_id;
       var hb = state.connections.heartbeats[cid] || { revision: 0 };
       var interval = Number(intervalInput.value);
       if (!isFinite(interval) || interval < 1 || interval > 60) {
-        errorNode.textContent = "保活间隔必须在 1–60 分钟";
-        errorNode.style.display = "";
+        showError("保活间隔必须在 1–60 分钟", intervalInput);
         return;
       }
       var token = tokenInput.value.trim();
       if (!token) {
-        errorNode.textContent = "请输入运维 token";
-        errorNode.style.display = "";
+        showError("请输入运维 token", tokenInput);
         return;
       }
-      errorNode.style.display = "none";
+      showError("");
       MC.api.requestV3("PUT", heartbeatPath(cid), {
         body: {
           interval_minutes: interval,
@@ -1650,28 +1939,25 @@
         MC.toast.success("保活设置已保存");
         refreshConnectionsView();
       }, function (err) {
-        errorNode.textContent = errorText(err);
-        errorNode.style.display = "";
+        showError(errorText(err));
       });
     }
 
-    function runHeartbeat(conn, tokenInput, errorNode) {
+    function runHeartbeat(conn, tokenInput, showError) {
       var cid = conn.connection_id;
       var token = tokenInput.value.trim();
       if (!token) {
-        errorNode.textContent = "请输入运维 token";
-        errorNode.style.display = "";
+        showError("请输入运维 token", tokenInput);
         return;
       }
-      errorNode.style.display = "none";
+      showError("");
       MC.api.requestV3("POST", heartbeatPath(cid) + "/run", {
         body: {},
         headers: { "X-Operator-Token": token },
       }).then(function (data) {
         var op = data && data.operation;
         if (!op) {
-          errorNode.textContent = "保活运行未返回操作状态";
-          errorNode.style.display = "";
+          showError("保活运行未返回操作状态");
           return;
         }
         trackOperation(cid, op);
@@ -1683,8 +1969,7 @@
           MC.toast.success("保活已执行");
         }
       }, function (err) {
-        errorNode.textContent = errorText(err);
-        errorNode.style.display = "";
+        showError(errorText(err));
       });
     }
 
@@ -1695,10 +1980,7 @@
       var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", "data-conn-token": "1" });
       var error = h("div.form-error", { style: "display:none", "data-conn-error": "1" });
 
-      function showError(message) {
-        error.textContent = message;
-        error.style.display = message ? "" : "none";
-      }
+      var showError = fieldErrors(error);
 
       var modal = MC.modal({
         title: "新建连接",
@@ -1720,8 +2002,8 @@
                 var name = nameInput.value.trim();
                 var origin = originInput.value.trim();
                 var token = tokenInput.value.trim();
-                if (!name || !origin) { showError("名称与 Origin 不能为空"); return; }
-                if (!token) { showError("请输入运维 token"); return; }
+                if (!name || !origin) { showError("名称与 Origin 不能为空", !name ? nameInput : originInput); return; }
+                if (!token) { showError("请输入运维 token", tokenInput); return; }
                 showError("");
                 MC.api.requestV3("POST", connectionsPath(), {
                   body: { name: name, origin: origin, enabled: !!enabledInput.checked },
@@ -1749,10 +2031,7 @@
       var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", "data-conn-token": "1" });
       var error = h("div.form-error", { style: "display:none", "data-conn-error": "1" });
 
-      function showError(message) {
-        error.textContent = message;
-        error.style.display = message ? "" : "none";
-      }
+      var showError = fieldErrors(error);
 
       var modal = MC.modal({
         title: "编辑连接",
@@ -1775,8 +2054,8 @@
                 var name = nameInput.value.trim();
                 var origin = originInput.value.trim();
                 var token = tokenInput.value.trim();
-                if (!name || !origin) { showError("名称与 Origin 不能为空"); return; }
-                if (!token) { showError("请输入运维 token"); return; }
+                if (!name || !origin) { showError("名称与 Origin 不能为空", !name ? nameInput : originInput); return; }
+                if (!token) { showError("请输入运维 token", tokenInput); return; }
                 showError("");
                 MC.api.requestV3("PATCH", connectionPath(conn.connection_id), {
                   body: { name: name, origin: origin, enabled: !!enabledInput.checked },
@@ -1809,10 +2088,7 @@
       var error = h("div.form-error", { style: "display:none", "data-cred-error": "1" });
       var cred = conn.credential || {};
 
-      function showError(message) {
-        error.textContent = message;
-        error.style.display = message ? "" : "none";
-      }
+      var showError = fieldErrors(error);
 
       var modal = MC.modal({
         title: "更换凭据",
@@ -1834,8 +2110,8 @@
                 var username = usernameInput.value.trim();
                 var password = passwordInput.value;
                 var token = tokenInput.value.trim();
-                if (!username || !password) { showError("账号与密码不能为空"); return; }
-                if (!token) { showError("请输入运维 token"); return; }
+                if (!username || !password) { showError("账号与密码不能为空", !username ? usernameInput : passwordInput); return; }
+                if (!token) { showError("请输入运维 token", tokenInput); return; }
                 showError("");
                 MC.api.requestV3("POST", connectionPath(conn.connection_id) + "/credentials/candidates", {
                   body: { username: username, password: password },
@@ -1867,10 +2143,7 @@
       var tokenInput = h("input.input", { type: "password", autocomplete: "off", placeholder: "运维 token", autofocus: true, "data-cred-token": "1" });
       var error = h("div.form-error", { style: "display:none", "data-cred-error": "1" });
 
-      function showError(message) {
-        error.textContent = message;
-        error.style.display = message ? "" : "none";
-      }
+      var showError = fieldErrors(error);
 
       var modal = MC.modal({
         title: title,
@@ -1888,7 +2161,7 @@
               "data-cred-action-submit": "1",
               onclick: function () {
                 var token = tokenInput.value.trim();
-                if (!token) { showError("请输入运维 token"); return; }
+                if (!token) { showError("请输入运维 token", tokenInput); return; }
                 showError("");
                 action(token).then(function (op) {
                   close();
@@ -1948,6 +2221,7 @@
       var hb = C.heartbeats[cid];
       var cred = conn.credential || {};
       var error = h("div.form-error", { style: "display:none" });
+      var showError = fieldErrors(error);
       var controls = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" });
       var tokenInput = null;
 
@@ -1968,16 +2242,18 @@
         controls.appendChild(h("label.row", { style: "gap:6px;align-items:center" }, enabledInput, h("span", "启用保活")));
         controls.appendChild(h("label.row", { style: "gap:6px;align-items:center" }, autoInput, h("span", "失效后自动账密重登")));
         controls.appendChild(h("span.small.muted", "间隔"));
+        intervalInput.setAttribute("aria-label", "保活间隔（分钟）");
         controls.appendChild(intervalInput);
         controls.appendChild(h("span.small.muted", "分钟"));
+        tokenInput.setAttribute("aria-label", "运维 token");
         controls.appendChild(tokenInput);
         controls.appendChild(h("button.btn.btn-sm", {
           type: "button", "data-hb-save": cid,
-          onclick: function () { saveHeartbeat(conn, enabledInput, intervalInput, tokenInput, error, autoInput); },
+          onclick: function () { saveHeartbeat(conn, enabledInput, intervalInput, tokenInput, showError, autoInput); },
         }, "保存保活"));
         controls.appendChild(h("button.btn.btn-sm", {
           type: "button", "data-hb-run": cid,
-          onclick: function () { runHeartbeat(conn, tokenInput, error); },
+          onclick: function () { runHeartbeat(conn, tokenInput, showError); },
         }, "立即保活"));
       } else {
         controls.appendChild(h("span.small.muted", { "data-hb-readonly": cid },
@@ -2017,7 +2293,7 @@
         body.appendChild(h("p.muted", "正在读取连接与保活状态…"));
         return;
       }
-      var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
+      var toolbar = h("div.row.sync-filters", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
       toolbar.appendChild(h("button.btn.btn-sm", { type: "button", "data-connections-refresh": "1", onclick: function () { loadConnections(true); } }, "刷新"));
       if (manage) {
         toolbar.appendChild(h("button.btn.btn-sm.btn-primary", {
@@ -2037,7 +2313,7 @@
       var tbody = h("tbody");
       C.items.forEach(function (conn) {
         var cred = conn.credential || {};
-        var actions = h("td.row", { style: "gap:6px;flex-wrap:wrap" });
+        var actions = h("div.row.sync-actions", { style: "gap:6px;flex-wrap:wrap" });
         if (manage) {
           actions.appendChild(h("button.btn.btn-sm", {
             type: "button", "data-conn-edit": conn.connection_id,
@@ -2069,7 +2345,7 @@
           h("td", h("span", { class: credentialBadge(cred), "data-cred-state": conn.connection_id }, credentialLabel(cred))),
           h("td", h("span.small", { "data-cred-epoch": conn.connection_id }, String(cred.auth_epoch == null ? 0 : cred.auth_epoch))),
           h("td", h("span.xsmall.muted", { "data-cred-error": conn.connection_id }, cred.last_error || "—")),
-          actions
+          h("td", actions)
         ));
       });
 
@@ -2090,12 +2366,16 @@
 
     function renderSources() {
       var S = state.sources;
-      var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
-      var search = h("input.input", { type: "search", placeholder: "搜索名称/路径", value: S.query, style: "min-width:200px" });
-      var status = h("select.input", {},
+      var toolbar = h("div.row.sync-filters", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
+      var search = h("input.input", { type: "search", "aria-label": "搜索更新源名称或路径", placeholder: "搜索名称或资源路径", value: S.query });
+      var status = h("select.input", { "aria-label": "来源状态" },
         SOURCE_STATUS.map(function (item) { return h("option", { value: item.id }, item.label); })
       );
-      var sort = h("select.input", {},
+      var scope = h("select.input", { "aria-label": "来源机型范围", "data-sync-scope": "1" },
+        h("option", { value: "profile" }, "当前机型"),
+        h("option", { value: "workspace" }, "全部机型")
+      );
+      var sort = h("select.input", { "aria-label": "来源排序" },
         SORTS.map(function (item) { return h("option", { value: item.id }, item.label); })
       );
       function searchNow() {
@@ -2107,15 +2387,23 @@
       });
       var searchBtn = h("button.btn.btn-sm", { type: "button", onclick: searchNow }, "搜索");
       status.value = S.status;
+      scope.value = S.scope;
       sort.value = S.sort;
       status.addEventListener("change", function () { S.status = status.value; loadSources(true); });
+      scope.addEventListener("change", function () {
+        S.scope = scope.value;
+        S.selected = {};
+        loadSources(true);
+      });
       sort.addEventListener("change", function () { S.sort = sort.value; renderBody(); });
       var refresh = h("button.btn.btn-sm", { type: "button", "data-sync-refresh": "1", onclick: function () { loadSources(true); } }, "刷新");
       toolbar.appendChild(search);
       toolbar.appendChild(searchBtn);
+      toolbar.appendChild(scope);
       toolbar.appendChild(status);
       toolbar.appendChild(sort);
       toolbar.appendChild(refresh);
+      if (!S.error && !S.loading) toolbar.appendChild(h("span.sync-result-count.muted.small", "共 " + S.total + " 个来源"));
 
       if (S.error) {
         // 失败也要保留工具栏：给显式重试入口，不让用户刷新整页。
@@ -2128,10 +2416,15 @@
         body.appendChild(h("p.muted", "正在读取更新源…"));
         return;
       }
+      if (S.error && !S.items.length) {
+        body.appendChild(h("div.card", h("div.card-b", toolbar)));
+        return;
+      }
       var rows = sortedItems();
       var selectable = rows.filter(function (row) { return !row.deleted; });
       var selectedRows = selectable.filter(function (row) { return S.selected[row.source_id]; });
-      var batchBar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px", "data-sync-batch": "1" });
+      var batchBar = h("div.row.sync-selection", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px", "data-sync-batch": "1" });
+      batchBar.hidden = !selectedRows.length;
       if (canWrite() && selectable.length) {
         batchBar.appendChild(h("span.small.muted", "已选 " + selectedRows.length + " / " + selectable.length));
         batchBar.appendChild(h("button.btn.btn-sm", {
@@ -2152,7 +2445,7 @@
       if (!S.items.length) {
         body.appendChild(h("div.card",
           h("div.card-b", toolbar,
-            h("p.muted", S.status === "deleted" ? "没有已删除的来源。" : "当前工作区还没有更新源。"))
+            emptyState(S.query || S.status ? "没有匹配的更新源" : (S.scope === "profile" ? "当前机型没有更新源" : "添加第一个更新源"), S.query || S.status ? "调整搜索或状态筛选后重试。" : (S.scope === "profile" ? "切换到全部机型查看，或从右上角新增更新源。" : "从右上角新增更新源，绑定来源与接收目标。")))
         ));
         return;
       }
@@ -2173,17 +2466,17 @@
 
       var tbody = h("tbody");
       rows.forEach(function (source) {
-        var actions = h("td.row", { style: "gap:6px;flex-wrap:wrap" });
+        var actions = h("div.row.sync-actions", { style: "gap:6px;flex-wrap:wrap" });
         var deleted = !!source.deleted;
         if (!deleted && canWrite()) {
-          actions.appendChild(h("button.btn.btn-sm", {
+          actions.appendChild(h("button.btn.btn-sm.btn-ghost", {
             type: "button",
             "data-sync-edit": source.source_id,
             onclick: function () { openEditor(source); },
           }, "设置"));
         }
         if (!deleted && canRun()) {
-          var runBtn = h("button.btn.btn-sm", {
+          var runBtn = h("button.btn.btn-sm.btn-ghost", {
             type: "button",
             "data-sync-run": source.source_id,
             title: source.enabled === false ? "来源已停用：启用后才能更新" : "立即更新此来源",
@@ -2191,7 +2484,7 @@
           }, "更新");
           if (source.enabled === false) runBtn.disabled = true;
           actions.appendChild(runBtn);
-          actions.appendChild(h("button.btn.btn-sm", {
+          actions.appendChild(h("button.btn.btn-sm.btn-ghost", {
             type: "button",
             "data-sync-test": source.source_id,
             disabled: !!S.testing[source.source_id],
@@ -2199,7 +2492,7 @@
           }, S.testing[source.source_id] ? "测试中…" : "测试"));
         }
         if (!deleted && canWrite()) {
-          actions.appendChild(h("button.btn.btn-sm", {
+          actions.appendChild(h("button.btn.btn-sm.btn-ghost", {
             type: "button",
             "data-sync-delete": source.source_id,
             onclick: function () { deleteSource(source); },
@@ -2224,36 +2517,36 @@
         tbody.appendChild(h("tr", { "data-sync-source": source.source_id, class: source.enabled === false ? "sync-paused" : "" },
           checkbox,
           h("td",
-            h("div", h("strong", source.name)),
+            h("div", sourceText(source.name, "name")),
             h("div.xsmall.muted", (KIND_LABEL[source.kind] || source.kind) + (source.profile_id ? " · " + source.profile_id : ""))
           ),
           h("td",
-            h("div.small", (KIND_LABEL[source.kind] || "") + (target ? " → " + (TARGET_LABEL[target] || target) : "")),
-            h("code.xsmall", source.display_path || source.resource_ref || "—")
+            h("div.small", (KIND_LABEL[source.kind] || "") + (target ? " → " + ({ file_archive: "文件归档", default_candidate: "默认配置候选", machine_observation: "机台观测" }[target] || target) : "")),
+            sourceText(source.display_path || source.resource_ref, "path")
           ),
           h("td",
             h("div.small", scheduleText(source)),
-            h("div.xsmall.muted", !source.enabled ? "来源已停用" : (source.schedule_mode === "manual" ? "可手动立即更新" : "跟随工作区计划"))
+            h("div.xsmall.muted", !source.enabled ? "来源已停用" : (source.schedule_mode === "manual" ? "可手动立即更新" : (source.schedule_mode === "custom" ? "独立频率" : "跟随工作区计划")))
           ),
-          h("td", h("span.xsmall.muted", "尚无核验记录")),
+          h("td", h("span.xsmall.muted", "核验状态未提供")),
           h("td", deleted
             ? h("span.badge.badge-muted", "已删除")
             : testResult
               ? h("span.xsmall", { class: testResult.ok ? "badge badge-ok" : "badge badge-muted", "data-sync-test-result": source.source_id }, testResult.text)
-              : (source.enabled === false ? h("span.badge.badge-muted", "已停用") : h("span.badge.badge-ok", "已启用"))),
+              : (source.enabled === false ? h("span.badge.badge-muted", "已停用") : h("span.badge.sync-status-enabled", "已启用"))),
           h("td", actions)
         ));
       });
       body.appendChild(h("div.card",
-        h("div.card-h", h("strong", "更新源"), h("span.muted.small", "共 " + S.total + " 条 · 工作区 " + workspaceId())),
         h("div.card-b",
           toolbar,
           batchBar,
-          h("div.sync-table-wrap", h("table.table", h("thead", h("tr",
+          h("div.sync-table-wrap", h("table.table.sync-source-table", h("thead", h("tr",
             h("th", headerBox), h("th", "配置 / 文件"), h("th", "更新来源 / 写入目标"),
-            h("th", "更新计划"), h("th", "最近有效核验"), h("th", "最近结果"), h("th", "操作")
+            h("th", "更新计划"), h("th", "最近有效核验"), h("th", "来源状态"), h("th", "操作")
           )), tbody)),
-          S.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null
+          S.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null,
+          h("div.sync-table-note.muted.xsmall", "全量更新不受当前筛选条件影响")
         )
       ));
     }
@@ -2286,7 +2579,9 @@
 
     function loadRuns(reset) {
       var R = state.runs;
-      if (R.loading) return Promise.resolve();
+      if (R.loading && !reset) return Promise.resolve();
+      var seq = ++R.loadSeq;
+      var wid = workspaceId();
       R.loading = true;
       R.error = "";
       if (reset) {
@@ -2295,34 +2590,57 @@
         R.expanded = false;
       }
       renderBody();
+      var append = !reset && R.expanded && !!R.next_cursor;
       return MC.api.requestV3("GET", runsPath(), {
         query: {
           state: R.state || undefined,
           limit: 50,
-          cursor: R.expanded && R.next_cursor ? R.next_cursor : "0",
+          cursor: append ? R.next_cursor : "0",
         },
       }).then(function (data) {
+        if (seq !== R.loadSeq || wid !== workspaceId()) return;
         var incoming = (data && data.items) || [];
-        R.items = R.expanded ? R.items.concat(incoming) : incoming;
+        R.items = append ? R.items.concat(incoming) : incoming;
         R.total = data && typeof data.total === "number" ? data.total : R.items.length;
         R.next_cursor = data ? data.next_cursor : null;
         R.loading = false;
         renderBody();
       }, function (err) {
+        if (seq !== R.loadSeq || wid !== workspaceId()) return;
         R.loading = false;
         R.error = errorText(err);
         renderBody();
       });
     }
 
-    function downloadDiagnostics(run) {
-      var eventsUrl = runPath(run.run_id) + "/events";
-      MC.api.requestV3("GET", eventsUrl, {}).then(function (data) {
+    function readEventPage(runId, after) {
+      return MC.api.requestV3("GET", runPath(runId) + "/events", { query: { after_seq: after } }).then(function (data) {
+        if (!data || !Array.isArray(data.items) || data.items.length > 200) throw new Error("事件列表格式无效");
+        var previous = after;
+        data.items.forEach(function (event) {
+          if (!event || !Number.isSafeInteger(event.seq) || event.seq <= previous) throw new Error("事件序号无效");
+          previous = event.seq;
+        });
+        return data.items;
+      });
+    }
+
+    function downloadDiagnostics(run, onFailure, onSuccess) {
+      var allEvents = [];
+      var maxEvents = 20000;
+      function collect(after) {
+        return readEventPage(run.run_id, after).then(function (page) {
+          allEvents = allEvents.concat(page);
+          if (page.length === 200 && allEvents.length < maxEvents) return collect(page[page.length - 1].seq);
+          return page.length === 200 && allEvents.length >= maxEvents;
+        });
+      }
+      return collect(0).then(function (truncated) {
         var payload = {
           run: run,
-          events: (data && data.items) || [],
+          events: allEvents,
           exported_at: new Date().toISOString(),
-          note: "MCChecker sync diagnostics; no secrets are included",
+          note: truncated ? "事件达到 20000 条读取上限，诊断可能不完整；文件不含凭据。" : "MCChecker sync diagnostics; no secrets are included",
         };
         var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         var url = URL.createObjectURL(blob);
@@ -2333,8 +2651,10 @@
         link.click();
         document.body.removeChild(link);
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-      }, function (err) {
-        MC.toast.error("诊断下载失败", errorText(err));
+        if (onSuccess) onSuccess(truncated);
+      }).catch(function (err) {
+        if (onFailure) onFailure(err);
+        else MC.toast.error("诊断下载失败", errorText(err));
       });
     }
 
@@ -2350,59 +2670,125 @@
 
     function openRun(run) {
       var bodyNode = h("div.col", { style: "gap:12px" }, h("p.muted.small", "正在读取运行详情…"));
+      var downloadError = h("div.form-error", { "data-sync-download-error": "1", role: "alert", hidden: true });
       var modal = MC.modal({
         title: "运行 " + run.run_id,
         subtitle: run.trigger + " · " + runStateText(run.state) + " · " + runCounts(run),
         size: "xwide",
-        body: bodyNode,
+        body: h("div.col", downloadError, bodyNode),
         footer: function (close) {
           var buttons = [];
           if (canRun() && ["partial", "failed", "interrupted"].indexOf(run.state) >= 0) {
             buttons.push(h("button.btn.btn-primary", { type: "button", "data-sync-retry": "1", onclick: function () { retryRun(run, close); } }, "重试失败项"));
           }
-          buttons.push(h("button.btn", { type: "button", onclick: function () { downloadDiagnostics(run); } }, "下载诊断"));
+          var downloadButton = h("button.btn", { type: "button", onclick: function () {
+            downloadButton.disabled = true;
+            downloadDiagnostics(run, function (err) {
+              downloadButton.disabled = false;
+              downloadError.textContent = "诊断下载失败：" + errorText(err) + "。请重试。";
+              downloadError.hidden = false;
+            }, function (truncated) {
+              downloadButton.disabled = false;
+              downloadError.hidden = !truncated;
+              downloadError.textContent = truncated ? "事件达到 20000 条上限，已下载的诊断可能不完整。" : "";
+            });
+          } }, "下载诊断");
+          buttons.push(downloadButton);
           buttons.push(h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"));
           return buttons;
         },
       });
-      Promise.all([
+      function loadDetails() {
+      util.clear(bodyNode);
+      bodyNode.appendChild(h("p.muted.small", "正在读取运行详情…"));
+      return Promise.all([
         MC.api.requestV3("GET", runPath(run.run_id), {}),
-        MC.api.requestV3("GET", runPath(run.run_id) + "/events", { query: { after_seq: 0 } }),
+        readEventPage(run.run_id, 0),
       ]).then(function (results) {
         var detail = results[0] || {};
-        var events = (results[1] && results[1].items) || [];
+        var events = results[1];
         var items = detail.items || [];
         util.clear(bodyNode);
-        var itemRows = items.length ? items.map(function (item) {
-          return h("tr",
-            h("td", h("div.small", item.name || item.source_id), h("div.xsmall.muted", item.source_id || "")),
-            h("td", runStateText(item.state)),
-            h("td", item.stage || "—"),
-            h("td", item.reason_code || "—"),
-            h("td", item.committed ? "是" : "否")
-          );
-        }) : [h("tr", h("td", { colspan: "5" }, h("span.muted", "没有 item 记录。")))];
-        bodyNode.appendChild(h("table.table",
-          h("thead", h("tr", h("th", "来源"), h("th", "状态"), h("th", "阶段"), h("th", "原因"), h("th", "已提交"))),
-          h("tbody", itemRows)
-        ));
-        bodyNode.appendChild(h("h3", "事件日志"));
-        var eventRows = events.length ? events.map(function (event) {
-          return h("li", h("span.muted.xsmall", event.at || ""), " · ",
-            h("strong", event.status || event.level || ""), " ", event.message || "", event.reason_code ? h("span.xsmall.muted", " (" + event.reason_code + ")") : null);
-        }) : [h("li.muted", "没有事件日志。")];
-        bodyNode.appendChild(h("ul.mini-list", eventRows));
+        var itemList = h("div.sync-log-items", { "aria-label": "运行来源" });
+        var log = h("div.sync-log-body", { "aria-live": "polite" });
+        var buttons = [];
+        var selectedItem = null;
+        var eventError = h("div.form-error", { role: "alert", hidden: true });
+        var moreButton = null;
+        function showEvents(item) {
+          selectedItem = item;
+          buttons.forEach(function (button) {
+            var selected = button.getAttribute("data-sync-run-item") === (item ? item.item_id : "all");
+            button.setAttribute("aria-pressed", String(selected));
+          });
+          util.clear(log);
+          log.appendChild(h("h3", item ? (item.name || item.source_id) : "全部事件"));
+          var visible = item ? events.filter(function (event) {
+            return event.item_id === item.item_id || (!event.item_id && event.source_id === item.source_id);
+          }) : events;
+          if (!visible.length) {
+            log.appendChild(h("p.small.muted", moreButton ? "已加载的事件中没有匹配项；可加载更多事件。" : "没有对应的事件日志。"));
+            return;
+          }
+          visible.forEach(function (event) {
+            log.appendChild(h("div.sync-log-line",
+              h("time.mono", event.at || "—"),
+              h("strong", event.status || event.level || "—"),
+              h("span", event.message || "—", event.reason_code ? h("span.muted", " · " + event.reason_code) : null)));
+          });
+        }
+        var allButton = h("button.sync-log-item", { type: "button", "data-sync-run-item": "all", onclick: function () { showEvents(null); } },
+          h("strong", "全部来源"), h("span.small.muted", items.length + " 项"));
+        buttons.push(allButton);
+        itemList.appendChild(allButton);
+        items.forEach(function (item) {
+          var button = h("button.sync-log-item", { type: "button", "data-sync-run-item": item.item_id, onclick: function () { showEvents(item); } },
+            h("strong", item.name || item.source_id),
+            h("span.small", runStateText(item.state) + " · " + (item.stage || "—")),
+            item.reason_code ? h("span.xsmall.muted", item.reason_code) : null);
+          buttons.push(button);
+          itemList.appendChild(button);
+        });
+        bodyNode.appendChild(h("div.sync-log-layout", itemList, log));
+        bodyNode.appendChild(eventError);
+        function addMoreButton() {
+          if (moreButton) return;
+          moreButton = h("button.btn.btn-sm", { type: "button", "data-sync-events-more": "1", onclick: function () {
+            var after = events.length ? Number(events[events.length - 1].seq) : 0;
+            if (!isFinite(after) || after <= 0) {
+              eventError.textContent = "事件序号无效，无法继续读取。"; eventError.hidden = false; return;
+            }
+            moreButton.disabled = true;
+            eventError.hidden = true;
+            readEventPage(run.run_id, after).then(function (next) {
+              events = events.concat(next);
+              if (next.length < 200) { moreButton.remove(); moreButton = null; }
+              else moreButton.disabled = false;
+              showEvents(selectedItem);
+            }).catch(function (err) {
+              moreButton.disabled = false;
+              eventError.textContent = "读取后续事件失败：" + errorText(err) + "。请重试。";
+              eventError.hidden = false;
+            });
+          } }, "加载更多事件");
+          bodyNode.appendChild(moreButton);
+        }
+        if (events.length >= 200) addMoreButton();
+        showEvents(null);
         if (detail.run) run = detail.run;
       }, function (err) {
         util.clear(bodyNode);
-        bodyNode.appendChild(h("div.form-error", errorText(err)));
+        bodyNode.appendChild(h("div.form-error", { role: "alert" }, "读取运行详情失败：" + errorText(err), " ",
+          h("button.btn.btn-sm", { type: "button", "data-sync-detail-retry": "1", onclick: loadDetails }, "重试")));
       });
+      }
+      loadDetails();
     }
 
     function renderRuns() {
       var R = state.runs;
-      var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
-      var filter = h("select.input", {},
+      var toolbar = h("div.row.sync-filters", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
+      var filter = h("select.input", { "aria-label": "运行结果" },
         h("option", { value: "" }, "全部状态"),
         ["running", "partial", "failed", "succeeded", "canceled", "interrupted"].map(function (value) {
           return h("option", { value: value }, runStateText(value));
@@ -2414,18 +2800,22 @@
       toolbar.appendChild(h("button.btn.btn-sm", { type: "button", onclick: function () { loadRuns(true); } }, "刷新"));
       if (R.error) body.appendChild(h("div.form-error", R.error));
       if (R.loading && !R.items.length) {
-        body.appendChild(h("p.muted", "正在读取运行记录…"));
+        body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted", "正在读取运行记录…"))));
+        return;
+      }
+      if (R.error && !R.items.length) {
+        body.appendChild(h("div.card", h("div.card-b", toolbar)));
         return;
       }
       if (!R.items.length) {
-        body.appendChild(h("div.card", h("div.card-b", h("p.muted", "还没有同步运行记录。"))));
+        body.appendChild(h("div.card", h("div.card-b", toolbar, emptyState(R.state ? "没有匹配的运行记录" : "还没有运行记录", "更新任务的处理结果与脱敏日志会显示在这里。"))));
         return;
       }
       var tbody = h("tbody");
       R.items.forEach(function (doc) {
         var run = doc.run || doc;
         var row = h("tr", { "data-sync-run": run.run_id, style: "cursor:pointer" },
-          h("td", h("div.small", run.run_id), h("div.xsmall.muted", run.parent_run_id ? "父 " + run.parent_run_id : "")),
+          h("td", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function (event) { event.stopPropagation(); openRun(run); } }, run.run_id), h("div.xsmall.muted", run.parent_run_id ? "父 " + run.parent_run_id : "")),
           h("td", run.trigger),
           h("td", runStateText(run.state)),
           h("td", runCounts(run)),
@@ -2449,10 +2839,13 @@
 
     function loadCandidates(reset, more) {
       var C = state.candidates;
-      if (C.loading) return Promise.resolve();
+      if (C.loading && !reset) return Promise.resolve();
+      var seq = ++C.loadSeq;
+      var wid = workspaceId();
       C.loading = true;
+      C.loadedFor = wid;
       C.error = "";
-      if (reset) { C.items = []; C.next_cursor = null; }
+      if (reset) { C.items = []; C.next_cursor = null; C.selected = {}; }
       renderBody();
       return MC.api.requestV3("GET", candidatesPath(), {
         query: {
@@ -2462,6 +2855,7 @@
           cursor: more && C.next_cursor ? C.next_cursor : "0",
         },
       }).then(function (data) {
+        if (seq !== C.loadSeq || wid !== workspaceId()) return;
         var incoming = (data && data.items) || [];
         C.items = more ? C.items.concat(incoming) : incoming;
         C.total = data && typeof data.total === "number" ? data.total : C.items.length;
@@ -2473,6 +2867,7 @@
         C.loadedFor = workspaceId();
         renderBody();
       }, function (err) {
+        if (seq !== C.loadSeq || wid !== workspaceId()) return;
         C.loading = false;
         C.loadedFor = workspaceId();
         C.error = errorText(err);
@@ -2481,11 +2876,13 @@
     }
 
     function openCandidate(candidate) {
-      var error = h("div.form-error", { style: "display:none" });
+      var error = h("div.form-error.sync-form-error", { style: "display:none" });
       var configs = [];
-      var configSelect = h("select.input", {});
-      var releaseSelect = h("select.input", {});
+      var configSelect = h("select.input", { "aria-label": "固定配置" });
+      var releaseSelect = h("select.input", { "aria-label": "软件版本" });
       var previewBox = h("div");
+      var previewSeq = 0;
+      var releaseSeq = 0;
       var configPath = "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
         "/profiles/" + encodeURIComponent(candidate.profile_id) + "/configs";
       function showError(message) {
@@ -2494,16 +2891,27 @@
       }
       function loadReleases() {
         var config = configs.filter(function (item) { return item.config_id === configSelect.value; })[0];
+        var seq = ++releaseSeq;
+        util.clear(releaseSelect);
+        releaseSelect.disabled = true;
         if (!config) return;
         MC.api.requestV3("GET", configPath + "/" + encodeURIComponent(config.config_id) + "/releases", {})
           .then(function (data) {
+            if (seq !== releaseSeq || configSelect.value !== config.config_id) return;
             util.clear(releaseSelect);
             (data.items || []).forEach(function (release) {
               releaseSelect.appendChild(h("option", { value: release.release_id }, "版本 " + (release.version || release.release_id)));
             });
             releaseSelect.disabled = !releaseSelect.options.length;
-          }, function (err) { showError(errorText(err)); });
+          }, function (err) { if (seq === releaseSeq) showError(errorText(err)); });
       }
+      function invalidatePreview() {
+        previewSeq += 1;
+        previewBox._decisions = {};
+        util.clear(previewBox);
+      }
+      configSelect.addEventListener("change", function () { invalidatePreview(); loadReleases(); });
+      releaseSelect.addEventListener("change", invalidatePreview);
       var modal = MC.modal({
         title: "候选 " + candidate.candidate_id,
         subtitle: "来源 " + candidate.source_id + " · " + candidate.state,
@@ -2523,6 +2931,7 @@
           return [h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭")];
         },
       });
+      modal.el.classList.add("sync-candidate-dialog");
       if (!candidate.file_version_id) {
         showError("该候选没有关联文件版本，无法生成参数差异（SDA 表候选需后续协议支持）");
       }
@@ -2532,11 +2941,10 @@
         configs.forEach(function (config) {
           configSelect.appendChild(h("option", { value: config.config_id }, (config.code || "") + " " + (config.name || config.config_id)));
         });
-        configSelect.addEventListener("change", loadReleases);
         if (configs.length) loadReleases();
       }, function (err) { showError(errorText(err)); });
 
-      function renderPreview(preview, keepDecisions) {
+      function renderPreview(preview, keepDecisions, targetConfig, targetRelease) {
         util.clear(previewBox);
         var items = preview.items || [];
         var decisions = keepDecisions ? (previewBox._decisions || {}) : {};
@@ -2545,6 +2953,7 @@
         var conflicts = items.filter(function (item) { return item.action === "conflict"; })
           .map(function (item) { return item.parameter_id; });
         var base = preview.base || [];
+        var applying = false;
 
         function pendingCount() {
           return conflicts.filter(function (pid) { return !decisions[pid]; }).length;
@@ -2564,26 +2973,34 @@
               ? "还有 " + left + " 项冲突待决议（可逐项选择，或用上方批量决议）"
               : "冲突已全部决议，可以写入草稿";
           }
-          if (clearBtn) clearBtn.disabled = !Object.keys(decisions).length;
+          if (clearBtn) clearBtn.disabled = applying || !Object.keys(decisions).length;
           if (!applyBtn) return;
           var blocked = (preview.blockers || []).filter(function (row) {
             return row.code !== "d0_frozen";
           });
-          applyBtn.disabled = !canWrite() || left > 0 ||
+          applyBtn.disabled = applying || !canWrite() || left > 0 ||
             (preview.can_apply === false && !preview.d0_frozen && conflicts.length === 0) ||
             blocked.length > 0;
         }
 
         function setAll(value) {
+          if (applying) return;
+          var skipped = 0;
           conflicts.forEach(function (pid) {
+            var select = selects[pid];
+            var allowed = select && Array.prototype.some.call(select.options, function (option) { return option.value === value; });
+            if (!allowed) { skipped++; return; }
             decisions[pid] = value;
-            if (selects[pid]) selects[pid].value = value;
+            select.value = value;
           });
           refreshApplyState();
+          batchHint.textContent = skipped ? skipped + " 项不支持此决议，保留原有选择；请逐项确认。" : "已应用到所有冲突项。";
         }
         function clearAll() {
+          if (applying) return;
           Object.keys(decisions).forEach(function (pid) { delete decisions[pid]; });
           Object.keys(selects).forEach(function (pid) { selects[pid].value = ""; });
+          batchHint.textContent = "";
           refreshApplyState();
         }
 
@@ -2593,13 +3010,16 @@
             var allowed = (item.allowed && item.allowed.length)
               ? item.allowed
               : ["use_new", "inherit_old", "manual"];
-            var sel = h("select.input", { "data-sync-decision": item.parameter_id },
+            var sel = h("select.input", { "data-sync-decision": item.parameter_id, "aria-label": "参数 " + (item.name || item.parameter_id) + " 的冲突决议" },
               h("option", { value: "" }, "请选择"),
               allowed.map(function (value) {
                 return h("option", { value: value }, DECISION_LABEL[value] || value);
               })
             );
-            if (decisions[item.parameter_id]) sel.value = decisions[item.parameter_id];
+            if (decisions[item.parameter_id]) {
+              sel.value = decisions[item.parameter_id];
+              if (!sel.value) delete decisions[item.parameter_id];
+            }
             sel.addEventListener("change", function () {
               if (sel.value) decisions[item.parameter_id] = sel.value;
               else delete decisions[item.parameter_id];
@@ -2611,34 +3031,49 @@
             cell = h("span.badge.badge-warn", "需人工处理");
           } else if (item.action === "keep") {
             cell = h("span.muted.small", "保留当前");
-          } else {
+          } else if (item.action === "drop") {
+            cell = h("span.small", "移除");
+          } else if (item.action === "from_new") {
             cell = h("span.muted.small", "采用新值");
+          } else {
+            cell = h("span.muted.small", "待确认");
           }
           var baseValue = (item.base && item.base.value !== undefined)
             ? item.base.value
             : (base.filter(function (row) { return row.parameter_id === item.parameter_id; })[0] || {}).value;
+          function valueText(value) {
+            if (value === undefined) return "未设";
+            if (value === null) return "null";
+            if (typeof value === "object" && typeof value.type === "string" && typeof value.text === "string") {
+              if (value.type === "null") return "null";
+              var shown = value.type === "string" ? JSON.stringify(value.text) : value.text;
+              return shown + (value.unit ? " " + value.unit : "");
+            }
+            return JSON.stringify(value);
+          }
           return h("tr", { "data-sync-diff": item.parameter_id },
             h("td", h("div.small", item.name || item.parameter_id), h("div.xsmall.muted", item.parameter_id)),
-            h("td", h("span.badge", item.action)),
-            h("td", h("span.xsmall", JSON.stringify(baseValue === undefined ? null : baseValue))),
-            h("td", h("span.xsmall", JSON.stringify(item.ours && item.ours.value !== undefined ? item.ours.value : null))),
-            h("td", h("span.xsmall", JSON.stringify(item.theirs && item.theirs.value !== undefined ? item.theirs.value : null))),
+            h("td", h("span.badge", { keep: "保留", from_new: "采用新值", drop: "移除", conflict: "冲突", manual: "人工处理" }[item.action] || item.action)),
+            h("td", h("span.xsmall.mono", valueText(baseValue))),
+            h("td", h("span.xsmall.mono", valueText(item.ours ? item.ours.value : undefined))),
+            h("td", h("span.xsmall.mono", valueText(item.theirs ? item.theirs.value : undefined))),
             h("td", cell)
           );
         });
 
+        var batchHint = h("span.xsmall.muted", { "aria-live": "polite", "data-sync-batch-hint": "1" });
         previewBox.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" },
           h("span.small.muted", "计划 " + (preview.summary ? JSON.stringify(preview.summary) : "")),
           h("button.btn.btn-sm", { type: "button", "data-sync-all-new": "1", disabled: !conflicts.length, onclick: function () { setAll("use_new"); } }, "全部采用新值"),
           h("button.btn.btn-sm", { type: "button", "data-sync-all-old": "1", disabled: !conflicts.length, onclick: function () { setAll("inherit_old"); } }, "全部保留当前"),
-          clearBtn
+          clearBtn, batchHint
         ));
-        previewBox.appendChild(h("table.table",
+        previewBox.appendChild(h("div.sync-diff-wrap", h("table.table",
           h("thead", h("tr",
             h("th", "参数"), h("th", "计划"), h("th", "基线"), h("th", "当前"), h("th", "候选"), h("th", "决议")
           )),
           h("tbody", rows)
-        ));
+        )));
         if (preview.blockers && preview.blockers.length) {
           previewBox.appendChild(h("div.form-error", { "data-sync-blockers": "1" },
             preview.blockers.map(function (row) { return row.message || row.code; }).join("；")));
@@ -2652,11 +3087,18 @@
           type: "button",
           "data-sync-apply": "1",
           onclick: function () {
-            if (!canWrite()) return;
+            if (!canWrite() || applying) return;
             var config = configs.filter(function (item) { return item.config_id === configSelect.value; })[0];
-            if (!config || !releaseSelect.value) { showError("先选择固定配置与软件版本"); return; }
+            if (!config || config.config_id !== targetConfig || releaseSelect.value !== targetRelease) { invalidatePreview(); showError("目标已变化，请重新预览后写入。"); return; }
             var payload = {};
             Object.keys(decisions).forEach(function (pid) { payload[pid] = decisions[pid]; });
+            applying = true;
+            refreshApplyState();
+            Object.keys(selects).forEach(function (pid) { selects[pid].disabled = true; });
+            Array.prototype.forEach.call(previewBox.querySelectorAll("[data-sync-all-new], [data-sync-all-old]"), function (button) { button.disabled = true; });
+            modal.el.querySelector("[data-sync-preview]").disabled = true;
+            configSelect.disabled = true;
+            releaseSelect.disabled = true;
             // 同一预览复用同一 request_id：重试变成幂等重放，不会重复写入。
             var requestId = "apply-" + preview.preview_id;
             MC.api.requestV3("POST", candidatesPath() + "/" + encodeURIComponent(candidate.candidate_id) + "/apply", {
@@ -2667,6 +3109,9 @@
                 create_baseline: frozen,
               },
             }).then(function (result) {
+              configSelect.disabled = false;
+              releaseSelect.disabled = false;
+              modal.el.querySelector("[data-sync-preview]").disabled = false;
               showError("");
               var done = h("div.card", h("div.card-b", h("div.col", { style: "gap:8px" },
                 h("p", { "data-sync-applied": "1" },
@@ -2683,8 +3128,8 @@
                         kind: "configv3",
                         query: {
                           config: config.config_id,
-                          release: releaseSelect.value,
-                          draft: "d0-" + releaseSelect.value,
+                          release: targetRelease,
+                          draft: "d0-" + targetRelease,
                         },
                       });
                     }
@@ -2694,6 +3139,13 @@
               previewBox.appendChild(done);
               loadCandidates(true);
             }, function (err) {
+              applying = false;
+              Object.keys(selects).forEach(function (pid) { selects[pid].disabled = false; });
+              Array.prototype.forEach.call(previewBox.querySelectorAll("[data-sync-all-new], [data-sync-all-old]"), function (button) { button.disabled = !conflicts.length; });
+              configSelect.disabled = false;
+              releaseSelect.disabled = false;
+              modal.el.querySelector("[data-sync-preview]").disabled = false;
+              refreshApplyState();
               if (err && err.code === "REVISION_CONFLICT") {
                 showError("草稿或 D0 已在其他客户端变化（409）；已选决议仍保留，请重新预览后继续。");
                 var rePreview = h("button.btn.btn-sm", {
@@ -2720,15 +3172,20 @@
       function requestPreview(keepDecisions) {
         var config = configs.filter(function (item) { return item.config_id === configSelect.value; })[0];
         if (!config || !releaseSelect.value) { showError("先选择固定配置与软件版本"); return; }
+        var targetConfig = config.config_id;
+        var targetRelease = releaseSelect.value;
+        var seq = ++previewSeq;
         showError("");
         if (!keepDecisions) util.clear(previewBox);
         MC.api.requestV3("POST", candidatesPath() + "/" + encodeURIComponent(candidate.candidate_id) + "/apply-preview", {
-          body: { config_id: config.config_id, draft_id: "d0-" + releaseSelect.value },
+          body: { config_id: targetConfig, draft_id: "d0-" + targetRelease },
         }).then(function (preview) {
+          if (seq !== previewSeq || configSelect.value !== targetConfig || releaseSelect.value !== targetRelease) return;
           var kept = keepDecisions ? (previewBox._decisions || {}) : {};
           previewBox._decisions = kept;
-          renderPreview(preview, true);
+          renderPreview(preview, true, targetConfig, targetRelease);
         }, function (err) {
+          if (seq !== previewSeq) return;
           showError(errorText(err));
           if (!keepDecisions) util.clear(previewBox);
         });
@@ -2755,7 +3212,12 @@
         return;
       }
       var pid = profiles[0];
-      var configPath = "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
+      var batchWid = workspaceId();
+      var batchEpoch = MC.workspaces && MC.workspaces.epoch ? MC.workspaces.epoch() : null;
+      function batchCurrent() {
+        return workspaceId() === batchWid && (batchEpoch === null || !MC.workspaces || !MC.workspaces.epoch || MC.workspaces.epoch() === batchEpoch);
+      }
+      var configPath = "/api/v3/workspaces/" + encodeURIComponent(batchWid) +
         "/profiles/" + encodeURIComponent(pid) + "/configs";
       var configSelect = h("select.input", { "data-sync-batch-config": "1" },
         h("option", { value: "" }, "正在读取配置…"));
@@ -2790,8 +3252,9 @@
               "data-sync-batch-apply": "1",
               onclick: function () {
                 if (!configSelect.value || !releaseSelect.value) return;
+                if (!batchCurrent()) { close(); MC.toast.warning("工作区已切换", "请在目标工作区重新选择候选。"); return; }
                 close();
-                runBatchApply(rows, configSelect.value, "d0-" + releaseSelect.value);
+                runBatchApply(rows, configSelect.value, "d0-" + releaseSelect.value, batchWid, batchCurrent);
               },
             }, "开始批量写入"),
           ];
@@ -2819,18 +3282,20 @@
       return modal;
     }
 
-    function runBatchApply(rows, configId, draftId) {
+    function runBatchApply(rows, configId, draftId, wid, isCurrent) {
       var C = state.candidates;
       C.busy = "apply";
       renderBody();
-      var stats = { ok: 0, skipped: [], failed: [] };
+      var stats = { ok: 0, skipped: [], failed: [], stopped: false };
       var seq = Promise.resolve();
       rows.forEach(function (row) {
         seq = seq.then(function () {
-          var base = candidatesPath() + "/" + encodeURIComponent(row.candidate_id);
+          if (stats.stopped || !isCurrent()) { stats.stopped = true; return; }
+          var base = "/api/v3/workspaces/" + encodeURIComponent(wid) + "/sync/candidates/" + encodeURIComponent(row.candidate_id);
           return MC.api.requestV3("POST", base + "/apply-preview", {
             body: { config_id: configId, draft_id: draftId },
           }).then(function (preview) {
+            if (!isCurrent()) { stats.stopped = true; return; }
             if (!preview) return;
             if (preview.d0_frozen) { stats.skipped.push(row.candidate_id + "：D0 已冻结"); return; }
             var needs = (preview.needs_decision || []).length ||
@@ -2840,18 +3305,25 @@
             return MC.api.requestV3("POST", base + "/apply", {
               body: { preview_id: preview.preview_id, request_id: "batch-" + preview.preview_id, decisions: {} },
             }).then(function () {
+              if (!isCurrent()) { stats.stopped = true; return; }
               stats.ok += 1;
               row.state = "applied";
             }, function (err) {
+              if (!isCurrent() || (err && err.code === "STALE_CONTEXT")) { stats.stopped = true; return; }
               stats.failed.push(row.candidate_id + "：" + errorText(err));
             });
           }, function (err) {
+            if (!isCurrent() || (err && err.code === "STALE_CONTEXT")) { stats.stopped = true; return; }
             stats.failed.push(row.candidate_id + "：" + errorText(err));
           });
         });
       });
       seq.then(function () {
         C.busy = "";
+        if (stats.stopped || !isCurrent()) {
+          MC.toast.warning("工作区 " + wid + " 的批量写入已停止", "尚未提交的候选不会继续处理；请回到原工作区核对已提交项的结果。");
+          return;
+        }
         var parts = ["成功 " + stats.ok + " 个"];
         if (stats.skipped.length) parts.push("需人工 " + stats.skipped.length + " 个");
         if (stats.failed.length) parts.push("失败 " + stats.failed.length + " 个");
@@ -2870,8 +3342,8 @@
 
     function renderCandidates() {
       var C = state.candidates;
-      var toolbar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
-      var stateSelect = h("select.input", { "data-sync-candidate-state": "1" },
+      var toolbar = h("div.row.sync-filters", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
+      var stateSelect = h("select.input", { "data-sync-candidate-state": "1", "aria-label": "候选状态" },
         h("option", { value: "" }, "全部状态"),
         Object.keys(CANDIDATE_STATE_LABEL).map(function (key) {
           return h("option", { value: key }, CANDIDATE_STATE_LABEL[key]);
@@ -2879,7 +3351,7 @@
       );
       stateSelect.value = C.state;
       stateSelect.addEventListener("change", function () { C.state = stateSelect.value; loadCandidates(true); });
-      var profileSelect = h("select.input", { "data-sync-candidate-profile": "1" },
+      var profileSelect = h("select.input", { "data-sync-candidate-profile": "1", "aria-label": "候选机型" },
         h("option", { value: "" }, "全部机型"),
         workspaceProfiles().map(function (profile) { return h("option", { value: profile.id }, profile.name); })
       );
@@ -2892,11 +3364,16 @@
       }, "刷新"));
 
       if (C.error) body.appendChild(h("div.form-error", C.error));
-      if (C.loading && !C.items.length) { body.appendChild(h("p.muted", "正在读取候选…")); return; }
+      if (C.loading && !C.items.length) { body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted", "正在读取候选…")))); return; }
+      if (C.error && !C.items.length) {
+        body.appendChild(h("div.card", h("div.card-b", toolbar)));
+        return;
+      }
 
       var selectable = C.items.filter(function (row) { return row.state !== "superseded"; });
       var chosen = selectable.filter(function (row) { return C.selected[row.candidate_id]; });
-      var batchBar = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px", "data-sync-candidate-batch": "1" });
+      var batchBar = h("div.row.sync-selection", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px", "data-sync-candidate-batch": "1" });
+      batchBar.hidden = !chosen.length;
       if (canWrite() && selectable.length) {
         batchBar.appendChild(h("span.small.muted", "已选 " + chosen.length + " / " + selectable.length));
         batchBar.appendChild(h("button.btn.btn-sm.btn-primary", {
@@ -2908,7 +3385,7 @@
       }
       if (!C.items.length) {
         body.appendChild(h("div.card", h("div.card-b", toolbar, batchBar,
-          h("p.muted", C.state ? "该状态下没有候选。" : "还没有更新候选。"))));
+          emptyState(C.state ? "没有匹配的更新候选" : "没有待处理的更新候选", "来源出现新内容后在此审阅；确认只写入草稿，发布仍需显式操作。"))));
         return;
       }
       var headerBox = h("input", {
@@ -2924,10 +3401,9 @@
         });
         renderBody();
       });
-      var tbody = h("tbody");
+      var cards = h("div.sync-candidate-cards");
       C.items.forEach(function (candidate) {
-        var row = h("tr", { "data-sync-candidate": candidate.candidate_id, style: "cursor:pointer" },
-          h("td", candidate.state === "superseded" ? h("span.muted.xsmall", "—") : h("input", {
+        var checkbox = candidate.state === "superseded" ? null : h("input", {
             type: "checkbox",
             "data-sync-candidate-select": candidate.candidate_id,
             "aria-label": "选择候选 " + candidate.candidate_id,
@@ -2938,29 +3414,31 @@
               else delete C.selected[candidate.candidate_id];
               renderBody();
             },
-          })),
-          h("td", h("div.small", candidate.candidate_id), h("div.xsmall.muted", candidate.source_id)),
-          h("td", h("span.badge", CANDIDATE_STATE_LABEL[candidate.state] || candidate.state)),
-          h("td", h("div.xsmall", candidate.content_hash || "—")),
-          h("td", h("div.small", util.formatTime(candidate.created_at)),
-            h("div.xsmall.muted", candidate.file_version_id ? "关联文件版本" : "无文件版本")),
-          h("td", h("div.xsmall.muted", candidate.applied_at ? "已写入 rev " + candidate.applied_revision : "—"))
+          });
+        var title = h("button.btn.btn-ghost.sync-candidate-title", { type: "button", onclick: function () { openCandidate(candidate); } }, candidate.source_id || candidate.candidate_id);
+        var card = h("article.sync-candidate-card", { "data-sync-candidate": candidate.candidate_id },
+          h("div.sync-candidate-heading", checkbox, title,
+            h("span.badge", CANDIDATE_STATE_LABEL[candidate.state] || candidate.state)),
+          h("div.small.muted", "机型 " + (candidate.profile_id || "—") + " · " + util.formatTime(candidate.created_at)),
+          h("div.xsmall.muted", candidate.file_version_id ? "关联文件版本 " + candidate.file_version_id : "无文件版本"),
+          h("div.xsmall.muted", "内容指纹 ", h("code", candidate.content_hash || "—")),
+          h("div.xsmall.muted", candidate.applied_at ? "已写入修订 " + candidate.applied_revision : "尚未写入草稿"),
+          h("div.sync-candidate-foot", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { openCandidate(candidate); } }, "查看参数差异"),
+            h("code.xsmall.muted", candidate.candidate_id))
         );
-        row.addEventListener("click", function () { openCandidate(candidate); });
-        tbody.appendChild(row);
+        card.addEventListener("click", function (event) {
+          if (event.target.closest("button, input, label")) return;
+          openCandidate(candidate);
+        });
+        cards.appendChild(card);
       });
       body.appendChild(h("div.card",
         h("div.card-h", h("strong", "更新候选"), h("span.muted.small", "共 " + C.total + " 条 · 工作区 " + workspaceId())),
         h("div.card-b",
           toolbar,
           batchBar,
-          h("table.table",
-            h("thead", h("tr",
-              h("th", headerBox), h("th", "候选"), h("th", "状态"), h("th", "内容指纹"),
-              h("th", "时间/来源"), h("th", "写入")
-            )),
-            tbody
-          ),
+          h("label.row.sync-candidate-select-all", headerBox, h("span.small.muted", "选择当前已加载候选")),
+          cards,
           C.next_cursor ? h("button.btn.btn-sm", {
             type: "button", onclick: function () { loadCandidates(false, true); },
           }, "加载更多") : null
@@ -2970,31 +3448,46 @@
 
     var sheet = h("div.sync-sheet");
     sheet.hidden = true;
+    var sheetModal = null;
+    var sheetHost = null;
 
     function paintSheet() {
       if (!state.sheet) {
+        if (sheetModal) sheetModal.close();
         sheet.hidden = true;
-        util.clear(sheet);
         return;
       }
       sheet.hidden = false;
-      util.clear(sheet);
-      var host = h("div.sync-sheet-card");
-      var close = h("button.btn.btn-sm", {
-        type: "button",
-        "data-sync-sheet-close": "1",
-        onclick: function () { showSheet(""); },
-      }, "关闭");
-      sheet.appendChild(h("div.row", { style: "justify-content:flex-end;margin-bottom:8px" }, close));
-      sheet.appendChild(host);
+      if (!sheetModal) {
+        sheetHost = h("div.sync-sheet-card");
+        sheetModal = MC.modal({
+          title: state.sheet === "plan" ? "更新计划与全量预览" : "连接设置",
+          body: sheetHost,
+          size: "wide",
+          onClose: function () {
+            sheetModal = null;
+            sheetHost = null;
+            state.sheet = "";
+            sheet.hidden = true;
+          },
+          footer: function (close) {
+            return [h("button.btn", { type: "button", "data-sync-sheet-close": "1", onclick: close }, "关闭")];
+          },
+        });
+        sheetModal.el.classList.add("sync-settings-dialog");
+        sheet.appendChild(sheetModal.el.parentNode);
+      }
+      // Keep the dialog and its focus scope stable across async updates.
+      util.clear(sheetHost);
       var previous = body;
-      body = host;
+      body = sheetHost;
       if (state.sheet === "plan") renderPlan();
       else if (state.sheet === "connections") renderConnections();
       body = previous;
     }
 
     function showSheet(kind) {
+      if (sheetModal && kind && state.sheet !== kind) sheetModal.close();
       state.sheet = kind || "";
       paintSheet();
       if (state.sheet === "plan" && state.plan.loadedFor !== workspaceId() && !state.plan.loading) {
@@ -3046,22 +3539,25 @@
       var conn = (state.connections.items || [])[0];
       var hb = conn && state.connections.heartbeats[conn.connection_id];
       var connText = !conn
-        ? "尚未配置 SDA 连接"
+        ? (state.connections.error ? "连接状态读取失败" : (state.connections.loading ? "正在读取连接…" : "尚未配置 SDA 连接"))
         : (conn.name + (hb && hb.enabled ? " · 保活 " + (hb.interval_minutes || 10) + " 分钟" : " · 保活已关闭"));
       return h("div.sync-strip",
-        h("span.small", connText),
-        h("button.btn.btn-sm", {
+        h("div.sync-strip-group",
+          h("div.sync-strip-info", h("span.sync-strip-label", "SDA 连接"), h("span.sync-strip-status", h("span.sync-status-dot", { "aria-hidden": "true" }), connText)),
+          h("button.btn.btn-sm.btn-ghost.sync-strip-action", {
           type: "button",
           "data-sync-connections": "1",
           onclick: function () { showSheet("connections"); },
-        }, conn ? "连接设置" : "配置连接"),
-        h("span.sync-divider"),
-        h("span.small", auto ? ("自动更新 每 " + hours + " 小时") : "自动更新 已暂停"),
-        h("button.btn.btn-sm", {
+          }, conn ? "连接设置" : "配置连接")
+        ),
+        h("div.sync-strip-group",
+          h("div.sync-strip-info", h("span.sync-strip-label", "自动更新"), h("span.sync-strip-status", h("span.sync-status-dot" + (plan && auto ? ".is-active" : ""), { "aria-hidden": "true" }), plan ? (auto ? ("每 " + hours + " 小时") : "已暂停") : (state.plan.error ? "更新计划读取失败" : "正在读取更新计划…"))),
+          h("button.btn.btn-sm.btn-ghost.sync-strip-action", {
           type: "button",
           "data-sync-plan": "1",
           onclick: function () { showSheet("plan"); },
-        }, "计划设置")
+          }, "计划设置")
+        )
       );
     }
     var stripHost = h("div");
@@ -3095,6 +3591,8 @@
       icon: "settings",
       update: function (next) {
         state.tab = tabById(next && next.arg).id;
+        if (sheetModal) sheetModal.close();
+        if (state.plan.loadedFor !== workspaceId()) state.plan = freshPlan();
         state.sheet = sheetFor(next);
         renderTabs();
         paintChrome();
@@ -3102,9 +3600,12 @@
         if (state.sheet) showSheet(state.sheet);
         if (state.tab === "sources") loadSources(true);
         if (state.tab === "runs") loadRuns(true);
+        if (state.tab === "candidates" && state.candidates.loadedFor !== workspaceId()) loadCandidates(true);
+        if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
       },
-      isDirty: function () { return !!activeEditorDirty; },
+      isDirty: function () { return !!activeEditorDirty || planDirty(); },
       destroy: function () {
+        if (sheetModal) sheetModal.close();
         activeEditorDirty = false;
         (state.connections.pollTimers || []).forEach(function (timer) { clearTimeout(timer); });
         state.connections.pollTimers = [];

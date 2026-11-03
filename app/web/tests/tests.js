@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 120;  // + M16-31/32/33/34/35/36 更新管理 + SDA 目录选择 + 32 新建/批量/草稿 + 36 批量决议
+  var EXPECTED_CASES = 135;  // + R6 标签、弹层、列表状态、机型筛选与事件分页回归
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -4038,6 +4038,7 @@
 
   test("SYNC-32：更新源列表、编辑 409 保留草稿与只读门控", function () {
     var calls = [];
+    var listRevisionChanged = false;
     var original = MC.api.requestV3;
     var originalWid = MC.workspaces && MC.workspaces.scopeId;
     var source = {
@@ -4051,6 +4052,11 @@
     MC.api.requestV3 = function (method, path, opts) {
       calls.push({ method: method, path: path, opts: opts || {} });
       if (method === "GET") {
+        if (opts && opts.query && opts.query.status === "all") {
+          return Promise.resolve(opts.query.cursor === "0"
+            ? { items: [{ source_id: "other" }], total: 2, next_cursor: "1", query_revision: 5 }
+            : { items: [Object.assign({}, source, { revision: 4, name: "远端名称" })], total: 2, next_cursor: null, query_revision: listRevisionChanged ? 6 : 5 });
+        }
         return Promise.resolve({ items: [source], total: 1, next_cursor: null });
       }
       if (method === "PATCH") {
@@ -4089,7 +4095,21 @@
           ok(modal.textContent.indexOf("保留") >= 0, "409 保留草稿并提示");
           ok(document.querySelector(".modal"), "409 不关闭编辑框");
           ok(modal.querySelector("[data-sync-reload]"), "409 提供重新载入最新版本入口");
-          cleanOverlays();
+          modal.querySelector("[data-sync-reload]").click();
+          return tick().then(function () {
+            var compare = lastModal();
+            ok(compare !== modal && compare.textContent.indexOf("远端名称") >= 0 && compare.textContent.indexOf("B.xml") >= 0, "对比服务端和本地草稿");
+            ok(calls.some(function (c) { return c.opts.query && c.opts.query.cursor === "1"; }), "跨页按稳定 ID 找到来源");
+            modalButton(compare, "取消").click();
+            ok(modal.querySelectorAll("input.input")[0].value === "B.xml", "取消对比保留草稿");
+            listRevisionChanged = true;
+            modal.querySelector("[data-sync-reload]").click();
+            return tick().then(function () {
+              ok(modal.textContent.indexOf("读取时发生变化") >= 0, "分页期间版本变化必须停止恢复");
+              eq(modal.querySelectorAll("input.input")[0].value, "B.xml", "分页变化时草稿不丢失");
+              cleanOverlays();
+            });
+          });
         });
       })
       .then(function () {
@@ -4133,6 +4153,47 @@
     })[0] || null;
   }
 
+  test("R6：来源删除确认和批量处理不跨工作区", function () {
+    var original = MC.api.requestV3, originalConfirm = MC.confirm, originalScope = MC.workspaces.scopeId, originalEpoch = MC.workspaces.epoch;
+    var wid = "w-a", epoch = 1, resolveConfirm, resolvePatch, writes = [];
+    MC.workspaces.scopeId = function () { return wid; };
+    MC.workspaces.epoch = function () { return epoch; };
+    MC.confirm = function () { return new Promise(function (resolve) { resolveConfirm = resolve; }); };
+    MC.api.requestV3 = function (method, path) {
+      if (method === "GET" && /\/sync\/sources$/.test(path)) return Promise.resolve({ items: ["a", "b"].map(function (id) { return { source_id: id, revision: 1, name: id, kind: "http_file", enabled: true }; }) });
+      if (method === "PATCH" || method === "DELETE") { writes.push({ method: method, path: path }); return new Promise(function (resolve) { resolvePatch = resolve; }); }
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function (key) { return key === "settings_write"; };
+    var inst = MC.views.updates(app, { arg: "sources" });
+    function cleanup() { inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; MC.confirm = originalConfirm; MC.workspaces.scopeId = originalScope; MC.workspaces.epoch = originalEpoch; }
+    return tick().then(function () {
+      inst.el.querySelector('[data-sync-delete="a"]').click();
+      wid = "w-b"; epoch++; resolveConfirm(true);
+      return tick();
+    }).then(function () {
+      eq(writes.length, 0, "切换后确认删除不发请求");
+      wid = "w-a"; epoch++; inst.update({ arg: "sources" });
+      return tick();
+    }).then(function () {
+      var boxes = inst.el.querySelectorAll("[data-sync-select]");
+      boxes[0].checked = true; boxes[0].dispatchEvent(new Event("change"));
+      boxes = inst.el.querySelectorAll("[data-sync-select]");
+      boxes[1].checked = true; boxes[1].dispatchEvent(new Event("change"));
+      MC.confirm = function () { return Promise.resolve(true); };
+      inst.el.querySelector("[data-sync-batch-disable]").click();
+      return tick();
+    }).then(function () {
+      eq(writes.length, 1, "批量开始只发送首项");
+      wid = "w-b"; epoch++; resolvePatch({ enabled: false, revision: 2 });
+      return tick().then(tick);
+    }).then(function () {
+      eq(writes.length, 1, "切换后不发送后续项");
+      ok(writes[0].path.indexOf("/w-a/") >= 0, "已发请求属于原工作区");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
   test("SYNC-32B：新建来源含类型/连接/目标绑定，删除与批量动作保持筛选", function () {
     var calls = [];
     var original = MC.api.requestV3;
@@ -4169,6 +4230,8 @@
     return tick()
       .then(function () {
         ok(host.querySelector("[data-sync-new]"), "可写身份有新建入口");
+        ok(host.textContent.indexOf("来源状态") >= 0, "启停状态不冒充最近运行结果");
+        ok(host.textContent.indexOf("核验状态未提供") >= 0, "接口没有核验数据时不声称没有核验记录");
         eq(host.querySelectorAll("[data-sync-select]").length, 2, "每行都有勾选框");
         ok(host.querySelector("[data-sync-batch]"), "有批量工具条");
         host.querySelector('[data-sync-test="s1"]').click();
@@ -4317,6 +4380,8 @@
         var retry = host.querySelector("[data-sync-retry]");
         ok(retry, "列表失败给出显式重试");
         ok(host.querySelector("[data-sync-new]"), "失败时工具栏保留");
+        ok(!host.querySelector(".sync-empty"), "读取失败不能显示空数据提示");
+        ok(host.querySelector("[data-sync-refresh]"), "读取失败仍可使用筛选工具栏");
         failList = false;
         retry.click();
         return tick().then(tick);
@@ -4413,11 +4478,72 @@
   });
 
 
+  test("R6：计划保存回包不能覆盖切换后的工作区", function () {
+    var original = MC.api.requestV3, originalScope = MC.workspaces.scopeId, originalEpoch = MC.workspaces.epoch;
+    var wid = "w-a", epoch = 1, resolveSave;
+    MC.workspaces.scopeId = function () { return wid; };
+    MC.workspaces.epoch = function () { return epoch; };
+    MC.api.requestV3 = function (method, path) {
+      if (method === "GET" && /\/sync\/policy$/.test(path)) return Promise.resolve({ revision: 1, enabled: false, default_interval_hours: path.indexOf("/w-a/") >= 0 ? 6 : 18, profile_overrides: {} });
+      if (method === "PUT" && /\/sync\/policy$/.test(path)) return new Promise(function (resolve) { resolveSave = resolve; });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function (name) { return name === "settings_write"; };
+    var inst = MC.views.updates(app, { arg: "plan" });
+    function cleanup() { inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; MC.workspaces.scopeId = originalScope; MC.workspaces.epoch = originalEpoch; }
+    return tick().then(function () {
+      var input = inst.el.querySelector("[data-plan-interval]"); input.value = "9"; input.dispatchEvent(new Event("input"));
+      inst.el.querySelector("[data-plan-save]").click();
+      wid = "w-b"; epoch++; inst.update({ arg: "plan" });
+      return tick();
+    }).then(function () {
+      resolveSave({ revision: 2, enabled: false, default_interval_hours: 9, profile_overrides: {} });
+      return tick();
+    }).then(function () {
+      eq(inst.el.querySelector("[data-plan-interval]").value, "18", "旧工作区保存回包不能覆盖新计划");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：工作区切换隔离计划读取与预览的晚到响应", function () {
+    var original = MC.api.requestV3, originalScope = MC.workspaces.scopeId, originalEpoch = MC.workspaces.epoch;
+    var wid = "w-a", epoch = 1, reads = 0, resolvePolicy, resolvePreview;
+    MC.workspaces.scopeId = function () { return wid; };
+    MC.workspaces.epoch = function () { return epoch; };
+    MC.api.requestV3 = function (method, path) {
+      if (method === "GET" && /\/sync\/policy$/.test(path)) {
+        if (path.indexOf("/w-a/") >= 0 && ++reads > 1) return new Promise(function (resolve) { resolvePolicy = resolve; });
+        return Promise.resolve({ revision: 1, enabled: false, default_interval_hours: path.indexOf("/w-a/") >= 0 ? 6 : 18, profile_overrides: {} });
+      }
+      if (method === "POST" && /\/sync\/previews$/.test(path)) return new Promise(function (resolve) { resolvePreview = resolve; });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function (name) { return name === "settings_write"; };
+    var inst = MC.views.updates(app, { arg: "plan" });
+    function cleanup() { inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; MC.workspaces.scopeId = originalScope; MC.workspaces.epoch = originalEpoch; }
+    return tick().then(function () {
+      inst.el.querySelector("[data-plan-preview]").click();
+      inst.el.querySelector("[data-plan-refresh]").click();
+      wid = "w-b"; epoch++; inst.update({ arg: "plan" });
+      return tick();
+    }).then(function () {
+      eq(inst.el.querySelector("[data-plan-interval]").value, "18", "新工作区计划加载");
+      resolvePolicy({ revision: 9, enabled: false, default_interval_hours: 99, profile_overrides: {} });
+      resolvePreview({ preview_id: "old-preview", total: 1, read_set_sha256: "old-workspace", items: [] });
+      return tick();
+    }).then(function () {
+      eq(inst.el.querySelector("[data-plan-interval]").value, "18", "旧计划回包不得覆盖");
+      ok(!inst.el.querySelector('[data-plan-read-set="old-workspace"]'), "旧预览不得进入新工作区");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
   test("SYNC-33：计划 CAS 409 保留草稿、workspace_all 预览与暂停后手动全量更新", function () {
     var calls = [];
     var previewBodies = [];
     var runBodies = [];
     var original = MC.api.requestV3;
+    var originalConfirm = MC.confirm;
     var originalScope = MC.workspaces.scopeId;
     var originalCurrent = MC.workspaces.current;
     var policy = {
@@ -4468,23 +4594,58 @@
     };
     function restore() {
       MC.api.requestV3 = original;
+      MC.confirm = originalConfirm;
       MC.workspaces.scopeId = originalScope;
       MC.workspaces.current = originalCurrent;
     }
     var app = settingsApp(true);
     app.can = function (name) { return name === "settings_write" || name === "tasks_run"; };
     var inst = MC.views.updates(app, { kind: "updates", arg: "plan", query: {} });
+    document.body.appendChild(inst.el);
     return tick()
       .then(function () {
         eq(inst.el.querySelector("[data-plan-enabled]").checked, false, "加载全局暂停状态");
         eq(inst.el.querySelector("[data-plan-interval]").value, "6", "加载默认间隔");
+        eq(inst.el.querySelector("[data-plan-interval]").getAttribute("aria-label"), "默认间隔（小时）", "默认间隔有可访问名称");
+        eq(inst.el.querySelector('[data-plan-override-enabled="second"]').getAttribute("aria-label"), "第二机型 自动状态覆盖", "机型覆盖有可访问名称");
+        var invalidInterval = inst.el.querySelector("[data-plan-interval]");
+        invalidInterval.value = "0";
+        invalidInterval.dispatchEvent(new Event("input"));
+        inst.el.querySelector("[data-plan-save]").click();
+        invalidInterval = inst.el.querySelector("[data-plan-interval]");
+        eq(invalidInterval.getAttribute("aria-invalid"), "true", "无效间隔标记错误");
+        ok(document.getElementById(invalidInterval.getAttribute("aria-describedby")).textContent.indexOf("1–2160") >= 0, "错误说明与间隔关联");
+        eq(document.activeElement, invalidInterval, "验证失败焦点返回无效输入");
+        invalidInterval.value = "6";
+        invalidInterval.dispatchEvent(new Event("input"));
+        ok(!invalidInterval.hasAttribute("aria-invalid"), "修改后清除旧错误关联");
+        var invalidOverride = inst.el.querySelector('[data-plan-override-interval="second"]');
+        invalidOverride.value = "0";
+        invalidOverride.dispatchEvent(new Event("input"));
+        inst.el.querySelector("[data-plan-save]").click();
+        invalidOverride = inst.el.querySelector('[data-plan-override-interval="second"]');
+        eq(invalidOverride.getAttribute("aria-invalid"), "true", "机型覆盖错误定位到对应输入");
+        eq(document.activeElement, invalidOverride, "机型覆盖错误焦点可恢复");
+        ok(!inst.el.querySelector("[data-plan-interval]").hasAttribute("aria-invalid"), "机型错误不会标记全局间隔");
+        invalidOverride.value = "8";
+        invalidOverride.dispatchEvent(new Event("input"));
         eq(inst.el.querySelector('[data-plan-override-enabled="second"]').value, "true", "加载机型覆盖 enabled");
         eq(inst.el.querySelector('[data-plan-override-interval="second"]').value, "8", "加载机型覆盖 interval");
+        ok(!inst.isDirty(), "加载后计划无未保存修改");
         var interval = inst.el.querySelector("[data-plan-interval]");
         interval.value = "9";
-        interval.dispatchEvent(new Event("change"));
-        inst.el.querySelector("[data-plan-save]").click();
-        return tick();
+        interval.dispatchEvent(new Event("input"));
+        ok(inst.isDirty(), "输入计划后即标记未保存，切换工作区须确认");
+        var reads = calls.filter(function (c) { return c.method === "GET" && /\/sync\/policy$/.test(c.path); }).length;
+        MC.confirm = function () { return Promise.resolve(false); };
+        inst.el.querySelector("[data-plan-refresh]").click();
+        return tick().then(function () {
+          eq(calls.filter(function (c) { return c.method === "GET" && /\/sync\/policy$/.test(c.path); }).length, reads, "取消刷新不重读计划");
+          eq(inst.el.querySelector("[data-plan-interval]").value, "9", "取消刷新保留草稿");
+          MC.confirm = originalConfirm;
+          inst.el.querySelector("[data-plan-save]").click();
+          return tick();
+        });
       })
       .then(function () {
         ok(inst.el.textContent.indexOf("保留") >= 0, "409 提示草稿保留");
@@ -4535,6 +4696,8 @@
         });
       })
       .catch(function (err) {
+        inst.destroy();
+        inst.el.remove();
         restore();
         throw err;
       });
@@ -4616,15 +4779,27 @@
         ok(inst.el.querySelector('[data-cred-manual="conn-34"]'), "锁定后提示人工处理");
         ok(inst.el.querySelector('[data-hb-enabled="conn-34"]'), "可写身份有保活开关");
         inst.el.querySelector('[data-conn-cred="conn-34"]').click();
-        pendingModal = document.querySelector(".modal");
+        pendingModal = document.querySelector("[data-cred-password]").closest(".modal");
         ok(pendingModal, "打开更换凭据表单");
         var user = pendingModal.querySelector("[data-cred-username]");
         var pwd = pendingModal.querySelector("[data-cred-password]");
         var token = pendingModal.querySelector("[data-cred-token]");
         eq(token.type, "password", "运维 token 是密码框");
+        pendingModal.querySelector("[data-cred-submit]").click();
+        eq(document.activeElement, user, "缺少账号时聚焦账号");
+        ok(user.getAttribute("aria-invalid") === "true" && document.getElementById(user.getAttribute("aria-describedby")).textContent.indexOf("账号") >= 0, "账号错误关联说明");
         user.value = "operator-account";
+        user.dispatchEvent(new Event("input"));
+        pendingModal.querySelector("[data-cred-submit]").click();
+        eq(document.activeElement, pwd, "缺少密码时聚焦密码");
+        ok(pwd.getAttribute("aria-invalid") === "true", "密码错误关联说明");
         pwd.value = "super-secret-pw";
+        pwd.dispatchEvent(new Event("input"));
+        pendingModal.querySelector("[data-cred-submit]").click();
+        eq(document.activeElement, token, "缺少令牌时聚焦令牌");
+        ok(token.getAttribute("aria-invalid") === "true", "令牌错误关联说明");
         token.value = "operator-token-34";
+        token.dispatchEvent(new Event("input"));
         pendingModal.querySelector("[data-cred-submit]").click();
         return tick().then(function () {
           eq(pwd.value, "", "失败后密码框清空");
@@ -4640,9 +4815,18 @@
         var enabled = inst.el.querySelector('[data-hb-enabled="conn-34"]');
         var interval = inst.el.querySelector('[data-hb-interval="conn-34"]');
         var token = inst.el.querySelector('[data-hb-token="conn-34"]');
+        interval.value = "0";
+        inst.el.querySelector('[data-hb-save="conn-34"]').click();
+        eq(document.activeElement, interval, "保活间隔错误定位输入");
+        ok(interval.getAttribute("aria-invalid") === "true", "保活间隔错误关联说明");
         enabled.checked = true;
         interval.value = "15";
+        interval.dispatchEvent(new Event("input"));
+        inst.el.querySelector('[data-hb-save="conn-34"]').click();
+        eq(document.activeElement, token, "缺少保活令牌时定位输入");
+        ok(token.getAttribute("aria-invalid") === "true", "保活令牌错误关联说明");
         token.value = "operator-token-34";
+        token.dispatchEvent(new Event("input"));
         inst.el.querySelector('[data-hb-save="conn-34"]').click();
         return tick().then(function () {
           var put = calls.filter(function (c) { return c.method === "PUT" && /\/heartbeat$/.test(c.path); })[0];
@@ -4712,8 +4896,86 @@
   });
 
 
+  test("R6：诊断下载包含后续事件页", function () {
+    var original = MC.api.requestV3;
+    var originalCreate = URL.createObjectURL;
+    var originalRevoke = URL.revokeObjectURL;
+    var originalClick = HTMLAnchorElement.prototype.click;
+    var downloaded;
+    var run = { run_id: "run-export", trigger: "manual", state: "succeeded", counts: {} };
+    URL.createObjectURL = function (blob) { downloaded = blob; return "blob:test"; };
+    URL.revokeObjectURL = function () {};
+    HTMLAnchorElement.prototype.click = function () {};
+    MC.api.requestV3 = function (method, path, opts) {
+      if (method === "GET" && /\/events$/.test(path)) {
+        var after = opts && opts.query ? opts.query.after_seq || 0 : 0;
+        return Promise.resolve({ items: after === 0
+          ? Array.from({ length: 200 }, function (_, i) { return { seq: i + 1 }; })
+          : [{ seq: 201, message: "末尾诊断事件" }] });
+      }
+      if (method === "GET" && /\/runs\/run-export$/.test(path)) return Promise.resolve({ run: run, items: [] });
+      if (method === "GET" && /\/sync\/runs$/.test(path)) return Promise.resolve({ items: [{ run: run }], total: 1 });
+      return Promise.resolve({ items: [] });
+    };
+    var inst = MC.views.updates(settingsApp(true), { arg: "runs" });
+    function cleanup() { cleanOverlays(); inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; HTMLAnchorElement.prototype.click = originalClick; }
+    return tick().then(function () { inst.el.querySelector("[data-sync-run]").click(); return tick(); })
+      .then(function () { modalButton(lastModal(), "下载诊断").click(); return tick().then(tick); })
+      .then(function () { ok(downloaded, "实际生成诊断 Blob"); return downloaded.text(); })
+      .then(function (raw) {
+        var payload = JSON.parse(raw);
+        eq(payload.events.length, 201, "下载包括后续页");
+        eq(payload.events[200].message, "末尾诊断事件", "最后事件保留");
+        cleanup();
+      }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：运行详情事件分页失败后保留已有内容并可重试", function () {
+    var original = MC.api.requestV3;
+    var calls = [];
+    var fail = true;
+    var run = { run_id: "run-pages", trigger: "manual", state: "succeeded", counts: {} };
+    MC.api.requestV3 = function (method, path, opts) {
+      if (method === "GET" && /\/events$/.test(path)) {
+        var after = opts && opts.query ? opts.query.after_seq || 0 : 0;
+        calls.push(after);
+        if (after === 0) return Promise.resolve({ items: Array.from({ length: 200 }, function (_, i) { return { seq: i + 1, message: "事件 " + (i + 1) }; }) });
+        if (fail) return Promise.reject({ code: "NETWORK", message: "下一页失败" });
+        return Promise.resolve({ items: [{ seq: 201, message: "末尾事件 201" }] });
+      }
+      if (method === "GET" && /\/runs\/run-pages$/.test(path)) return Promise.resolve({ run: run, items: [] });
+      if (method === "GET" && /\/sync\/runs$/.test(path)) return Promise.resolve({ items: [{ run: run }], total: 1 });
+      return Promise.resolve({ items: [] });
+    };
+    var inst = MC.views.updates(settingsApp(true), { arg: "runs" });
+    function cleanup() { cleanOverlays(); inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; }
+    return tick().then(function () {
+      inst.el.querySelector("[data-sync-run]").click();
+      return tick();
+    }).then(function () {
+      var modal = lastModal();
+      ok(modal.textContent.indexOf("事件 200") >= 0, "首批事件可见");
+      modal.querySelector("[data-sync-events-more]").click();
+      return tick();
+    }).then(function () {
+      var modal = lastModal();
+      ok(modal.textContent.indexOf("下一页失败") >= 0, "分页错误持续显示");
+      ok(modal.textContent.indexOf("事件 200") >= 0, "失败后已加载事件保留");
+      fail = false;
+      modal.querySelector("[data-sync-events-more]").click();
+      return tick();
+    }).then(function () {
+      var modal = lastModal();
+      ok(modal.textContent.indexOf("末尾事件 201") >= 0, "重试后追加后续事件");
+      ok(calls.filter(function (x) { return x === 200; }).length === 2, "两次请求都从正确序号继续");
+      ok(!modal.querySelector("[data-sync-events-more]"), "最后一批不足 200 条时移除加载入口");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
   test("SYNC-35：运行记录列表、items/events 与失败项重试", function () {
     var calls = [];
+    var failDownload = false;
     var original = MC.api.requestV3;
     var originalWid = MC.workspaces && MC.workspaces.scopeId;
     var run = {
@@ -4730,7 +4992,11 @@
     MC.api.requestV3 = function (method, path, opts) {
       calls.push({ method: method, path: path, opts: opts || {} });
       if (method === "GET" && path.indexOf("/events") >= 0) {
-        return Promise.resolve({ items: [{ seq: 1, at: "2026-11-02T00:00:10Z", status: "succeeded", message: "A 已提交" }] });
+        if (failDownload) return Promise.reject({ code: "NETWORK", message: "日志暂时不可用" });
+        return Promise.resolve({ items: [
+          { seq: 1, item_id: "item-1", source_id: "src-1", at: "2026-11-02T00:00:10Z", status: "succeeded", message: "A 已提交" },
+          { seq: 2, item_id: "item-2", source_id: "src-2", at: "2026-11-02T00:00:11Z", status: "blocked", message: "B 已阻断" },
+        ] });
       }
       if (method === "GET" && path.indexOf("/runs/") >= 0) {
         return Promise.resolve({ run: run, items: items });
@@ -4762,12 +5028,24 @@
         ok(modal.textContent.indexOf("A.xml") >= 0 && modal.textContent.indexOf("B.xml") >= 0, "items 可见");
         ok(modal.textContent.indexOf("collector_offline") >= 0, "失败原因可见");
         ok(modal.textContent.indexOf("A 已提交") >= 0, "事件日志可见");
-        var retry = modal.querySelector("[data-sync-retry]");
-        ok(retry, "失败项有重试入口");
-        retry.click();
+        modal.querySelector('[data-sync-run-item="item-2"]').click();
+        ok(modal.textContent.indexOf("B 已阻断") >= 0, "选中来源显示对应日志");
+        ok(modal.textContent.indexOf("A 已提交") < 0, "选中来源不混入其他来源日志");
+        modal.querySelector('[data-sync-run-item="all"]').click();
+        ok(modal.textContent.indexOf("A 已提交") >= 0, "可返回全部日志");
+        failDownload = true;
+        modalButton(modal, "下载诊断").click();
         return tick().then(function () {
-          ok(calls.some(function (c) { return c.method === "POST" && c.path.indexOf("/retry") >= 0; }), "重试走 POST /retry");
-          [].filter.call(modal.querySelectorAll(".modal-footer .btn"), function (b) { return b.textContent === "关闭"; })[0].click();
+          ok(modal.querySelector("[data-sync-download-error]").textContent.indexOf("日志暂时不可用") >= 0, "下载失败在详情中持续显示");
+          ok(modalButton(modal, "下载诊断"), "失败后保留重试入口");
+          failDownload = false;
+          var retry = modal.querySelector("[data-sync-retry]");
+          ok(retry, "失败项有重试入口");
+          retry.click();
+          return tick().then(function () {
+            ok(calls.some(function (c) { return c.method === "POST" && c.path.indexOf("/retry") >= 0; }), "重试走 POST /retry");
+            [].filter.call(modal.querySelectorAll(".modal-footer .btn"), function (b) { return b.textContent === "关闭"; })[0].click();
+          });
         });
       })
       .then(function () {
@@ -4799,6 +5077,59 @@
       });
   });
 
+  test("R6：候选目标切换使旧预览和晚到响应失效", function () {
+    var original = MC.api.requestV3;
+    var resolvePreview;
+    var resolveApply;
+    var requests = 0;
+    MC.api.requestV3 = function (method, path) {
+      if (method === "GET" && /\/sync\/candidates$/.test(path)) return Promise.resolve({ items: [{ candidate_id: "r6-race", source_id: "s", profile_id: "default", state: "pending", file_version_id: "v" }] });
+      if (method === "GET" && /\/releases$/.test(path)) return Promise.resolve({ items: [{ release_id: "r1" }, { release_id: "r2" }] });
+      if (method === "GET" && /\/configs$/.test(path)) return Promise.resolve({ items: [{ config_id: "c1", name: "配置" }] });
+      if (method === "POST" && /\/apply-preview$/.test(path)) {
+        requests++;
+        if (requests === 1) return new Promise(function (resolve) { resolvePreview = resolve; });
+        return Promise.resolve({ preview_id: "p2", blockers: [], items: [{ parameter_id: "fresh", name: "新目标", action: "conflict", allowed: ["use_new", "inherit_old"] }] });
+      }
+      if (method === "POST" && /\/apply$/.test(path)) return new Promise(function (resolve) { resolveApply = resolve; });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true);
+    app.can = function (name) { return name === "settings_write"; };
+    var inst = MC.views.updates(app, { arg: "candidates" });
+    function cleanup() { cleanOverlays(); inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; }
+    return tick().then(function () { inst.el.querySelector("[data-sync-candidate]").click(); return tick().then(tick); })
+      .then(function () {
+        var modal = lastModal(), release = modal.querySelector('[aria-label="软件版本"]');
+        modal.querySelector("[data-sync-preview]").click();
+        release.value = "r2"; release.dispatchEvent(new Event("change"));
+        resolvePreview({ preview_id: "p1", blockers: [], items: [{ parameter_id: "stale", name: "旧目标", action: "from_new" }] });
+        return tick();
+      }).then(function () {
+        var modal = lastModal();
+        ok(!modal.querySelector("[data-sync-diff]"), "旧目标晚到预览不显示");
+        modal.querySelector("[data-sync-preview]").click();
+        return tick();
+      }).then(function () {
+        var modal = lastModal(), release = modal.querySelector('[aria-label="软件版本"]');
+        ok(modal.querySelector('[data-sync-diff="fresh"]'), "新目标预览显示");
+        release.value = "r1"; release.dispatchEvent(new Event("change"));
+        ok(!modal.querySelector("[data-sync-apply]"), "切换目标后写入入口失效");
+        modal.querySelector("[data-sync-preview]").click();
+        return tick();
+      }).then(function () {
+        var modal = lastModal(), decision = modal.querySelector("[data-sync-decision]");
+        decision.value = "use_new"; decision.dispatchEvent(new Event("change"));
+        modal.querySelector("[data-sync-apply]").click();
+        decision.value = "inherit_old"; decision.dispatchEvent(new Event("change"));
+        ok(modal.querySelector("[data-sync-apply]").disabled && modal.querySelector("[data-sync-preview]").disabled, "写入中不能再次预览或提交");
+        resolveApply({ draft_revision: 1 });
+        return tick();
+      }).then(function () {
+        cleanup();
+      }).catch(function (err) { cleanup(); throw err; });
+  });
+
   test("SYNC-36：候选差异预览、冲突决议与写入草稿", function () {
     var calls = [];
     var original = MC.api.requestV3;
@@ -4813,7 +5144,8 @@
       d0_frozen: false, blockers: [], allowed_decisions: ["use_new", "inherit_old", "manual"],
       items: [
         { parameter_id: "p1", name: "Pulse", action: "from_new", ours: { value: { type: "int", text: "1" } }, theirs: { value: { type: "int", text: "2" } } },
-        { parameter_id: "p2", name: "Enabled", action: "conflict", allowed: ["use_new", "inherit_old", "manual"], ours: { value: { type: "bool", text: "false" } }, theirs: { value: { type: "bool", text: "true" } } },
+        { parameter_id: "p2", name: "Enabled", action: "conflict", allowed: ["use_new", "inherit_old", "manual"], base: { value: { type: "null", text: "null" } }, ours: { value: { type: "bool", text: "false" } }, theirs: { value: { type: "string", text: "" } } },
+        { parameter_id: "p3", name: "Removed", action: "drop", ours: { value: { type: "int", text: "0" } }, theirs: null },
       ],
     };
     if (MC.workspaces) MC.workspaces.scopeId = function () { return "w-cand"; };
@@ -4860,6 +5192,13 @@
       .then(function () {
         var modal = document.querySelector(".modal");
         ok(modal.textContent.indexOf("Pulse") >= 0 && modal.textContent.indexOf("Enabled") >= 0, "显示参数差异");
+        var firstCells = modal.querySelector('[data-sync-diff="p1"]').querySelectorAll("td");
+        var secondCells = modal.querySelector('[data-sync-diff="p2"]').querySelectorAll("td");
+        eq(firstCells[2].textContent, "未设", "缺失基线不冒充 null");
+        eq(secondCells[2].textContent, "null", "显式 null 独立显示");
+        eq(secondCells[3].textContent, "false", "布尔 false 保留");
+        eq(secondCells[4].textContent, '""', "空字符串独立显示");
+        ok(modal.querySelector('[data-sync-diff="p3"]').textContent.indexOf("移除") >= 0, "移除动作不能冒充采用新值");
         var decision = modal.querySelector("[data-sync-decision]");
         ok(decision, "冲突参数有决议下拉");
         decision.value = "use_new";
@@ -4915,14 +5254,15 @@
       state: "pending", content_hash: "b".repeat(64), created_at: "2026-11-02T00:00:00Z",
       file_version_id: "v-36b",
     };
+    var allowOld = true;
     function makePreview() {
       return {
         preview_id: "prev-36b", candidate_id: "cand-36b", draft_revision: 5,
         d0_frozen: false, blockers: [], can_apply: false,
         summary: { conflict: 2 },
         items: [
-          { parameter_id: "p1", name: "Pulse", action: "conflict", allowed: ["use_new", "inherit_old"], base: { value: { text: "0" } }, ours: { value: { text: "1" } }, theirs: { value: { text: "2" } } },
-          { parameter_id: "p2", name: "Enabled", action: "conflict", allowed: ["use_new", "inherit_old"], base: { value: { text: "0" } }, ours: { value: { text: "0" } }, theirs: { value: { text: "1" } } },
+          { parameter_id: "p1", name: "Pulse", action: "conflict", allowed: allowOld ? ["use_new", "inherit_old"] : ["use_new", "pin"], base: { value: { text: "0" } }, ours: { value: { text: "1" } }, theirs: { value: { text: "2" } } },
+          { parameter_id: "p2", name: "Enabled", action: "conflict", allowed: ["use_new", "pin"], base: { value: { text: "0" } }, ours: { value: { text: "0" } }, theirs: { value: { text: "1" } } },
         ],
       };
     }
@@ -4976,6 +5316,11 @@
         modal.querySelector("[data-sync-all-old]").click();
         var selects = modal.querySelectorAll("[data-sync-decision]");
         eq(selects[0].value, "inherit_old", "批量保留当前写入下拉");
+        eq(selects[1].value, "", "不允许保留的冲突保持未决");
+        ok(apply.disabled, "不允许的批量决议不能解除写入禁用");
+        selects[1].value = "use_new";
+        selects[1].dispatchEvent(new Event("change"));
+        ok(!apply.disabled, "逐项补全有效决议后才允许写入");
         apply.click();
         return tick().then(tick);
       })
@@ -4985,13 +5330,16 @@
         var rePreview = modal.querySelector("[data-sync-repreview]");
         ok(rePreview, "409 提供重新预览入口");
         var before = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply-preview") >= 0; }).length;
+        allowOld = false;
         rePreview.click();
         return tick().then(function () {
           var modal2 = document.querySelector(".modal");
           var after = calls.filter(function (c) { return c.method === "POST" && c.path.indexOf("/apply-preview") >= 0; }).length;
           ok(after > before, "重新预览重新请求 apply-preview");
           var selects = modal2.querySelectorAll("[data-sync-decision]");
-          eq(selects[0].value, "inherit_old", "重新预览后保留已选决议");
+          eq(selects[0].value, "", "重新预览后移除不再允许的旧决议");
+          eq(selects[1].value, "use_new", "重新预览保留仍然有效的决议");
+          ok(modal2.querySelector("[data-sync-apply]").disabled, "旧决议失效时禁止写入");
           eq(applyAttempt, 1, "只提交过一次写入");
           inst.destroy();
           inst.el.remove();
@@ -5002,6 +5350,46 @@
         restore();
         throw err;
       });
+  });
+
+  test("R6：批量候选切换工作区后不向新工作区继续写入", function () {
+    var original = MC.api.requestV3, originalScope = MC.workspaces.scopeId, originalEpoch = MC.workspaces.epoch;
+    var wid = "w-a", epoch = 1, resolvePreview, writes = [];
+    MC.workspaces.scopeId = function () { return wid; };
+    MC.workspaces.epoch = function () { return epoch; };
+    MC.api.requestV3 = function (method, path) {
+      if (method === "GET" && /\/sync\/candidates$/.test(path)) return Promise.resolve({ items: ["a", "b"].map(function (id) { return { candidate_id: id, source_id: id, profile_id: "default", state: "pending", file_version_id: "v" }; }) });
+      if (method === "GET" && /\/releases$/.test(path)) return Promise.resolve({ items: [{ release_id: "rel" }] });
+      if (method === "GET" && /\/configs$/.test(path)) return Promise.resolve({ items: [{ config_id: "cfg" }] });
+      if (method === "POST") { writes.push(path); return new Promise(function (resolve) { resolvePreview = resolve; }); }
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function (key) { return key === "settings_write"; };
+    var inst = MC.views.updates(app, { arg: "candidates" });
+    function cleanup() { cleanOverlays(); inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; MC.workspaces.scopeId = originalScope; MC.workspaces.epoch = originalEpoch; }
+    return tick().then(function () {
+      var boxes = inst.el.querySelectorAll("[data-sync-candidate-select]");
+      boxes[0].checked = true; boxes[0].dispatchEvent(new Event("change"));
+      boxes = inst.el.querySelectorAll("[data-sync-candidate-select]");
+      boxes[1].checked = true; boxes[1].dispatchEvent(new Event("change"));
+      inst.el.querySelector("[data-sync-candidate-batch-apply]").click();
+      return tick().then(tick);
+    }).then(function () {
+      var modal = lastModal(), config = modal.querySelector("[data-sync-batch-config]");
+      config.value = "cfg"; config.dispatchEvent(new Event("change"));
+      modal.querySelector("[data-sync-batch-release]").value = "rel";
+      modal.querySelector("[data-sync-batch-apply]").click();
+      return tick();
+    }).then(function () {
+      eq(writes.length, 1, "只启动第一个预览");
+      wid = "w-b"; epoch++;
+      resolvePreview({ preview_id: "preview-a", can_apply: true, items: [] });
+      return tick().then(tick);
+    }).then(function () {
+      eq(writes.length, 1, "切换后不继续预览或写入");
+      ok(writes[0].indexOf("/w-a/") >= 0, "已发请求归属原工作区");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
   });
 
   test("SYNC-36C：候选筛选/多选批量写入与跳转配置管理", function () {
@@ -5042,6 +5430,8 @@
       .then(function () {
         ok(host.querySelector("[data-sync-candidate-state]"), "有状态筛选");
         ok(host.querySelector("[data-sync-candidate-profile]"), "有机型筛选");
+        eq(host.querySelectorAll("article[data-sync-candidate]").length, 2, "候选以独立卡片呈现");
+        ok(host.querySelector('[data-sync-candidate="cand-a"] button'), "候选详情可通过键盘按钮打开");
         var checks = host.querySelectorAll("[data-sync-candidate-select]");
         eq(checks.length, 2, "每行有勾选框");
         checks[0].checked = true;
@@ -5120,7 +5510,7 @@
       })
       .then(function () {
         eq(count, 1, "空候选只发一次 GET，不得在 renderBody 里递归重载");
-        ok(inst.el.textContent.indexOf("还没有更新候选") >= 0, "显示空态");
+        ok(inst.el.textContent.indexOf("没有待处理的更新候选") >= 0, "显示空态");
         inst.destroy();
         inst.el.remove();
         MC.api.requestV3 = original;
@@ -5131,6 +5521,196 @@
       });
   });
 
+
+  test("R6：更新源机型范围使用服务端筛选并清除旧选择", function () {
+    var original = MC.api.requestV3;
+    var calls = [];
+    MC.api.requestV3 = function (method, path, opts) {
+      if (method === "GET" && /\/sync\/sources$/.test(path)) {
+        calls.push(opts.query || {});
+        return Promise.resolve({ items: [{ source_id: "scope-src", name: "来源", kind: "http_file", profile_id: "model-a", enabled: true }], total: 1 });
+      }
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true);
+    app.pid = "model-a";
+    var inst = MC.views.updates(app, { arg: "sources", pid: "model-a" });
+    function cleanup() { inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; }
+    return tick().then(function () {
+      eq(calls[0].profile_id, "model-a", "默认按当前机型向服务端查询");
+      var checkbox = inst.el.querySelector("[data-sync-select]");
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event("change"));
+      var scope = inst.el.querySelector("[data-sync-scope]");
+      ok(scope, "存在机型范围筛选");
+      scope.value = "workspace";
+      scope.dispatchEvent(new Event("change"));
+      return tick();
+    }).then(function () {
+      eq(calls[calls.length - 1].profile_id, undefined, "全部机型不向服务端传机型过滤");
+      ok(!inst.el.querySelector("[data-sync-select]").checked, "切换范围清除原选择");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：来源筛选切换后旧响应不能覆盖当前结果", function () {
+    var original = MC.api.requestV3;
+    var resolveOld;
+    var count = 0;
+    MC.api.requestV3 = function (method, path, opts) {
+      if (method === "GET" && /\/sync\/sources$/.test(path) && !(opts.query && opts.query.status === "all")) {
+        count += 1;
+        if (count === 2) return new Promise(function (resolve) { resolveOld = resolve; });
+        return Promise.resolve({ items: [{ source_id: "current", name: "当前机型来源", kind: "http_file", enabled: true }], total: 1 });
+      }
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true);
+    app.pid = "model-a";
+    var inst = MC.views.updates(app, { arg: "sources" });
+    function cleanup() { inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; }
+    return tick().then(function () {
+      var scope = inst.el.querySelector("[data-sync-scope]");
+      scope.value = "workspace"; scope.dispatchEvent(new Event("change"));
+      scope.value = "profile"; scope.dispatchEvent(new Event("change"));
+      return tick();
+    }).then(function () {
+      resolveOld({ items: [{ source_id: "old", name: "旧范围来源", kind: "http_file", enabled: true }], total: 1 });
+      return tick();
+    }).then(function () {
+      ok(inst.el.textContent.indexOf("当前机型来源") >= 0, "当前范围结果仍可见");
+      ok(inst.el.textContent.indexOf("旧范围来源") < 0, "晚到的旧范围结果被丢弃");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：候选跨工作区切换忽略旧请求", function () {
+    var original = MC.api.requestV3;
+    var originalScope = MC.workspaces.scopeId;
+    var wid = "w-a", resolveOld;
+    MC.workspaces.scopeId = function () { return wid; };
+    MC.api.requestV3 = function (method, path) {
+      if (/\/sync\/candidates$/.test(path)) {
+        if (path.indexOf("/w-a/") >= 0) return new Promise(function (resolve) { resolveOld = resolve; });
+        return Promise.resolve({ items: [{ candidate_id: "new-workspace", state: "pending", profile_id: "default" }], total: 1 });
+      }
+      return Promise.resolve({ items: [] });
+    };
+    var inst = MC.views.updates(settingsApp(true), { arg: "candidates" });
+    function cleanup() { inst.destroy(); inst.el.remove(); MC.api.requestV3 = original; MC.workspaces.scopeId = originalScope; }
+    wid = "w-b";
+    inst.update({ arg: "candidates" });
+    return tick().then(function () {
+      resolveOld({ items: [{ candidate_id: "old-workspace", state: "pending", profile_id: "default" }], total: 1 });
+      return tick();
+    }).then(function () {
+      ok(inst.el.querySelector('[data-sync-candidate="new-workspace"]'), "新工作区数据可见");
+      ok(!inst.el.querySelector('[data-sync-candidate="old-workspace"]'), "旧工作区结果不得覆盖");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：运行记录与候选快速切换筛选忽略晚到响应", function () {
+    var original = MC.api.requestV3;
+    var oldRuns, oldCandidates;
+    MC.api.requestV3 = function (method, path, opts) {
+      var state = opts && opts.query && opts.query.state;
+      if (/\/sync\/runs$/.test(path)) {
+        if (state === "failed") return new Promise(function (resolve) { oldRuns = resolve; });
+        return Promise.resolve({ items: state === "succeeded" ? [{ run: { run_id: "new-run", state: "succeeded", counts: {} } }] : [], total: 1 });
+      }
+      if (/\/sync\/candidates$/.test(path)) {
+        if (state === "pending") return new Promise(function (resolve) { oldCandidates = resolve; });
+        return Promise.resolve({ items: state === "applied" ? [{ candidate_id: "new-candidate", state: "applied", profile_id: "default" }] : [], total: 1 });
+      }
+      return Promise.resolve({ items: [] });
+    };
+    var runs = MC.views.updates(settingsApp(true), { arg: "runs" });
+    var candidates = MC.views.updates(settingsApp(true), { arg: "candidates" });
+    function cleanup() { runs.destroy(); candidates.destroy(); runs.el.remove(); candidates.el.remove(); MC.api.requestV3 = original; }
+    function choose(root, selector, value) { var s = root.querySelector(selector); ok(s, "加载时保留筛选"); s.value = value; s.dispatchEvent(new Event("change")); }
+    return tick().then(function () {
+      choose(runs.el, '[aria-label="运行结果"]', "failed");
+      choose(runs.el, '[aria-label="运行结果"]', "succeeded");
+      choose(candidates.el, "[data-sync-candidate-state]", "pending");
+      choose(candidates.el, "[data-sync-candidate-state]", "applied");
+      return tick();
+    }).then(function () {
+      oldRuns({ items: [{ run: { run_id: "old-run", state: "failed", counts: {} } }], total: 1 });
+      oldCandidates({ items: [{ candidate_id: "old-candidate", state: "pending", profile_id: "default" }], total: 1 });
+      return tick();
+    }).then(function () {
+      ok(runs.el.querySelector('[data-sync-run="new-run"]') && !runs.el.querySelector('[data-sync-run="old-run"]'), "运行记录保留最新筛选结果");
+      ok(candidates.el.querySelector('[data-sync-candidate="new-candidate"]') && !candidates.el.querySelector('[data-sync-candidate="old-candidate"]'), "候选保留最新筛选结果");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：运行记录与候选读取失败时保留筛选和重试，不显示空数据", function () {
+    var original = MC.api.requestV3;
+    MC.api.requestV3 = function (method, path) {
+      if (path.indexOf("/sync/runs") >= 0 || path.indexOf("/sync/candidates") >= 0) {
+        return Promise.reject({ code: "NETWORK", message: "读取失败" });
+      }
+      return Promise.resolve({ items: [] });
+    };
+    var runs = MC.views.updates(settingsApp(true), { arg: "runs" });
+    var candidates = MC.views.updates(settingsApp(true), { arg: "candidates" });
+    function cleanup() { runs.destroy(); candidates.destroy(); runs.el.remove(); candidates.el.remove(); MC.api.requestV3 = original; }
+    return tick().then(function () {
+      ok(runs.el.textContent.indexOf("读取失败") >= 0, "运行记录错误可见");
+      ok(runs.el.querySelector("select") && !runs.el.querySelector(".sync-empty"), "运行记录保留筛选并隐藏空态");
+      ok(candidates.el.textContent.indexOf("读取失败") >= 0, "候选错误可见");
+      ok(candidates.el.querySelector("[data-sync-candidate-refresh]") && !candidates.el.querySelector(".sync-empty"), "候选保留重试并隐藏空态");
+      cleanup();
+    }).catch(function (err) { cleanup(); throw err; });
+  });
+
+  test("R6：更新管理标签键盘导航与面板关联", function () {
+    var original = MC.api.requestV3;
+    MC.api.requestV3 = function () { return Promise.resolve({ items: [], total: 0 }); };
+    var inst = MC.views.updates(settingsApp(true), { arg: "sources" });
+    document.body.appendChild(inst.el);
+    try {
+      var first = inst.el.querySelector('[data-sync-tab="sources"]');
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      var runs = inst.el.querySelector('[data-sync-tab="runs"]');
+      eq(runs.getAttribute("aria-selected"), "true");
+      eq(runs.getAttribute("tabindex"), "0");
+      eq(inst.el.querySelector('[role="tabpanel"]').getAttribute("aria-labelledby"), runs.id);
+      runs.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      eq(inst.el.querySelector('[data-sync-tab="candidates"]').getAttribute("aria-selected"), "true");
+    } finally {
+      inst.destroy(); inst.el.remove(); MC.api.requestV3 = original;
+    }
+  });
+
+  test("R6：弹窗焦点循环忽略隐藏控件", function () {
+    var input = MC.util.h("input", { "aria-label": "可见输入" });
+    var hidden = MC.util.h("button", { hidden: true }, "隐藏操作");
+    var modal = MC.modal({ title: "焦点测试", dismissible: false, body: MC.util.h("div", input, hidden) });
+    try {
+      input.focus();
+      var event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+      document.dispatchEvent(event);
+      ok(event.defaultPrevented, "唯一可见焦点项的 Tab 保持在弹窗内");
+      eq(document.activeElement, input, "焦点没有移动到隐藏控件");
+    } finally { modal.close(); }
+  });
+
+  test("R6：二级对话框独占 Escape 与 Tab，关闭后保留设置面板", function () {
+    var outer = MC.modal({ title: "连接设置", body: MC.util.h("button", "更换凭据") });
+    var inner = MC.modal({ title: "更换凭据", body: MC.util.h("input", { "aria-label": "账号" }) });
+    try {
+      var input = inner.el.querySelector("input");
+      input.focus();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+      ok(inner.el.contains(document.activeElement), "焦点留在最上层");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      ok(!inner.el.isConnected, "关闭凭据弹层");
+      ok(outer.el.isConnected, "保留连接设置");
+    } finally { inner.close(); outer.close(); }
+  });
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链
    * 清空之后——串行队列本身是一条长微任务链，不 flush 的话最后几条用例的迟到拒绝

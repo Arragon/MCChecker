@@ -1,8 +1,9 @@
 """M16-40 浏览器 E2E 的场景清单（纯数据 + 纯函数，便于单测）。
 
-两级证据：
+三级证据：
 - `interactive`：真的点击/输入/断言 DOM 变化（更新管理、焦点、409、运维 token）。
 - `reachable`：路由可达、视图挂载、无错误块、标题快照一致（旧 V3 的 F 面板）。
+- `api`：真实服务接口交互，不证明用户界面能发出相同请求。
 
 级别写进报告，不能用 `reachable` 冒充 `interactive`。
 """
@@ -57,7 +58,7 @@ UPDATE_SCENARIOS: List[Dict[str, object]] = [
         "id": "updates-sources-list",
         "tab": "sources",
         "title": "来源列表/筛选/新建与批量工具条",
-        "steps": ["wait:[data-sync-source]", "assert:[data-sync-new]", "assert:[data-sync-batch]", "shot"],
+        "steps": ["wait:[data-sync-source]", "assert:[data-sync-new]", "assert:[data-sync-batch]", "assert-disabled-source", "shot"],
     },
     {
         "id": "updates-source-create",
@@ -82,6 +83,7 @@ UPDATE_SCENARIOS: List[Dict[str, object]] = [
             "click:[data-sync-new]",
             "wait:[data-sync-kind]",
             "assert-focus-in:.modal",
+            "assert-source-tab-wrap",
             "key:Escape",
             "wait-close",
             "click:[data-sync-new]",
@@ -106,7 +108,10 @@ UPDATE_SCENARIOS: List[Dict[str, object]] = [
             "click:[data-conn-create]",
             "wait:[data-conn-token]",
             "assert:[data-conn-create-submit]",
+            "validate-connection-form",
             "shot",
+            "key:Escape",
+            "assert:[data-sync-sheet-close]",
             "key:Escape",
             "wait-close",
         ],
@@ -155,13 +160,15 @@ def legacy_hash(item: Dict[str, object], workspace: str) -> str:
 
 
 def summarize(results: List[Dict[str, object]]) -> Dict[str, int]:
-    """汇总口径：只统计 interactive；reachable 单独计数，不能混进 PASS 数。"""
-    summary = {"interactive_pass": 0, "interactive_fail": 0, "reachable_pass": 0, "reachable_fail": 0}
+    """交互、路由和接口证据分别计数。"""
+    summary = {"interactive_pass": 0, "interactive_fail": 0, "reachable_pass": 0, "reachable_fail": 0, "api_pass": 0, "api_fail": 0}
     for row in results:
         level = row.get("level")
         ok = bool(row.get("ok"))
         if level == "interactive":
             summary["interactive_pass" if ok else "interactive_fail"] += 1
+        elif level == "api":
+            summary["api_pass" if ok else "api_fail"] += 1
         else:
             summary["reachable_pass" if ok else "reachable_fail"] += 1
     return summary

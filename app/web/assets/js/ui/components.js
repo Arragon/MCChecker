@@ -81,6 +81,13 @@
   /* ===================== Modal ===================== */
   var FOCUSABLE = 'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+  function visibleFocusable(dialog) {
+    return Array.prototype.filter.call(dialog.querySelectorAll(FOCUSABLE), function (item) {
+      return !item.matches(":disabled") && !item.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        item.getClientRects().length > 0 && global.getComputedStyle(item).visibility === "visible";
+    });
+  }
+
   /**
    * MC.modal({title, subtitle, body: Node, footer: Node[]|fn(close)=>Node[], size: 'wide'|'xwide', onClose, dismissible})
    * 返回 {close, el}
@@ -102,6 +109,9 @@
     }
 
     function onKey(e) {
+      // Only the top dialog owns Escape and the Tab loop (e.g. settings → credentials).
+      var layers = document.querySelectorAll(".modal-backdrop");
+      if (layers.length && layers[layers.length - 1] !== backdrop) return;
       if (e.key === "Escape") {
         if (opts.onDismiss) {
           e.stopPropagation();
@@ -113,11 +123,14 @@
           close();
         }
       } else if (e.key === "Tab") {
-        var items = dialog.querySelectorAll(FOCUSABLE);
+        var items = visibleFocusable(dialog);
         if (!items.length) return;
         var first = items[0];
         var last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        if (!dialog.contains(document.activeElement)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -144,7 +157,11 @@
     document.addEventListener("keydown", onKey, true);
     document.body.appendChild(backdrop);
     setTimeout(function () {
-      var target = dialog.querySelector("[autofocus]") || dialog.querySelector(".modal-body " + FOCUSABLE) || dialog.querySelector(FOCUSABLE);
+      var layers = document.querySelectorAll(".modal-backdrop");
+      if (closed || !layers.length || layers[layers.length - 1] !== backdrop) return;
+      var items = visibleFocusable(dialog);
+      var target = items.filter(function (item) { return item.hasAttribute("autofocus"); })[0] ||
+        items.filter(function (item) { return !!item.closest(".modal-body"); })[0] || items[0];
       if (target) target.focus();
     }, 0);
     return { close: close, el: dialog };

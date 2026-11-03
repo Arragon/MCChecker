@@ -62,6 +62,8 @@ def test_summarize_separates_levels():
         {"level": "interactive", "ok": True},
         {"level": "interactive", "ok": False},
         {"level": "reachable", "ok": True},
+        {"level": "api", "ok": True},
+        {"level": "api", "ok": False},
         {"level": "reachable", "ok": True},
     ]
     summary = SCEN.summarize(results)
@@ -70,6 +72,8 @@ def test_summarize_separates_levels():
         "interactive_fail": 1,
         "reachable_pass": 2,
         "reachable_fail": 0,
+        "api_pass": 1,
+        "api_fail": 1,
     }
 
 

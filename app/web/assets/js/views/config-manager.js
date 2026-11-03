@@ -128,7 +128,7 @@
 
     function pageHead() {
       var add = h("button.btn", { type: "button", disabled: !canWrite(), title: canWrite() ? null : "只有管理员可以新建配置", onclick: createConfigDialog }, icon("plus"), "新建固定配置");
-      return h("div.view-header", h("div.view-title", h("h1", "配置管理"), h("div.view-sub", "固定配置、软件版本、默认 D0、基线 Bn 与机台 rn。这里只管理配置，不宣称已下发真实机台。")), add);
+      return h("div.view-header", h("div.view-title", h("h1", "配置管理")), add);
     }
 
     function configsPanel() {
