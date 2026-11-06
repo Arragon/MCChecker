@@ -949,13 +949,14 @@ class Runner:
               wrap.scrollLeft = wrap.scrollWidth;
               row.scrollIntoView({block: 'nearest', inline: 'nearest'});
               var p = page.getBoundingClientRect(), w = wrap.getBoundingClientRect(), r = row.getBoundingClientRect();
-              return {height: p.height, tableHeight: w.height, rowVisible: r.bottom <= p.bottom + 1 && r.top >= p.top - 1,
+              var footer = document.querySelector(".sync-list-footer").getBoundingClientRect();
+              return {tableTop: w.top, footerVisible: footer.top >= p.top && footer.bottom <= p.bottom + 1, height: p.height, tableHeight: w.height, rowVisible: r.bottom <= p.bottom + 1 && r.top >= p.top - 1,
                 horizontalEnd: wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 1};
             })()""")
             shot = self.shoot("updates-sources-%s-admin" % viewport["id"].split("-")[-1])
             ok = (isinstance(overflow, (int, float)) and overflow <= 1 and geometry and
-                  geometry["height"] > 0 and geometry["tableHeight"] > 0 and
-                  geometry["rowVisible"] and geometry["horizontalEnd"])
+                  geometry["height"] > 0 and geometry["tableHeight"] >= 100 and geometry["footerVisible"] and
+                  (viewport["width"] != 1366 or geometry["tableTop"] < 300) and geometry["rowVisible"] and geometry["horizontalEnd"])
             self.report.append(
                 {
                     "id": "viewport-%s" % viewport["id"],
@@ -1179,11 +1180,11 @@ class Runner:
                 notes.append("%s %s" % (viewport["id"], geometry))
             b.call("Emulation.setDeviceMetricsOverride", width=375, height=812, deviceScaleFactor=1, mobile=True)
             b.call("Emulation.setTouchEmulationEnabled", enabled=True, maxTouchPoints=1)
-            b.eval("document.querySelector('.sync-page').scrollTop=0")
+            b.eval("document.querySelector('.sync-table-wrap').scrollTop=0")
             b.call("Input.synthesizeScrollGesture", x=180, y=700, yDistance=-400, speed=800, gestureSourceType="touch")
-            if not b.wait_for("document.querySelector('.sync-page').scrollTop>10", timeout=5):
+            if not b.wait_for("document.querySelector('.sync-table-wrap').scrollTop>10 && document.querySelector('.sync-page').scrollTop===0", timeout=5):
                 raise AssertionError("移动触摸滑动未滚动长列表")
-            notes.append("移动触摸滑动可滚动长列表")
+            notes.append("移动触摸滑动仅滚动数据区，页面工具栏保持可见")
             point = b.eval("""(function(){var s=document.querySelector('details[data-sync-long-path] summary');s.scrollIntoView({block:'center',inline:'center'});var r=s.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,h=document.elementFromPoint(x,y);return {x:x,y:y,hit:!!h&&(h===s||s.contains(h))}})()""")
             if not point or not point["hit"]:
                 raise AssertionError("长路径展开入口被遮挡：%s" % point)

@@ -1596,7 +1596,7 @@
           h("div.row", { style: "gap:18px;flex-wrap:wrap;align-items:center" },
             h("label.row", { style: "gap:6px;align-items:center" },
               enabledInput, h("span", "启用自动更新")),
-            h("div.row", { style: "gap:6px;align-items:center" },
+            h("label.row.sync-plan-interval", { style: "gap:6px;align-items:center" },
               h("span.small.muted", "默认间隔"),
               intervalInput,
               h("span.small.muted", "小时")
@@ -1614,7 +1614,7 @@
       var pv = P.preview;
       var previewActions = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" });
       if (save) {
-        previewActions.appendChild(h("button.btn.btn-primary", {
+        previewActions.appendChild(h("button.btn", {
           type: "button",
           "data-plan-preview": "1",
           disabled: P.previewing,
@@ -1647,10 +1647,10 @@
         var fingerprint = pv.read_set_sha256 ? String(pv.read_set_sha256).slice(0, 16) : "—";
         previewBody.appendChild(h("p.small", { "data-plan-read-set": pv.read_set_sha256 || "" },
           "冻结来源 " + (pv.total || 0) + " 个 · 排除 " + ((pv.excluded || []).length)
-          + " 个 · read_set " + fingerprint
+          + " 个 · 范围指纹 " + fingerprint
         ));
         previewBody.appendChild(h("p.xsmall.muted",
-          "失败筛选只影响本页显示；冻结 read_set 始终按 workspace_all 请求，不会缩成失败子集。"
+          "失败筛选只影响本页显示；冻结的更新范围始终包含所有机型下已启用的来源。"
         ));
         var rows = (pv.items || []).slice();
         if (P.failuresOnly) {
@@ -1658,13 +1658,13 @@
         }
         if (!rows.length) {
           previewBody.appendChild(h("p.muted.small", P.failuresOnly
-            ? "当前没有记录到失败来源；全量 read_set 仍包含上面的 " + (pv.total || 0) + " 个来源。"
+            ? "当前没有记录到失败来源；全量范围仍包含上面的 " + (pv.total || 0) + " 个来源。"
             : "预览中没有可用来源。"));
         } else {
           rows.forEach(function (item) {
             previewBody.appendChild(h("div.row", {
               "data-plan-preview-source": item.source_id,
-              style: "gap:10px;align-items:center;padding:4px 0;border-top:1px solid var(--border)",
+              style: "gap:10px;align-items:center;padding:4px 0;border-top:1px solid var(--c-border)",
             },
               h("span.small", item.name || item.source_id),
               h("span.xsmall.muted", (item.profile_id || "") + " · " + (item.schedule_mode || "inherit"))
@@ -1675,7 +1675,7 @@
         previewBody.appendChild(h("p.muted.small", "尚未预览；全量预览会冻结所有机型下已启用来源。"));
       }
       body.appendChild(h("div.card",
-        h("div.card-h", h("strong", "全量预览"), h("span.muted.small", "workspace_all")),
+        h("div.card-h", h("strong", "全量预览"), h("span.muted.small", "工作区所有机型")),
         previewBody
       ));
 
@@ -1683,7 +1683,7 @@
       var runBody = h("div.card-b");
       var runActions = h("div.row", { style: "gap:8px;flex-wrap:wrap;align-items:center" });
       if (run) {
-        runActions.appendChild(h("button.btn.btn-primary", {
+        runActions.appendChild(h("button.btn", {
           type: "button",
           "data-plan-run": "1",
           disabled: P.running,
@@ -1702,7 +1702,7 @@
           var task = entry.task || {};
           runBody.appendChild(h("div.row", {
             "data-plan-run-row": entry.workspace_id,
-            style: "gap:10px;align-items:center;padding:4px 0;border-top:1px solid var(--border)",
+            style: "gap:10px;align-items:center;padding:4px 0;border-top:1px solid var(--c-border)",
           },
             h("span.small", entry.profile_id),
             h("span.xsmall.muted", "工作区 " + entry.workspace_id),
@@ -1715,7 +1715,7 @@
         runBody.appendChild(h("p.muted.small", "尚未提交手动任务。"));
       }
       body.appendChild(h("div.card",
-        h("div.card-h", h("strong", "手动全量更新"), h("span.muted.small", "按机型分组投递 sync_run")),
+        h("div.card-h", h("strong", "手动全量更新"), h("span.muted.small", "按机型分组提交任务")),
         runBody
       ));
     }
@@ -2413,7 +2413,7 @@
         ));
       }
       if (S.loading && !S.items.length) {
-        body.appendChild(h("p.muted", "正在读取更新源…"));
+        body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted.sync-loading", { role: "status" }, "正在读取更新源…"))));
         return;
       }
       if (S.error && !S.items.length) {
@@ -2545,8 +2545,13 @@
             h("th", headerBox), h("th", "配置 / 文件"), h("th", "更新来源 / 写入目标"),
             h("th", "更新计划"), h("th", "最近有效核验"), h("th", "来源状态"), h("th", "操作")
           )), tbody)),
-          S.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null,
-          h("div.sync-table-note.muted.xsmall", "全量更新不受当前筛选条件影响")
+          h("div.sync-list-footer",
+            h("span.muted.xsmall", "全量更新不受当前筛选条件影响"),
+            h("div.row", { style: "gap:8px;align-items:center" },
+              h("span.muted.xsmall", "已加载 " + S.items.length + " / " + S.total),
+              S.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null
+            )
+          )
         )
       ));
     }
@@ -2798,6 +2803,7 @@
       filter.addEventListener("change", function () { R.state = filter.value; loadRuns(true); });
       toolbar.appendChild(filter);
       toolbar.appendChild(h("button.btn.btn-sm", { type: "button", onclick: function () { loadRuns(true); } }, "刷新"));
+      if (!R.error && !R.loading) toolbar.appendChild(h("span.sync-result-count.muted.small", "共 " + R.total + " 条"));
       if (R.error) body.appendChild(h("div.form-error", R.error));
       if (R.loading && !R.items.length) {
         body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted", "正在读取运行记录…"))));
@@ -2825,11 +2831,11 @@
         tbody.appendChild(row);
       });
       body.appendChild(h("div.card",
-        h("div.card-h", h("strong", "运行记录"), h("span.muted.small", "共 " + R.total + " 条")),
-        h("div.card-b", toolbar, h("table.table",
+        h("div.card-b", toolbar, h("div.sync-table-wrap", h("table.table.sync-run-table",
           h("thead", h("tr", h("th", "运行"), h("th", "触发"), h("th", "状态"), h("th", "计数"), h("th", "时间"))),
           tbody
-        ), R.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { R.expanded = true; loadRuns(false); } }, "加载更多") : null)
+        )), h("div.sync-list-footer", h("span.muted.xsmall", "已加载 " + R.items.length + " / " + R.total),
+          R.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { R.expanded = true; loadRuns(false); } }, "加载更多") : null))
       ));
     }
 
@@ -3363,6 +3369,7 @@
         type: "button", "data-sync-candidate-refresh": "1", onclick: function () { loadCandidates(true); },
       }, "刷新"));
 
+      if (!C.error && !C.loading) toolbar.appendChild(h("span.sync-result-count.muted.small", "共 " + C.total + " 条"));
       if (C.error) body.appendChild(h("div.form-error", C.error));
       if (C.loading && !C.items.length) { body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted", "正在读取候选…")))); return; }
       if (C.error && !C.items.length) {
@@ -3433,16 +3440,16 @@
         cards.appendChild(card);
       });
       body.appendChild(h("div.card",
-        h("div.card-h", h("strong", "更新候选"), h("span.muted.small", "共 " + C.total + " 条 · 工作区 " + workspaceId())),
         h("div.card-b",
           toolbar,
           batchBar,
           h("label.row.sync-candidate-select-all", headerBox, h("span.small.muted", "选择当前已加载候选")),
-          cards,
+          h("div.sync-card-scroll", cards),
+          h("div.sync-list-footer", h("span.muted.xsmall", "已加载 " + C.items.length + " / " + C.total),
           C.next_cursor ? h("button.btn.btn-sm", {
             type: "button", onclick: function () { loadCandidates(false, true); },
           }, "加载更多") : null
-        )
+        ))
       ));
     }
 
@@ -3543,7 +3550,7 @@
         : (conn.name + (hb && hb.enabled ? " · 保活 " + (hb.interval_minutes || 10) + " 分钟" : " · 保活已关闭"));
       return h("div.sync-strip",
         h("div.sync-strip-group",
-          h("div.sync-strip-info", h("span.sync-strip-label", "SDA 连接"), h("span.sync-strip-status", h("span.sync-status-dot", { "aria-hidden": "true" }), connText)),
+          h("div.sync-strip-info", h("span.sync-status-dot", { "aria-hidden": "true" }), h("span.sync-strip-label", "SDA 连接"), h("span.sync-strip-status", connText)),
           h("button.btn.btn-sm.btn-ghost.sync-strip-action", {
           type: "button",
           "data-sync-connections": "1",
@@ -3551,7 +3558,7 @@
           }, conn ? "连接设置" : "配置连接")
         ),
         h("div.sync-strip-group",
-          h("div.sync-strip-info", h("span.sync-strip-label", "自动更新"), h("span.sync-strip-status", h("span.sync-status-dot" + (plan && auto ? ".is-active" : ""), { "aria-hidden": "true" }), plan ? (auto ? ("每 " + hours + " 小时") : "已暂停") : (state.plan.error ? "更新计划读取失败" : "正在读取更新计划…"))),
+          h("div.sync-strip-info", h("span.sync-status-dot" + (plan && auto ? ".is-active" : ""), { "aria-hidden": "true" }), h("span.sync-strip-label", "自动更新"), h("span.sync-strip-status", plan ? (auto ? ("每 " + hours + " 小时") : "已暂停") : (state.plan.error ? "更新计划读取失败" : "正在读取更新计划…"))),
           h("button.btn.btn-sm.btn-ghost.sync-strip-action", {
           type: "button",
           "data-sync-plan": "1",
@@ -3572,8 +3579,7 @@
         headActions
       ),
       stripHost,
-      tabbar,
-      body,
+      h("div.sync-workbench", tabbar, body),
       sheet
     ));
     renderTabs();
