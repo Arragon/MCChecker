@@ -240,9 +240,9 @@ class SessionManager:
     def _call(self, operation: Callable[[Any], Any], session: Any) -> Any:
         try:
             return operation(session)
-        except Exception:
-            logger.warning("会话操作异常", exc_info=True)
-            return {"status": "failed", "reason_code": NETWORK_REASON}
+        except Exception as exc:
+            logger.warning("会话操作异常（%s）", type(exc).__name__)
+            return {"status": "failed", "reason_code": getattr(exc, "reason_code", NETWORK_REASON)}
 
     def _result(self, result: Any) -> SessionOutcome:
         status = str(_outcome_value(result, "status", "failed"))

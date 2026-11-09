@@ -22,7 +22,8 @@ class PlaywrightRequest:
         self._request = request
 
     def fetch(self, **kwargs):
-        return self._request.fetch(**kwargs)
+        url = kwargs.pop("url")
+        return self._request.fetch(url, **kwargs)
 
 
 class PlaywrightPage:
@@ -98,12 +99,15 @@ class PlaywrightBrowser:
         executable_path: str = "",
         args: Iterable[str] = (),
         timeout_ms: int = 15000,
+        proxy=None,
     ) -> "PlaywrightBrowser":
         from playwright.sync_api import sync_playwright  # type: ignore
 
         playwright = sync_playwright().start()
         try:
             launch_options = {"headless": bool(headless), "args": list(args)}
+            if proxy:
+                launch_options["proxy"] = dict(proxy)
             configured = str(executable_path or "").strip()
             if configured:
                 launch_options["executable_path"] = os.path.abspath(configured)

@@ -114,6 +114,25 @@ def test_parameter_identity_and_definition_history_do_not_drift():
         assert _param(server, w1, cid, "TooDeep", deep + ["x"])[0] == 400
 
 
+def test_directory_selection_includes_descendants_without_changing_lazy_tree_contract():
+    seed_roles("directory-selection")
+    with make_server() as server:
+        wid = _create(server, "Directory")
+        cid = _config(server, wid)
+        _param(server, wid, cid, "Speed", ["Control", "Motion"])
+        _param(server, wid, cid, "Power", ["Control", "Laser"])
+        _param(server, wid, cid, "Other", ["Other"])
+        path = "/api/v3/workspaces/%s/profiles/default/configs/%s/parameter-tree?parent=Control" % (wid, cid)
+        admin = as_role(server, "admin")
+        assert admin.json("GET", path)[2]["parameter_total"] == 0
+        root = admin.json("GET", path.split("?", 1)[0])[2]
+        assert {d["name"]: d["has_children"] for d in root["directories"]} == {"Control": True, "Other": False}
+        page = admin.json("GET", path + "&recursive=true&limit=1")[2]
+        assert page["parameter_total"] == 2 and len(page["items"]) == 1
+        second = admin.json("GET", path + "&recursive=true&offset=1&limit=1")[2]
+        assert second["items"][0]["parameter_id"] != page["items"][0]["parameter_id"]
+
+
 def test_binding_candidates_require_confirmation_and_freeze_is_immutable():
     seed_roles("param2")
     with make_server() as server:

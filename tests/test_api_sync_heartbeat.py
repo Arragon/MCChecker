@@ -20,19 +20,18 @@ from authz_fixtures import as_role, make_server, seed_roles
 from app.server import api_sync_heartbeat
 from app.services import sync_paths
 
-OPERATOR_TOKEN = "m16-34-test-operator-token"
 
 
 @pytest.fixture(autouse=True)
 def heartbeat_api_ports(monkeypatch):
-    monkeypatch.setenv("MCHECKER_OPERATOR_TOKEN", OPERATOR_TOKEN)
+    monkeypatch.delenv("MCHECKER_OPERATOR_TOKEN", raising=False)
     api_sync_heartbeat.configure_probe(None)
     yield
     api_sync_heartbeat.configure_probe(None)
 
 
-def operator_header():
-    return {"X-Operator-Token": OPERATOR_TOKEN}
+def admin_headers():
+    return {}
 
 
 def make_workspace(caller, name):
@@ -46,7 +45,7 @@ def make_connection(caller, wid, name="SDA main"):
         "POST",
         "/api/v3/workspaces/%s/connections" % wid,
         {"name": name, "origin": "https://sda.example.invalid"},
-        headers=operator_header(),
+        headers=admin_headers(),
     )
     assert status == 201, body
     return body
@@ -61,7 +60,7 @@ def enable(caller, wid, cid, interval=10, revision=0):
         "PUT",
         heartbeat_url(wid, cid),
         {"interval_minutes": interval, "enabled": True},
-        headers=dict(operator_header(), **{"If-Match": str(revision)}),
+        headers=dict(admin_headers(), **{"If-Match": str(revision)}),
     )
     assert status == 200, body
     return body
@@ -72,7 +71,7 @@ def read_text(path):
         return handle.read()
 
 
-def test_read_only_sees_status_but_writes_need_operator_token_and_capability():
+def test_read_only_sees_status_but_writes_need_admin():
     seed_roles("hb-read")
     with make_server() as server:
         admin = as_role(server, "admin")
@@ -88,38 +87,29 @@ def test_read_only_sees_status_but_writes_need_operator_token_and_capability():
         assert state["heartbeat_validated"] is False
         assert state["revision"] == 0
 
-        # 只读身份即使带运维 token 也不能写。
+        # 访客没有写权限。
         status, _headers, denied = visitor.json(
             "PUT",
             url,
             {"interval_minutes": 5, "enabled": True},
-            headers=dict(operator_header(), **{"If-Match": "0"}),
+            headers=dict(admin_headers(), **{"If-Match": "0"}),
         )
         assert status == 403, denied
         assert denied["error"]["detail"]["action"] == "integration_credentials_manage"
 
         status, _headers, denied = visitor.json(
-            "POST", url + "/run", {}, headers=operator_header()
+            "POST", url + "/run", {}, headers=admin_headers()
         )
         assert status == 403, denied
         assert denied["error"]["detail"]["action"] == "integration_credentials_manage"
 
-        # 管理员有能力键，但没有运维 token 仍然 403。
-        status, _headers, denied = admin.json(
-            "PUT",
-            url,
-            {"interval_minutes": 5, "enabled": True},
-            headers={"If-Match": "0"},
-        )
-        assert status == 403, denied
-        assert denied["error"]["detail"]["field"] == "operator_token"
-
-        status, _headers, denied = admin.json("POST", url + "/run", {})
-        assert status == 403, denied
-        assert denied["error"]["detail"]["field"] == "operator_token"
-
-        assert not os.path.exists(sync_paths.sync_file(wid, "heartbeat.json"))
-        assert not os.path.exists(sync_paths.sync_file(wid, "operations.json"))
+        # 管理员无需额外 token；CAS 与真实运行结果仍保留。
+        status, _, saved = admin.json("PUT", url, {"interval_minutes": 5, "enabled": True}, headers={"If-Match": "0"})
+        assert status == 200, saved
+        assert saved["enabled"] is True
+        status, _, op = admin.json("POST", url + "/run", {})
+        assert status == 202, op
+        assert op["operation"]["state"] == "blocked"
 
 
 def test_put_uses_revision_cas_and_validates_fields():
@@ -130,10 +120,10 @@ def test_put_uses_revision_cas_and_validates_fields():
         wid = make_workspace(admin, "W1")
         cid = make_connection(admin, wid)["connection_id"]
         url = heartbeat_url(wid, cid)
-        headers = dict(operator_header(), **{"If-Match": "0"})
+        headers = dict(admin_headers(), **{"If-Match": "0"})
 
         status, _headers, missing = admin.json(
-            "PUT", url, {"interval_minutes": 5, "enabled": True}, headers=operator_header()
+            "PUT", url, {"interval_minutes": 5, "enabled": True}, headers=admin_headers()
         )
         assert status == 409, missing
         assert missing["error"]["detail"]["field"] == "expected_revision"
@@ -190,7 +180,7 @@ def test_run_disabled_is_blocked_and_never_calls_probe():
         cid = make_connection(admin, wid)["connection_id"]
 
         status, _headers, payload = admin.json(
-            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=operator_header()
+            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=admin_headers()
         )
         assert status == 202, payload
         op = payload["operation"]
@@ -216,7 +206,7 @@ def test_run_without_probe_is_blocked_collector_offline_not_faked():
         enable(admin, wid, cid)
 
         status, _headers, payload = admin.json(
-            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=operator_header()
+            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=admin_headers()
         )
         assert status == 202, payload
         op = payload["operation"]
@@ -258,7 +248,7 @@ def test_run_success_records_safe_state_and_never_echoes_probe_secrets():
         enable(admin, wid, cid, interval=5)
 
         status, _headers, payload = admin.json(
-            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=operator_header()
+            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=admin_headers()
         )
         assert status == 202, payload
         op = payload["operation"]
@@ -299,7 +289,7 @@ def test_run_failure_keeps_reason_without_echoing_secret():
         enable(admin, wid, cid)
 
         status, _headers, payload = admin.json(
-            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=operator_header()
+            "POST", heartbeat_url(wid, cid) + "/run", {}, headers=admin_headers()
         )
         assert status == 202, payload
         op = payload["operation"]
@@ -332,11 +322,11 @@ def test_cross_workspace_heartbeat_is_404():
             "PUT",
             heartbeat_url(wid2, cid),
             {"interval_minutes": 5, "enabled": True},
-            headers=dict(operator_header(), **{"If-Match": "0"}),
+            headers=dict(admin_headers(), **{"If-Match": "0"}),
         )
         assert status == 404, payload
         status, _headers, payload = admin.json(
-            "POST", heartbeat_url(wid2, cid) + "/run", {}, headers=operator_header()
+            "POST", heartbeat_url(wid2, cid) + "/run", {}, headers=admin_headers()
         )
         assert status == 404, payload
         assert not os.path.exists(sync_paths.sync_file(wid2, "operations.json"))

@@ -400,6 +400,11 @@ def _activate_result(
             "candidate_id": candidate_id,
         }
     try:
+        if hasattr(vault, "verify_activation"):
+            candidate = sync_credentials.get_credential_state(workspace_id, connection_id).get("candidate")
+            if not candidate or candidate.get("candidate_id") != candidate_id:
+                raise AppError(SOURCE_CHANGED, "凭据候选已变化", field="candidate_id")
+            vault.verify_activation(workspace_id, connection_id, candidate)
         latest = sync_credentials.activate_candidate(
             workspace_id,
             connection_id,

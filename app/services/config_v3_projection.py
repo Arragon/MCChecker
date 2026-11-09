@@ -44,6 +44,7 @@ def _member(values: Dict[str, Any], pid: str, revision_id: str) -> Dict[str, Any
         "enabled": enabled,
         "value_state": state,
         "status": status,
+        "intent": row.get("intent", "inherit"),
     }
     if state == "present" and "value" in row:
         cell["value"] = row["value"]
@@ -59,6 +60,11 @@ def overview(
     machine_ids: Optional[List[str]] = None,
     offset: int = 0,
     limit: Optional[int] = None,
+    catalog_all: bool = False,
+    keyword: str = "",
+    directory: str = "",
+    only_changes: bool = False,
+    machine_revision_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     with storage.use_profile(profile_id):
         doc = config_v3_catalog._load(profile_id)
@@ -70,30 +76,34 @@ def overview(
         raise AppError(NOT_FOUND, "软件版本不存在", release_id=release_id)
     definition = _definition(config, release)
     params = definition.get("parameters") or {}
+    if catalog_all:
+        params = (config.get("definition", {}).get("current") or {}).get("parameters") or {}
     columns: List[Dict[str, Any]] = []
 
     d0 = release.get("d0") or {}
-    if release.get("default_revision_id") or d0.get("frozen"):
+    if release.get("default_revision_id") or d0.get("frozen") or catalog_all:
         columns.append(
             {
                 "kind": "default",
                 "column_id": "d0-" + release_id,
-                "label": "D0",
+                "label": "D0" if release.get("default_revision_id") or d0.get("frozen") else "D0 草稿",
                 "revision_id": release.get("default_revision_id") or ("d0-" + release_id),
                 "values": d0.get("frozen_snapshot") or d0.get("values") or {},
+                "definition_revision": release.get("definition_revision", 0),
             }
         )
 
     if compare_release_id:
         other = (config.get("releases") or {}).get(compare_release_id)
-        if other is not None and other.get("default_revision_id"):
+        if other is not None and (other.get("default_revision_id") or catalog_all):
             columns.append(
                 {
                     "kind": "compare",
                     "column_id": "d0-" + compare_release_id,
-                    "label": "前一版本 D0 " + str(other.get("version")),
-                    "revision_id": other["default_revision_id"],
-                    "values": (other.get("d0") or {}).get("frozen_snapshot") or {},
+                    "label": "对比版本 D0 " + str(other.get("version")) + (" · 草稿" if not other.get("default_revision_id") else ""),
+                    "revision_id": other.get("default_revision_id") or "d0-" + compare_release_id,
+                    "values": (other.get("d0") or {}).get("frozen_snapshot") or (other.get("d0") or {}).get("values") or {},
+                    "definition_revision": other.get("definition_revision", 0),
                 }
             )
 
@@ -111,10 +121,13 @@ def overview(
                 "label": row["label"],
                 "revision_id": row["baseline_id"],
                 "values": row.get("values") or {},
+                "definition_revision": row.get("definition_revision", 0),
             }
         )
 
     selected_machines = set(machine_ids or [])
+    selected_revisions = set(machine_revision_ids or [])
+    found_revisions = set()
     for machine in (config.get("machines") or {}).values():
         if selected_machines and machine["machine_id"] not in selected_machines:
             continue
@@ -125,7 +138,9 @@ def overview(
         ]
         if not matching:
             continue
-        rev = matching[-1]  # 插入顺序即发布顺序
+        chosen = [r for r in matching if r["revision_id"] in selected_revisions]
+        found_revisions.update(r["revision_id"] for r in chosen)
+        rev = chosen[-1] if chosen else matching[-1]
         columns.append(
             {
                 "kind": "machine",
@@ -135,24 +150,56 @@ def overview(
                 "machine_id": machine["machine_id"],
                 "machine_no": machine["machine_no"],
                 "values": rev.get("values") or {},
+                "definition_revision": rev.get("definition_revision", 0),
             }
         )
+
+    if selected_revisions - found_revisions:
+        raise AppError(NOT_FOUND, "机台修订不存在或不属于所选版本", field="machine_revisions")
 
     ordered = sorted(
         params,
         key=lambda k: (params[k].get("directory") or [], params[k].get("name") or ""),
     )
+    bindings = {b["parameter_id"]: b for b in ((release.get("binding_set") or {}).get("bindings") or {}).values()}
+    term = str(keyword or "").lower().strip()
+    folder = str(directory or "").strip("/")
+    previous = next((col for col in columns if col["kind"] == "compare"), None)
+    previous_definition = _definition(config, other) if compare_release_id and other is not None else {}
+    previous_bindings = {b["parameter_id"]: b for b in (((other or {}).get("binding_set") or {}).get("bindings") or {}).values()} if compare_release_id else {}
+    def changed(pid: str) -> bool:
+        if previous is None:
+            return False
+        before = _member(previous["values"], pid, "")
+        after = _member(d0.get("frozen_snapshot") or d0.get("values") or {}, pid, "")
+        current_parameter = (definition.get("parameters") or {}).get(pid)
+        old_parameter = (previous_definition.get("parameters") or {}).get(pid)
+        fields = ("name", "directory", "type", "unit", "attrs")
+        metadata_changed = any((current_parameter or {}).get(key) != (old_parameter or {}).get(key) for key in fields)
+        old_binding = previous_bindings.get(pid)
+        binding_changed = (bindings.get(pid) or {}).get("locator") != (old_binding or {}).get("locator")
+        return before != after or metadata_changed or binding_changed
+    if term:
+        ordered = [pid for pid in ordered if term in (str(params[pid].get("name", "")) + " " + pid + " " + "/".join(params[pid].get("directory") or []) + " " + str(bindings.get(pid, {}).get("locator", ""))).lower()]
+    if folder:
+        ordered = [pid for pid in ordered if "/".join(params[pid].get("directory") or []) == folder or "/".join(params[pid].get("directory") or []).startswith(folder + "/")]
+    if only_changes:
+        ordered = [pid for pid in ordered if changed(pid)]
     total = len(ordered)
     start = max(0, int(offset))
     size = None if limit is None else max(1, min(int(limit), 500))
     visible = ordered[start:] if size is None else ordered[start : start + size]
     rows = []
+    definitions = {snapshot.get("revision"): snapshot.get("parameters") or {} for snapshot in (config.get("definition", {}).get("history") or [])}
     for pid in visible:
         p = params[pid]
         cells = {
             col["column_id"]: _member(col["values"], pid, col["revision_id"])
             for col in columns
         }
+        for col in columns:
+            source_parameter = definitions.get(col.get("definition_revision"), {}).get(pid) or {}
+            cells[col["column_id"]].update({"type": source_parameter.get("type", ""), "unit": source_parameter.get("unit", ""), "defined": pid in definitions.get(col.get("definition_revision"), {})})
         rows.append(
             {
                 "parameter_id": pid,
@@ -164,6 +211,8 @@ def overview(
                 "attrs": copy.deepcopy(p.get("attrs") or {}),
                 "source": copy.deepcopy(p.get("source") or {}),
                 "cells": cells,
+                "binding": copy.deepcopy(bindings.get(pid)),
+                "changed": changed(pid),
             }
         )
     public_columns = []
@@ -175,6 +224,7 @@ def overview(
         "release_id": release_id,
         "release_version": release.get("version"),
         "definition_revision": definition.get("revision", 0),
+        "catalog_revision": (config.get("definition") or {}).get("revision", 0),
         "has_previous": bool(release.get("predecessor_id")),
         "previous_release_id": release.get("predecessor_id"),
         "columns": public_columns,

@@ -87,7 +87,8 @@ def test_restore_creates_new_draft_and_events_are_scoped():
         events = as_role(server, "admin").json(
             "GET", "/api/v3/workspaces/%s/profiles/default/configs/%s/events" % (wid, cid)
         )[2]["items"]
-        assert len(events) == 1 and events[0]["type"] == "restore"
+        assert len(events) == 5 and events[0]["type"] == "restore"
+        assert {event["type"] for event in events} == {"create_config", "create_release", "freeze", "baseline", "restore"}
         assert events[0]["principal"] and events[0]["ip"] and events[0]["undo_of"] == ""
         assert events[0]["source"]["revision_id"] == baseline
 
@@ -100,12 +101,14 @@ def test_restore_creates_new_draft_and_events_are_scoped():
         events2 = as_role(server, "admin").json(
             "GET", "/api/v3/workspaces/%s/profiles/default/events" % wid
         )[2]["items"]
-        assert len(events2) == 2 and events2[0]["type"] == "undo", "读审计不得再产生事件"
+        assert len(events2) == 6 and events2[0]["type"] == "undo", "读审计不得再产生事件"
 
         other, _ocid = _base(server, "W2")
-        assert as_role(server, "admin").json(
+        other_events = as_role(server, "admin").json(
             "GET", "/api/v3/workspaces/%s/profiles/default/events" % other
-        )[2]["items"] == []
+        )[2]["items"]
+        assert len(other_events) == 1 and other_events[0]["type"] == "create_config"
+        assert other_events[0]["config_id"] == _ocid
 
         status, _h, body = as_role(server, "member").json(
             "POST", "/api/v3/workspaces/%s/profiles/default/configs/%s/restore-plans" % (wid, cid),

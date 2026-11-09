@@ -2,6 +2,122 @@
 
 设计基线为 INH-2165 附件：HTML SHA-256 `88eca2cea8b8d90d2fdde1379b162ef6af3a312736b76c3bd6d412a3d984db82`，说明书 SHA-256 `4b7f3ea0f02fce8dae4efd1f184a57d40104818c77a38113b15fe24dd3c4b413`。原型数据为模拟值，实际数据和权限来自生产 API。
 
+## 配置管理全页签与弹窗集中检查（2026-11-08）
+
+本轮在现有未提交实现上完成布局专项整改，不改业务接口、持久格式或发布状态机。完整遍历版本演进、参数工作台、参数总览、模板导出、配置历史，并检查固定配置目录、配置文件和配置记录。更新管理继续执行既有全量回归。
+
+| 问题 | 修复与验收 |
+| --- | --- |
+| 详情响应式规则串入导出表单 | 详情网格、动作与事实列表限定到 `.cv-node-detail`；导出来源标签、选择器、提示和预览按钮纵向排列，映射表填充可用宽度 |
+| 工作区空间浪费 | 紧凑修订选择及工具栏；桌面参数目录和表格使用剩余高度，分页栏保留；大于 1100px 的版本图与详情并列，图形局部滚动 |
+| 长版本号、机台号与修订路径 | 节点省略、完整详情换行；修订选择器限定宽度并保留完整路径标题；参数历史独立纵向布局，修复长版本路径导致正文溢出 148px 的问题 |
+| 合并、提取与嵌套弹窗挤压 | 配置专属 dialog/backdrop 样式，手机合并表单单列、提取选择器回流；表格局部滚动，编辑控件保留宽度；正文末项、底部动作及表格横向末端可达 |
+| 只读与操作层级 | 固化绑定只提供关闭；提取、合并说明精简，保留不导入值/不自动发布的后果说明；自定义合并值有独立可访问名称 |
+
+真实浏览器布局清单 `scripts/e2e_config_layout.py` 接入现有配置场景，在 1366×768、1920×1080、768×1024、375×812 四种视口检查 **22 类弹窗，88 次检查**：软件版本、机台分支、读图说明、修订选择、发布确认、提取选择/预览、合并选择/冲突预览/自定义决议、新增参数、放弃修改、新增/移动/删除目录、参数属性、固化/可编辑绑定、参数历史、嵌套文件字段、固化确认、新建固定配置。检查包含边界、正文溢出、输入框至少 100px、底部按钮宽度与可见性、正文末项和局部表格末端可达；全部通过。表格内编辑控件最小宽度由局部样式保护，不通过压扁控件隐藏溢出。
+
+长数据来自隔离 HTTP API 创建的 62 字符版本号、63 字符机台号及 105 项长名称参数；三方冲突和自定义决议、显式 null 提取预览使用真实服务契约。五页签整页横向溢出均为 0；主内容区高依次为 **541 / 853 / 797 / 572px**，桌面参数表和目录局部滚动，窄屏内容可纵向滚动到末项。既有 409 恢复、访客 403、跨工作区 404、未保存退出与 A/B 切换检查保留。
+
+最终检查：`./.venv39/bin/python scripts/check_web_ui.py --retries 1` **150/150**；`./.venv39/bin/python scripts/e2e_browser.py --only all --report docs/evidence/m16-40/config-layout-all-e2e.json` **交互 39/39、旧路由可达 28/28、API 1/1**。共享弹窗另一个调用方的焦点进入、Esc 和返回仍通过；全量包含更新管理的长错误、恢复、嵌套弹窗和触摸仿真。旧路由检查不等于全部旧功能交互验收。
+
+人工实屏在保留的 50012 模拟服务检查版本图、参数工作台、模板导出、桌面及 375px 合并弹窗，未提交发布或覆盖用户输入；已恢复正常视口。截图：`config-full-audit-workbench.png`、`config-full-audit-export.png`、`config-full-audit-merge-phone.png`，复杂弹窗截图为 `config-dialog-*.png`，均在 `docs/evidence/m16-40/`。本轮证据为本机 Chromium 与模拟环境，不替代真实 SDA、实体触屏及 Windows/Linux 实机验收。API 能力限制沿用下节，未以模拟成功补齐。
+
+环境清理已运行 `agent-gc` 默认演练：可用空间 113.6GB，无符合条件候选，活动 toolcache 受保护；删除路径 0，释放 0 字节。用户数据、原有未提交内容及 `.qoder/` 保留。
+
+## 配置管理完整结构对齐与 DL 对外读取（2026-11-08）
+
+正确的 MCChecker 附件已重新核对；用户确认选错的 Workflow 附件不作为设计目标。本轮把配置目录改为总表，进入后以面包屑和五页签承载修订；不再使用固定配置卡片侧栏套进原型工作区。所有数据来自真实服务，保留原 WIP、`.qoder/` 和原 50009 模拟数据。
+
+| 原型要求 | 实施和真实验收 |
+| --- | --- |
+| 目录总表和空态 | API 统计、搜索、创建/打开、缺失深链与错误分别处理；未创建不算加载失败 |
+| D0 / Bn / rn 演进图 | 软件版本列、真实前序/采用连线、选中详情和机台表；新机台可选择任一已固化基准 |
+| 参数工作台 | 四级修订选择、七列矩阵、目录/小树/大数据分页、逐 ID 编辑；保存 CAS、409 对照重试、D0 固化、Bn/rn 发布、历史只读 |
+| 参数总览 | 全局身份与本版成员分开，服务器搜索/目录/变更筛选；准备版定义同步双 CAS、目录新增/移动/空删除；历史值使用其冻结类型/单位 |
+| 文件绑定 | XML/JSON 文件与字段选择；准备版绑定经 CAS 修正，固化后只读。保存绑定不读取或覆盖草稿值 |
+| 模板导出 | 四步与双栏，精确映射/字段选择、预览失效、不可变文件与下载；真实输出保留未匹配字段、XML 注释和处理指令；分页映射与 4000 字符预览上限明示 |
+| 配置历史 | 分页事件时间线、实际操作人/IP、恢复仅建草稿，不推进既有 head |
+| 离开保护与弹窗 | 值、导出映射、新建表单保护；工作区切换取消保留、确认放弃关闭旧弹窗；Esc/焦点返回/页签方向键；手机表单输入、关闭、保存及复选标签点击区复验为至少 40px |
+
+验证：前端 HTTP 测试 **149/149**；配置/值契约 **130/130**；全仓 pytest **3098 passed、1 skipped**（Windows 实机进程树回收）；浏览器 `--only all` **交互 39/39、旧路由可达 28/28、API 1/1**。修正最后的手机表单尺寸后再次通过配置专用真实浏览器场景。报告为 `config-parity-all-e2e.json`、`config-prototype-e2e.json`，均位于 `docs/evidence/m16-40/`。新增路由已补充权限与修订声明；秘密扫描仅更新原合成样本的准确行号，未放宽规则；版本图复用共享 SVG 命名空间，离线打包门禁通过。
+
+四种视口覆盖全部五页签，主内容区高度分别为 1366×768：513px、1920×1080：825px、768×1024：769px、375×812：563px，整页横向溢出为 0。105 条长名称/路径在表格内部滚动（矩阵可视 560px、内容 8308–10594px），第 2 页 5 条均可达。人工另对比 1920 版本图、参数工作台、375 总览与新增表单，检查取消 Esc 后输入保留及返回触发按钮；截图 `config-prototype-desktop.png`、`config-prototype-workbench.png`、`config-prototype-phone.png`、`config-prototype-form-phone.png`。
+
+新测试入口为 `http://127.0.0.1:50012/index.html#/p/default/configv3/configs?workspace=default`：三软件版本、两基线、两机台、准备版和空配置均通过 HTTP API 创建；另有 SDA 更新/导出示例，一次实际 TLS 模拟采集已成功，待处理候选保留供用户测试。DL 已新增按工作区/机型/模块/时间读取的外部 GET API，以及模块发现，详见 `docs/DL_COEFFICIENTS_API.md`；真实服务连续保存 8 与 11，查询两次之间返回 8，响应见 `dl-temporal-live.json`。生效时间线独立于可删的展示历史；普通写入失败回滚两份文件，旧历史不完整证据明确标记。
+
+证据边界：浏览器配置闭环和模拟 TLS SDA 为本机隔离环境，旧路由仅证明可达；触摸为仿真加点击区复验，未代替实体触屏。真实 SDA、目标设备、Windows/Linux 实机未验收。现有参数解析/提取 API 只支持 XML/JSON，INI 保留已有精确路径绑定/导出，未伪造自动字段选择。更新候选的 pin/clear_pin 决议仍不提供；手工 Bn/rn 草稿的固定值不代表候选决议已支持。DL 旧版已删除记录、未记时间的恢复无法追溯补齐。无外部验收通过声明。
+
+## 连接布局修订与确认（2026-11-08）
+
+用户确认独立连接重排预览后实施：连接设置与自动更新入口移至更新管理标题右侧；连接面板以选择器、连接信息、登录凭据、保活与自动登录三个分区替代窄表格。编号、认证纪元、完整心跳时间与 idle 诊断保留在技术详情，保存按钮固定在底部。手机按钮及保活复选标签至少 40px，正文局部滚动。原凭据验证、激活及错误锁定入口、访客限制和所有真实 API 保留；本轮不改后端、持久格式、共享弹窗或全局 tokens。
+
+保活草稿按工作区、连接分别保留；切换连接、刷新和关闭重开均不丢失。刷新不能静默采用最新 revision。409 后先保留草稿，刷新显示服务器/草稿的开关、间隔与自动登录差异；明确确认所显示修订后再保存，后续并发仍由 CAS 保护。新增前端回归覆盖上述过程、原修订请求、冲突提示和确认后成功清除草稿。
+
+同时确认配置空态修复：重试点击不再把 MouseEvent 当作 ID；权威列表不存在的深链显示“该配置已不存在”，可返回列表并清除失效 URL；真实请求失败仍显示失败和重试。模拟服务人工回读两项现有配置，未重置用户数据。
+
+最终验证命令来自项目已有脚本：`./.venv39/bin/python scripts/check_web_ui.py --retries 1` **145/145**；`./.venv39/bin/python scripts/e2e_browser.py --only all --report /tmp/mcc-connections-redesign-final.json` **交互 38/38、旧路由可达 28/28、API 1/1**。最终报告归档为 `docs/evidence/m16-40/connections-redesign-e2e.json`。覆盖 1366×768、1920×1080、768×1024、375×812，包含长数据、触摸仿真、合成读取错误及恢复、共享弹窗、两档权限、真实来源 409 和候选写入；旧路由只证明可达，合成错误/候选不代表外部 SDA 验收。
+
+在保留原数据的 `127.0.0.1:50009` 模拟服务另作人工检查：连接三分区、375×812 正文滚动与末项/固定保存、Esc 关闭后焦点返回标题连接按钮。截图为 `connections-redesign-desktop.png` 与 `connections-redesign-phone.png`。真实 SDA、实体触屏、Windows/Linux 与机台证据范围沿用下节限制，未新增通过声明。
+
+## 当前实现与验收（2026-11-07）
+
+用户重新提供的 `MCChecker_V3.1_Frontend.html` 和 `MCChecker_V3.1_Backend_Design.md` 与上述 SHA 完全一致；本轮采用这套指定交互，覆盖此前另行设计的向导方向。**本地 UI 与下面列明的 API 闭环已通过；完整生产 SDA/设备链路尚未完成。**
+
+用户已明确选择自建模拟环境，不再等待现场 SDA 输入。当前验收启动实际主服务、独立 Python 3.12 collector、Chromium 与本地 TLS SDA：账密表单含 CSRF、Cookie 有闲置过期、受保护接口返回内容；不替换应用 API 的成功响应。新增受管 IPC/Vault/probe/read/保活接线、来源输入测试和表候选均在该环境验证。
+
+| 原型要求 | 本轮实现与保留功能 | 证据范围 |
+| --- | --- | --- |
+| 配置管理内部四个入口 | 固定配置／配置文件／更新管理／配置记录，共享导航；旧更新管理、设置及 configspace 深链可达 | 前端真实 DOM 单测；本地服务人工核对文件、记录与更新管理切换 |
+| 单一文件资源 | 文件页使用既有 file-selector，每页 50 条并打开原文件视图；原导入、历史、修改记录、下载不另建实现 | 原文件工作流回归和旧路由可达检查 |
+| 配置记录 | 同 W/P 的 events API 支持显式 limit/offset，每页 50 条；无分页参数的旧调用保留原响应 | 分页/越界/工作区隔离 API 回归，前端分页回归 |
+| 来源筛选与状态 | 配置、版本、机型、名称/路径/机台、失败/候选等在服务端分页前筛选；freshness 及绑定指纹来自真实持久回执 | 来源 API 与执行器测试；不把目录读取、心跳或启用状态当作内容核验 |
+| 清楚的编辑流程 | HTTP 直接地址；SDA 标识/路径由目录选择，连接按类型显示；高级设置保留业务路径、记录 URL、关键词；错误打开高级区并定位；未保存和 409 保留输入 | 长路径、真实 409、撤权 403、窄屏及键盘回归；人工确认 HTTP 隐藏连接、SDA 显示连接；最终样式断言覆盖布局规则覆盖 hidden 的问题 |
+| 测试当前输入 | 新增管理员 `POST /sync/source-tests`，复用受控 HTTP 下载/展开或当前 SDA reader；登录页/结构不符拒绝；不保存来源、业务文件或核验时间 | 本地 HTTP/TLS 服务实际下载；SDA 缺部署配置时仍明确 blocked |
+| 全量/所选与批量计划 | 全量直接预览冻结清单；所选范围预览后按 preview_id 投递；计划批量调用既有原子 source-policy-batches（最多 100 项，逐项 revision，全有或全无） | 前端请求/草稿/失败回归及现有策略事务测试 |
+| 排期与最近运行 | next_due 只读取运行中调度器的已知锚点，不由 GET 种锚；无锚/停调度/暂停时不编造时间；最近运行读取真实清单 limit=1 | 调度只读/跨 W/暂停测试及完整浏览器回归 |
+| 运行取消、重试和诊断 | 新增管理员取消 API/UI；任务/文件搜索和失败过滤在分页前执行；详情可只看失败；保留事件分页、Blob 下载，复用既有复制工具复制脱敏诊断；任务完成事件只触发当前工作区重新读取 | 取消幂等、访客拒绝、跨 W、执行中取消、复制错误恢复和浏览器下载验证；375px 页脚换行可达 |
+| 三方候选 | 可选 base_file_version_id 引用同一文件的原来源版本；比较原来源/本地/新来源。缺失原来源须决议；映射不明/指纹不符/来源修订变化或删除阻止写入 | 真实文件快照和 API 冲突测试；浏览器实际预览、409、重新决议、写草稿、head 不变 |
+| 稳定文件身份与并发 | 来源显示改名不改目标文件；不存在的 file_id 阻断；下载前冻结版本，下载后再核对来源/绑定，旧回包不能覆盖新状态 | 新增执行器和可信提交回归；原跨工作区/故障/安全测试保留 |
+| 候选保存失败恢复 | 原文已提交但候选登记失败时明确报告局部失败，保留已保存文件和原比较基线；重试不把刚保存的内容误作原来源 | 注入存储失败、回读实际文件与原核验指针、恢复后生成候选的回归 |
+| 两档权限 | 管理员/访客；移除 operator token；服务端能力检查、CSRF、CAS、Vault 加密和跨 W/P 边界保留 | 管理员无 token 可操作、访客即使带旧 token 也拒绝；撤权保留输入且零业务写入 |
+| 采集器与凭据闭环 | manager/client 接入独立 runtime；SecretStore 密文在 data 外；验证票据才可激活；错误候选不覆盖 active；管理员提交替换凭据解除锁存；独立保活循环随应用启动/停止 | 4 项实际子进程 + Chromium + TLS 端到端；旧 epoch、取消、错误内容、撤销、跨区、并发本地/连接改动拒绝提交；300 KiB 内容穿越多个 IPC chunk |
+| SDA 表精确候选 | 校验 table_id，再把 document 保存为同一 FileResource 的精确版本；候选有可回读 FileVersion | 经实际 TLS 读取、API 预览与决议、写入草稿；D0 未发布 |
+| 运行详情一致性 | 详情标题/统计/取消与重试使用最新 manifest；提供刷新详情并保留失败筛选，关闭后刷新当前列表摘要 | 修复人工测试发现的“日志已成功、标题仍进行中”；前端回归及实际界面确认，无需重载页面才能获得刷新结果 |
+
+API 兼容说明：增加来源查询字段、来源输入测试、运行取消和可选原来源版本引用。旧候选可读取；没有原来源不自动覆盖，没有来源绑定的旧候选只可查看。候选预览不再允许 `base_revision_id` 改用任意配置修订。当前草稿值契约不持久化 intent，故 pin/clear_pin 明确拒绝且不作为可提交选项；扩展它需要独立持久化契约设计，不返回无效的成功回执。
+
+验证命令与结果：
+
+末次启动顺序修正后，`./.venv39/bin/python -m pytest -q tests/test_sda_runtime_integration.py tests/test_collector_manager.py tests/test_api_tasks.py tests/test_sync_security_gate.py tests/test_sync_credentials.py tests/test_api_connections.py` 为 128 passed、1 Windows 条件 skipped。配置安装不启动线程，HTTP 绑定成功后才启动保活，避免绑定失败留下后台任务。最新 143 项前端还验证了关闭详情、异步刷新列表后回到原运行入口的键盘焦点。
+
+- `./.venv39/bin/python scripts/check_web_ui.py --retries 1`：143/143。测试页加载与生产相同的 tokens/base/components/layout/views 样式，来源条件显示检查 computed display，不能只断言 hidden 属性。
+- `./.venv39/bin/python -m pytest -q -rs tests/test_sync*.py tests/test_scheduler.py tests/test_api_sync*.py tests/test_collector*.py tests/test_sda*.py tests/test_session_manager.py tests/test_api_connections.py tests/test_api_authz.py tests/test_api_security.py tests/test_api_session.py tests/test_e2e_scenarios.py tests/test_v3*.py`：824 passed，1 skipped（已有 Windows 进程树实机条件）。其中 4 项 `test_sda_runtime_integration.py` 实际启动独立环境与浏览器；真实 data 首末快照一致，此守卫不证明期间无人写入。
+- `./.venv39/bin/python scripts/e2e_browser.py --only all --report /tmp/mcc-sda-simulation-browser.json`：interactive 38/38，reachable 28/28，API 1/1。Chrome 触屏仿真包含“更多”展开；不代表物理触屏实机认证。末次运行详情修正后，以 143 项前端回归和 `--only download --report /tmp/mcc-sda-run-dialog-confirmation.json` 确认最新状态/操作及 375px 页脚和实际诊断下载。
+- 表单显示修正后的确认：`./.venv39/bin/python scripts/e2e_browser.py --only source-conflict --report /tmp/mcc-r6-final-source-confirmation.json`：1/1，375px 长路径创建、409 保留输入、对比并再次保存通过。
+- `node --check`：components.js、shell.js、config-manager.js、update_management.js；`git diff --check`。原生前端沿用既有静态资源，未引入新构建系统或依赖。
+
+模拟闲置保活证据：[sda-simulation-idle.json](evidence/m16-40/sda-simulation-idle.json)。服务真实闲置窗口 75 秒，经过 113.4 秒和每分钟自动心跳，再发受保护请求成功；登录次数前后均 1。该记录没有把加速时钟或普通目录读取当作续期；不将其写成真实 SDA 的 heartbeat_validated。人工点击来源更新、运行详情和返回列表的画面为 [来源](evidence/m16-40/sda-simulation-sources.png) / [详情](evidence/m16-40/sda-simulation-run.png)。
+
+| 视口 | 表格顶边 | 数据区高 | 主工作区高 | 末项/横向末端/底部操作 | 页面横向溢出 |
+| --- | ---: | ---: | ---: | --- | ---: |
+| 1366×768 | 297 | 411 | 682 | 全部可达 | 0 |
+| 1920×1080 | 297 | 723 | 994 | 全部可达 | 0 |
+| 768×1024 | 325 | 647 | 938 | 全部可达 | 0 |
+| 375×812 | 493 | 267 | 726 | 全部可达 | 0 |
+
+### 仍未完成及依赖
+
+1. **机台观测存储契约，仍未接通**：现有 target 只有 V3 FileResource/配置与 device_id，旧 config_ingest 需要独立 LogicalFile；旧 ConfigRepository 又是全局共享、没有 workspace 字段。不能把两个文件 ID 混用，也不能在 W/P 隔离要求下直接向旧共享库写入。保持明确阻断；未创建平行观测库或模拟观测成功。SDA 表精确版本这一缺口已修复。
+2. **pin/clear_pin**：既有草稿不能持久化 intent，这两种决议仍显式拒绝；需要单独确定持久化与迁移契约。
+3. **大响应流式限额**：业务内容与 IPC 有大小/hash 校验、二进制分块；实际验证到 300 KiB。当前 Playwright APIRequestContext 会缓冲响应，dispose 与读取后限额不能等同网络接收期间的严格内存上限；超大/未知长度响应的真实流式接线尚未完成，不宣称规模验收通过。
+4. **真实协议/平台范围**：按用户选择，本轮不再等待说明书 §20 的现场输入。当前 /synthetic 端点及表 document 是明确的模拟契约，不代表真实 SDA；真实 SSO/CA、真实机台、Windows/Linux 进程树和离线包未验证。
+
+独立设计预览：`http://127.0.0.1:50007/`。原隔离服务 `http://127.0.0.1:50008/` 保留；带实际 collector 与 TLS 模拟 SDA 的测试服务为 `http://127.0.0.1:50009/`，管理员与来源均明确命名为模拟环境，使用新的临时 data。复跑：`./.venv39/bin/python scripts/run_sda_simulation.py --port 50009`。独立环境版本和许可证见 `collector/requirements-simulation.lock` 与 `collector/README.md`；核心 requirements.txt 未添加依赖。
+
+环境清理按要求执行 `agent-gc` 预览：末次可用空间 113.8 GB，无符合条件的候选，toolcache 因活动进程被保护；未应用删除，移除路径 0、释放 0 字节。未绕过 allowlist 清理，用户文件及 `.qoder/` 保留。
+
+## 早期对照（保留历史；以下筛选、基线和 token 限制已被本轮替代）
+
 | R6 区域 | 现有实现与保留功能 | 尚需检查或差异 |
 | --- | --- | --- |
 | 更新源 | 三页签、当前/全部机型服务端筛选、局部横滚、按需批量工具条、单项更新/测试/编辑/删除；来源写入使用原有 API 和 revision，删除确认与批量处理绑定原工作区 | 隔离真实服务验证双机型筛选和全量预览互不干扰；前端测试覆盖删除确认及批量处理时切换工作区。固定配置和版本筛选受现有 API 约束。核验信息未提供时如实显示，启停状态不冒充运行结果 |
@@ -36,3 +152,12 @@
 本轮使用项目既有真实服务浏览器脚本和隔离数据执行。截图在 `docs/evidence/m16-40/` 更新；浏览器手动控制因 Work 设置关闭而不可用，既有 CLI 浏览器测试可运行。所有外部 SDA、真实触屏设备、Windows/Linux 实机以及此前列明的 API 限制仍按上文保留。
 
 确认回归：`./.venv39/bin/python scripts/check_web_ui.py --retries 1` 135/135；`./.venv39/bin/python -m pytest -q tests/test_e2e_scenarios.py` 8/8；`./.venv39/bin/python scripts/e2e_browser.py --only all --report /tmp/mcc-r6-round2-confirm.json` 交互 38/38、旧路由可达 28/28、API 契约 1/1。最终截图中默认间隔标签已保持单行。检查覆盖长数据、合成错误注入与重试、只读/撤权、嵌套弹窗焦点、工作区切换和真实 409；不代表真实 SDA 或全部旧功能的完整交互验收。
+
+
+## 权限统一修订（2026-11-06）
+
+用户确认全系统仅区分管理员与访客，覆盖早期独立运维授权要求。删除后端 operator token 验证模块和前端 token 字段；连接、凭据和保活所有写请求继续由 `integration_credentials_manage` 服务端管理员能力保护。已登记非管理员也显示“访客”；姓名、登记状态和历史能力键没有改变持久格式。旧 `deployer` 能力键只是管理员同义兼容。上文早期 token 输入和三段式验证记录属于修订前证据，不再作为当前验收要求。
+
+更新测试是用户明确改变授权规则所需：旧“管理员无 token 必须 403”断言替换为“管理员无 token 可操作、访客无/有旧 token 仍拒绝”，没有移除凭据脱敏、Vault 未配置/存储失败、CAS、工作区隔离或撤权断言。移除已无生产调用方的 token 模块及其专属单测；其他凭据与安全门测试保留。
+
+验证：前端 `check_web_ui.py --retries 1` 135/135；后端 connections、heartbeat、security gate、API authz/security/session 与 e2e scenarios 共 385 项通过。`e2e_browser.py --only all --report /tmp/mcc-two-role-auth.json` 为交互 38/38、旧路由可达 28/28、API 契约 1/1；其中两档权限场景明确验证访客（带旧 token）403、管理员无 token 201，并通过真实界面创建/编辑连接及保存保活。外部 SDA 与真实设备证据范围不变。

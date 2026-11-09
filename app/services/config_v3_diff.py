@@ -95,6 +95,14 @@ def resolve(config: Dict[str, Any], revision_id: str) -> Dict[str, Any]:
     raise AppError(NOT_FOUND, "修订不存在", revision_id=rid)
 
 
+def get_revision(profile_id: str, config_id: str, revision_id: str) -> Dict[str, Any]:
+    with storage.use_profile(profile_id):
+        config = config_v3_catalog._load(profile_id)["configs"].get(config_id)
+    if config is None:
+        raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+    return resolve(config, revision_id)
+
+
 def _snapshot(config: Dict[str, Any], revision: Dict[str, Any]) -> Dict[str, Any]:
     definition = _definition_by_rev(config, revision["definition_revision"])
     params = definition.get("parameters") or {}

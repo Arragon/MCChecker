@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import config_values, locks, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
-from . import config_v3_catalog, config_v3_drafts
+from . import config_v3_catalog, config_v3_diff, config_v3_drafts
 
 MAX_BATCH = 100
 
@@ -165,6 +165,7 @@ def patch_baseline_values(
         definition = config_v3_drafts._definition_for(release, config)
         params = definition.get("parameters") or {}
         values = dict(draft.get("values") or {})
+        basis = config_v3_diff.resolve(config, draft["source_revision_id"])["values"]
         changed: List[str] = []
         for item in items:
             if not isinstance(item, dict):
@@ -172,8 +173,8 @@ def patch_baseline_values(
             pid = str(item.get("parameter_id") or "")
             if pid not in params:
                 raise AppError(NOT_FOUND, "参数不在该版本定义中", parameter_id=pid)
-            values[pid] = config_values.apply_member_patch(
-                values.get(pid), item, str(params[pid].get("type") or "")
+            values[pid] = config_v3_drafts.patch_branch_member(
+                values.get(pid), item, str(params[pid].get("type") or ""), basis.get(pid)
             )
             changed.append(pid)
         draft["values"] = values
@@ -259,6 +260,8 @@ def get_branch(profile_id: str, config_id: str) -> Dict[str, Any]:
                 "release_id": row["release_id"],
                 "definition_revision": row["definition_revision"],
                 "published_at": row["published_at"],
+                "parent_id": row.get("parent_id"),
+                "source_revision_id": row.get("source_revision_id"),
             }
             for row in branch["baselines"].values()
         ],

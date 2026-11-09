@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -183,6 +184,7 @@ class CollectorManager:
         self._stop_timeout = float(stop_timeout)
         self._lock = threading.RLock()
         self._proc = None  # type: Optional[subprocess.Popen[Any]]
+        self._client = None
         self._state = STATE_STOPPED
         self._reason = REASON_OFFLINE
         self._message = "collector 未启动"
@@ -431,6 +433,17 @@ class CollectorManager:
         """诊断包：当前状态 + 重新跑一次自检（含版本/浏览器原因码）。"""
         return {"status": self.status(), "probe": self.probe(timeout)}
 
+    def client(self):
+        """Lazy binary IPC client; manager remains the sole owner of process lifetime."""
+        from .collector_client import CollectorClient, CollectorClientError
+        with self._lock:
+            state = self.start()
+            if not state["available"]:
+                raise CollectorClientError(state.get("reason_code") or REASON_OFFLINE)
+            if self._client is None:
+                self._client = CollectorClient(self._proc.stdin, self._proc.stdout, "inst-" + secrets.token_hex(12))
+            return self._client
+
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
@@ -439,7 +452,7 @@ class CollectorManager:
         kwargs = {
             "cwd": self._cwd,
             "stdin": subprocess.PIPE,
-            "stdout": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
             "stderr": subprocess.DEVNULL,
             "shell": False,
             "close_fds": True,
@@ -520,6 +533,9 @@ class CollectorManager:
         self._clear_runtime_locked()
 
     def _clear_runtime_locked(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
         self._started_at = None
         self._started_mono = None
 

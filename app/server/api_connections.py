@@ -1,9 +1,8 @@
 """M16-30 连接与认证管理 API（workspace 级）。
 
 路径：`/api/v3/workspaces/{wid}/connections`。读接口只给 `read` 能力并返回
-安全投影（连接元数据 + 凭据状态；无 account/secret）。所有写接口先要求
-`integration_credentials_manage`（管理员），再要求独立运维 token
-（`MCHECKER_OPERATOR_TOKEN`，头 `X-Operator-Token`），两者缺一即 403。
+安全投影（连接元数据 + 凭据状态；无 account/secret）。所有写接口要求
+`integration_credentials_manage`（管理员）；访客一律 403。
 
 明文只在创建候选的请求体里短暂存在，交给部署端注入的 vault；本应用不保存、
 不回显。vault/probe 未配置时：候选/撤销/激活返回 503，probe 操作收在
@@ -29,14 +28,12 @@ from ..services import (
     sync_catalog,
     sync_connections,
     sync_credentials,
-    sync_operator_auth,
     sync_operations,
     workspace_catalog,
 )
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
-OPERATOR_HEADER = "x-operator-token"
 IDEMPOTENCY_HEADER = "idempotency-key"
 
 _VAULT: Any = None
@@ -91,9 +88,8 @@ def _connection(wid: str, cid: str) -> Dict[str, Any]:
     return sync_connections.get_connection(wid, cid)
 
 
-def _operator(ctx: RequestContext) -> None:
-    authz.authorize(ctx, sync_operator_auth.OPERATOR_CAPABILITY)
-    sync_operator_auth.require_operator((ctx.headers or {}).get(OPERATOR_HEADER))
+def _require_admin(ctx: RequestContext) -> None:
+    authz.authorize(ctx, "integration_credentials_manage")
 
 
 def _if_match(ctx: RequestContext) -> int:
@@ -150,7 +146,7 @@ def create_connection(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _scope(wid)
     payload = json_body(body)
@@ -171,7 +167,7 @@ def update_connection(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     payload = json_body(body)
@@ -200,7 +196,7 @@ def create_candidate(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     vault = _vault()
@@ -238,7 +234,7 @@ def probe_credentials(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     payload = json_body(body)
@@ -265,7 +261,7 @@ def activate_candidate(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     candidate_id = validate_id(params["candidate_id"], "candidate_id")
@@ -306,7 +302,7 @@ def revoke_credentials(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     expected_revision = _if_match(ctx)

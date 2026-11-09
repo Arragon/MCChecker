@@ -5,6 +5,56 @@ from __future__ import annotations
 from authz_fixtures import as_role, make_server, seed_roles
 
 
+def test_manual_parameter_adoption_is_cas_guarded_and_keeps_frozen_definitions():
+    seed_roles("manual-adoption")
+    with make_server() as server:
+        wid = _create(server, "Adoption")
+        cid = _config(server, wid)
+        rid = _release(server, wid, cid)
+        admin = as_role(server, "admin")
+        base = "/api/v3/workspaces/%s/profiles/default/configs/%s" % (wid, cid)
+        payload = {"name": "Later", "directory": ["G"], "type": "number", "release_id": rid,
+                   "expected_draft_revision": 0, "expected_definition_revision": 0}
+        status, _, body = admin.json("POST", base + "/parameters", payload)
+        assert status == 201, body
+        pid = body["parameter"]["parameter_id"]
+        draft = admin.json("GET", base + "/drafts/d0-" + rid)[2]
+        assert draft["revision"] == 1 and draft["values"][pid]["value_state"] == "unset"
+        assert admin.json("GET", base + "/parameters?release_id=" + rid)[2]["total"] == 1
+        assert admin.json("POST", base + "/parameters", dict(payload, name="Stale"))[0] == 409
+        assert admin.json("GET", base + "/parameters")[2]["total"] == 1
+        assert admin.json("POST", base + "/drafts/d0-" + rid + "/freeze", {"request_id": "freeze"})[0] == 200
+        frozen = dict(payload, name="Forbidden", expected_draft_revision=1, expected_definition_revision=1)
+        assert admin.json("POST", base + "/parameters", frozen)[0] == 409
+        assert admin.json("GET", base + "/parameters")[2]["total"] == 1
+
+
+def test_empty_directory_mutations_keep_ids_and_frozen_paths():
+    seed_roles("directory")
+    with make_server() as server:
+        wid = _create(server, "Directories")
+        cid = _config(server, wid)
+        pid = _param(server, wid, cid, "Pulse")
+        rid = _release(server, wid, cid)
+        base = "/api/v3/workspaces/%s/profiles/default/configs/%s" % (wid, cid)
+        admin = as_role(server, "admin")
+        path = base + "/parameter-directories"
+        payload = {"path": ["Empty"], "expected_definition_revision": 1}
+        assert as_role(server, "visitor").json("POST", path, payload)[0] == 403
+        assert admin.json("POST", path, payload)[0] == 201
+        tree = admin.json("GET", base + "/parameter-tree")[2]
+        assert {d["name"]: d["count"] for d in tree["directories"]} == {"Empty": 0, "G": 1}
+        assert admin.json("POST", base + "/drafts/d0-" + rid + "/freeze", {"request_id": "f"})[0] == 200
+        assert admin.json("PATCH", path, {"path": ["G"], "new_path": ["Moved"], "expected_definition_revision": 2})[0] == 200
+        current = admin.json("GET", base + "/parameters")[2]["items"][0]
+        assert current["parameter_id"] == pid and current["directory"] == ["Moved"]
+        frozen = admin.json("GET", base + "/parameters?release_id=" + rid)[2]["items"][0]
+        assert frozen["parameter_id"] == pid and frozen["directory"] == ["G"]
+        assert admin.json("POST", path + "/delete", {"path": ["Moved"], "expected_definition_revision": 3})[0] == 400
+        assert admin.json("POST", path + "/delete", {"path": ["Empty"], "expected_definition_revision": 3})[0] == 200
+        assert admin.json("POST", path, dict(payload, path=["Stale"], expected_definition_revision=3))[0] == 409
+
+
 def _create(server, name):
     status, _h, body = as_role(server, "admin").json(
         "POST", "/api/v3/workspaces", {"name": name}

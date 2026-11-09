@@ -8,11 +8,13 @@
 - AAD 绑定 `workspace_id + connection_id + generation`；生产 Fernet 把 AAD 放进认证明文内；header scope 再次复核。
 - 密钥由部署端注入（`MCHECKER_SECRET_KEY`，base64url 或 hex，≥32 字节）；密钥与密文分离，无密钥时 `key_missing`，**没有明文回退**。
 
-## 运维授权
+## 管理员授权（2026-11-06 用户确认）
 
-- `MCHECKER_OPERATOR_TOKEN` 是部署端高熵 token；`app/services/sync_operator_auth.py` 用恒定时间比较。
-- 该能力独立于全局 admin/deployer，不新增空间角色/全站登录。
-- token 不进入日志、错误正文、任务结果、Linear、Git 或备份。
+- 全系统只有管理员和访客；`integration_credentials_manage` 映射管理员。
+- 连接写入、凭据导入/验证/激活/撤销、保活配置和立即执行仅管理员可用；访客可查看安全投影。
+- 不再要求 `MCHECKER_OPERATOR_TOKEN` 或 `X-Operator-Token`，旧头不会给访客授权。
+- 登记姓名是身份信息，不是额外的成员角色；撤权在下一次请求生效。
+- 此变更只统一授权方式，SecretStore 加密、密钥注入、凭据生命周期、CAS、工作区隔离与脱敏不变。
 
 ## 测试边界
 

@@ -5,6 +5,7 @@
 (function (global) {
   "use strict";
   var MC = (global.MC = global.MC || {});
+  var NS = MC.SVG_NS = "http://www.w3.org/2000/svg";
 
   var PATHS = {
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
@@ -71,7 +72,6 @@
   }
 
   function icon(name, cls) {
-    var NS = "http://www.w3.org/2000/svg";
     var svg = document.createElementNS(NS, "svg");
     svg.setAttribute("class", "svg-icon" + (cls ? " " + cls : ""));
     svg.setAttribute("aria-hidden", "true");

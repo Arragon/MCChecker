@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-11-08T19:50:53Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-66433-67443/data",
+  "server": "http://127.0.0.1:64773",
+  "summary": {
+    "interactive_pass": 1,
+    "interactive_fail": 0,
+    "reachable_pass": 0,
+    "reachable_fail": 0,
+    "api_pass": 0,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "config-prototype",
+      "title": "配置原型真实功能与四视口",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "UI 创建目录总表条目、软件版本、稳定参数，并真实纳入准备版",
+        "真实配置文件 → 字段选择 → 版本绑定，保留 file/version 身份",
+        "409 保留输入 → 比较最新草稿 → 重试保存 → D0 固化并只读",
+        "创建基线草稿/保存/发布 B1；选择真实 B1 建机台草稿，固定值发布 r1；主线未被改写",
+        "修改映射立即使旧预览失效；重新预览的完整输出保留未匹配字段并生成可下载文件",
+        "事件时间线恢复产生新草稿，已发布 r1 与基线 head 不变",
+        "未保存值/新增表单切换工作区均先确认；取消保留，放弃后关闭旧弹窗，不向 B 写入",
+        "1366 版本演进 {\"page\": 1366, \"viewport\": 1366, \"height\": 513, \"table\": {\"client\": 74, \"scroll\": 74}}",
+        "1366 参数工作台 {\"page\": 1366, \"viewport\": 1366, \"height\": 513, \"table\": {\"client\": 216, \"scroll\": 216}}",
+        "1366 参数总览 {\"page\": 1366, \"viewport\": 1366, \"height\": 513, \"table\": {\"client\": 560, \"scroll\": 10594}}",
+        "1366 模板导出 {\"page\": 1366, \"viewport\": 1366, \"height\": 513, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "1366 配置历史 {\"page\": 1366, \"viewport\": 1366, \"height\": 513, \"table\": null}",
+        "1920 版本演进 {\"page\": 1920, \"viewport\": 1920, \"height\": 825, \"table\": {\"client\": 74, \"scroll\": 74}}",
+        "1920 参数工作台 {\"page\": 1920, \"viewport\": 1920, \"height\": 825, \"table\": {\"client\": 521, \"scroll\": 521}}",
+        "1920 参数总览 {\"page\": 1920, \"viewport\": 1920, \"height\": 825, \"table\": {\"client\": 560, \"scroll\": 8308}}",
+        "1920 模板导出 {\"page\": 1920, \"viewport\": 1920, \"height\": 825, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "1920 配置历史 {\"page\": 1920, \"viewport\": 1920, \"height\": 825, \"table\": null}",
+        "768 版本演进 {\"page\": 768, \"viewport\": 768, \"height\": 769, \"table\": {\"client\": 74, \"scroll\": 74}}",
+        "768 参数工作台 {\"page\": 768, \"viewport\": 768, \"height\": 769, \"table\": {\"client\": 429, \"scroll\": 429}}",
+        "768 参数总览 {\"page\": 768, \"viewport\": 768, \"height\": 769, \"table\": {\"client\": 560, \"scroll\": 10594}}",
+        "768 模板导出 {\"page\": 768, \"viewport\": 768, \"height\": 769, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "768 配置历史 {\"page\": 768, \"viewport\": 768, \"height\": 769, \"table\": null}",
+        "375 版本演进 {\"page\": 375, \"viewport\": 375, \"height\": 563, \"table\": {\"client\": 144, \"scroll\": 144}}",
+        "375 参数工作台 {\"page\": 375, \"viewport\": 375, \"height\": 563, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "375 参数总览 {\"page\": 375, \"viewport\": 375, \"height\": 563, \"table\": {\"client\": 560, \"scroll\": 10594}}",
+        "375 模板导出 {\"page\": 375, \"viewport\": 375, \"height\": 563, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "375 配置历史 {\"page\": 375, \"viewport\": 375, \"height\": 563, \"table\": null}",
+        "四视口五页面无整页横向溢出；105 参数分页末项可达；访客403/跨工作区404"
+      ],
+      "screenshot": "docs/evidence/m16-40/config-prototype-export.png"
+    }
+  ]
+}

@@ -38,7 +38,7 @@ from e2e_cdp import Chrome, CdpError  # noqa: E402
 ADMIN_IP = "10.9.9.1"
 MEMBER_IP = "10.9.9.2"
 ADMIN_NAME = "E2E管理员"
-OPERATOR_TOKEN = "e2e-operator-token"
+LEGACY_TOKEN = "obsolete-token"
 EVIDENCE_DIR = os.environ.get("MCC_E2E_EVIDENCE_DIR") or os.path.join(REPO_ROOT, "docs", "evidence", "m16-40")
 
 
@@ -68,7 +68,6 @@ class Server:
         env.update(
             {
                 "MCHECKER_TRUSTED_PROXIES": "127.0.0.1",
-                "MCHECKER_OPERATOR_TOKEN": OPERATOR_TOKEN,
                 "PYTHONUNBUFFERED": "1",
             }
         )
@@ -279,14 +278,14 @@ class Runner:
             elif kind == "validate-connection-form":
                 checked = self.browser.eval("""(function(){
                   var d=document.querySelector('[data-conn-create-submit]').closest('.modal');
-                  var name=d.querySelector('[data-conn-name]'),origin=d.querySelector('[data-conn-origin]'),token=d.querySelector('[data-conn-token]'),submit=d.querySelector('[data-conn-create-submit]');
+                  var name=d.querySelector('[data-conn-name]'),origin=d.querySelector('[data-conn-origin]'),submit=d.querySelector('[data-conn-create-submit]');
                   function check(input){var error=document.getElementById(input.getAttribute('aria-describedby'));return document.activeElement===input && input.getAttribute('aria-invalid')==='true' && !!error && !!error.textContent;}
                   submit.click();if(!check(name))return false;name.value='测试连接';name.dispatchEvent(new Event('input',{bubbles:true}));
                   submit.click();if(!check(origin))return false;origin.value='https://example.invalid';origin.dispatchEvent(new Event('input',{bubbles:true}));
-                  submit.click();if(!check(token))return false;return !name.hasAttribute('aria-invalid') && !origin.hasAttribute('aria-invalid');
+                  return !name.hasAttribute('aria-invalid') && !origin.hasAttribute('aria-invalid') && !d.querySelector('[data-conn-token]');
                 })()""")
                 if not checked:
-                    notes.append("连接名称、地址或令牌缺少校验关联或焦点")
+                    notes.append("连接名称/地址校验或管理员免令牌状态不正确")
                     return False, notes, shot
                 notes.append("连接表单校验关联和焦点正常")
             elif kind == "click":
@@ -390,7 +389,7 @@ class Runner:
         self.browser.wait_for("document.querySelector('[data-sync-source]')", timeout=20)
         admin_ok = self.browser.eval("!!document.querySelector('[data-sync-edit]')")
         admin_shot = self.shoot("updates-sources-1366-admin")
-        # 成员：只读。SPA 的 session 是启动时拉取的，换身份必须整页重载。
+        # 访客：只读。SPA 的 session 是启动时拉取的，换身份必须整页重载。
         self.role(MEMBER_IP)
         self.browser.reload()
         self.browser.navigate(self.url(e2e_scenarios.updates_hash("sources", "default")))
@@ -402,7 +401,7 @@ class Runner:
         self.report.append(
             {
                 "id": "roles-admin-member",
-                "title": "管理员可编辑 / 成员只读",
+                "title": "管理员可编辑 / 访客只读",
                 "level": "interactive",
                 "ok": bool(admin_ok and member_ok),
                 "notes": ["admin_edit=%s member_edit=%s" % (admin_ok, member_ok)],
@@ -502,7 +501,7 @@ class Runner:
         """隔离数据中建立文件候选，通过真实 API 和页面写入准备版草稿。"""
         assert self.browser and self.server
         from app.core import storage
-        from app.services import config_v3_catalog, config_v3_drafts, file_versions, sync_candidates
+        from app.services import config_v3_catalog, config_v3_drafts, file_versions, sync_candidates, sync_sources
 
         b = self.browser
         notes = []
@@ -513,6 +512,8 @@ class Runner:
                 raise AssertionError("创建隔离工作区失败：%s" % status)
             wid = data["workspace"]["id"]
             with storage.use_workspace(wid), storage.use_profile("default"):
+                storage.save_config_file("candidate.xml", b"<R><x>1</x></R>")
+                base_file_version_id = file_versions.current_identity("default", "candidate.xml")["version_id"]
                 storage.save_config_file("candidate.xml", b"<R><x>2</x></R>")
                 file_row = next(x for x in file_versions.list_resources("default") if x["name"] == "candidate.xml")
             with storage.use_workspace(wid):
@@ -526,7 +527,8 @@ class Runner:
                 config_v3_drafts.patch_values("default", cid, did, {"request_id": "r6-seed", "items": [{"parameter_id": pid, "membership": "included", "value_state": "present", "value": "1"}]}, if_match='"0"')
                 before = config_v3_drafts.get_draft("default", cid, did)
                 head_before = (config_v3_catalog._load("default")["configs"][cid].get("main_branch") or {}).get("head_id")
-            candidate = sync_candidates.create_candidate(wid, "default", "r6-fixture-source", 1, file_row["blob_sha256"], "file_archive:%s" % file_row["file_id"], file_version_id=file_row["version_id"])
+            source = sync_sources.create_source(wid, {"profile_id": "default", "name": "candidate.xml", "kind": "http_file", "resource_ref": "https://example.invalid/candidate.xml", "target": {"kind": "file_archive", "file_id": file_row["file_id"]}})
+            candidate = sync_candidates.create_candidate(wid, "default", source["source_id"], 1, file_row["blob_sha256"], "file_archive:%s" % file_row["file_id"], file_version_id=file_row["version_id"], base_file_version_id=base_file_version_id)
             b.navigate("about:blank")
             b.navigate(self.url(e2e_scenarios.updates_hash("candidates", wid)))
             selector = '[data-sync-candidate="%s"] button' % candidate["candidate_id"]
@@ -545,15 +547,18 @@ class Runner:
             if not b.wait_for("!!document.querySelector('[data-sync-diff]')", timeout=15):
                 raise AssertionError("切换回来后无法重新预览")
             if not b.eval("document.querySelector('[data-sync-diff]').textContent.includes('2') && !document.querySelector('[data-sync-apply]').disabled"):
-                raise AssertionError("候选差异或写入状态不正确")
+                raise AssertionError("候选差异或写入状态不正确：%s" % b.eval("document.querySelector('.sync-candidate-dialog').innerText"))
             with storage.use_workspace(wid):
                 config_v3_drafts.patch_values("default", cid, did, {"request_id": "r6-concurrent", "items": [{"parameter_id": pid, "membership": "included", "value_state": "present", "value": "3"}]}, if_match='"%d"' % before["revision"])
             b.eval("document.querySelector('[data-sync-apply]').click()")
             if not b.wait_for("!!document.querySelector('[data-sync-repreview]')", timeout=15):
                 raise AssertionError("真实并发修改未触发候选 409 恢复")
             b.eval("document.querySelector('[data-sync-repreview]').click()")
-            if not b.wait_for("!!document.querySelector('[data-sync-apply]') && !document.querySelector('[data-sync-apply]').disabled && !document.querySelector('[data-sync-repreview]')", timeout=15):
+            if not b.wait_for("!!document.querySelector('[data-sync-decision]') && !document.querySelector('[data-sync-repreview]')", timeout=15):
                 raise AssertionError("候选重新预览失败")
+            b.eval("var s=document.querySelector('[data-sync-decision]');s.value='use_new';s.dispatchEvent(new Event('change',{bubbles:true}))")
+            if b.eval("document.querySelector('[data-sync-apply]').disabled"):
+                raise AssertionError("明确决议后仍无法写入草稿")
             b.eval("document.querySelector('[data-sync-apply]').click()")
             if not b.wait_for("!!document.querySelector('[data-sync-applied]')", timeout=15):
                 raise AssertionError("候选写入未返回成功")
@@ -577,7 +582,7 @@ class Runner:
         """验证显式基线产生真实冲突；该基线参数不由当前界面提供。"""
         assert self.server
         from app.core import storage
-        from app.services import config_v3_catalog, config_v3_drafts, file_versions, sync_candidates
+        from app.services import config_v3_catalog, config_v3_drafts, file_versions, sync_candidates, sync_sources
 
         notes = []
         ok = False
@@ -587,6 +592,8 @@ class Runner:
                 raise AssertionError("创建隔离工作区失败")
             wid = data["workspace"]["id"]
             with storage.use_workspace(wid), storage.use_profile("default"):
+                storage.save_config_file("conflict.xml", b"<R><x>1</x></R>")
+                base_file_version_id = file_versions.current_identity("default", "conflict.xml")["version_id"]
                 storage.save_config_file("conflict.xml", b"<R><x>3</x></R>")
                 file_row = next(x for x in file_versions.list_resources("default") if x["name"] == "conflict.xml")
             with storage.use_workspace(wid):
@@ -600,15 +607,17 @@ class Runner:
                 release = config_v3_catalog.create_release("default", cid, {"version": "2"})
                 did = "d0-" + release["release_id"]
                 config_v3_drafts.patch_values("default", cid, did, {"request_id": "current", "items": [{"parameter_id": pid, "membership": "included", "value_state": "present", "value": "2"}]}, if_match='"0"')
-            candidate = sync_candidates.create_candidate(wid, "default", "r6-conflict-source", 1, file_row["blob_sha256"], "file_archive:%s" % file_row["file_id"], file_version_id=file_row["version_id"])
+            source = sync_sources.create_source(wid, {"profile_id": "default", "name": "conflict.xml", "kind": "http_file", "resource_ref": "https://example.invalid/conflict.xml", "target": {"kind": "file_archive", "file_id": file_row["file_id"]}})
+            candidate = sync_candidates.create_candidate(wid, "default", source["source_id"], 1, file_row["blob_sha256"], "file_archive:%s" % file_row["file_id"], file_version_id=file_row["version_id"], base_file_version_id=base_file_version_id)
             path = "/api/v3/workspaces/%s/sync/candidates/%s" % (wid, candidate["candidate_id"])
             headers = {"X-Workspace-Id": wid}
             status, default = api(self.server, "POST", path + "/apply-preview", {"config_id": cid, "draft_id": did}, headers=headers)
-            if status != 201 or not any(x.get("parameter_id") == pid and x.get("action") == "from_new" for x in default.get("items", [])):
-                raise AssertionError("默认基线的预览结果不符合预期：%s" % default)
+            if status != 201 or not any(x.get("parameter_id") == pid and x.get("action") == "conflict" for x in default.get("items", [])):
+                raise AssertionError("原来源文件基线未识别真实冲突：%s" % default)
             status, preview = api(self.server, "POST", path + "/apply-preview", {"config_id": cid, "draft_id": did, "base_revision_id": old_draft}, headers=headers)
-            if status != 201 or not any(x.get("parameter_id") == pid and x.get("action") == "conflict" for x in preview.get("items", [])):
-                raise AssertionError("显式基线未形成真实冲突：%s" % preview)
+            if status != 400:
+                raise AssertionError("不允许客户端换成任意配置修订作为原来源基线：%s" % preview)
+            preview = default
             status, applied = api(self.server, "POST", path + "/apply", {"preview_id": preview["preview_id"], "request_id": "r6-conflict-apply", "decisions": {pid: "use_new"}}, headers=headers)
             if status != 200:
                 raise AssertionError("真实冲突决议写入失败：%s %s" % (status, applied))
@@ -616,7 +625,7 @@ class Runner:
                 result = config_v3_drafts.get_draft("default", cid, did)
             if result["values"][pid]["value"] != "3":
                 raise AssertionError("真实冲突决议未写入预期值")
-            notes.append("真实 API：默认基线为当前草稿；显式冻结 D0 基线产生冲突，use_new 写入值 3。当前 UI 不传基线参数")
+            notes.append("真实 API：原来源文件值 1、本地值 2、新来源值 3 产生冲突；拒绝客户端改用任意修订，use_new 写入值 3")
             ok = True
         except Exception as exc:
             notes.append(str(exc))
@@ -698,10 +707,10 @@ class Runner:
             if not valid_error:
                 raise AssertionError("名称校验缺少错误关联或焦点")
             b.eval("var i=document.querySelector('.sync-source-dialog input[autofocus]');i.value='R6 来源长名称测试';i.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-sync-save]').click()")
-            ref_error = b.eval("""(function(){var d=document.querySelector('.sync-source-dialog'),l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent==='资源引用'),i=document.getElementById(l.htmlFor),e=document.getElementById(i.getAttribute('aria-describedby'));return i.getAttribute('aria-invalid')==='true' && document.activeElement===i && !!e && e.textContent.includes('下载 URL')})()""")
+            ref_error = b.eval("""(function(){var d=document.querySelector('.sync-source-dialog'),l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent==='下载地址'),i=document.getElementById(l.htmlFor),e=document.getElementById(i.getAttribute('aria-describedby'));return i.getAttribute('aria-invalid')==='true' && document.activeElement===i && !!e && e.textContent.includes('下载 URL')})()""")
             if not ref_error:
                 raise AssertionError("资源引用校验缺少错误关联或焦点")
-            b.eval("""(function(){var d=document.querySelector('.sync-source-dialog');function input(label,value){var l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent===label),i=document.getElementById(l.htmlFor);i.value=value;i.dispatchEvent(new Event('input',{bubbles:true}))}input('资源引用','http://127.0.0.1:9/test.xml');input('业务路径','wrong');d.querySelector('[data-sync-save]').click()})()""")
+            b.eval("""(function(){var d=document.querySelector('.sync-source-dialog');function input(label,value){var l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent===label),i=document.getElementById(l.htmlFor);i.value=value;i.dispatchEvent(new Event('input',{bubbles:true}))}input('下载地址','http://127.0.0.1:9/test.xml');input('业务路径','wrong');d.querySelector('[data-sync-save]').click()})()""")
             if not b.eval("""(function(){var d=document.querySelector('.sync-source-dialog'),l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent==='业务路径'),i=document.getElementById(l.htmlFor);return document.activeElement===i && i.getAttribute('aria-invalid')==='true'})()"""):
                 raise AssertionError("业务路径错误未定位到输入")
             b.eval("""(function(){var d=document.querySelector('.sync-source-dialog');function input(label,value,event){var l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent===label),i=document.getElementById(l.htmlFor);i.value=value;i.dispatchEvent(new Event(event,{bubbles:true}))}input('业务路径','/valid','input');input('计划','custom','change');d.querySelector('[data-sync-save]').click()})()""")
@@ -712,7 +721,7 @@ class Runner:
                 raise AssertionError("目标文件错误未定位到选择框")
             b.eval("""(function(){var d=document.querySelector('.sync-source-dialog');
               function set(label,value){var l=Array.from(d.querySelectorAll('label')).find(x=>x.textContent===label);var i=document.getElementById(l.htmlFor);i.value=value;i.dispatchEvent(new Event('input',{bubbles:true}));}
-              set('名称','R6 来源长名称测试');set('资源引用','http://127.0.0.1:9/'+'a'.repeat(100));set('业务路径','/'+'long'.repeat(30));
+              set('名称','R6 来源长名称测试');set('下载地址','http://127.0.0.1:9/'+'a'.repeat(100));set('业务路径','/'+'long'.repeat(30));
               var file=d.querySelector('[data-sync-target-file]');file.selectedIndex=1;file.dispatchEvent(new Event('change',{bubbles:true}));})()""")
             geometry = b.eval("(function(){var d=document.querySelector('.sync-source-dialog'),a=d.querySelector('[data-sync-save]').getBoundingClientRect();return {width:d.getBoundingClientRect().width,save:a.bottom<=innerHeight,body:d.querySelector('.modal-body').clientHeight,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth}})()")
             if not geometry or geometry["width"] > 375 or not geometry["save"] or geometry["body"] <= 0 or geometry["overflow"] > 1:
@@ -909,6 +918,12 @@ class Runner:
             b.eval("document.querySelector('[data-sync-run]').click()")
             if not b.wait_for("Array.from(document.querySelectorAll('.modal-footer button')).some(b => b.textContent === '下载诊断')", timeout=5):
                 raise AssertionError("诊断下载入口不存在")
+            b.viewport(375, 812)
+            geometry = b.eval("""(function(){var d=document.querySelector('.sync-run-dialog'),f=d.querySelector('.modal-footer').getBoundingClientRect(),body=d.querySelector('.modal-body').getBoundingClientRect();return {footerVisible:f.top>=0&&f.bottom<=innerHeight,bodyHeight:body.height,overflow:document.documentElement.scrollWidth-innerWidth}})()""")
+            if not geometry or not geometry["footerVisible"] or geometry["bodyHeight"] < 100 or geometry["overflow"] > 1:
+                raise AssertionError("窄屏运行详情操作不可达：%s" % geometry)
+            notes.append("375px 运行详情页脚换行且可达：%s" % geometry)
+            b.viewport(1366, 768)
             b.eval("Array.from(document.querySelectorAll('.modal-footer button')).find(b => b.textContent === '下载诊断').click()")
             deadline = time.time() + 15
             filename = "sync-run-%s-diagnostics.json" % run_id
@@ -928,6 +943,8 @@ class Runner:
             ok = True
         except Exception as exc:
             notes.append(str(exc))
+        finally:
+            b.viewport(1366, 768)
         self.report.append({"id": "diagnostic-download", "title": "运行诊断文件下载", "level": "interactive", "ok": ok, "notes": notes, "screenshot": None})
         log("[%s] diagnostic-download %s" % ("PASS" if ok else "FAIL", notes[-1:]))
 
@@ -1012,7 +1029,7 @@ class Runner:
                     notes.append(str(geometry))
                     if name == "connection":
                         b.eval("document.querySelector('[data-conn-create]').click()")
-                        if not b.wait_for("!!document.querySelector('[data-conn-token]')", timeout=10):
+                        if not b.wait_for("!!document.querySelector('[data-conn-name]')", timeout=10):
                             raise AssertionError("嵌套连接对话框未打开")
                         time.sleep(0.35)
                         nested = b.eval("""(function(){var d=Array.from(document.querySelectorAll('.modal')).pop(),r=d.getBoundingClientRect(),f=d.querySelector('.modal-footer').getBoundingClientRect();return {width:r.width,height:r.height,footerVisible:f.bottom<=innerHeight+1,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth}})()""")
@@ -1050,6 +1067,12 @@ class Runner:
                 b.call("Input.dispatchTouchEvent", type="touchStart", touchPoints=[{"x": point["x"], "y": point["y"]}])
                 b.call("Input.dispatchTouchEvent", type="touchEnd", touchPoints=[])
 
+            tap(".sync-source-more summary")
+            if not b.wait_for("!!document.querySelector('.sync-source-more[open]')", timeout=10):
+                raise AssertionError("触摸未展开更多操作")
+            if not b.eval("document.querySelector('.sync-source-more[open] [data-sync-delete]').getClientRects().length > 0"):
+                raise AssertionError("低频操作在触屏上不可见")
+            tap(".sync-source-more[open] summary")
             tap("[data-sync-new]")
             if not b.wait_for("!!document.querySelector('.sync-source-dialog [data-sync-cancel]')", timeout=10):
                 raise AssertionError("触摸未打开来源抽屉")
@@ -1236,7 +1259,7 @@ class Runner:
             b.navigate(self.url(e2e_scenarios.updates_hash("connections", "default")))
             if not b.wait_for("!!document.querySelector('[data-conn-create]')", timeout=15):
                 raise AssertionError("连接设置未加载")
-            b.eval("""window.__errorOriginal=MC.api.requestV3;MC.api.requestV3=function(m,p,o){if(m==='POST'&&p.endsWith('/connections'))return Promise.reject({code:'NETWORK',message:'模拟连接失败：'+'x'.repeat(600)});return window.__errorOriginal.apply(this,arguments)};document.querySelector('[data-conn-create]').click();var d=Array.from(document.querySelectorAll('.modal')).pop();d.querySelector('[data-conn-name]').value='测试';d.querySelector('[data-conn-origin]').value='https://example.invalid';d.querySelector('[data-conn-token]').value='local-test';d.querySelector('[data-conn-create-submit]').click()""")
+            b.eval("""window.__errorOriginal=MC.api.requestV3;MC.api.requestV3=function(m,p,o){if(m==='POST'&&p.endsWith('/connections'))return Promise.reject({code:'NETWORK',message:'模拟连接失败：'+'x'.repeat(600)});return window.__errorOriginal.apply(this,arguments)};document.querySelector('[data-conn-create]').click();var d=Array.from(document.querySelectorAll('.modal')).pop();d.querySelector('[data-conn-name]').value='测试';d.querySelector('[data-conn-origin]').value='https://example.invalid';d.querySelector('[data-conn-create-submit]').click()""")
             if not b.wait_for("document.querySelector('[data-conn-error]')?.textContent.includes('模拟连接失败')", timeout=10):
                 raise AssertionError("连接错误未显示")
             modal_error = b.eval("""(function(){var e=document.querySelector('[data-conn-error]'),d=e.closest('.modal');return {overflow:e.scrollWidth-e.clientWidth,modalOverflow:d.scrollWidth-d.clientWidth}})()""")
@@ -1254,57 +1277,36 @@ class Runner:
         log("[%s] source-error-recovery %s" % ("PASS" if ok else "FAIL", notes[-1:]))
 
     def run_operator(self) -> None:
-        """运维 token 三段式：无 token / 错 token 都是 403，正确 token 成功。"""
+        """管理员无需 token，访客无法通过旧 token 提权。"""
         assert self.browser
-        self.browser.navigate(self.url(e2e_scenarios.updates_hash("connections", "default")))
-        script = """
-        (async function(){
-          const body = {name: "E2E 连接", origin: "https://sda.e2e.invalid"};
-          async function call(token) {
-            const headers = {"Content-Type": "application/json", "X-Requested-With": "MCChecker"};
-            if (token) headers["X-Operator-Token"] = token;
-            const res = await fetch("/api/v3/workspaces/default/connections", {
-              method: "POST", headers: headers, body: JSON.stringify(body)
-            });
-            const text = await res.text();
-            return {status: res.status, body: text};
-          }
-          const missing = await call("");
-          const wrong = await call("wrong-token-value");
-          const right = await call(%s);
-          return JSON.stringify({missing, wrong, right});
-        })()
-        """ % json.dumps(OPERATOR_TOKEN)
-        raw = self.browser.eval(script)
+        b = self.browser
+        notes = []
+        ok = False
+        script = """(async function(){const r=await fetch('/api/v3/workspaces/default/connections',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'MCChecker','X-Operator-Token':'obsolete-token'},body:JSON.stringify({name:'权限回归连接',origin:'https://example.invalid'})});return r.status;})()"""
         try:
-            data = json.loads(raw) if isinstance(raw, str) else {}
-        except ValueError:
-            data = {}
-        missing_ok = data.get("missing", {}).get("status") == 403
-        wrong_ok = data.get("wrong", {}).get("status") == 403
-        right_ok = data.get("right", {}).get("status") in (200, 201)
-        leaked = OPERATOR_TOKEN in json.dumps(data.get("missing", {})) + json.dumps(data.get("wrong", {}))
-        ok = bool(missing_ok and wrong_ok and right_ok and not leaked)
-        shot = self.shoot("updates-connections-operator-token")
-        self.report.append(
-            {
-                "id": "operator-token",
-                "title": "运维 token：缺失/错误拒绝，正确放行，且不回显 token",
-                "level": "interactive",
-                "ok": ok,
-                "notes": [
-                    "missing=%s wrong=%s right=%s leaked=%s"
-                    % (
-                        data.get("missing", {}).get("status"),
-                        data.get("wrong", {}).get("status"),
-                        data.get("right", {}).get("status"),
-                        leaked,
-                    )
-                ],
-                "screenshot": shot,
-            }
-        )
-        log("[%s] operator-token" % ("PASS" if ok else "FAIL"))
+            self.role(MEMBER_IP)
+            b.navigate(self.url(e2e_scenarios.updates_hash("connections", "default")))
+            if not b.wait_for("document.querySelector('[data-connections-readonly]')", timeout=10):
+                raise AssertionError("访客未显示只读状态")
+            denied = b.eval(script)
+            if denied != 403:
+                raise AssertionError("访客带旧 token 被放行：%s" % denied)
+            self.role(ADMIN_IP)
+            b.navigate("about:blank")
+            b.navigate(self.url(e2e_scenarios.updates_hash("connections", "default")))
+            if not b.wait_for("document.querySelector('[data-conn-create]')", timeout=10):
+                raise AssertionError("管理员缺少连接管理入口")
+            allowed = b.eval(script.replace(",'X-Operator-Token':'obsolete-token'", ""))
+            if allowed != 201:
+                raise AssertionError("管理员无 token 创建失败：%s" % allowed)
+            notes.append("访客（含旧 token）403；管理员不带 token 201")
+            ok = True
+        except Exception as exc:
+            notes.append(str(exc))
+        finally:
+            self.role(ADMIN_IP)
+        self.report.append({"id":"admin-visitor-auth","title":"管理员与访客两档授权","level":"interactive","ok":ok,"notes":notes,"screenshot":None})
+        log("[%s] admin-visitor-auth %s" % ("PASS" if ok else "FAIL", notes))
 
     def run_connection_settings(self) -> None:
         """隔离工作区通过界面写连接和停用状态的保活配置，不连接 SDA。"""
@@ -1325,7 +1327,7 @@ class Runner:
             if not b.wait_for("!!document.querySelector('[data-conn-create]')", timeout=20):
                 raise AssertionError("连接设置未加载")
             b.eval("document.querySelector('[data-conn-create]').click()")
-            b.eval("""(function(token){var d=Array.from(document.querySelectorAll('.modal')).pop();d.querySelector('[data-conn-name]').value='R6 测试连接';d.querySelector('[data-conn-origin]').value='https://example.invalid';d.querySelector('[data-conn-token]').value=token;d.querySelector('[data-conn-create-submit]').click()})(%s)""" % json.dumps(OPERATOR_TOKEN))
+            b.eval("""(function(){var d=Array.from(document.querySelectorAll('.modal')).pop();d.querySelector('[data-conn-name]').value='R6 测试连接';d.querySelector('[data-conn-origin]').value='https://example.invalid';d.querySelector('[data-conn-create-submit]').click()})()""")
             if not b.wait_for("!document.querySelector('[data-conn-create-submit]') && !!document.querySelector('[data-conn-edit]')", timeout=15):
                 raise AssertionError("界面创建连接未完成")
             status, listing = api(self.server, "GET", base)
@@ -1335,14 +1337,14 @@ class Runner:
                 raise AssertionError("服务端没有创建连接")
             cid = row["connection_id"]
             b.eval("document.querySelector('[data-conn-edit]').click()")
-            b.eval("""(function(token){var d=Array.from(document.querySelectorAll('.modal')).pop();d.querySelector('[data-conn-name]').value='R6 已编辑连接';d.querySelector('[data-conn-token]').value=token;d.querySelector('[data-conn-save]').click()})(%s)""" % json.dumps(OPERATOR_TOKEN))
+            b.eval("""(function(){var d=Array.from(document.querySelectorAll('.modal')).pop();d.querySelector('[data-conn-name]').value='R6 已编辑连接';d.querySelector('[data-conn-save]').click()})()""")
             if not b.wait_for("!document.querySelector('[data-conn-save]') && document.body.innerText.includes('R6 已编辑连接')", timeout=15):
                 raise AssertionError("连接编辑未完成")
             status, listing = api(self.server, "GET", base)
             row = next((x for x in listing.get("items", []) if x.get("connection_id") == cid), None)
             if status != 200 or not row or row.get("name") != "R6 已编辑连接" or row.get("policy_revision", 0) <= 0:
                 raise AssertionError("连接编辑未写入服务端")
-            b.eval("""(function(token){var i=document.querySelector('[data-hb-interval]'),t=document.querySelector('[data-hb-token]');i.value='15';i.dispatchEvent(new Event('input',{bubbles:true}));t.value=token;document.querySelector('[data-hb-save]').click()})(%s)""" % json.dumps(OPERATOR_TOKEN))
+            b.eval("""(function(){var i=document.querySelector('[data-hb-interval]');i.value='15';i.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-hb-save]').click()})()""")
             if not b.wait_for("document.querySelector('[data-hb-status]')?.textContent.includes('间隔 15 分钟')", timeout=15):
                 raise AssertionError("保活设置未回显")
             status, hb = api(self.server, "GET", base + "/" + cid + "/heartbeat")
@@ -1350,10 +1352,10 @@ class Runner:
                 raise AssertionError("保活设置未正确保存")
             for name in ("connections.json", "heartbeat.json"):
                 with open(sync_paths.sync_file(wid, name), "rb") as stream:
-                    if OPERATOR_TOKEN.encode() in stream.read():
+                    if LEGACY_TOKEN.encode() in stream.read():
                         raise AssertionError("运维 token 出现在配置文件中")
-            if b.eval("document.querySelector('[data-hb-token]')?.value"):
-                raise AssertionError("保存后令牌框未清空")
+            if b.eval("!!document.querySelector('[data-hb-token], [data-conn-token], [data-cred-token]')"):
+                raise AssertionError("管理员界面仍残留运维令牌输入")
             notes.append("浏览器创建和编辑连接、保存 15 分钟停用保活；服务端配置不含令牌")
             ok = True
         except Exception as exc:
@@ -1394,7 +1396,7 @@ class Runner:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="M16-40 真实浏览器 E2E")
-    parser.add_argument("--only", default="all", choices=("all", "updates", "legacy", "roles", "viewports", "panel-viewports", "touch-controls", "shared-modal", "long-sources", "source-error-recovery", "operator", "connection-settings", "workspace", "plan-save-preview", "download", "source-conflict", "revocation", "candidate-responsive", "candidate-real-apply", "candidate-conflict-contract", "source-scope"))
+    parser.add_argument("--only", default="all", choices=("all", "updates", "legacy", "roles", "viewports", "panel-viewports", "touch-controls", "shared-modal", "long-sources", "source-error-recovery", "operator", "connection-settings", "workspace", "plan-save-preview", "download", "source-conflict", "revocation", "candidate-responsive", "candidate-real-apply", "candidate-conflict-contract", "source-scope", "config-prototype"))
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--chrome", default=None)
     parser.add_argument("--report", default=None)
@@ -1407,9 +1409,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         runner.start()
         # CDP 截图后后台合成帧可能停滞；触摸手势必须先于截图场景执行。
-        groups = [args.only] if args.only != "all" else ["touch-controls", "long-sources", "updates", "legacy", "roles", "viewports", "panel-viewports", "shared-modal", "source-error-recovery", "operator", "connection-settings", "download", "workspace", "plan-save-preview", "source-conflict", "revocation", "candidate-responsive", "candidate-real-apply", "candidate-conflict-contract", "source-scope"]
+        groups = [args.only] if args.only != "all" else ["touch-controls", "long-sources", "updates", "legacy", "roles", "viewports", "panel-viewports", "shared-modal", "source-error-recovery", "operator", "connection-settings", "download", "workspace", "plan-save-preview", "source-conflict", "revocation", "candidate-responsive", "candidate-real-apply", "candidate-conflict-contract", "source-scope", "config-prototype"]
         for group in groups:
-            if group == "updates":
+            if group == "config-prototype":
+                from e2e_config_prototype import run
+                run(runner, api, ADMIN_IP, MEMBER_IP)
+            elif group == "updates":
                 runner.run_updates()
             elif group == "legacy":
                 runner.run_legacy()

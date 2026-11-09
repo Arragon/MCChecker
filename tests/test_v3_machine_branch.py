@@ -5,6 +5,66 @@ from __future__ import annotations
 from authz_fixtures import as_role, make_server, seed_roles
 
 
+def test_machine_workbench_edits_cas_and_reads_immutable_revision():
+    seed_roles("machine-workbench")
+    with make_server() as server:
+        wid = _create(server, "Workbench")
+        cid = _config(server, wid)
+        pid = _param(server, wid, cid)
+        rid = _release(server, wid, cid)
+        _freeze_d0(server, wid, cid, pid, rid)
+        status, _, result = _machine(server, wid, cid, rid)
+        assert status == 201
+        mid = result["machine"]["machine_id"]
+        base = "/api/v3/workspaces/%s/profiles/default/configs/%s" % (wid, cid)
+        path = base + "/machines/%s/draft/values" % mid
+        payload = {"request_id": "edit-1", "items": [{"parameter_id": pid,
+            "membership": "included", "value_state": "present", "value": "7", "enabled": True}]}
+        assert as_role(server, "visitor").json("PATCH", path, payload, headers={"If-Match": '"0"'})[0] == 403
+        admin = as_role(server, "admin")
+        status, _, result = admin.json("PATCH", path, payload, headers={"If-Match": '"0"'})
+        assert status == 200, result
+        assert result["draft"]["revision"] == 1
+        assert result["draft"]["values"][pid]["value"] == "7"
+        assert admin.json("PATCH", path, payload, headers={"If-Match": '"0"'})[0] == 200
+        assert admin.json("PATCH", path, dict(payload, request_id="stale"), headers={"If-Match": '"0"'})[0] == 409
+        status, _, published = _publish(server, wid, cid, mid, '"1"')
+        assert status == 200, published
+        revision = published["machine"]["head_id"]
+        status, _, snapshot = admin.json("GET", base + "/revisions/" + revision)
+        assert status == 200, snapshot
+        assert snapshot["snapshot"]["values"][pid]["value"] == "7"
+        assert admin.json("PATCH", path, dict(payload, request_id="after-publish"), headers={"If-Match": '"1"'})[0] == 409
+        assert admin.json("GET", base + "/revisions/mr-absent")[0] == 404
+        other = _create(server, "Other")
+        assert admin.json("GET", base.replace(wid, other) + "/revisions/" + revision)[0] == 404
+
+
+def test_machine_pin_roundtrip_and_inherit_uses_server_basis():
+    seed_roles("machine-intent")
+    with make_server() as server:
+        wid = _create(server, "Intent")
+        cid = _config(server, wid)
+        pid = _param(server, wid, cid)
+        rid = _release(server, wid, cid)
+        _freeze_d0(server, wid, cid, pid, rid)
+        machine = _machine(server, wid, cid, rid)[2]["machine"]
+        path = "/api/v3/workspaces/%s/profiles/default/configs/%s/machines/%s" % (wid, cid, machine["machine_id"])
+        admin = as_role(server, "admin")
+        payload = {"request_id": "pin", "expected_revision": 0, "items": [{"parameter_id": pid, "intent": "pin", "value_state": "present", "value": "7"}]}
+        status, _, result = admin.json("PATCH", path + "/draft/values", payload)
+        assert status == 200 and result["draft"]["values"][pid]["intent"] == "pin"
+        assert admin.json("GET", path)[2]["machine"]["draft"]["values"][pid]["intent"] == "pin"
+        bad = {"request_id": "bad", "expected_revision": 1, "items": [{"parameter_id": pid, "intent": "unknown"}]}
+        assert admin.json("PATCH", path + "/draft/values", bad)[0] == 400
+        assert admin.json("GET", path)[2]["machine"]["draft"]["revision"] == 1
+        inherit = {"request_id": "inherit", "expected_revision": 1, "items": [{"parameter_id": pid, "intent": "inherit", "value": "999"}]}
+        status, _, result = admin.json("PATCH", path + "/draft/values", inherit)
+        assert status == 200, result
+        assert result["draft"]["values"][pid]["value"] == "1"
+        assert result["draft"]["values"][pid]["intent"] == "inherit"
+
+
 def _create(server, name):
     status, _h, body = as_role(server, "admin").json(
         "POST", "/api/v3/workspaces", {"name": name}

@@ -22,7 +22,6 @@ from authz_fixtures import as_role, make_server, seed_roles
 from app.server import api_connections
 from app.services import authz, sync_paths
 
-OPERATOR_TOKEN = "m16-30-test-operator-token"
 FORBIDDEN_KEYS = frozenset(
     {
         "password",
@@ -67,7 +66,7 @@ class FakeVault:
 
 @pytest.fixture(autouse=True)
 def connection_api_ports(monkeypatch):
-    monkeypatch.setenv("MCHECKER_OPERATOR_TOKEN", OPERATOR_TOKEN)
+    monkeypatch.delenv("MCHECKER_OPERATOR_TOKEN", raising=False)
     api_connections.configure_vault(None)
     api_connections.configure_probe(None)
     yield
@@ -75,8 +74,8 @@ def connection_api_ports(monkeypatch):
     api_connections.configure_probe(None)
 
 
-def operator_header():
-    return {"X-Operator-Token": OPERATOR_TOKEN}
+def admin_headers():
+    return {}
 
 
 def make_workspace(caller, name):
@@ -90,7 +89,7 @@ def make_connection(caller, wid, name="SDA main"):
         "POST",
         "/api/v3/workspaces/%s/connections" % wid,
         {"name": name, "origin": "https://sda.example.invalid"},
-        headers=operator_header(),
+        headers=admin_headers(),
     )
     assert status == 201, body
     return body
@@ -102,7 +101,7 @@ def begin_candidate(caller, wid, cid, vault, username="operator-account", passwo
         "POST",
         "/api/v3/workspaces/%s/connections/%s/credentials/candidates" % (wid, cid),
         {"username": username, "password": password},
-        headers=operator_header(),
+        headers=admin_headers(),
     )
     assert status == 201, body
     return body
@@ -168,52 +167,29 @@ def test_read_only_sees_connection_status_without_account_or_secret():
         assert "super-secret-pw" not in credentials_text
 
 
-def test_credential_writes_require_operator_token_even_for_admin():
+def test_credential_writes_require_admin_without_operator_token(monkeypatch):
+    monkeypatch.delenv("MCHECKER_OPERATOR_TOKEN", raising=False)
     seed_roles("conn-auth")
     with make_server() as server:
         admin = as_role(server, "admin")
         visitor = as_role(server, "visitor")
         wid = make_workspace(admin, "W1")
-        cid = make_connection(admin, wid)["connection_id"]
-        candidate_url = "/api/v3/workspaces/%s/connections/%s/credentials/candidates" % (
-            wid,
-            cid,
-        )
-
-        status, _headers, payload = admin.json(
-            "POST", candidate_url, {"username": "u", "password": "p"}
-        )
-        assert status == 403, payload
-        assert payload["error"]["detail"]["field"] == "operator_token"
-        assert not os.path.exists(sync_paths.sync_file(wid, "credentials.json"))
-
-        status, _headers, payload = visitor.json(
-            "POST",
-            candidate_url,
-            {"username": "u", "password": "p"},
-            headers=operator_header(),
-        )
-        assert status == 403, payload
-        assert payload["error"]["detail"]["action"] == "integration_credentials_manage"
-
-        status, _headers, payload = admin.json(
-            "PATCH",
-            "/api/v3/workspaces/%s/connections/%s" % (wid, cid),
-            {"name": "renamed"},
-            headers={"If-Match": "1"},
-        )
-        assert status == 403, payload
-        assert payload["error"]["detail"]["field"] == "operator_token"
-
+        status, _, conn = admin.json("POST", "/api/v3/workspaces/%s/connections" % wid,
+                                    {"name": "SDA", "origin": "https://example.invalid"})
+        assert status == 201, conn
+        cid = conn["connection_id"]
+        url = "/api/v3/workspaces/%s/connections/%s" % (wid, cid)
+        for headers in ({}, {"X-Operator-Token": "legacy-token"}):
+            status, _, denied = visitor.json("POST", url + "/credentials/candidates",
+                                            {"username": "u", "password": "p"}, headers=headers)
+            assert status == 403, denied
+            assert denied["error"]["detail"]["action"] == "integration_credentials_manage"
+        status, _, saved = admin.json("PATCH", url, {"name": "renamed"}, headers={"If-Match": "1"})
+        assert status == 200, saved
         api_connections.configure_vault(FakeVault())
-        status, _headers, body = admin.json(
-            "POST",
-            candidate_url,
-            {"username": "u", "password": "p"},
-            headers=operator_header(),
-        )
-        assert status == 201, body
-        assert body["candidate"]["state"] == "pending"
+        status, _, pending = admin.json("POST", url + "/credentials/candidates", {"username": "u", "password": "p"})
+        assert status == 201, pending
+        assert pending["candidate"]["state"] == "pending"
 
 
 def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
@@ -241,7 +217,7 @@ def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
             "PATCH",
             "/api/v3/workspaces/%s/connections/%s" % (wid2, cid),
             {"name": "cross"},
-            headers=dict(operator_header(), **{"If-Match": "1"}),
+            headers=dict(admin_headers(), **{"If-Match": "1"}),
         )
         assert status == 404, payload
 
@@ -249,7 +225,7 @@ def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid2, cid),
             {},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 404, payload
         assert not os.path.exists(sync_paths.sync_file(wid2, "operations.json"))
@@ -262,7 +238,7 @@ def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid1, cid),
             {},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 202, probe
         op_id = probe["operation"]["op_id"]
@@ -283,7 +259,7 @@ def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/revoke" % (wid1, cid),
             headers=dict(
-                {"Host": "attacker.example", "If-Match": "1"}, **operator_header()
+                {"Host": "attacker.example", "If-Match": "1"}, **admin_headers()
             ),
         )
         assert status in (403, 421), payload
@@ -293,7 +269,7 @@ def test_cross_workspace_and_forged_host_cannot_reach_another_workspace():
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid1, cid),
             body={},
-            headers=operator_header(),
+            headers=admin_headers(),
             with_csrf=False,
         )
         assert status == 403, raw
@@ -312,7 +288,7 @@ def test_probe_without_configured_probe_is_blocked_not_faked():
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid, cid),
             {},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 202, payload
         op = payload["operation"]
@@ -362,7 +338,7 @@ def test_bad_credentials_latches_and_repeated_probe_does_not_call_provider_again
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid, cid),
             {"candidate_id": candidate_id},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 202, first
         assert first["operation"]["state"] == "succeeded"
@@ -373,7 +349,7 @@ def test_bad_credentials_latches_and_repeated_probe_does_not_call_provider_again
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid, cid),
             {"candidate_id": candidate_id},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 202, second
         assert second["operation"]["state"] == "failed"
@@ -385,7 +361,7 @@ def test_bad_credentials_latches_and_repeated_probe_does_not_call_provider_again
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid, cid),
             {"candidate_id": candidate_id},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 202, third
         assert third["operation"]["state"] == "blocked"
@@ -424,14 +400,14 @@ def test_activate_stale_epoch_is_409_and_success_returns_202_operation():
         )
 
         status, _headers, stale = admin.json(
-            "POST", url, {"probe_epoch": 99}, headers=operator_header()
+            "POST", url, {"probe_epoch": 99}, headers=admin_headers()
         )
         assert status == 409, stale
         assert stale["error"]["code"] == "SOURCE_CHANGED"
         assert not os.path.exists(sync_paths.sync_file(wid, "operations.json"))
 
         status, _headers, activated = admin.json(
-            "POST", url, {"probe_epoch": 0}, headers=operator_header()
+            "POST", url, {"probe_epoch": 0}, headers=admin_headers()
         )
         assert status == 202, activated
         op = activated["operation"]
@@ -449,12 +425,12 @@ def test_activate_stale_epoch_is_409_and_success_returns_202_operation():
         assert state["active_generation"] == 1
 
         status, _headers, again = admin.json(
-            "POST", url, {"probe_epoch": 0}, headers=operator_header()
+            "POST", url, {"probe_epoch": 0}, headers=admin_headers()
         )
         assert status in (404, 409), again
 
 
-def test_revoke_requires_operator_and_storage_failure_is_not_reported_as_success():
+def test_revoke_requires_admin_and_storage_failure_is_not_reported_as_success():
     seed_roles("conn-revoke")
     with make_server() as server:
         admin = as_role(server, "admin")
@@ -468,21 +444,21 @@ def test_revoke_requires_operator_and_storage_failure_is_not_reported_as_success
             pending["candidate"]["candidate_id"],
         )
         status, _headers, activated = admin.json(
-            "POST", activate_url, {"probe_epoch": 0}, headers=operator_header()
+            "POST", activate_url, {"probe_epoch": 0}, headers=admin_headers()
         )
         assert status == 202, activated
         revision = activated["operation"]["result"]["credential"]["revision"]
         url = "/api/v3/workspaces/%s/connections/%s/credentials/revoke" % (wid, cid)
 
-        status, _headers, denied = admin.json(
+        status, _headers, denied = as_role(server, "visitor").json(
             "POST", url, headers={"If-Match": str(revision)}
         )
         assert status == 403, denied
-        assert denied["error"]["detail"]["field"] == "operator_token"
+        assert denied["error"]["detail"]["action"] == "integration_credentials_manage"
 
         vault.fail_delete = True
         status, _headers, failed = admin.json(
-            "POST", url, headers=dict(operator_header(), **{"If-Match": str(revision)})
+            "POST", url, headers=dict(admin_headers(), **{"If-Match": str(revision)})
         )
         assert status == 500, failed
         assert failed["error"]["code"] == "STORAGE_FAILURE"
@@ -494,7 +470,7 @@ def test_revoke_requires_operator_and_storage_failure_is_not_reported_as_success
 
         vault.fail_delete = False
         status, _headers, revoked = admin.json(
-            "POST", url, headers=dict(operator_header(), **{"If-Match": str(revision)})
+            "POST", url, headers=dict(admin_headers(), **{"If-Match": str(revision)})
         )
         assert status == 200, revoked
         assert revoked["state"] == "unconfigured"
@@ -519,7 +495,7 @@ def test_idempotency_same_key_same_body_returns_same_operation():
         pending = begin_candidate(admin, wid, cid, FakeVault())
         candidate_id = pending["candidate"]["candidate_id"]
         url = "/api/v3/workspaces/%s/connections/%s/credentials/probe" % (wid, cid)
-        headers = dict(operator_header(), **{"Idempotency-Key": "probe-key-1"})
+        headers = dict(admin_headers(), **{"Idempotency-Key": "probe-key-1"})
 
         status, _headers, first = admin.json(
             "POST", url, {"candidate_id": candidate_id}, headers=headers
@@ -554,7 +530,7 @@ def test_candidate_without_vault_is_503_and_writes_nothing():
             "POST",
             "/api/v3/workspaces/%s/connections/%s/credentials/candidates" % (wid, cid),
             {"username": "u", "password": "p"},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 503, payload
         assert payload["error"]["code"] == "CONFIG_DISABLED"
@@ -573,7 +549,7 @@ def test_connection_create_patch_cas_and_capabilities():
             "POST",
             "/api/v3/workspaces/%s/connections" % wid,
             {"name": "n", "origin": "https://sda.example.invalid"},
-            headers=operator_header(),
+            headers=admin_headers(),
         )
         assert status == 403, denied
         assert denied["error"]["detail"]["action"] == "integration_credentials_manage"
@@ -584,7 +560,7 @@ def test_connection_create_patch_cas_and_capabilities():
             "PATCH",
             "/api/v3/workspaces/%s/connections/%s" % (wid, cid),
             {"name": "renamed"},
-            headers=dict(operator_header(), **{"If-Match": "1"}),
+            headers=dict(admin_headers(), **{"If-Match": "1"}),
         )
         assert status == 200, updated
         assert updated["name"] == "renamed"
@@ -594,7 +570,7 @@ def test_connection_create_patch_cas_and_capabilities():
             "PATCH",
             "/api/v3/workspaces/%s/connections/%s" % (wid, cid),
             {"name": "stale"},
-            headers=dict(operator_header(), **{"If-Match": "1"}),
+            headers=dict(admin_headers(), **{"If-Match": "1"}),
         )
         assert status == 409, stale
 

@@ -38,6 +38,7 @@ from app.core.errors import AppError
 from app.server import api_connections
 from app.server.http import CSRF_HEADER
 from app.services import (
+    file_versions,
     sync_candidates,
     sync_paths,
     sync_run_store,
@@ -217,7 +218,7 @@ def _current_file(wid: str, name: str) -> Optional[bytes]:
 
 
 def _operator_headers() -> Dict[str, str]:
-    return {"X-Operator-Token": OPERATOR_TOKEN}
+    return {}
 
 
 def _is_csrf_error(payload: Any) -> bool:
@@ -280,11 +281,17 @@ def _make_source(
     display_path: Optional[str] = None,
     kind: str = "http_file",
     connection_id: Optional[str] = None,
+    existing_target: bool = False,
 ) -> Dict[str, Any]:
+    payload = _source_payload(name, url, display_path, kind, connection_id)
+    if existing_target:
+        with storage.use_workspace(wid), storage.use_profile("default"):
+            storage.save_config_file(name, b"<config/>")
+            payload["target"]["file_id"] = file_versions.current_identity("default", name)["file_id"]
     status, _headers, body = caller.json(
         "POST",
         "/api/v3/workspaces/%s/sync/sources" % wid,
-        _source_payload(name, url, display_path, kind, connection_id),
+        payload,
     )
     assert status == 201, "source create failed: %s" % status
     return body
@@ -365,10 +372,10 @@ def test_same_named_sources_profiles_and_connections_are_workspace_scoped(http_s
         assert c1["connection_id"] != c2["connection_id"]
 
         s1 = _make_source(
-            admin, w1, "shared.xml", _url(httpd, "/w1/shared.xml"), "/w1/private/shared.xml"
+            admin, w1, "shared.xml", _url(httpd, "/w1/shared.xml"), "/w1/private/shared.xml", existing_target=True
         )
         s2 = _make_source(
-            admin, w2, "shared.xml", _url(httpd, "/w2/shared.xml"), "/w2/private/shared.xml"
+            admin, w2, "shared.xml", _url(httpd, "/w2/shared.xml"), "/w2/private/shared.xml", existing_target=True
         )
         assert s1["name"] == s2["name"] == "shared.xml"
         assert s1["profile_id"] == s2["profile_id"] == "default"
@@ -451,7 +458,7 @@ def test_same_named_sources_profiles_and_connections_are_workspace_scoped(http_s
         _wait_task(submitted["task"]["id"])
         assert run1["run"]["state"] == "succeeded", run1["run"]
         assert _current_file(w1, "shared.xml") == XML_W1
-        assert _current_file(w2, "shared.xml") is None
+        assert _current_file(w2, "shared.xml") == b"<config/>", "W1 的运行不能修改 W2 已有目标"
 
         # 跨 W 读列表/日志：响应与访问日志不出现 W1 私有路径。
         caplog.clear()
@@ -498,7 +505,7 @@ def _url(httpd: Any, path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_credential_import_replace_revoke_requires_operator_and_safe_projection(caplog):
+def test_credential_import_replace_revoke_requires_admin_and_safe_projection(caplog):
     caplog.set_level(logging.INFO)
     seed_roles("m16-38-cred")
     responses: List[Any] = []
@@ -515,13 +522,13 @@ def test_credential_import_replace_revoke_requires_operator_and_safe_projection(
             cid,
         )
 
-        # 全局管理员但没有运维 token：导入被拒，且不落 credentials.json。
-        status, _headers, denied = admin.json(
+        # 访客即使登记了身份仍无管理权限，且不落 credentials.json。
+        status, _headers, denied = visitor.json(
             "POST", candidate_url, {"username": USERNAME, "password": PASSWORD}
         )
         responses.append(denied)
         assert status == 403, denied
-        assert denied["error"]["detail"]["field"] == "operator_token"
+        assert denied["error"]["detail"]["action"] == "integration_credentials_manage"
         assert not os.path.exists(sync_paths.sync_file(w1, "credentials.json"))
 
         # 有 token 但未注入 vault：503，不伪造成功。
@@ -565,12 +572,12 @@ def test_credential_import_replace_revoke_requires_operator_and_safe_projection(
             "/api/v3/workspaces/%s/connections/%s/credentials/candidates/%s/activate"
             % (w1, cid, candidate_id)
         )
-        status, _headers, activate_denied = admin.json(
+        status, _headers, activate_denied = visitor.json(
             "POST", activate_url, {"probe_epoch": 0}
         )
         responses.append(activate_denied)
         assert status == 403, activate_denied
-        assert activate_denied["error"]["detail"]["field"] == "operator_token"
+        assert activate_denied["error"]["detail"]["action"] == "integration_credentials_manage"
 
         status, _headers, activated = admin.json(
             "POST", activate_url, {"probe_epoch": 0}, headers=_operator_headers()
@@ -585,12 +592,12 @@ def test_credential_import_replace_revoke_requires_operator_and_safe_projection(
         revision = operation["result"]["credential"]["revision"]
 
         revoke_url = "/api/v3/workspaces/%s/connections/%s/credentials/revoke" % (w1, cid)
-        status, _headers, revoke_denied = admin.json(
+        status, _headers, revoke_denied = visitor.json(
             "POST", revoke_url, headers={"If-Match": str(revision)}
         )
         responses.append(revoke_denied)
         assert status == 403, revoke_denied
-        assert revoke_denied["error"]["detail"]["field"] == "operator_token"
+        assert revoke_denied["error"]["detail"]["action"] == "integration_credentials_manage"
 
         status, _headers, revoked = admin.json(
             "POST",
@@ -894,7 +901,7 @@ def test_logs_operations_runs_and_backup_do_not_contain_secret_markers(
         assert status == 200, revoked
 
         source = _make_source(
-            admin, w1, "plain.xml", _url(httpd, "/plain.xml"), "/plain/plain.xml"
+            admin, w1, "plain.xml", _url(httpd, "/plain.xml"), "/plain/plain.xml", existing_target=True
         )
         submitted = _run_source(admin, w1, source["source_id"])
         run = _wait_run(w1, submitted["run"]["run_id"])

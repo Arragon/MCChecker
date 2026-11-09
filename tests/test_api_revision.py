@@ -79,6 +79,8 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}"): None,
     # M16-32/M16-33：单项与工作区级手动任务同样走 sync_run，不递增旧 5 段。
     ("POST", "/api/v3/workspaces/{wid}/sync/sources/{sid}/run"): None,
+    ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/cancel"): None,
+    ("POST", "/api/v3/workspaces/{wid}/sync/source-tests"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/runs"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry"): "tasks (retry queued; no business part)",
     ("POST", "/api/v3/workspaces/{wid}/sync/candidates/{cid}/apply-preview"): None,
@@ -101,6 +103,10 @@ WRITE_ROUTE_EXPECTATIONS = {
     ("PUT", "/api/v3/workspaces/{wid}/connections/{cid}/heartbeat"): None,
     ("POST", "/api/v3/workspaces/{wid}/connections/{cid}/heartbeat/run"): None,
     # M12-01：固定配置/版本图是独立 V3 域，不递增旧 5 段。
+    ('PATCH', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/draft/values'): None,
+    ('POST', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories'): None,
+    ('PATCH', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories'): None,
+    ('POST', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories/delete'): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/releases"): None,
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameters"): None,

@@ -170,6 +170,9 @@ def _normalize_actions(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if row.get("action") in ("manual", "drop") or row.get("blockers"):
             out.append(row)
             continue
+        if row.get("action") == "conflict" and (row.get("ours") or {}).get("intent") == config_merge.INTENT_PIN:
+            out.append(row)
+            continue
         base = row.get("base")
         ours = row.get("ours")
         theirs = row.get("theirs")
@@ -197,6 +200,9 @@ def create_preview(
     candidate_id: str,
     base: Any,
     candidate: Any,
+    base_known: bool = True,
+    extra_blockers: Optional[List[Dict[str, Any]]] = None,
+    source_guard: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     workspace_context.assert_profile(wid, profile_id)
@@ -220,19 +226,29 @@ def create_preview(
         names=names,
     )
     items = _normalize_actions(merged.get("items") or [])
+    supported_decisions = ["use_new", "inherit_old", "manual"]
+    for item in items:
+        item["allowed"] = [choice for choice in item.get("allowed") or [] if choice in supported_decisions]
+    if not base_known:
+        # A missing source snapshot never makes current local edits the upstream base.
+        for item in items:
+            if item.get("theirs") and not _same_value(item.get("ours"), item.get("theirs")):
+                item.update(action="conflict", decision=None, candidate=None,
+                            allowed=["use_new", "inherit_old", "manual"])
     summary = {action: 0 for action in config_merge.ACTIONS}
     for item in items:
         summary[item.get("action", "manual")] = summary.get(item.get("action", "manual"), 0) + 1
     needs_decision = [item["parameter_id"] for item in items if item.get("action") == "conflict"]
     manual = [item["parameter_id"] for item in items if item.get("action") == "manual"]
     blockers = list(merged.get("blockers") or [])
+    blockers.extend(extra_blockers or [])
     blockers.extend(_type_blockers(candidate_entries, params))
     frozen = bool(draft.get("frozen"))
     if frozen:
         blockers.append(
             {"code": "d0_frozen", "parameter_id": None, "message": "D0 已冻结，不提供覆盖"}
         )
-    can_apply = bool(merged.get("can_apply")) and not blockers and not frozen and not needs_decision
+    can_apply = not blockers and not frozen and not needs_decision and not manual
     preview_id = _stable(
         wid,
         profile_id,
@@ -244,6 +260,9 @@ def create_preview(
         frozen,
         json.dumps(base_entries, sort_keys=True, ensure_ascii=False),
         json.dumps(candidate_entries, sort_keys=True, ensure_ascii=False),
+        base_known,
+        json.dumps(extra_blockers or [], sort_keys=True, ensure_ascii=False),
+        json.dumps(source_guard or {}, sort_keys=True),
     )
     preview = {
         "preview_id": preview_id,
@@ -256,6 +275,8 @@ def create_preview(
         "head_id": snapshot["head_id"] or None,
         "d0_frozen": frozen,
         "base": base_entries,
+        "base_known": base_known,
+        "source_guard": source_guard,
         "current": current_entries,
         "candidate": candidate_entries,
         "items": items,
@@ -263,7 +284,7 @@ def create_preview(
         "blockers": blockers,
         "needs_decision": needs_decision,
         "manual": manual,
-        "allowed_decisions": [] if frozen else list(merged.get("allowed_actions") or []),
+        "allowed_decisions": [] if frozen else supported_decisions,
         "can_apply": can_apply,
         "created_at": _now(),
     }
@@ -282,6 +303,17 @@ def get_preview(workspace_id: str, preview_id: str) -> Dict[str, Any]:
     preview = _load_doc(wid)["items"].get(pid)
     if not isinstance(preview, dict):
         raise AppError(NOT_FOUND, "候选预览不存在", field="preview_id")
+    if preview.get("source_guard"):
+        from . import sync_sources
+        guard = preview["source_guard"]
+        try:
+            source = sync_sources.get_source(wid, guard["source_id"])
+        except AppError as exc:
+            if exc.code != NOT_FOUND:
+                raise
+            raise AppError(REVISION_CONFLICT, "来源已移除，请重新核对候选", field="source_id")
+        if source["revision"] != guard["revision"]:
+            raise AppError(REVISION_CONFLICT, "来源绑定已变化，请重新获取候选", field="source_id")
     snapshot = _draft_snapshot(wid, preview["profile_id"], preview["config_id"], preview["draft_id"])
     draft = snapshot["draft"]
     changes = []

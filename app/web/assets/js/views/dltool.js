@@ -1870,7 +1870,7 @@
     function deleteEntry(id, entry, btn, repaint) {
       MC.confirm({
         title: "删除这条历史",
-        message: "只从历史里去掉这条记录，当前正在使用的参数不会改变。",
+        message: "从界面历史移除此记录；按时间查询的生效记录仍保留，当前参数不变。",
         confirmText: "删除",
         danger: true,
       }).then(function (ok) {

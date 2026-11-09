@@ -30,7 +30,7 @@ from . import (
 
 FILE = "candidate_applies.json"
 DEFAULT_DOC: Dict[str, Any] = {"items": {}}
-DECISIONS = frozenset({"use_new", "inherit_old", "manual", "pin", "clear_pin"})
+DECISIONS = frozenset({"use_new", "inherit_old", "manual"})
 
 
 def _now() -> str:

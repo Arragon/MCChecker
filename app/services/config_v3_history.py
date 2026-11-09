@@ -119,6 +119,7 @@ def restore(profile_id: str, config_id: str, payload: Dict[str, Any], actor: Any
                 "created_at": _now(),
             }
             machine["draft"] = draft
+            machine["release_id"] = release["release_id"]
             kind = "machine"
         else:
             if not release.get("default_revision_id"):

@@ -405,6 +405,11 @@ def apply_member_patch(
 ) -> Dict[str, Any]:
     """把一条值 PATCH 合并到当前 member；非法立即 422，调用方不得落盘。"""
     row = dict(current or default_member())
+    if "intent" in patch:
+        intent = str(patch.get("intent") or "")
+        if intent not in ("inherit", "override", "pin"):
+            raise AppError(INVALID_INPUT, "继承方式无效", field="intent")
+        row["intent"] = intent
     if "membership" in patch:
         membership = str(patch.get("membership") or "").strip()
         if membership not in MEMBERSHIPS:
@@ -436,4 +441,6 @@ def apply_member_patch(
         raise AppError(INVALID_INPUT, "present 状态必须有值", field="value")
     if row.get("value_state") != "present":
         row.pop("value", None)
+    if row.get("intent") == "pin" and row.get("value_state") != "present":
+        raise AppError(INVALID_INPUT, "固定值需要有效的参数值", field="intent")
     return row

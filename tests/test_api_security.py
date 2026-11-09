@@ -174,9 +174,15 @@ WRITE_ROUTE_ACTIONS = {
     ): "integration_credentials_manage",
     # M16-33：手动/批量同步任务走同一个 tasks_run 权限档（只读身份不能触发）。
     ("POST", "/api/v3/workspaces/{wid}/sync/runs"): "tasks_run",
+    ("POST", "/api/v3/workspaces/{wid}/sync/source-tests"): "settings_write",
     ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry"): "tasks_run",
+    ("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/cancel"): "tasks_run",
     ("POST", "/api/v3/workspaces/{wid}/sync/candidates/{cid}/apply-preview"): None,
     ("POST", "/api/v3/workspaces/{wid}/sync/candidates/{cid}/apply"): "settings_write",
+    ('PATCH', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/draft/values'): "config_registry_write",
+    ('POST', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories'): "config_registry_write",
+    ('PATCH', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories'): "config_registry_write",
+    ('POST', '/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories/delete'): "config_registry_write",
     ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs"): "config_registry_write",
     (
         "POST",

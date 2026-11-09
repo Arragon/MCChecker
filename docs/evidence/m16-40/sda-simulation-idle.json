@@ -1,0 +1,10 @@
+{
+  "simulation": true,
+  "elapsed_seconds": 113.4,
+  "idle_seconds": 75,
+  "logins_before": 1,
+  "logins_after": 1,
+  "protected_reads": 5,
+  "post_window_protected_probe": "succeeded",
+  "note": "real elapsed simulated idle window; automatic 1-minute heartbeats; not production SDA evidence"
+}

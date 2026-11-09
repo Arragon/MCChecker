@@ -23,6 +23,20 @@ def _etag(revision: int) -> str:
     return '"%d"' % int(revision)
 
 
+def patch_branch_member(current, patch, type_name, basis):
+    """继承采用精确基准值；手动编辑与固定值沿用已有 intent 语义。"""
+    if patch.get("intent") == "inherit":
+        return config_values.apply_member_patch(basis, {"intent": "inherit"}, type_name)
+    result = config_values.apply_member_patch(current, patch, type_name)
+    if "intent" not in patch and ("value" in patch or "value_state" in patch):
+        existing = (current or {}).get("intent")
+        def state(row):
+            row = row or {}
+            return (row.get("membership", "not_introduced"), row.get("enabled", True), row.get("value_state", "unset"), row.get("value"))
+        result["intent"] = existing if existing in ("pin", "override") else "inherit" if state(result) == state(basis) else "override"
+    return result
+
+
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -112,6 +126,8 @@ def patch_values(
             pid = str(item.get("parameter_id") or "").strip()
             if pid not in params:
                 raise AppError(NOT_FOUND, "参数不在该版本的定义修订中", parameter_id=pid)
+            if item.get("intent") not in (None, "inherit"):
+                raise AppError(INVALID_INPUT, "版本默认不接受覆盖或固定意图", field="intent")
             next_values[pid] = config_values.apply_member_patch(
                 next_values.get(pid), item, str(params[pid].get("type") or "")
             )
@@ -157,6 +173,10 @@ def freeze_default(
                 "该版本的 canonical D0 已冻结",
                 draft_id=draft_id,
             )
+        if "expected_revision" in payload:
+            expected = payload["expected_revision"]
+            if isinstance(expected, bool) or not isinstance(expected, int) or expected != int(d0.get("revision", 0)):
+                raise AppError(REVISION_CONFLICT, "草稿已变化，请重新核对后固化", current_revision=d0.get("revision", 0))
         definition = _definition_for(release, config)
         params = definition.get("parameters") or {}
         for pid, row in (d0.get("values") or {}).items():

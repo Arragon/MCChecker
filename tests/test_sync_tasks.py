@@ -24,6 +24,7 @@ from app.services import (
     sync_sources,
     sync_tasks,
     tasks,
+    file_versions,
     workspace_catalog,
 )
 from app.services.context import RequestContext
@@ -90,11 +91,15 @@ def ctx(wid):
 
 
 def make_http_source(wid, url, name="A.xml", kind="http_file", record_url=None):
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        if storage.load_config_file(name) is None:
+            storage.save_config_file(name, b"<config/>")
+        file_id = file_versions.current_identity("default", name)["file_id"]
     payload = {
         "profile_id": "default",
         "name": name,
         "kind": kind,
-        "target": {"kind": "file_archive", "file_id": "file-0001"},
+        "target": {"kind": "file_archive", "file_id": file_id},
         "resource_ref": url,
         "display_path": "/synthetic/" + name,
         "record_source": record_url,
@@ -196,6 +201,25 @@ def test_all_sources_failed_aggregates_to_failed():
     assert all(item["status"] == "blocked" for item in task["result"]["items"])
 
 
+def test_source_changed_during_read_never_commits_old_response(http_server, monkeypatch):
+    wid = make_workspace()
+    httpd = http_server({"/A.xml": XML_A})
+    source = make_http_source(wid, _url(httpd, "/A.xml"))
+    fetch = sync_http_adapter.fetch_source
+
+    def changed_while_fetching(model, **kwargs):
+        result = fetch(model, **kwargs)
+        sync_sources.update_source(wid, source["source_id"], source["revision"], {"resource_ref": _url(httpd, "/different.xml")})
+        return result
+
+    monkeypatch.setattr(sync_http_adapter, "fetch_source", changed_while_fetching)
+    result = sync_tasks.submit_sync_run(ctx(wid), [source])
+    doc = wait_run(wid, result["run"]["run_id"])
+    assert doc["items"][0]["state"] == "blocked"
+    assert doc["items"][0]["reason_code"] == "source_changed"
+    assert current_file(wid, "A.xml") == b"<config/>"
+
+
 def test_cancel_keeps_committed_file_and_cancels_the_rest(http_server, monkeypatch):
     wid = make_workspace()
     httpd = http_server({"/A.xml": XML_A, "/B.xml": XML_B})
@@ -231,7 +255,7 @@ def test_cancel_keeps_committed_file_and_cancels_the_rest(http_server, monkeypat
     assert doc["run"]["counts"]["succeeded"] == 1
     assert doc["run"]["counts"]["canceled"] == 1
     assert current_file(wid, "A.xml") == XML_A
-    assert current_file(wid, "B.xml") is None
+    assert current_file(wid, "B.xml") == b"<config/>", "取消必须保留原目标，不写入未完成的下载"
     assert [item["status"] for item in task["result"]["items"]] == ["succeeded", "canceled"]
     assert task["state"] == "partial"
 

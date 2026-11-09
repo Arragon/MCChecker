@@ -223,3 +223,35 @@ def test_source_url_userinfo_rejected_and_read_projection_masks_query():
         assert item["record_source"] == "https://example.invalid/records"
         dumped = json.dumps(visitor_list)
         assert "super-secret" not in dumped and "record-secret" not in dumped
+
+
+def test_sources_filter_target_and_project_true_freshness_before_pagination():
+    from app.services import sync_status
+    seed_roles("sync-sources-target-filter")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        visitor = as_role(server, "visitor")
+        wid = make_workspace(admin, "target filters")
+        base = "/api/v3/workspaces/%s/sync/sources" % wid
+        created = []
+        for i, (cfg, rel) in enumerate((("cfg-one", "rel-one"), ("cfg-two", "rel-two"), ("cfg-one", "rel-two"))):
+            payload = dict(source_payload(None, "Source-%d.xml" % i), kind="http_file",
+                           connection_id=None, resource_ref="https://example.invalid/source.xml",
+                           target={"kind": "default_candidate", "configuration_id": cfg, "release_id": rel})
+            status, _, source = admin.json("POST", base, payload)
+            assert status == 201, source
+            created.append(source)
+        sid = created[2]["source_id"]
+        sync_status.record_attempt(wid, "default", sid, at="2026-11-06T09:00:00Z")
+        sync_status.record_verified(wid, "default", sid, at="2026-11-06T09:00:01Z", sha256="a" * 64)
+        status, _, result = visitor.json("GET", base + "?configuration_id=cfg-one&release_id=rel-two&limit=1")
+        assert status == 200, result
+        assert result["total"] == 1
+        assert result["items"][0]["source_id"] == sid
+        assert result["items"][0]["freshness"]["last_verified_at"] == "2026-11-06T09:00:01Z"
+        assert result["items"][0]["freshness"]["last_good_version_id"] is None
+        status, _, unknown = visitor.json("GET", base + "?configuration_id=cfg-two")
+        assert unknown["items"][0]["freshness"]["last_verified_at"] is None
+        assert unknown["items"][0]["freshness"]["current_origin"] == "unknown"
+        other = make_workspace(admin, "other")
+        assert visitor.json("GET", "/api/v3/workspaces/%s/sync/sources?configuration_id=cfg-one" % other)[2]["total"] == 0

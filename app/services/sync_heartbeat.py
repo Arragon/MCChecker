@@ -185,6 +185,8 @@ def configure(
             record["auto_relogin"] = True
         if not enabled:
             record["next_due_at"] = None
+        elif not record.get("next_due_at"):
+            record["next_due_at"] = _now()
         record["revision"] = expected + 1
         doc["items"][cid] = record
         return doc

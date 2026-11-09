@@ -6,6 +6,7 @@ IP、已登记姓名、事件、备注和整份设置。一键应用会把该条
 但不再追加记录；和已有记录完全相同的「应用历史」不出现在列表里。
 管理员可以删除一条历史，当前正在使用的参数不变。
 
+同文件的 timeline 独立保留保存/恢复的完整生效快照；展示删除与限额不删除时间线。
 历史文件是机型目录里的 `dl_coeff_history.json`。读取时不创建文件。
 与当前设置完全相同的最新一条可见记录标成当前。
 """
@@ -16,7 +17,8 @@ import logging
 import math
 import os
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import dltool, fsutil, storage
@@ -34,6 +36,106 @@ AOM_MODES = ("delay", "width")
 _COEFF_FIELDS = dltool.KEYS + ("b",)
 _RANGE_FIELDS = ("x_min", "x_max", "y_min", "y_max")
 _IF_MATCH = "If-Match"
+
+
+def _effective_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_text(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _parse_at(value: Any) -> datetime:
+    # Require an offset: a caller's local day must never silently mean the server's day.
+    text = str(value or "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", text):
+        raise AppError(INVALID_INPUT, "at 必须是含时区的 ISO 8601 时间，例如 2026-10-09T00:00:00+08:00", field="at")
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
+        raise AppError(INVALID_INPUT, "at 不是有效日期时间", field="at") from exc
+
+
+def _legacy_timeline(book: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for entry in book["entries"]:
+        try:
+            at = datetime.fromisoformat(str(entry.get("created_at") or ""))
+        except ValueError:
+            continue  # No timestamp is evidence of a value, not of when it was effective.
+        rows.append({"id": "legacy:" + entry["id"], "module_id": entry["item"],
+                     "effective_at": _utc_text(at), "configuration": _item_snapshot(entry["item"], entry),
+                     "source": "legacy_history", "history_id": entry["id"], "event": entry.get("event", "save")})
+    return rows
+
+
+def _record_temporal(book: Dict[str, Any], item: str, event: str, snapshot: Dict[str, Any], history_id: str = "") -> None:
+    at = _utc_text(_effective_now())
+    if "timeline" not in book:
+        book["timeline"] = _legacy_timeline(book)
+        book["tracking_started_at"] = at
+    number = int(book.get("timeline_next", 1))
+    book["timeline"].append({"id": "dt_%09d" % number, "module_id": item, "effective_at": at,
+                             "configuration": deepcopy(snapshot), "source": "timeline", "event": event,
+                             "history_id": history_id})
+    book["timeline_next"] = number + 1
+
+
+def coefficients_at(pid: str, item: str, at: Any) -> Dict[str, Any]:
+    """Read the complete configuration effective on [effective_at, valid_until)."""
+    item_id, requested = _require_item(item), _parse_at(at)
+    with storage.use_profile(pid), storage.profile_lock(pid):
+        book = _load_book()
+        series = book["timeline"] if "timeline" in book else _legacy_timeline(book)
+        tracked = [row for row in series if row["module_id"] == item_id and row["source"] == "timeline"]
+        if tracked and requested >= _parse_at(tracked[-1]["effective_at"]):
+            live = _item_snapshot(item_id, _item_target(dltool.load_config(), item_id))
+            if not _same_snapshot(live, tracked[-1]["configuration"]):
+                raise AppError(REVISION_CONFLICT, "当前配置与生效时间线不一致，需管理员核对；不能推断历史配置", module_id=item_id)
+    rows = [(_parse_at(row["effective_at"]), index, row) for index, row in
+            enumerate(series) if row["module_id"] == item_id]
+    rows.sort(key=lambda row: (row[0], row[1]))
+    eligible = [row for row in rows if row[0] <= requested]
+    if not eligible:
+        raise AppError(NOT_FOUND, "该时间点没有可用的系数配置", module_id=item_id, at=_utc_text(requested))
+    selected = eligible[-1][2]
+    later = [row for row in rows if row[0] > requested]
+    return {"workspace_id": storage.get_active_workspace(), "profile_id": pid, "module_id": item_id,
+            "requested_at": _utc_text(requested), "effective_at": selected["effective_at"],
+            "valid_until": later[0][2]["effective_at"] if later else None,
+            "revision_id": selected["id"], "configuration": deepcopy(selected["configuration"]),
+            "coverage": selected["source"], "tracking_started_at": book.get("tracking_started_at"),
+            "interval_verified": selected["source"] == "timeline",
+            "history_id": selected.get("history_id") or None}
+
+
+def persist_config_change(cfg: Dict[str, Any], record) -> Any:
+    """Both files are owned by this locked DL write; restore original bytes on I/O failure.
+
+    A process/power loss between replacements is detected by the temporal read's
+    live snapshot check rather than being presented as a verified interval.
+    """
+    paths = (dltool._get_config_file(), history_path())
+    originals = {}
+    for path in paths:
+        try:
+            with open(path, "rb") as stream:
+                originals[path] = stream.read()
+        except FileNotFoundError:
+            originals[path] = None
+    try:
+        dltool.save_config(cfg)
+        return record()
+    except Exception:
+        for path in paths:
+            raw = originals[path]
+            if raw is None:
+                if os.path.isfile(path):
+                    os.unlink(path)  # Roll back only a file newly created by this failed write.
+            else:
+                fsutil.atomic_write_bytes(path, raw)
+        raise
 
 
 def history_path() -> str:
@@ -81,8 +183,7 @@ def save_coefficients(
             return {"rev": _rev(), "snapshot": current, "coeffs": current["coeffs"], "unchanged": True, "entry": None}
         _load_book()
         _write_snapshot(item_id, target, incoming)
-        dltool.save_config(cfg)
-        entry = _append_locked(item_id, "", "save", note, incoming, actor, "")
+        entry = persist_config_change(cfg, lambda: _append_locked(item_id, "", "save", note, incoming, actor, ""))
         rev = _rev()
 
     from . import revision
@@ -122,11 +223,12 @@ def apply_history(
         incoming = _item_snapshot(item_id, source)
         current = _item_snapshot(item_id, target)
         changed = not _same_snapshot(current, incoming)
+        removed = _prune_redundant_apply(book, item_id)
         if changed:
             _write_snapshot(item_id, target, incoming)
-            dltool.save_config(cfg)
-        removed = _prune_redundant_apply(book, item_id)
-        if removed:
+            _record_temporal(book, item_id, "apply", incoming, wanted)
+            persist_config_change(cfg, lambda: fsutil.atomic_write_json(history_path(), book))
+        elif removed:
             fsutil.atomic_write_json(history_path(), book)
         entries = _visible_entries(book, item_id)
         current_id = _current_id(entries, incoming, item_id)
@@ -413,6 +515,8 @@ def _append_locked(
 ) -> Dict[str, Any]:
     if book is None:
         book = _load_book()
+    # Seed pre-existing evidence before appending/pruning the display history.
+    _record_temporal(book, item, event, snapshot, "ch_%06d" % int(book["next"]))
     _prune_redundant_apply(book, item)
     number = int(book["next"])
     entry = {
@@ -462,7 +566,21 @@ def _load_book() -> Dict[str, Any]:
     for row in raw["entries"]:
         if isinstance(row, dict) and row.get("id") and row.get("item"):
             entries.append(row)
-    return {"next": nxt, "entries": entries}
+    result = {"next": nxt, "entries": entries}
+    if "timeline" in raw:
+        timeline = raw["timeline"]
+        counter = raw.get("timeline_next")
+        if not isinstance(timeline, list) or isinstance(counter, bool) or not isinstance(counter, int) or counter < 1:
+            raise CorruptDataError(path)
+        for row in timeline:
+            if not isinstance(row, dict) or not row.get("id") or not row.get("module_id") or not isinstance(row.get("configuration"), dict) or row.get("source") not in ("timeline", "legacy_history"):
+                raise CorruptDataError(path)
+            try:
+                _parse_at(row.get("effective_at"))
+            except AppError as exc:
+                raise CorruptDataError(path) from exc
+        result.update(timeline=timeline, timeline_next=counter, tracking_started_at=raw.get("tracking_started_at"))
+    return result
 
 
 def _series(book: Dict[str, Any], item: str, mode: str) -> List[Dict[str, Any]]:

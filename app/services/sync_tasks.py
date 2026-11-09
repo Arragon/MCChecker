@@ -55,6 +55,8 @@ from . import (
     sync_credentials,
     sync_http_adapter,
     sync_run_store,
+    sync_sources,
+    sync_status,
     tasks,
     updates,
     workspace_context,
@@ -90,6 +92,13 @@ def register_sda_reader(reader: Optional[Any]) -> None:
     """登记 SDA 取数回调；None 表示尚未接入，SDA 来源明确 blocked。"""
     global _SDA_READER
     _SDA_READER = reader
+
+
+def read_sda_input(source: Dict[str, Any], cancel: threading.Event) -> Dict[str, Any]:
+    """Shared read-only collector boundary for source-input checks; never submits a run."""
+    if _SDA_READER is None:
+        return {"status": "blocked", "reason_code": SDA_REASON, "message": "SDA 采集器未接入"}
+    return _SDA_READER(source, cancel)
 
 
 def _now() -> str:
@@ -407,6 +416,7 @@ def _execute(
                     message="已取消，未开始",
                 )
             else:
+                sync_status.record_attempt(workspace_id, profile_id, source["source_id"])
                 item = _run_source(
                     workspace_id,
                     profile_id,
@@ -416,6 +426,8 @@ def _execute(
                     sda_reader,
                     guards.get(source.get("source_id")),
                 )
+                if item["state"] not in ("succeeded", "unchanged"):
+                    sync_status.record_attempt(workspace_id, profile_id, source["source_id"], reason_code=item.get("reason_code"))
             items.append(item)
             task.result["items"].append(_task_item(source, item))
             task.progress["total"] = total
@@ -509,6 +521,8 @@ def _freeze_guards(
     out: Dict[str, Dict[str, Any]] = {}
     for source in sources:
         guard: Dict[str, Any] = {
+            "source_id": source.get("source_id"),
+            "source_revision": source.get("revision"),
             "connection_id": source.get("connection_id"),
             "epoch": None,
             "binding": None,
@@ -518,6 +532,7 @@ def _freeze_guards(
             try:
                 connection = sync_connections.get_connection(workspace_id, cid)
                 guard["enabled"] = bool(connection.get("enabled"))
+                guard["policy_revision"] = connection["policy_revision"]
                 guard["epoch"] = sync_credentials.get_credential_state(
                     workspace_id, cid
                 )["auth_epoch"]
@@ -541,6 +556,12 @@ def _guard_error(
 ) -> Optional[AppError]:
     if not guard:
         return None
+    try:
+        source = sync_sources.get_source(workspace_id, guard["source_id"])
+    except AppError as exc:
+        return exc
+    if source["revision"] != guard["source_revision"]:
+        return AppError(REVISION_CONFLICT, "来源在取数期间已变化，未提交", field="source_id")
     cid = guard.get("connection_id")
     enabled = guard.get("enabled")
     if cid and enabled is not None:
@@ -548,10 +569,10 @@ def _guard_error(
             connection = sync_connections.get_connection(workspace_id, cid)
         except AppError as exc:
             return exc
-        if not connection.get("enabled"):
+        if not connection.get("enabled") or connection.get("policy_revision") != guard.get("policy_revision"):
             return AppError(
                 REVISION_CONFLICT,
-                "连接已停用，旧回包不能提交",
+                "连接已停用或配置已变化，旧回包不能提交",
                 field="connection_id",
             )
     epoch = guard.get("epoch")
@@ -636,10 +657,7 @@ def _run_source(
                 reason_code="source_changed",
                 message="来源凭据或目标绑定在取数期间已变化，未提交",
             )
-        base_sha = None
-        if model.kind == "http_file":
-            raw = _current_file(workspace_id, profile_id, model.name)
-            base_sha = raw.sha256 if raw is not None else None
+        base_sha = raw.sha256 if model.kind == "http_file" and raw is not None else None
         committed = sync_commit.commit_fetch_result(
             workspace_id, profile_id, source, fetch, base_sha=base_sha
         )
@@ -666,6 +684,7 @@ def _run_source(
                 item.get("status") == "success" for item in committed.get("items") or []
             ),
             byte_size=fetch.items[0].size if fetch.items else None,
+            candidate_id=committed.get("candidate_id"),
         )
     except AppError as exc:
         return _item(
@@ -706,6 +725,8 @@ def _run_sda_source(
             message="SDA collector 尚未接入；不伪造成功",
         )
     try:
+        bound = ((guard or {}).get("binding") or {}).get("ref") or {}
+        raw_before = _current_file(workspace_id, profile_id, bound.get("name") or source["name"])
         result = sda_reader(source, cancel)
         if not isinstance(result, dict):
             return _item(run_id, source, "failed", reason_code="protocol_mismatch", message="SDA 结果形状非法")
@@ -727,34 +748,7 @@ def _run_sda_source(
                 reason_code="validated",
                 message="目录已读取；匿名 catalog 不计为会话验证",
             )
-        if kind == "sda_table":
-            content = result.get("content")
-            if not isinstance(content, (bytes, bytearray)):
-                return _item(run_id, source, "failed", reason_code="invalid_payload", message="表内容缺失")
-            body = bytes(content)
-            digest = str(result.get("sha256") or hashlib.sha256(body).hexdigest())
-            try:
-                candidate = sync_candidates.create_candidate(
-                    workspace_id,
-                    profile_id,
-                    source["source_id"],
-                    int(source.get("revision") or 0),
-                    digest,
-                    "%s:%s" % (kind, source.get("resource_ref") or source["source_id"]),
-                )
-            except AppError as exc:
-                return _item(run_id, source, "failed", reason_code=exc.code.lower() if exc.code == "TOO_LARGE" else "unknown", message=exc.message)
-            return _item(
-                run_id,
-                source,
-                "succeeded",
-                reason_code="validated",
-                message="表内容已生成候选",
-                sha256=digest,
-                byte_size=len(body),
-                candidate_id=candidate["candidate_id"],
-            )
-        if kind != "sda_file":
+        if kind not in ("sda_file", "sda_table"):
             return _item(run_id, source, "blocked", reason_code="protocol_mismatch", message="不支持的 SDA 来源")
 
         raw_items = result.get("items")
@@ -798,14 +792,12 @@ def _run_sda_source(
                 reason_code="source_changed",
                 message="来源凭据或目标绑定在取数期间已变化，未提交",
             )
-        model = SyncSource.from_dict(source)
-        raw = _current_file(workspace_id, profile_id, model.name)
         committed = sync_commit.commit_fetch_result(
             workspace_id,
             profile_id,
             source,
             fetch,
-            base_sha=raw.sha256 if raw is not None else None,
+            base_sha=raw_before.sha256 if raw_before is not None else None,
         )
         state = _commit_state(committed)
         reason_code = committed.get("reason_code")
@@ -826,6 +818,7 @@ def _run_sda_source(
             sha256=fetched[0].sha256,
             committed=any(item.get("status") == "success" for item in committed.get("items") or []),
             byte_size=fetched[0].size,
+            candidate_id=committed.get("candidate_id"),
         )
     except AppError as exc:
         return _item(
@@ -890,7 +883,7 @@ def _item(
         stage=stage,
         reason_code=reason_code,
         using_last_good=False,
-        last_verified_at=_now() if state in ("succeeded", "unchanged") else None,
+        last_verified_at=_now() if state in ("succeeded", "unchanged") and source.get("kind") != "sda_catalog" else None,
         candidate_id=candidate_id,
     )
     payload = item.to_dict()

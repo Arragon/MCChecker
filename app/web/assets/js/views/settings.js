@@ -251,7 +251,7 @@
                     "tr",
                     h("td.mono", p.ip, p.ip === me.ip ? h("span.badge.badge-primary", { style: "margin-left:6px" }, "你") : null),
                     h("td.cell-strong", p.name),
-                    h("td", adminSet[p.ip] ? h("span.badge.badge-primary", "管理员") : h("span.muted", "成员")),
+                    h("td", adminSet[p.ip] ? h("span.badge.badge-primary", "管理员") : h("span.muted", "访客")),
                     h("td.muted.num", util.formatTime(p.updated_at)),
                     h("td.cell-actions", h("button.btn.btn-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { personDialog(p); } }, "编辑"), h("button.btn.btn-danger-ghost.btn-sm", { type: "button", disabled: ro(), title: ro() ? "只有管理员可以修改" : null, onclick: function () { removePerson(p); } }, "删除"))
                   );

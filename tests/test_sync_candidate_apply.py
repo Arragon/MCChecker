@@ -58,6 +58,22 @@ def values(pids, text="2"):
     return {pid: typed("int", text) for pid in pids}
 
 
+@pytest.mark.parametrize("decision", ["pin", "clear_pin"])
+def test_unsupported_pin_decisions_never_return_fake_success(decision):
+    wid, cid, did, pids = make_config(1)
+    seed_current(wid, cid, did, pids)
+    preview = sync_candidate_plans.create_preview(wid, "default", cid, did, "candidate-pin",
+        values(pids, "0"), values(pids, "2"))
+    assert decision not in preview["items"][0]["allowed"]
+    with pytest.raises(AppError) as error:
+        sync_candidate_apply.apply_preview(wid, "default", preview["preview_id"], "pin-choice", {pids[0]: decision})
+    assert error.value.code == INVALID_INPUT
+    with storage.use_workspace(wid):
+        draft = config_v3_drafts.get_draft("default", cid, did)
+    assert draft["values"][pids[0]]["value"] == "1"
+    assert draft["revision"] == 1
+
+
 def make_preview(wid, cid, did, pids, current_text="1", base_text="1", candidate_text="2"):
     seed_current(wid, cid, did, pids, current_text)
     return sync_candidate_plans.create_preview(

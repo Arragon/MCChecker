@@ -12,12 +12,15 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from ..services import authz, dl, dl_history
+from ..core.errors import NOT_FOUND, AppError
+from ..services import authz, dl, dl_history, workspace_catalog
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
 
 def register(router: Router) -> None:
+    router.add("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/dl/{item}/coefficients", coefficients_at)
+    router.add("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/dl/modules", modules)
     router.add("GET", "/api/v1/p/{pid}/dl", get_state)
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/compute", compute)
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/extract", extract)
@@ -26,6 +29,28 @@ def register(router: Router) -> None:
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/coeffs", save_coefficients)
     router.add("POST", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}/apply", apply_coefficients)
     router.add("DELETE", "/api/v1/p/{pid}/dl/{item}/coeff-history/{hid}", delete_history)
+
+
+def _scope(params: Dict[str, str]) -> None:
+    workspace_catalog.get_workspace(params["wid"])
+    if not any(row["id"] == params["pid"] for row in workspace_catalog.list_profiles(params["wid"])):
+        raise AppError(NOT_FOUND, "机型不存在", profile_id=params["pid"])
+
+
+def coefficients_at(ctx, params, query, body) -> Response:
+    authz.authorize(ctx, "read")
+    _scope(params)
+    return Response(payload=dl_history.coefficients_at(params["pid"], params["item"], (query.get("at") or [""])[0]),
+                    headers={"Cache-Control": "no-store"})
+
+
+def modules(ctx, params, query, body) -> Response:
+    authz.authorize(ctx, "read")
+    _scope(params)
+    state = dl.get_state(params["pid"])
+    return Response(payload={"workspace_id": params["wid"], "profile_id": params["pid"],
+                             "items": [{"module_id": key, "name": state["items"][key]["name"]} for key in dl.ITEMS]},
+                    headers={"Cache-Control": "no-store"})
 
 
 def get_state(

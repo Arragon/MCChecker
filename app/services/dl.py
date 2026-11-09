@@ -292,11 +292,10 @@ def save_item(
         before_item = deepcopy(items[item])
         new_item = _merged_item(before_item, clean, name, binding, aom)
         items[item] = new_item
-        from .dl_history import ensure_history_readable, record_config_save
+        from .dl_history import ensure_history_readable, record_config_save, persist_config_change
 
         ensure_history_readable()
-        dltool.save_config(cfg)
-        record_config_save(item, before_item, new_item, actor)
+        persist_config_change(cfg, lambda: record_config_save(item, before_item, new_item, actor))
         new_rev = _current_rev_in_profile()
 
     revision.bump(pid, PART)

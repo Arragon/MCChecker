@@ -12,6 +12,7 @@ from ..services import (
     config_v3_diff,
     config_v3_drafts,
     config_v3_extract,
+    config_v3_history,
     config_v3_machines,
     config_v3_projection,
     workspace_catalog,
@@ -21,6 +22,12 @@ from .router import Response, Router, json_body, query_param
 
 
 def register(router: Router) -> None:
+    directory_path = "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-directories"
+    router.add("POST", directory_path, create_directory)
+    router.add("PATCH", directory_path, move_directory)
+    router.add("POST", directory_path + "/delete", delete_directory)
+    router.add("PATCH", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/machines/{mid}/draft/values", patch_machine_values)
+    router.add("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/revisions/{rid}", revision_detail)
     router.add("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", list_configs)
     router.add("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs", create_config)
     router.add("GET", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}", get_config)
@@ -108,6 +115,11 @@ def register(router: Router) -> None:
         create_baseline_draft,
     )
     router.add(
+        "GET",
+        "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}",
+        get_baseline_draft,
+    )
+    router.add(
         "PATCH",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/baseline-drafts/{did}/values",
         patch_baseline_values,
@@ -188,7 +200,9 @@ def create_config(
 ) -> Response:
     authz.authorize(ctx, "config_registry_write")
     _scope(params["wid"], params["pid"])
-    return Response(status=201, payload={"config": config_v3_catalog.create_config(params["pid"], json_body(body))})
+    config = config_v3_catalog.create_config(params["pid"], json_body(body))
+    config_v3_history.record(params["pid"], config["config_id"], "create_config", actor=ctx.actor, ip=ctx.ip, after={"name": config["name"], "code": config["code"]})
+    return Response(status=201, payload={"config": config})
 
 
 def get_config(
@@ -212,10 +226,9 @@ def create_release(
 ) -> Response:
     authz.authorize(ctx, "config_registry_write")
     _scope(params["wid"], params["pid"])
-    return Response(
-        status=201,
-        payload={"release": config_v3_catalog.create_release(params["pid"], params["cid"], json_body(body))},
-    )
+    release = config_v3_catalog.create_release(params["pid"], params["cid"], json_body(body))
+    config_v3_history.record(params["pid"], params["cid"], "create_release", actor=ctx.actor, ip=ctx.ip, after={"release_id": release["release_id"], "version": release["version"]})
+    return Response(status=201, payload={"release": release})
 
 
 def graph(
@@ -237,6 +250,7 @@ def list_parameters(
             params["cid"],
             _int(query_param(query, "offset"), 0),
             _int(query_param(query, "limit"), 0) or None,
+            query_param(query, "release_id"),
         )
     )
 
@@ -249,6 +263,8 @@ def parameter_tree(
     return Response(payload=config_v3_catalog.parameter_tree(
         params["pid"], params["cid"], query_param(query, "parent"),
         _int(query_param(query, "offset"), 0), _int(query_param(query, "limit"), 50),
+        query_param(query, "release_id"),
+        query_param(query, "recursive") == "true",
     ))
 
 
@@ -261,6 +277,26 @@ def create_parameter(
         status=201,
         payload={"parameter": config_v3_catalog.create_parameter(params["pid"], params["cid"], json_body(body))},
     )
+
+
+def _directory_write(ctx, params, body, action) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    result = config_v3_catalog.mutate_directory(params["pid"], params["cid"], json_body(body), action)
+    config_v3_history.record(params["pid"], params["cid"], "directory", actor=ctx.actor, ip=ctx.ip, after=result)
+    return Response(status=201 if action == "create" else 200, payload={"directory": result})
+
+
+def create_directory(ctx, params, query, body) -> Response:
+    return _directory_write(ctx, params, body, "create")
+
+
+def move_directory(ctx, params, query, body) -> Response:
+    return _directory_write(ctx, params, body, "move")
+
+
+def delete_directory(ctx, params, query, body) -> Response:
+    return _directory_write(ctx, params, body, "delete")
 
 
 def update_parameter(
@@ -355,7 +391,15 @@ def freeze_default(
     result = config_v3_drafts.freeze_default(
         params["pid"], params["cid"], params["did"], json_body(body)
     )
+    if not result.get("replayed"):
+        config_v3_history.record(params["pid"], params["cid"], "freeze", actor=ctx.actor, ip=ctx.ip, source={"revision_id": params["did"]})
     return Response(payload=result, headers={"ETag": config_v3_drafts._etag(result["revision"])})
+
+
+def get_baseline_draft(ctx, params, query, body) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload=config_v3_baselines.get_baseline_draft(params["pid"], params["cid"], params["did"]))
 
 
 def create_baseline_draft(
@@ -394,6 +438,8 @@ def publish_baseline(
         params["pid"], params["cid"], params["did"], json_body(body),
         (ctx.headers or {}).get("if-match"),
     )
+    if not result.get("replayed"):
+        config_v3_history.record(params["pid"], params["cid"], "baseline", actor=ctx.actor, ip=ctx.ip, source={"revision_id": result["baseline_id"]})
     return Response(payload={"baseline": result}, headers={"ETag": etag})
 
 
@@ -413,6 +459,19 @@ def baseline_detail(
     return Response(
         payload={"baseline": config_v3_baselines.get_baseline(params["pid"], params["cid"], params["bid"])}
     )
+
+
+def revision_detail(ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]) -> Response:
+    authz.authorize(ctx, "config_read")
+    _scope(params["wid"], params["pid"])
+    return Response(payload={"snapshot": config_v3_diff.get_revision(params["pid"], params["cid"], params["rid"])})
+
+
+def patch_machine_values(ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]) -> Response:
+    authz.authorize(ctx, "config_registry_write")
+    _scope(params["wid"], params["pid"])
+    draft = config_v3_machines.patch_values(params["pid"], params["cid"], params["mid"], json_body(body), (ctx.headers or {}).get("if-match"))
+    return Response(payload={"draft": draft}, headers={"ETag": config_v3_drafts._etag(draft["revision"])})
 
 
 def list_machines(
@@ -468,6 +527,7 @@ def publish_machine(
         params["pid"], params["cid"], params["mid"], json_body(body),
         (ctx.headers or {}).get("if-match"),
     )
+    config_v3_history.record(params["pid"], params["cid"], "machine", actor=ctx.actor, ip=ctx.ip, source={"revision_id": result["head_id"]})
     return Response(payload={"machine": result}, headers={"ETag": '"%d"' % seq})
 
 
@@ -495,6 +555,7 @@ def extract_preview(
             _int(query_param(query, "offset"), 0),
             _int(query_param(query, "limit"), 100),
             query_param(query, "filter") or config_v3_extract.FILTER_ALL,
+            query_param(query, "q") or "",
         )
     )
 
@@ -512,6 +573,11 @@ def overview(
             _csv(query_param(query, "machines")),
             _int(query_param(query, "offset"), 0),
             _int(query_param(query, "limit"), 0) or None,
+            query_param(query, "catalog") == "all",
+            query_param(query, "q"),
+            query_param(query, "directory"),
+            query_param(query, "only_changes") == "true",
+            _csv(query_param(query, "machine_revisions")),
         )
     )
 

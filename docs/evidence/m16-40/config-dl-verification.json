@@ -1,0 +1,22 @@
+{
+  "frontend": {
+    "passed": 149,
+    "command": "./.venv39/bin/python scripts/check_web_ui.py --retries 1"
+  },
+  "pytest": {
+    "passed": 3098,
+    "skipped": 1,
+    "skip_reason": "Windows-only process tree cleanup",
+    "command": "./.venv39/bin/python -m pytest -q --junitxml=/tmp/mcc-config-dl-final-pytest.xml",
+    "junit_sha256": "317566c2e6beca3154bfb5e7bd58f2e6e0c3a3c7a129d7231ec25d80b052f0ad"
+  },
+  "browser": {
+    "interactive_pass": 39,
+    "reachable_pass": 28,
+    "api_pass": 1,
+    "report": "config-parity-all-e2e.json"
+  },
+  "simulation_only": true,
+  "external_sda_verified": false,
+  "physical_device_verified": false
+}

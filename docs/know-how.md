@@ -92,6 +92,11 @@
 - **Collector 是独立进程边界，不是“另一个 app 模块”**（M16-14 / INH-2179）：`collector/` 只跑在 Python 3.12 环境，主应用（3.9 + 标准库）不得 `import collector`，也不得把它加进核心 `requirements.txt` / `make_release.RELEASE_ENTRIES`。生命周期唯一入口是 `app/services/collector_manager.py`：`start()` 先跑 `--self-test` 再 `Popen([python, entry])`（`shell=False`，argv 里永远没有凭据）；POSIX 用 `start_new_session` + `killpg`，Windows 用 `CREATE_NEW_PROCESS_GROUP` + `taskkill /T /F`（尽力而为，Job Object 留到实机证据）。`run.ordered_stop` 的停止序是「调度器 → 排空任务 → collector → 关 HTTP」，`stop()` 等到 `Popen.wait()` 返回才放行，所以 SIGTERM 路径不会在 collector 还活着时释放单实例锁。子进程 stdout/stderr 目前是 `DEVNULL`（骨架没有协议输出，避免管道写满死锁），M16-15 接 IPC 时再接管管道；不要在那之前把 stdout 改成 `PIPE` 却不读。`requirements.lock` 在目标环境回填前保持 BLOCKED-EXTERNAL，禁止猜版本。
 
 ## 4. Testing Notes
+- 不能把接收业务 ID 的 load(selectId) 直接当 onclick 回调而不校验参数，浏览器会传 MouseEvent，随后形成假的配置 ID。配置选择须核对最新 W/P 列表；空列表、失效选择与请求失败分开呈现，返回列表时同时清除失效深链参数。
+- 实际 Playwright `APIRequestContext.fetch` 的 URL 是位置参数，不能直接转发 `url=`；每次响应读取后须 dispose，避免由 context 持有全部响应。模拟器应跑实际 Chromium + HTTP/TLS，纯 FakeRequest 不能验证这两个 SDK 契约。
+- 私有 IPC 的正文与 meta 必须在同一次请求锁中取快照；另一次凭据请求会重置 last_meta。凭据撤销持有元数据锁时不能再取桥接层锁，读路径的锁顺序相反；管道请求本身由 client 串行化即可。pipe.read(n) 可能短读，两端均须累积到指定长度或 EOF。
+- 受保护表响应的 table_id 是传输身份，document 才是参数文件内容。把 table_id 等包络字段混入文件快照会产生未映射参数，不能通过放宽映射检查解决。
+- 布局类的 display 会覆盖浏览器默认的 `[hidden]` 显示规则。条件字段应在所属视图提供明确隐藏规则；相关回归必须加载生产样式并检查 computed display，单独检查 hidden 属性不能证明用户看不到字段。
 - 使用 pytest 运行测试，`pytest tests/ -v`
 - DL 系数绑定的 `variable_path` 不只认旧节点 ID。详情面板「复制绑定路径」得到的是 `文件名/标签/…`（XML 如 `scenario.xml/CONFIG_ROOT/SCENARIO_BLOCK/input`），提取接口和模板 mock 都按这个路径、定位符、节点 ID 三种写法解析；同名兄弟仍取第一个。XML 属性在树上的标签带 `@`，映射里写 `min` 会回落到 `@min`，已经写了 `@min` 的旧配置不受影响。
 - Python 3.9 兼容性不能只靠 `compileall`：函数注解里的 `X | None` 能编译，但在导入时求值才报 `TypeError`。验证方式是用 3.9 解释器实际导入模块（`python3.9 -c "import app.core.storage"`）；当前 v1.0.1 的 `storage.py`、`differ.py`、`dltool.py` 在 3.9.11 下导入即失败。
@@ -119,6 +124,14 @@
 - `tests.js` 的 `EXPECTED_CASES` 闸是**可自证伪**的，所以「ALL PASSED (n)」里的 n 就是页面自己数出来的注册数（M3-13 实测）：把副本里的常量从 51 改成 47，同一份页面报 `1 FAILED / 52` 并在列表里点名「用例注册数不符：预期 47，实际注册 51」。这条探测要在**改之前的 /tmp 副本**上做，别把它当成一次真实验收轮次记进计数。
 
 ## 5. UI/UX Notes
+- 版本图详情的响应式网格只可作用于 .cv-node-detail 内部，不能覆盖通用 .cv-detail-body；导出来源表单和映射预览也复用该正文类。版本图目前在 1100px 以下堆叠，详情网格不能串入导出表单；导出回归需检查字段纵向顺序、控件宽度和映射表占满正文，不能仅检查整页横向溢出。
+- 配置弹窗与其确认框均需标记 `.cv-dialog` / `.cv-dialog-backdrop`，局部表单规则不能覆盖其他模块的共享 modal。参数历史不要复用横向 `.mini-list`：长版本路径会撑破正文，即使五个页签没有整页横向溢出也无法发现。回归应逐弹窗检查正文溢出、输入控件宽度、滚动末项和底部动作，并包括真实三方冲突、自定义决议、显式 null、长版本号及嵌套字段选择器。
+- 目录的参数数量不代表存在子目录。展开箭头按 has_children 或已读取的直接子目录决定；无子目录仅保留目录选择按钮，不能显示可以反复展开/折叠的空箭头。子目录存在性统计须包含显式空目录，并在原有目录扫描中线性计算，避免按每个目录重复扫描全部参数。
+- 参数目录显示的后代计数须与点击后的筛选范围一致：工作台选择目录包含其子目录；懒加载树的直接子项接口默认语义保持不变，递归参数分页显式请求 recursive=true。MC.Tree 使用 contain:strict，嵌入固定高度容器时该容器还须为 flex 布局，否则树会有节点但可视高度为 0；回归应检查实际高度和叶子选择联动，而非只检查 DOM 存在。
+- 三方候选的 B 是原来源文件快照，不是当前草稿或冻结 D0。API 用候选的 `base_file_version_id` 提取；旧候选无此引用时需明确决议。值级归一化会改变 core merge 的 conflict/from_new，必须同时按归一化后的 items 重算 can_apply，不能保留旧 conflict 的 false。来源绑定与文件内容指纹也须在写入前再核对。
+- 配置域 Bn/rn 手工草稿支持 inherit/override/pin；inherit 由服务端从精确基准取值，pin 仅用于 present，D0 不支持覆盖意图。更新候选的决议 API 仍仅支持 use_new/inherit_old/manual，不提供 pin/clear_pin，不能把手工草稿能力误宣称为候选已支持。
+- 来源核验必须来自真实内容读取和提交回执；回执中的绑定指纹与当前来源不符时，旧时间只代表历史核验，不能显示当前来源有效。来源改名不改已绑定 FileResource；任务提交前冻结目标版本，回包后检查来源修订和目标，不能在下载结束后才取 current 作为并发比较基准。
+- 原文提交和候选登记之间可能发生存储失败：须保留已提交文件的真实回执，并保持原来源 checkpoint 不前移，供同内容重试继续使用原比较基线；不能谎称全部回滚，也不能重试时静默换基线。调度时间的 GET 仅投影存活调度器的既有锚点，不得为展示而种锚或编造未来执行时间。
 - 更新管理按 V3.1 HTML 原型收成三页（更新源 / 运行记录 / 更新候选）。计划和连接是来源页上的层，不是平级页签。D0 未冻结时候选写入准备版草稿；D0 已冻结时 `create_baseline=true` 新建基线变更草稿并写入勾选的新值，不改 D0、不发布。保活 `enabled` 与 `auto_relogin` 分开保存；collector 的 `SessionManager(auto_relogin=False)` 不会调用登录。旧书签 `settings/schedule` 打开计划层。
 - 树形视图使用自定义 HTML (ui.html + ui.row + ui.column) 构建，折叠箭头为 CSS 三角形（无需 Material Icons），层级竖线使用不同颜色区分（8色循环，1.5px 细线）
 - 折叠展开通过原生 JavaScript `mct(this)` 实现 DOM 遍历（closest('.tree-row') → nextElementSibling），无需生成元素 ID，比 getElementById 方案更健壮
@@ -170,3 +183,9 @@
 - **共享弹窗焦点边界必须基于可见控件**：条件隐藏、禁用或 inert 子树不参与 Tab 循环；只有当前最上层弹窗可处理键盘和执行延迟初始聚焦，关闭后旧计时器不得抢焦点。
 - **运行事件接口每页最多返回 200 条**：详情按 `after_seq` 增量读取，分页失败应保留已显示事件；诊断导出需要逐页读取，达到 20000 条保护上限时必须标明可能不完整，不能把首屏当成全部日志。
 - **更新管理的长列表滚动发生在数据区**：`.sync-table-wrap` / `.sync-card-scroll` 承担局部滚动，筛选和游标加载区不随数据滚走。触屏回归须检查实际数据区的 `scrollTop` 和末项，不能继续用 `.sync-page.scrollTop` 作为滚动成功依据；窄屏也须测量数据区非零高度、固定表头与底部操作可达性。
+
+- **权限只有管理员与访客**（2026-11-06 用户决策）：姓名登记不产生第三种角色；连接、凭据及保活写入只检查全局管理员能力，禁止恢复独立 operator token 门槛。`deployer` 是旧能力兼容键，等同管理员。凭据加密密钥属于部署配置，不是用户授权凭证，不能随 token 门槛移除。
+- **连接保活草稿按工作区和连接保存**：切换连接、关闭面板或刷新列表不能丢失输入，也不能把新读到的 revision 自动写回旧草稿。显示服务器与草稿差异，经显式确认采用所显示修订后才能再次提交；后续并发仍由 `If-Match` 拒绝。连接草稿同样参与 `isDirty()` 离开保护。
+
+- **配置目录身份与版本成员分开**：总览用 catalog=all，工作台参数/树必须携带 release_id；新参数经定义修订与 D0 revision 双 CAS 明确纳入准备版后才可编辑。历史类型/单位取各列冻结定义。空目录是可选定义元数据，删除仅限空目录，移动不改稳定参数 ID。
+- **DL 时间查询使用生效事件**：同文件的兼容 timeline 元数据保存完整快照；保存、完整配置保存、历史恢复均记录。展示历史删除及 200 条限额不得删时间线。旧记录标 legacy_history/interval_verified=false，缺时间不得推断。GET 不创建文件；普通 I/O 失败回滚配置/历史原始字节，快照不一致时拒绝推断最新历史。

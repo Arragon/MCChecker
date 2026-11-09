@@ -1,0 +1,100 @@
+{
+  "simulation": true,
+  "url": "http://127.0.0.1:50012/api/v3/workspaces/default/profiles/default/dl/pp_energy/coefficients?at=2026-11-08T19%3A40%3A26.208005%2B00%3A00",
+  "earlier": {
+    "workspace_id": "",
+    "profile_id": "default",
+    "module_id": "pp_energy",
+    "requested_at": "2026-11-08T19:40:26.208005Z",
+    "effective_at": "2026-11-08T19:40:26.207570Z",
+    "valid_until": "2026-11-08T19:40:26.209422Z",
+    "revision_id": "dt_000000001",
+    "configuration": {
+      "coeffs": {
+        "k1": 8.0,
+        "k2": 0.0,
+        "k3": 0.0,
+        "k4": 0.0,
+        "k5": 0.0,
+        "k6": 0.0,
+        "k7": 0.0,
+        "k8": 0.0,
+        "b": 0.0
+      },
+      "binding": {
+        "source_file": "",
+        "variable_path": "",
+        "field_map": {}
+      },
+      "x_min": null,
+      "x_max": null,
+      "y_min": null,
+      "y_max": null,
+      "trans_coeff": 9.0,
+      "power_conv_coeff": 2.0
+    },
+    "coverage": "timeline",
+    "tracking_started_at": "2026-11-08T19:40:26.207570Z",
+    "interval_verified": true,
+    "history_id": "ch_000001"
+  },
+  "current": {
+    "workspace_id": "",
+    "profile_id": "default",
+    "module_id": "pp_energy",
+    "requested_at": "2026-11-08T19:40:26.210398Z",
+    "effective_at": "2026-11-08T19:40:26.209422Z",
+    "valid_until": null,
+    "revision_id": "dt_000000002",
+    "configuration": {
+      "coeffs": {
+        "k1": 11.0,
+        "k2": 0.0,
+        "k3": 0.0,
+        "k4": 0.0,
+        "k5": 0.0,
+        "k6": 0.0,
+        "k7": 0.0,
+        "k8": 0.0,
+        "b": 0.0
+      },
+      "binding": {
+        "source_file": "",
+        "variable_path": "",
+        "field_map": {}
+      },
+      "x_min": null,
+      "x_max": null,
+      "y_min": null,
+      "y_max": null,
+      "trans_coeff": 9.0,
+      "power_conv_coeff": 2.0
+    },
+    "coverage": "timeline",
+    "tracking_started_at": "2026-11-08T19:40:26.207570Z",
+    "interval_verified": true,
+    "history_id": "ch_000002"
+  },
+  "modules": {
+    "workspace_id": "default",
+    "profile_id": "default",
+    "items": [
+      {
+        "module_id": "pp_energy",
+        "name": "计算PP能量"
+      },
+      {
+        "module_id": "rp_energy",
+        "name": "计算RP能量"
+      },
+      {
+        "module_id": "rp_width",
+        "name": "计算RP脉宽"
+      },
+      {
+        "module_id": "ppz",
+        "name": "计算PPz"
+      }
+    ]
+  }
+}

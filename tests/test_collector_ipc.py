@@ -31,6 +31,15 @@ def test_frame_roundtrip_and_oversize():
         ipc.decode_frame(ipc.FRAME_HEADER.pack(2) + b"[]")
 
 
+@pytest.mark.parametrize("protocol", [ipc, collector_ipc])
+def test_pipe_fragmented_reads_are_reassembled(protocol):
+    class Fragmented(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, 3))
+    payload = {"request_id": "fragmented", "type": "request"}
+    assert protocol.read_frame(Fragmented(protocol.encode_frame(payload))) == payload
+
+
 def test_chunk_one_megabyte_roundtrip():
     data = os.urandom(1024 * 1024)
     frames = ipc.chunk_frames("req-1", data)

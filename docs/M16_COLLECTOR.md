@@ -1,5 +1,9 @@
 # M16-14 采集器环境与受管生命周期（INH-2179）
 
+> 2026-11-07：以下为 M16-14 的历史边界。当前 main 已接分帧 IPC，manager 提供二进制 client，
+> run.py 可显式启用 Vault/probe/read/保活接线。自建 TLS 模拟环境的实际 Chromium 验证和
+> 尚未实现的契约项见 [R6 当前审计](M16_R6_UI_AUDIT.md)；不是只有生命周期骨架。
+
 > 状态：代码骨架已完成（`collector/` + `app/services/collector_manager.py`）；真实
 > Python 3.12/Playwright/Chromium/断网安装证据为 **BLOCKED-EXTERNAL**（E4，见 §8）。
 > 事实源：`docs/MCChecker_V3.1_PLAN.md` M16-14、ADR-012/020、

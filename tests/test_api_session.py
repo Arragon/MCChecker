@@ -178,7 +178,7 @@ class TestPerProfileIdentity:
         with running_server(trusted_proxies=("127.0.0.1",)) as server:
             payload, _ = session(server, "/api/v1/session?profile=%s" % p1,
                                  headers={"X-Forwarded-For": "10.1.2.3"})
-        assert payload["identity"]["role_label"] == "成员"
+        assert payload["identity"]["role_label"] == "访客"
         assert payload["identity"]["is_admin"] is False
         assert payload["identity"]["is_deployer"] is False
 

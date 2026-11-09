@@ -47,7 +47,7 @@
 | S15 | 14/21/39 | `test_collector_manager.py`、`test_collector_ipc.py` | **BLOCKED-EXTERNAL**（Windows/Linux 进程树） |
 | S16 | 16/23 | `test_sda_adapter.py`、`test_sync_executor.py` | LOCAL-PASS |
 | S17 | 21/39 | `test_sync_faults.py` | LOCAL-PASS |
-| S18 | 19/38 | `test_sync_operator_auth.py`、`test_sync_credentials.py` | LOCAL-PASS |
+| S18 | 19/38 | `test_api_authz.py`、`test_api_connections.py`、`test_sync_credentials.py`（仅管理员/访客） | LOCAL-PASS |
 | S19 | 17/19/20/38 | `test_sync_credentials.py`、`test_api_connections.py` | LOCAL-PASS |
 | S20 | 19/20 | `test_sync_credentials.py`（auth_epoch 竞态） | LOCAL-PASS |
 | S21 | 16/22/24 | `test_collector_streaming.py` | LOCAL-PASS |
@@ -77,7 +77,7 @@
 | S45 | 29 | `test_sync_observations.py` | LOCAL-PASS |
 | S46 | 13/31/32/40 | E2E `F15/F16`（旧入口收口）、`SYNC-32` | LOCAL-PASS |
 | S47 | 31–36/40 | E2E 五 tab + 焦点/409/视口（13 项） | LOCAL-PASS |
-| S48 | 18/30/34/38/40 | `SYNC-34`、`test_sync_security_gate.py`、E2E `operator-token` | LOCAL-PASS |
+| S48 | 18/30/34/38/40 | `SYNC-34`、`test_sync_security_gate.py`、E2E `admin-visitor-auth` | LOCAL-PASS |
 | S49 | 11/35 | `SYNC-35`、`test_sync_run_store.py` | LOCAL-PASS |
 | S50 | 11/35/38 | `test_sync_security_gate.py`（run events/Task 脱敏）+ `scan_secrets.py` | LOCAL-PASS |
 | S51 | 09/33/39 | `test_sync_policy.py`、E2E `updates-plan` | LOCAL-PASS |

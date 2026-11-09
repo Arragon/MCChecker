@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-11-08T20:03:18Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-76562-68189/data",
+  "server": "http://127.0.0.1:55720",
+  "summary": {
+    "interactive_pass": 1,
+    "interactive_fail": 0,
+    "reachable_pass": 0,
+    "reachable_fail": 0,
+    "api_pass": 0,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "config-prototype",
+      "title": "配置原型真实功能与四视口",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "UI 创建目录总表条目、软件版本、稳定参数，并真实纳入准备版",
+        "真实配置文件 → 字段选择 → 版本绑定，保留 file/version 身份",
+        "409 保留输入 → 比较最新草稿 → 重试保存 → D0 固化并只读",
+        "创建基线草稿/保存/发布 B1；选择真实 B1 建机台草稿，固定值发布 r1；主线未被改写",
+        "修改映射立即使旧预览失效；重新预览的完整输出保留未匹配字段并生成可下载文件",
+        "事件时间线恢复产生新草稿，已发布 r1 与基线 head 不变",
+        "未保存值/新增表单切换工作区均先确认；取消保留，放弃后关闭旧弹窗，不向 B 写入",
+        "1366 版本演进 {\"page\": 1366, \"viewport\": 1366, \"height\": 541, \"table\": {\"client\": 74, \"scroll\": 74}}",
+        "1366 参数工作台 {\"page\": 1366, \"viewport\": 1366, \"height\": 541, \"footerBottom\": 715, \"table\": {\"client\": 313, \"scroll\": 313}}",
+        "1366 参数总览 {\"page\": 1366, \"viewport\": 1366, \"height\": 541, \"footerBottom\": 749, \"table\": {\"client\": 342, \"scroll\": 10594}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 256, \"sourceWidth\": 288, \"mappingWidth\": 726, \"previewWidth\": 758}",
+        "1366 模板导出 {\"page\": 1366, \"viewport\": 1366, \"height\": 541, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "1366 配置历史 {\"page\": 1366, \"viewport\": 1366, \"height\": 541, \"table\": null}",
+        "1920 版本演进 {\"page\": 1920, \"viewport\": 1920, \"height\": 853, \"table\": {\"client\": 74, \"scroll\": 74}}",
+        "1920 参数工作台 {\"page\": 1920, \"viewport\": 1920, \"height\": 853, \"footerBottom\": 1027, \"table\": {\"client\": 625, \"scroll\": 625}}",
+        "1920 参数总览 {\"page\": 1920, \"viewport\": 1920, \"height\": 853, \"footerBottom\": 1061, \"table\": {\"client\": 654, \"scroll\": 8308}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 256, \"sourceWidth\": 288, \"mappingWidth\": 1280, \"previewWidth\": 1312}",
+        "1920 模板导出 {\"page\": 1920, \"viewport\": 1920, \"height\": 853, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "1920 配置历史 {\"page\": 1920, \"viewport\": 1920, \"height\": 853, \"table\": null}",
+        "768 版本演进 {\"page\": 768, \"viewport\": 768, \"height\": 797, \"table\": {\"client\": 74, \"scroll\": 74}}",
+        "768 参数工作台 {\"page\": 768, \"viewport\": 768, \"height\": 797, \"footerBottom\": 971, \"table\": {\"client\": 533, \"scroll\": 533}}",
+        "768 参数总览 {\"page\": 768, \"viewport\": 768, \"height\": 797, \"footerBottom\": 1005, \"table\": {\"client\": 598, \"scroll\": 10594}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 698, \"sourceWidth\": 730, \"mappingWidth\": 698, \"previewWidth\": 730}",
+        "768 模板导出 {\"page\": 768, \"viewport\": 768, \"height\": 797, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "768 配置历史 {\"page\": 768, \"viewport\": 768, \"height\": 797, \"table\": null}",
+        "375 版本演进 {\"page\": 375, \"viewport\": 375, \"height\": 579, \"table\": {\"client\": 144, \"scroll\": 144}}",
+        "375 参数工作台 {\"page\": 375, \"viewport\": 375, \"height\": 579, \"footerBottom\": 789.5, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "375 参数总览 {\"page\": 375, \"viewport\": 375, \"height\": 579, \"footerBottom\": 11289.015625, \"table\": {\"client\": 10594, \"scroll\": 10594}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 317, \"sourceWidth\": 349, \"mappingWidth\": 317, \"previewWidth\": 349}",
+        "375 模板导出 {\"page\": 375, \"viewport\": 375, \"height\": 579, \"table\": {\"client\": 84, \"scroll\": 84}}",
+        "375 配置历史 {\"page\": 375, \"viewport\": 375, \"height\": 579, \"table\": null}",
+        "四视口五页面无整页横向溢出；105 参数分页末项可达；访客403/跨工作区404"
+      ],
+      "screenshot": "docs/evidence/m16-40/config-prototype-export.png"
+    }
+  ]
+}

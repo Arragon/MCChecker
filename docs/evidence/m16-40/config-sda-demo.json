@@ -1,0 +1,21 @@
+{
+  "simulation": true,
+  "config_id": "cfg-e3b8a54d1050",
+  "parameter_id": "p-4f98dff95181",
+  "releases": [
+    "rel-c89c04011bb8",
+    "rel-797a4af50d1c"
+  ],
+  "source_id": "src-31d573d07609ff0b",
+  "run_id": "run-20261108T194025Z-804d7a36",
+  "file_id": "f-04dc08335d72ab09",
+  "url": "http://127.0.0.1:50012/index.html#/p/default/configv3/configs?workspace=default&config=cfg-e3b8a54d1050",
+  "candidates": [
+    {
+      "candidate_id": "cand-0623290a236e7654",
+      "source_id": "src-31d573d07609ff0b",
+      "state": "pending",
+      "file_version_id": "v-743a7c8a71af044f"
+    }
+  ]
+}

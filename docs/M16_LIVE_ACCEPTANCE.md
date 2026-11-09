@@ -42,7 +42,7 @@ unset MCC_SDA_USER MCC_SDA_PASSWORD
 
 | 步骤 | 动作 | 记录字段 |
 |---|---|---|
-| L1 | 连接注册（origin + 运维 token） | 时间、origin（脱敏）、HTTP 状态 |
+| L1 | 管理员身份注册连接（无需独立运维 token） | 时间、origin（脱敏）、HTTP 状态 |
 | L2 | 凭据导入 → 候选 → 激活 | 是否 202、op_id、auth_epoch |
 | L3 | 来源绑定（catalog 表/文件） | connection_id、resource_ref、display_path |
 | L4 | 单项更新（`POST .../sources/{sid}/run`） | run_id、终态、items 计数 |

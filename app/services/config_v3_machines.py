@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import config_values, locks, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
-from . import config_v3_catalog, config_v3_drafts
+from . import config_v3_catalog, config_v3_diff, config_v3_drafts
 
 
 def _now() -> str:
@@ -56,6 +56,7 @@ def _public(machine: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "machine_id": machine["machine_id"],
         "machine_no": machine["machine_no"],
+        "release_id": machine["release_id"],
         "head_id": machine.get("head_id"),
         "published": bool(machine.get("head_id")),
         "draft": copy.deepcopy(machine.get("draft")),
@@ -65,6 +66,8 @@ def _public(machine: Dict[str, Any]) -> Dict[str, Any]:
                 "label": row["label"],
                 "parent_id": row.get("parent_id"),
                 "base_kind": row.get("base_kind"),
+                "base_revision_id": row.get("base_revision_id"),
+                "release_id": row.get("release_id"),
                 "published_at": row["published_at"],
             }
             for row in (machine.get("revisions") or {}).values()
@@ -160,6 +163,51 @@ def new_draft(profile_id: str, config_id: str, machine_id: str, payload: Dict[st
         machine["release_id"] = release["release_id"]
         config_v3_catalog._save(profile_id, doc)
         return _public(machine)
+
+
+def patch_values(profile_id: str, config_id: str, machine_id: str,
+                 payload: Dict[str, Any], if_match: Optional[str]) -> Dict[str, Any]:
+    items = payload.get("items")
+    if not isinstance(items, list) or not 1 <= len(items) <= config_v3_drafts.MAX_BATCH:
+        raise AppError(INVALID_INPUT, "items 必须为 1-100 项", field="items")
+    request_id = str(payload.get("request_id") or "").strip()
+    if not request_id or len(request_id) > 100:
+        raise AppError(INVALID_INPUT, "request_id 必填且 ≤100 字符", field="request_id")
+    raw = if_match if if_match is not None else payload.get("expected_revision")
+    try:
+        expected = int(str(raw).strip('"'))
+    except (ValueError, TypeError):
+        raise AppError(INVALID_INPUT, "缺少合法 If-Match", field="expected_revision")
+    with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
+        doc = config_v3_catalog._load(profile_id)
+        config = doc["configs"].get(config_id)
+        if config is None:
+            raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        machine = _find(config, machine_id)
+        draft = machine.get("draft") or {}
+        if draft.get("status") != "draft":
+            raise AppError(REVISION_CONFLICT, "机台没有可编辑草稿", machine_id=machine_id)
+        receipts = draft.setdefault("receipts", {})
+        if request_id in receipts:
+            return copy.deepcopy(draft)
+        if int(draft.get("revision", 0)) != expected:
+            raise AppError(REVISION_CONFLICT, "草稿已被其他编辑者更新", current=draft.get("revision", 0))
+        release = config["releases"][machine["release_id"]]
+        parameters = config_v3_drafts._definition_for(release, config).get("parameters") or {}
+        values = copy.deepcopy(draft.get("values") or {})
+        basis = config_v3_diff.resolve(config, draft["base_revision_id"])["values"]
+        for item in items:
+            if not isinstance(item, dict):
+                raise AppError(INVALID_INPUT, "items 元素必须为对象", field="items")
+            pid = str(item.get("parameter_id") or "")
+            if pid not in parameters:
+                raise AppError(NOT_FOUND, "参数不在该版本定义中", parameter_id=pid)
+            values[pid] = config_v3_drafts.patch_branch_member(values.get(pid), item, str(parameters[pid].get("type") or ""), basis.get(pid))
+        draft["values"] = values
+        draft["revision"] = int(draft.get("revision", 0)) + 1
+        receipts[request_id] = {"revision": draft["revision"]}
+        config_v3_catalog._save(profile_id, doc)
+        return copy.deepcopy(draft)
 
 
 def publish_machine(

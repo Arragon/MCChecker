@@ -24,6 +24,8 @@ FRAME_HEADER = struct.Struct(">I")
 OPERATIONS = frozenset(
     {
         "configure_connection",
+        "store_credentials",
+        "delete_credentials",
         "verify_credentials",
         "activate_credentials",
         "ensure_session",
@@ -73,8 +75,20 @@ def decode_frame(data: bytes) -> Dict[str, Any]:
     return payload
 
 
+def _read_exact(reader, size: int) -> bytes:
+    parts = []
+    remaining = size
+    while remaining:
+        part = reader.read(remaining)
+        if not part:
+            break
+        parts.append(part)
+        remaining -= len(part)
+    return b"".join(parts)
+
+
 def read_frame(reader) -> Optional[Dict[str, Any]]:
-    header = reader.read(FRAME_HEADER.size)
+    header = _read_exact(reader, FRAME_HEADER.size)
     if not header:
         return None
     if len(header) != FRAME_HEADER.size:
@@ -82,7 +96,7 @@ def read_frame(reader) -> Optional[Dict[str, Any]]:
     length = FRAME_HEADER.unpack(header)[0]
     if length < 1 or length > MAX_FRAME_BYTES:
         raise CollectorProtocolError("protocol_mismatch", "frame length out of bounds")
-    body = reader.read(length)
+    body = _read_exact(reader, length)
     if len(body) != length:
         raise CollectorProtocolError("protocol_mismatch", "truncated frame body")
     return decode_frame(header + body)

@@ -5,6 +5,25 @@ from __future__ import annotations
 from authz_fixtures import as_role, make_server, seed_roles
 
 
+def test_catalog_projection_keeps_new_identity_separate_from_frozen_membership():
+    seed_roles("overview-catalog")
+    with make_server() as server:
+        wid = _create(server, "Catalog")
+        cid = _config(server, wid)
+        original = _param(server, wid, cid, "Original")
+        rid = _release(server, wid, cid, "690")
+        _freeze_with(server, wid, cid, rid, [{"parameter_id": original, "membership": "included", "enabled": True, "value_state": "present", "value": "0"}])
+        added = _param(server, wid, cid, "Later")
+        base = "/api/v3/workspaces/%s/profiles/default/configs/%s/releases/%s/overview" % (wid, cid, rid)
+        admin = as_role(server, "admin")
+        old = admin.json("GET", base)[2]
+        assert old["total"] == 1
+        current = admin.json("GET", base + "?catalog=all&q=Later&limit=1")[2]
+        assert current["total"] == 1 and current["rows"][0]["parameter_id"] == added
+        assert current["rows"][0]["cells"]["d0-" + rid]["status"] == "not_introduced"
+        assert admin.json("GET", base + "?catalog=all&directory=Absent")[2]["total"] == 0
+
+
 def _create(server, name):
     status, _h, body = as_role(server, "admin").json(
         "POST", "/api/v3/workspaces", {"name": name}

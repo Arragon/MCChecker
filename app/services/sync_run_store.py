@@ -202,6 +202,8 @@ def list_runs(
     trigger: Optional[str] = None,
     limit: int = 50,
     cursor: str = "0",
+    query: str = "",
+    failed_only: bool = False,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     if state is not None:
@@ -217,6 +219,7 @@ def list_runs(
     if limit < 1 or limit > 200:
         raise AppError(INVALID_INPUT, "limit 必须在 1–200", field="limit")
     root = runs_root(wid)
+    needle = str(query or "").strip().casefold()
     items: List[Dict[str, Any]] = []
     if os.path.isdir(root):
         for name in os.listdir(root):
@@ -231,6 +234,14 @@ def list_runs(
                 continue
             if trigger is not None and run.get("trigger") != trigger:
                 continue
+            if failed_only and run.get("state") not in ("failed", "partial", "interrupted"):
+                continue
+            if needle:
+                names = [str(run.get("run_id") or "")]
+                for row in doc["items"]:
+                    names.extend(str(row.get(key) or "") for key in ("name", "source_id", "profile_id"))
+                if needle not in " ".join(names).casefold():
+                    continue
             items.append(doc)
     items.sort(
         key=lambda item: (str(item["run"].get("created_at") or ""), str(item["run"]["run_id"])),

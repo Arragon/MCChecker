@@ -10,14 +10,18 @@ resource_ref；`http_file` 来源不要求 connection。删除只写 tombstone�
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
+import json
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
+from app.core import storage
 from app.core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
 from app.core.sync_models import (
     SOURCE_KINDS,
     SOURCE_SCHEDULE_MODES,
     SyncSource,
+    SourceFreshness,
     SyncTarget,
     make_source_id,
     validate_enum,
@@ -28,10 +32,17 @@ from app.core.sync_models import (
 )
 from app.services import sync_connections, workspace_context
 
-from . import sync_catalog, sync_store
+from . import config_v3_catalog, sync_candidates, sync_catalog, sync_store, sync_status
 
 FILE = "sources.json"
 DEFAULT_DOC: Dict[str, Any] = {"revision": 0, "items": []}
+
+
+def binding_fingerprint(source: Dict[str, Any]) -> str:
+    """Identify the read/target contract; display name and schedule do not prove a new binding."""
+    keys = ("kind", "connection_id", "resource_ref", "display_path", "target", "keyword")
+    raw = json.dumps({key: source.get(key) for key in keys}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 CREATE_FIELDS = frozenset(
     {
         "profile_id",
@@ -166,13 +177,19 @@ def list_sources(
     query: str = "",
     limit: int = 50,
     cursor: str = "0",
+    configuration_id: Optional[str] = None,
+    release_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
+    if configuration_id:
+        validate_id(configuration_id, "configuration_id")
+    if release_id:
+        validate_id(release_id, "release_id")
     if profile_id:
         workspace_context.assert_profile(wid, profile_id)
     if kind is not None:
         validate_enum(kind, SOURCE_KINDS, "kind")
-    if status not in (None, "enabled", "disabled", "deleted", "all"):
+    if status not in (None, "enabled", "disabled", "deleted", "all", "failed", "candidates"):
         raise AppError(INVALID_INPUT, "status 不在允许值内", field="status")
     try:
         offset = int(str(cursor or "0"))
@@ -184,26 +201,50 @@ def list_sources(
         raise AppError(INVALID_INPUT, "limit 必须在 1–200", field="limit")
 
     doc = _load(wid)
+    freshness = {(row["profile_id"], row["source_id"]): row for row in sync_status.list_status(wid)}
+    pending = set()
+    candidate_cursor = "0"
+    while candidate_cursor is not None:
+        candidates = sync_candidates.list_candidates(wid, profile_id=profile_id, state="pending", limit=200, cursor=candidate_cursor)
+        pending.update((row["profile_id"], row["source_id"]) for row in candidates["items"])
+        candidate_cursor = candidates["next_cursor"]
     needle = str(query or "").strip().casefold()
     rows: List[Dict[str, Any]] = []
+    configuration_ids = set()
+    release_ids = set()
     for item in doc["items"]:
         if not isinstance(item, dict):
             raise AppError(INVALID_INPUT, "sources.json 条目损坏", field="sources")
         deleted = bool(item.get("deleted"))
         if profile_id and item.get("profile_id") != profile_id:
             continue
+        target = item.get("target") or {}
+        if not deleted:
+            if target.get("configuration_id"):
+                configuration_ids.add(target["configuration_id"])
+            if target.get("release_id"):
+                release_ids.add(target["release_id"])
+        if configuration_id and target.get("configuration_id") != configuration_id:
+            continue
+        if release_id and target.get("release_id") != release_id:
+            continue
         if kind and item.get("kind") != kind:
             continue
         if status == "deleted" and not deleted:
             continue
-        if status in (None, "enabled", "disabled") and deleted:
+        if status in (None, "enabled", "disabled", "failed", "candidates") and deleted:
             continue
         if status == "enabled" and not item.get("enabled"):
             continue
         if status == "disabled" and item.get("enabled"):
             continue
+        key = (item["profile_id"], item["source_id"])
+        if status == "candidates" and key not in pending:
+            continue
+        if status == "failed" and (freshness.get(key) or {}).get("reason_code") in (None, "unknown", "validated", "unchanged", "disabled", "canceled"):
+            continue
         if needle:
-            haystack = (str(item.get("name", "")) + " " + str(item.get("display_path", ""))).casefold()
+            haystack = (str(item.get("name", "")) + " " + str(item.get("display_path", "")) + " " + str(target.get("device_id") or "")).casefold()
             if needle not in haystack:
                 continue
         rows.append(item)
@@ -211,8 +252,39 @@ def list_sources(
     rows.sort(key=lambda row: (str(row.get("name", "")).casefold(), str(row.get("source_id", ""))))
     total = len(rows)
     page = rows[offset : offset + limit]
+    labels = {}
+    # Read each profile catalog once; absent targets remain explicit IDs rather than invented names.
+    with storage.use_workspace(wid):
+        for pid in {row["profile_id"] for row in doc["items"] if isinstance(row, dict) and (not profile_id or row["profile_id"] == profile_id)}:
+            for config in config_v3_catalog.list_configs(pid):
+                cid = config["config_id"]
+                labels[(pid, cid)] = config
+                for release in config_v3_catalog.list_releases(pid, cid):
+                    labels[(pid, release["release_id"])] = release
+    items = []
+    for row in page:
+        projected = _safe(row, include_deleted=bool(row.get("deleted")))
+        projected["freshness"] = freshness.get((row["profile_id"], row["source_id"])) or dict(
+            SourceFreshness(workspace_id=wid, profile_id=row["profile_id"], source_id=row["source_id"]).to_dict(),
+            available=False,
+        )
+        receipt = projected["freshness"].get("receipt") or {}
+        projected["freshness"]["binding_current"] = receipt.get("binding_fingerprint") == binding_fingerprint(row)
+        if projected["freshness"].get("last_verified_at") and not projected["freshness"]["binding_current"]:
+            projected["freshness"]["reason_code"] = "source_changed"
+        target = row.get("target") or {}
+        projected["target_display"] = {
+            "configuration_name": (labels.get((row["profile_id"], target.get("configuration_id"))) or {}).get("name"),
+            "software_version": (labels.get((row["profile_id"], target.get("release_id"))) or {}).get("version"),
+        }
+        projected["has_candidate"] = (row["profile_id"], row["source_id"]) in pending
+        items.append(projected)
     return {
-        "items": [_safe(row, include_deleted=bool(row.get("deleted"))) for row in page],
+        "items": items,
+        "filters": {
+            "configurations": [{"id": cid, "label": next((v.get("name") for (pid, key), v in labels.items() if key == cid and v.get("name")), cid)} for cid in sorted(configuration_ids)],
+            "releases": [{"id": rid, "label": next((v.get("version") for (pid, key), v in labels.items() if key == rid and v.get("version")), rid)} for rid in sorted(release_ids)],
+        },
         "total": total,
         "next_cursor": str(offset + limit) if offset + limit < total else None,
         "query_revision": doc["revision"],
@@ -227,7 +299,7 @@ def get_source(workspace_id: str, source_id: str, include_deleted: bool = False)
     return _safe(item, include_deleted=include_deleted)
 
 
-def create_source(workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def validate_source_input(workspace_id: str, payload: Dict[str, Any]) -> SyncSource:
     wid = validate_workspace_id(workspace_id)
     if not isinstance(payload, dict):
         raise AppError(INVALID_INPUT, "payload 必须是对象", field="payload")
@@ -257,30 +329,36 @@ def create_source(workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     source_id = make_source_id(wid, profile_id, name)
     now = _now()
 
+    source = SyncSource(
+        source_id=source_id,
+        workspace_id=wid,
+        profile_id=profile_id,
+        revision=1,
+        name=name,
+        kind=kind,
+        target=target,
+        enabled=payload.get("enabled", True),
+        schedule_mode=schedule_mode,
+        interval_hours=interval_hours,
+        connection_id=connection_id,
+        resource_ref=payload.get("resource_ref"),
+        display_path=payload.get("display_path"),
+        record_source=payload.get("record_source"),
+        keyword=payload.get("keyword", ""),
+        created_at=now,
+        updated_at=now,
+    )
+    return source
+
+
+def create_source(workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    source = validate_source_input(workspace_id, payload)
+    wid, profile_id, source_id = source.workspace_id, source.profile_id, source.source_id
+    name = source.name
+
     def mutate(doc: Dict[str, Any]) -> Dict[str, Any]:
-        if _find(doc, source_id, include_deleted=True) is not None:
+        if _find(doc, source_id, include_deleted=True) is not None or _name_taken(doc, profile_id, name):
             raise AppError(INVALID_INPUT, "来源名称已存在（含 tombstone）", field="name")
-        if _name_taken(doc, profile_id, name):
-            raise AppError(INVALID_INPUT, "来源名称已存在", field="name")
-        source = SyncSource(
-            source_id=source_id,
-            workspace_id=wid,
-            profile_id=profile_id,
-            revision=1,
-            name=name,
-            kind=kind,
-            target=target,
-            enabled=payload.get("enabled", True),
-            schedule_mode=schedule_mode,
-            interval_hours=interval_hours,
-            connection_id=connection_id,
-            resource_ref=payload.get("resource_ref"),
-            display_path=payload.get("display_path"),
-            record_source=payload.get("record_source"),
-            keyword=payload.get("keyword", ""),
-            created_at=now,
-            updated_at=now,
-        )
         doc["items"].append(source.to_dict())
         doc["revision"] = doc["revision"] + 1
         return doc

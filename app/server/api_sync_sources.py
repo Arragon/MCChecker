@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..core.errors import INVALID_INPUT, REVISION_CONFLICT, AppError
-from ..services import authz, sync_sources, sync_tasks, workspace_catalog
+from ..services import authz, scheduler, sync_policy, sync_scheduler, sync_sources, sync_source_tests, sync_tasks, workspace_catalog
 from ..services.context import RequestContext
 from .router import Response, Router, json_body, query_param
 
@@ -21,6 +21,17 @@ def register(router: Router) -> None:
     router.add("PATCH", "/api/v3/workspaces/{wid}/sync/sources/{sid}", update_source)
     router.add("DELETE", "/api/v3/workspaces/{wid}/sync/sources/{sid}", delete_source)
     router.add("POST", "/api/v3/workspaces/{wid}/sync/sources/{sid}/run", run_source)
+    router.add("POST", "/api/v3/workspaces/{wid}/sync/source-tests", test_source)
+
+
+def test_source(ctx: RequestContext, params: Dict[str, str],
+                query: Dict[str, List[str]], body: Optional[bytes]) -> Response:
+    authz.authorize(ctx, "settings_write")
+    _scope(params["wid"])
+    payload = json_body(body)
+    if not isinstance(payload, dict):
+        raise AppError(INVALID_INPUT, "payload 必须是对象", field="payload")
+    return Response(payload=sync_source_tests.check_source(params["wid"], payload))
 
 
 def _scope(wid: str) -> None:
@@ -55,13 +66,24 @@ def list_sources(
     _scope(wid)
     listing = sync_sources.list_sources(
         wid,
-            profile_id=query_param(query, "profile_id") or None,
-            kind=query_param(query, "kind") or None,
-            status=query_param(query, "status") or None,
-            query=query_param(query, "q") or "",
-            limit=max(1, min(_int(query_param(query, "limit"), 50), 200)),
+        profile_id=query_param(query, "profile_id") or None,
+        kind=query_param(query, "kind") or None,
+        status=query_param(query, "status") or None,
+        query=query_param(query, "q") or "",
+        configuration_id=query_param(query, "configuration_id") or None,
+        release_id=query_param(query, "release_id") or None,
+        limit=max(1, min(_int(query_param(query, "limit"), 50), 200)),
         cursor=query_param(query, "cursor") or "0",
     )
+    policy = sync_policy.get_policy(wid)
+    live_scheduler = scheduler.get_scheduler()
+    for source in listing["items"]:
+        override = (policy.get("profile_overrides") or {}).get(source["profile_id"]) or {}
+        configured_interval = source.get("interval_hours") if source["schedule_mode"] == "custom" else override.get("interval_hours") or policy["default_interval_hours"]
+        due = live_scheduler.next_sync_at(wid, source, policy) if live_scheduler else None
+        source["schedule"] = {"configured_interval_hours": configured_interval,
+            "automatic_enabled": sync_scheduler.effective_interval(policy, source) is not None,
+            "next_due_at": sync_scheduler.format_timestamp(due) if due else None}
     if not authz.allowed(ctx.actor, "settings_write"):
         listing["items"] = [sync_sources.project_for_read(row) for row in listing["items"]]
     return Response(payload=listing)

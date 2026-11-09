@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional
 
 from app.core import fsutil, storage
 from app.core.errors import INVALID_INPUT, AppError
-from app.services import revision, updates, workspace_context
+from app.services import (file_versions, revision, updates, workspace_context,
+                          sync_bindings, sync_candidates, sync_sources, sync_status)
 
 from .sync_http_adapter import HttpFetchItem, HttpFetchResult
 
@@ -46,8 +47,9 @@ def _commit_file(
     source: Dict[str, Any],
     item: HttpFetchItem,
     base_sha: Optional[str],
+    target_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    name = item.basename or source.get("name")
+    name = target_name or item.basename or source.get("name")
     try:
         name = fsutil.validate_filename(name)
     except AppError as exc:
@@ -55,6 +57,7 @@ def _commit_file(
     _validate_item(item)
     with storage.use_workspace(workspace_id), storage.use_profile(profile_id):
         outcome = updates._commit_config(profile_id, name, bytes(item.content), base_sha=base_sha)
+        version = file_versions.current_identity(profile_id, name) if outcome.get("status") in ("success", "unchanged") else {}
         if outcome.get("status") == "success":
             revision.bump(profile_id, "files")
     return {
@@ -64,6 +67,7 @@ def _commit_file(
         "archived": outcome.get("archived"),
         "size": item.size,
         "sha256": item.sha256,
+        "version_id": version.get("version_id"),
     }
 
 
@@ -124,18 +128,45 @@ def commit_fetch_result(
         }
     target = source.get("target") or {}
     if result.kind == "http_file":
-        if target.get("kind") != "file_archive":
+        if target.get("kind") not in ("file_archive", "default_candidate"):
             return {
                 "status": "blocked",
                 "source_id": result.source_id,
                 "reason_code": "target_missing",
-                "message": "http_file 只提交 file_archive；候选/观测归 M16-26/29",
+                "message": "该目标需要可信机台采集信息，不能作为普通文件更新",
                 "items": [],
             }
+        try:
+            binding = sync_bindings.resolve_binding(workspace_id, profile_id, target)
+        except AppError as exc:
+            return {"status": "blocked", "source_id": result.source_id, "reason_code": "target_missing", "message": exc.message, "items": []}
+        if target.get("kind") == "default_candidate":
+            if len(result.items) != 1:
+                return {"status": "blocked", "source_id": result.source_id, "reason_code": "invalid_payload", "message": "默认参数候选需精确对应一个来源文件，请调整文件匹配规则", "items": []}
+        previous = sync_status.get_status(workspace_id, profile_id, result.source_id)
+        target_name = (binding.get("ref") or {}).get("name") if len(result.items) == 1 else None
+        if not target_name and target.get("kind") == "default_candidate" and previous.get("last_good_version_id"):
+            with storage.use_workspace(workspace_id), storage.use_profile(profile_id):
+                original = file_versions.find_version(profile_id, previous["last_good_version_id"])
+            target_name = (original or {}).get("name")
         items = [
-            _commit_file(workspace_id, profile_id, source, item, base_sha)
+            _commit_file(workspace_id, profile_id, source, item, base_sha, target_name=target_name)
             for item in result.items
         ]
+        candidate = None
+        if target.get("kind") == "default_candidate" and items and items[0].get("version_id"):
+            try:
+                candidate = sync_candidates.create_candidate(
+                    workspace_id, profile_id, result.source_id, int(source.get("revision") or 1),
+                    items[0]["sha256"], "default_candidate:%s:%s" % (target["configuration_id"], target["release_id"]),
+                    file_version_id=items[0]["version_id"], base_file_version_id=previous.get("last_good_version_id")
+                    if (previous.get("receipt") or {}).get("binding_fingerprint") == sync_sources.binding_fingerprint(source) else None,
+                )
+            except Exception:
+                # The raw file is already committed. Preserve that fact and the old checkpoint;
+                # retry must still compare against the original source, not the just-saved bytes.
+                return {"status": "partial", "source_id": result.source_id, "reason_code": "storage_failure",
+                        "message": "来源文件已保存，但候选登记失败；已保留文件和原比较基线，请重试。", "items": items}
     elif result.kind == "http_record":
         items = [
             _commit_record(workspace_id, profile_id, source, item)
@@ -149,8 +180,17 @@ def commit_fetch_result(
             "message": "unsupported fetch result kind",
             "items": [],
         }
-    return {
+    response = {
         "status": _aggregate(items),
         "source_id": result.source_id,
         "items": items,
     }
+    if result.kind == "http_file":
+        if candidate:
+            response["candidate_id"] = candidate["candidate_id"]
+        for item in items:
+            if item.get("version_id"):
+                sync_status.record_commit(workspace_id, profile_id, result.source_id,
+                                          item["sha256"], item["version_id"],
+                                          receipt={"binding_fingerprint": sync_sources.binding_fingerprint(source)})
+    return response

@@ -92,7 +92,7 @@ class TestFixtureSelfCheck:
         """先证明夹具造出来的五个身份确实各自成立，后面的矩阵断言才有意义。"""
         expected = {
             "visitor": ("访客", False, False),
-            "member": ("成员", False, False),
+            "member": ("访客", False, False),
             "admin": ("管理员", False, True),
             "deployer": ("管理员", False, True),
             "deployer_admin": ("管理员", False, True),

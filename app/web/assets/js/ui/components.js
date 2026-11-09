@@ -8,6 +8,17 @@
   var h = MC.util.h;
   var icon = MC.icon;
 
+  MC.configWorkspaceNav = function (app, active) {
+    return h("nav.config-workspace-nav", { "aria-label": "配置管理导航" },
+      [{ id: "configs", label: "固定配置", icon: "compare" }, { id: "files", label: "配置文件", icon: "file" },
+        { id: "updates", label: "更新管理", icon: "refresh" }, { id: "records", label: "配置记录", icon: "history" }].map(function (item) {
+        return h("button.btn.btn-ghost" + (item.id === active ? ".is-active" : ""), {
+          type: "button", "aria-current": item.id === active ? "page" : null,
+          onclick: function () { app.go({ kind: item.id === "updates" ? "updates" : "configv3", arg: item.id === "updates" ? "sources" : item.id }); },
+        }, icon(item.icon), item.label);
+      }));
+  };
+
   /* ===================== Toast ===================== */
   var stack = null;
   var TOAST_ICON = { success: "check-circle", error: "x-circle", warning: "alert", info: "info" };

@@ -111,6 +111,8 @@ def ordered_stop(
     if scheduler is not None:
         scheduler.stop()
     runner.shutdown(tasks.DEFAULT_SHUTDOWN_TIMEOUT if timeout is None else timeout)
+    from app.services import sync_collector
+    sync_collector.stop()
     if not collector_manager.stop_all():
         # 强制结束仍回收不了（例如不可中断的系统调用）：不静默，状态可从 collector_manager 读。
         logger.error(
@@ -255,6 +257,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # 后台任务队列（卡 6 / §10.1）：worker 数来自 Settings.max_workers，注入进程内单例，
     # `/tasks` 的 handler 与卡 8 的调度器都通过 `tasks.get_runner()` 拿同一个 runner。
+    from app.services import sync_collector
+    try:
+        collector_bridge = sync_collector.configure_from_environment()
+    except AppError as exc:
+        lock.release()
+        logger.error("采集器部署配置不可用：%s", exc.message)
+        return 5
     runner = tasks.init_runner(settings.max_workers)
 
     try:
@@ -273,6 +282,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 于是仍然「一条工作线程都没起、可以直接删锁」，不必再回头停调度器。调度线程只投任务、
     # 自己不下载不写盘，所以放在这里也已经开始按 `schedule.json` 排期。
     scheduler = services_scheduler.init_scheduler(runner)
+    if collector_bridge is not None:
+        collector_bridge.start_heartbeats()
 
     def _handle_signal(signum, _frame):
         logger.info("收到信号 %s，正在停止…", signum)

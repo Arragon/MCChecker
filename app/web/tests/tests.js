@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 135;  // + R6 标签、弹层、列表状态、机型筛选与事件分页回归
+  var EXPECTED_CASES = 150;  // + 连接分区、逐连接草稿与刷新后的 CAS
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -719,7 +719,7 @@
           return Promise.resolve({ items: [] });
         },
       });
-      var inst = r.mountView(MC.views.configv3(settingsApp(false)));
+      var inst = r.mountView(MC.views.configv3(settingsApp(false), { query: { config: "cfg-1" } }));
       function wait(n) {
         return tick().then(function () {
           if (inst.el.textContent.indexOf("一号配置") >= 0) return true;
@@ -729,9 +729,9 @@
       }
       return wait(20).then(function () {
         var text = inst.el.textContent;
-        ok(text.indexOf("配置管理") >= 0, "视图标题");
+        ok(inst.el.querySelector('[aria-label="配置管理导航"]'), "保留配置管理导航");
         ok(text.indexOf("一号配置") >= 0 && text.indexOf("MC-001") >= 0, "配置列表与标识");
-        ok(text.indexOf("当前身份可查看配置") >= 0, "非管理员只读横幅");
+        ok(inst.el.querySelector(".banner-warning") && text.indexOf("只读模式，编辑需要管理员权限") >= 0, "非管理员只读横幅保留明确的编辑权限说明");
         ["版本演进", "参数工作台", "参数总览", "模板导出", "配置历史"].forEach(function (label) {
           ok(text.indexOf(label) >= 0, "缺少 tab：" + label);
         });
@@ -848,7 +848,7 @@
       });
       var testApp = settingsApp(true);
       testApp.can = function () { return true; };
-      var inst = r.mountView(MC.views.configv3(testApp));
+      var inst = r.mountView(MC.views.configv3(testApp, { query: { config: "cfg-1", tab: "workbench" } }));
       function waitFor(fn, n) {
         return tick().then(function () {
           if (fn()) return true;
@@ -977,7 +977,7 @@
       });
       var testApp = settingsApp(true);
       testApp.can = function () { return true; };
-      var inst = r.mountView(MC.views.configv3(testApp));
+      var inst = r.mountView(MC.views.configv3(testApp, { query: { config: "cfg-1", tab: "workbench" } }));
       function waitFor(fn, n) {
         return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); });
       }
@@ -993,6 +993,7 @@
         btn.click();
         return waitFor(function () { return modalText().indexOf("预览合并") >= 0; }, 20);
       }).then(function () {
+        ok(document.querySelector('.modal select[aria-label="共同基准 O"]') && document.querySelector('.modal select[aria-label="当前配置 L"]') && document.querySelector('.modal select[aria-label="目标配置 N"]'), "三方输入选择真实修订，无需手填修订编号");
         clickModal("预览合并");
         return waitFor(function () { return modalText().indexOf("待决议 1 行") >= 0; }, 20);
       }).then(function () {
@@ -1035,7 +1036,7 @@
       });
       var testApp = settingsApp(true);
       testApp.can = function () { return true; };
-      var inst = r.mountView(MC.views.configv3(testApp));
+      var inst = r.mountView(MC.views.configv3(testApp, { query: { config: "cfg-1" } }));
       function waitFor(fn, n) { return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); }); }
       function tab(text) {
         var b = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === text; })[0];
@@ -1045,7 +1046,7 @@
         tab("模板导出");
         return waitFor(function () { return inst.el.textContent.indexOf("预览导出") >= 0; }, 20);
       }).then(function () {
-        ok(inst.el.textContent.indexOf("配置修订") >= 0 && inst.el.textContent.indexOf("模板文件") >= 0, "导出控件");
+        ok(inst.el.textContent.indexOf("配置修订") >= 0 && inst.el.querySelector('[aria-label="模板文件"]'), "导出控件与可访问名称");
         ok(inst.el.textContent.indexOf("tpl.json") >= 0, "模板文件选择");
         tab("配置历史");
         return waitFor(function () { return inst.el.textContent.indexOf("merge_commit") >= 0; }, 20);
@@ -1080,7 +1081,7 @@
       });
       var testApp = settingsApp(true);
       testApp.can = function () { return true; };
-      var inst = r.mountView(MC.views.configv3(testApp));
+      var inst = r.mountView(MC.views.configv3(testApp, { query: { config: "cfg-1" } }));
       function waitFor(fn, n) { return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); }); }
       return waitFor(function () { return inst.el.textContent.indexOf("配置历史") >= 0; }, 20).then(function () {
         var tab = [].slice.call(inst.el.querySelectorAll("button")).filter(function (b) { return b.textContent.trim() === "配置历史"; })[0];
@@ -1141,7 +1142,7 @@
       });
       var testApp = settingsApp(true);
       testApp.can = function () { return true; };
-      var inst = r.mountView(MC.views.configv3(testApp));
+      var inst = r.mountView(MC.views.configv3(testApp, { query: { config: "cfg-1" } }));
       function waitFor(fn, n) { return tick().then(function () { if (fn()) return true; if (!n) return false; return waitFor(fn, n - 1); }); }
       function tab(text) { var b = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === text; })[0]; ok(b, "缺少 " + text); b.click(); }
       return waitFor(function () { return inst.el.textContent.indexOf("版本演进") >= 0; }, 20).then(function () {
@@ -1156,9 +1157,9 @@
       }).then(function () {
         ok(inst.el.textContent.indexOf("P0") < 0, "翻页不保留旧页行");
         tab("参数树");
-        return waitFor(function () { return inst.el.textContent.indexOf("目录分组模式") >= 0 && inst.el.textContent.indexOf("G0 (4900)") >= 0; }, 20);
+        return waitFor(function () { return !!inst.el.querySelector(".cv-param-folders") && !inst.el.querySelector(".vtree") && inst.el.textContent.indexOf("G0 · 4900") >= 0; }, 20);
       }).then(function () {
-        var dir = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === "G0 (4900)"; })[0];
+        var dir = [].slice.call(inst.el.querySelectorAll("button")).filter(function (x) { return x.textContent.trim() === "G0 · 4900"; })[0];
         dir.click();
         return waitFor(function () { return inst.el.textContent.indexOf("DirParam0") >= 0; }, 20);
       }).then(function () {
@@ -1205,7 +1206,7 @@
           return Promise.resolve({ items: [] });
         },
       });
-      var inst = r.mountView(MC.views.configv3(settingsApp(false)));
+      var inst = r.mountView(MC.views.configv3(settingsApp(false), { query: { config: "cfg-1" } }));
       function waitFor(fn, n) {
         return tick().then(function () {
           if (fn()) return true;
@@ -1225,6 +1226,11 @@
         return waitFor(function () { return inst.el.querySelector(".vtree") && inst.el.textContent.indexOf("Pulse") >= 0; }, 20);
       }).then(function () {
         ok(inst.el.querySelector(".vtree"), "参数树要渲染");
+        ok(inst.el.querySelector(".vtree").clientHeight > 0, "参数树必须有可点击的可见高度");
+        var leaf = Array.prototype.filter.call(inst.el.querySelectorAll(".vtree .tr"), function (row) { return row.textContent.indexOf("Pulse") >= 0; })[0];
+        ok(leaf, "参数叶可见"); leaf.click();
+        eq(inst.el.querySelectorAll(".cv-param-data tbody tr").length, 1, "叶子选择联动右侧表格");
+        ok(inst.el.querySelector(".cv-folder-trail").textContent === "Pulse", "显示选中参数上下文");
         ok(inst.el.textContent.indexOf("Pulse") >= 0, "树要有参数叶");
         ok(inst.el.textContent.indexOf("G / Sub") >= 0 || inst.el.textContent.indexOf("G") >= 0, "树/详情保留完整层级");
       });
@@ -4208,8 +4214,8 @@
       if (method === "GET" && /\/sync\/sources$/.test(path)) return Promise.resolve({ items: rows.slice(), total: 2, next_cursor: null });
       if (method === "GET" && /\/connections$/.test(path)) return Promise.resolve({ items: [{ connection_id: "c1", name: "SDA 一", enabled: true }] });
       if (method === "GET" && /file-selector/.test(path)) return Promise.resolve({ items: [{ file_id: "file-1", name: "A.xml", current_version: "3" }] });
-      if (method === "POST" && /\/sync\/previews$/.test(path)) {
-        return Promise.resolve({ items: [{ source_id: "s1", target: { kind: "file_archive" }, binding: { file_id: "file-1" } }], excluded: [] });
+      if (method === "POST" && /\/sync\/source-tests$/.test(path)) {
+        return Promise.resolve({ status: "succeeded", message: "内容已读取并通过格式校验；未保存或更新业务文件。", items: [] });
       }
       if (method === "POST" && /\/sync\/sources$/.test(path)) {
         return Promise.resolve({ source_id: "s3", revision: 1, name: "新来源", kind: "http_file", enabled: true });
@@ -4230,7 +4236,7 @@
     return tick()
       .then(function () {
         ok(host.querySelector("[data-sync-new]"), "可写身份有新建入口");
-        ok(host.textContent.indexOf("来源状态") >= 0, "启停状态不冒充最近运行结果");
+        ok(host.textContent.indexOf("最近结果") >= 0, "展示运行核验和候选结果");
         ok(host.textContent.indexOf("核验状态未提供") >= 0, "接口没有核验数据时不声称没有核验记录");
         eq(host.querySelectorAll("[data-sync-select]").length, 2, "每行都有勾选框");
         ok(host.querySelector("[data-sync-batch]"), "有批量工具条");
@@ -4238,11 +4244,11 @@
         return tick().then(tick);
       })
       .then(function () {
-        var preview = calls.filter(function (c) { return c.method === "POST" && /\/sync\/previews$/.test(c.path); })[0];
-        ok(preview, "来源测试走只读预览");
-        eq(preview.opts.body.scope, "selected_sources");
-        eq(preview.opts.body.source_ids, ["s1"]);
-        ok(/可解析/.test(host.textContent), "测试结果显示可解析");
+        var preview = calls.filter(function (c) { return c.method === "POST" && /\/sync\/source-tests$/.test(c.path); })[0];
+        ok(preview, "来源测试调用真实内容校验接口");
+        eq(preview.opts.body.name, "A.xml");
+        ok(!preview.opts.body.source_id, "只发送来源输入字段");
+        ok(/格式校验/.test(host.textContent), "显示服务端真实测试回执");
         var checks = host.querySelectorAll("[data-sync-select]");
         checks[0].checked = true;
         checks[0].dispatchEvent(new Event("change"));
@@ -4269,7 +4275,7 @@
         host.querySelector('[data-sync-delete="s1"]').click();
         return tick().then(function () {
           var confirm = lastModal();
-          ok(confirm && confirm.textContent.indexOf("tombstone") >= 0, "删除说明 tombstone 语义");
+          ok(confirm && confirm.textContent.indexOf("历史版本、候选和运行记录都会保留") >= 0, "删除说明数据保留范围");
           modalButton(confirm, "删除来源").click();
           return tick().then(tick);
         });
@@ -4783,8 +4789,7 @@
         ok(pendingModal, "打开更换凭据表单");
         var user = pendingModal.querySelector("[data-cred-username]");
         var pwd = pendingModal.querySelector("[data-cred-password]");
-        var token = pendingModal.querySelector("[data-cred-token]");
-        eq(token.type, "password", "运维 token 是密码框");
+        ok(!pendingModal.querySelector("[data-cred-token]"), "管理员无需运维令牌");
         pendingModal.querySelector("[data-cred-submit]").click();
         eq(document.activeElement, user, "缺少账号时聚焦账号");
         ok(user.getAttribute("aria-invalid") === "true" && document.getElementById(user.getAttribute("aria-describedby")).textContent.indexOf("账号") >= 0, "账号错误关联说明");
@@ -4796,25 +4801,20 @@
         pwd.value = "super-secret-pw";
         pwd.dispatchEvent(new Event("input"));
         pendingModal.querySelector("[data-cred-submit]").click();
-        eq(document.activeElement, token, "缺少令牌时聚焦令牌");
-        ok(token.getAttribute("aria-invalid") === "true", "令牌错误关联说明");
-        token.value = "operator-token-34";
-        token.dispatchEvent(new Event("input"));
-        pendingModal.querySelector("[data-cred-submit]").click();
         return tick().then(function () {
           eq(pwd.value, "", "失败后密码框清空");
           ok(pendingModal.textContent.indexOf("super-secret-pw") < 0, "失败不回显秘密");
           ok(pendingModal.textContent.indexOf("INVALID_INPUT") >= 0, "显示安全错误码");
           ok(document.querySelector(".modal"), "失败不关闭表单");
           pendingModal.querySelector(".modal-footer .btn").click();
-          eq(token.value, "", "关闭后运维 token 清空");
+
         });
       })
       .then(function () {
         var autoBefore = inst.el.querySelector('[data-auto-relogin="conn-34"]').textContent;
         var enabled = inst.el.querySelector('[data-hb-enabled="conn-34"]');
         var interval = inst.el.querySelector('[data-hb-interval="conn-34"]');
-        var token = inst.el.querySelector('[data-hb-token="conn-34"]');
+        ok(!inst.el.querySelector("[data-hb-token]"), "保活无需运维令牌");
         interval.value = "0";
         inst.el.querySelector('[data-hb-save="conn-34"]').click();
         eq(document.activeElement, interval, "保活间隔错误定位输入");
@@ -4823,25 +4823,18 @@
         interval.value = "15";
         interval.dispatchEvent(new Event("input"));
         inst.el.querySelector('[data-hb-save="conn-34"]').click();
-        eq(document.activeElement, token, "缺少保活令牌时定位输入");
-        ok(token.getAttribute("aria-invalid") === "true", "保活令牌错误关联说明");
-        token.value = "operator-token-34";
-        token.dispatchEvent(new Event("input"));
-        inst.el.querySelector('[data-hb-save="conn-34"]').click();
         return tick().then(function () {
           var put = calls.filter(function (c) { return c.method === "PUT" && /\/heartbeat$/.test(c.path); })[0];
           ok(put, "保存保活发 PUT");
           eq(put.opts.body, { interval_minutes: 15, enabled: true, auto_relogin: true });
           eq(put.opts.headers["If-Match"], "0", "保活保存带 revision CAS");
-          eq(put.opts.headers["X-Operator-Token"], "operator-token-34");
+          ok(!put.opts.headers["X-Operator-Token"], "请求不带运维令牌");
           eq(inst.el.querySelector('[data-auto-relogin="conn-34"]').textContent, autoBefore,
             "切换保活不改变自动重登展示");
           ok(inst.el.querySelector('[data-hb-status="conn-34"]').textContent.indexOf("已启用") >= 0,
             "保活开关反映服务端返回");
           eq(calls.filter(function (c) { return c.path.indexOf("/credentials/") >= 0; }).length, 1,
             "保存保活不触碰凭据接口（只有前面的候选失败一次）");
-          token = inst.el.querySelector('[data-hb-token="conn-34"]');
-          token.value = "operator-token-34";
           inst.el.querySelector('[data-hb-run="conn-34"]').click();
           return tick();
         });
@@ -5710,6 +5703,415 @@
       ok(!inner.el.isConnected, "关闭凭据弹层");
       ok(outer.el.isConnected, "保留连接设置");
     } finally { inner.close(); outer.close(); }
+  });
+
+  test("R6：配置管理共享导航保持真实路由与当前页语义", function () {
+    var calls = [];
+    var nav = MC.configWorkspaceNav({ go: function (route) { calls.push(route); } }, "updates");
+    eq(nav.querySelectorAll("button").length, 4);
+    eq(nav.querySelector('[aria-current="page"]').textContent, "更新管理");
+    nav.querySelectorAll("button")[1].click(); nav.querySelectorAll("button")[3].click();
+    eq(calls, [{ kind: "configv3", arg: "files" }, { kind: "configv3", arg: "records" }]);
+  });
+
+  test("R6：来源目标筛选发给服务端，批量计划一次提交各自修订", function () {
+    var original = MC.api.requestV3, calls = [], inst;
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (/\/sync\/sources$/.test(path)) return Promise.resolve({ items: [{ source_id: "s1", name: "A.xml", revision: 4, enabled: true }], total: 1,
+        filters: { configurations: [{ id: "cfg1", label: "配置一" }], releases: [{ id: "rel1", label: "691" }] } });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "sources" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; }
+    return tick().then(function () {
+      var select = inst.el.querySelector('select[aria-label="全部固定配置"]');
+      select.value = "cfg1"; select.dispatchEvent(new Event("change")); return tick();
+    }).then(function () {
+      var list = calls.filter(function (call) { return /\/sync\/sources$/.test(call.path); });
+      eq(list[list.length - 1].opts.query.configuration_id, "cfg1");
+      var check = inst.el.querySelector("[data-sync-select]"); check.checked = true; check.dispatchEvent(new Event("change"));
+      inst.el.querySelector("[data-sync-batch-plan]").click();
+      var modal = lastModal();
+      modal.querySelector("[data-sync-batch-plan-save]").click(); return tick();
+    }).then(function () {
+      var save = calls.filter(function (call) { return /source-policy-batches$/.test(call.path); });
+      eq(save.length, 1); eq(save[0].opts.body, { updates: [{ source_id: "s1", expected_revision: 4, schedule_mode: "inherit", interval_hours: null }] });
+      done();
+    }).catch(function (err) { done(); throw err; });
+  });
+
+  test("R6：编辑中测试发送未保存输入且不保存来源", function () {
+    var original = MC.api.requestV3, calls = [], inst;
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ method: method, path: path, opts: opts || {} });
+      if (/\/sync\/sources$/.test(path)) return Promise.resolve({ items: [], total: 0 });
+      if (/file-selector$/.test(path)) return Promise.resolve({ items: [{ file_id: "f1", name: "A.xml" }] });
+      if (/source-tests$/.test(path)) return Promise.resolve({ status: "failed", message: "服务器不可达，输入已保留" });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "sources" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; }
+    return tick().then(function () { inst.el.querySelector("[data-sync-new]").click(); return tick(); }).then(function () {
+      var modal = lastModal(), inputs = modal.querySelectorAll("input.input");
+      eq(getComputedStyle(modal.querySelector("[data-sync-connection]").parentElement).display, "none", "HTTP 地址不显示 SDA 连接");
+      ok(modal.querySelector(".sync-source-advanced"), "记录和匹配规则保留在高级设置");
+      inputs[0].value = "Current.xml"; inputs[0].dispatchEvent(new Event("input"));
+      inputs[1].value = "https://example.invalid/unsaved.xml"; inputs[1].dispatchEvent(new Event("input"));
+      var target = modal.querySelector("[data-sync-target-file]"); target.value = "f1"; target.dispatchEvent(new Event("change"));
+      modal.querySelector("[data-sync-test-input]").click(); return tick();
+    }).then(function () {
+      var request = calls.filter(function (call) { return /source-tests$/.test(call.path); })[0];
+      eq(request.opts.body.resource_ref, "https://example.invalid/unsaved.xml");
+      ok(lastModal().textContent.indexOf("服务器不可达") >= 0);
+      eq(lastModal().querySelectorAll("input.input")[0].value, "Current.xml");
+      eq(calls.filter(function (call) { return call.method === "PATCH" || call.method === "POST" && /\/sync\/sources$/.test(call.path); }).length, 0);
+      var kind = lastModal().querySelector("[data-sync-kind]"); kind.value = "sda_file"; kind.dispatchEvent(new Event("change"));
+      ok(lastModal().querySelectorAll("input.input")[1].readOnly, "SDA 稳定标识由目录选择填入，不能手工猜测");
+      ok(getComputedStyle(lastModal().querySelector("[data-sync-connection]").parentElement).display !== "none", "SDA 显示连接选择");
+      done();
+    }).catch(function (err) { done(); throw err; });
+  });
+
+  test("R6：运行取消失败可重试，成功只宣称请求已提交", function () {
+    var original = MC.api.requestV3, inst, writes = 0;
+    var run = { run_id: "run-one", state: "queued", counts: { total: 1 }, trigger: "manual" };
+    MC.api.requestV3 = function (method, path) {
+      if (/\/cancel$/.test(path)) { writes++; return writes === 1 ? Promise.reject({ message: "临时失败" }) : Promise.resolve({ run: run }); }
+      if (/\/runs$/.test(path)) return Promise.resolve({ items: [{ run: run }], total: 1 });
+      if (/\/runs\/run-one$/.test(path)) return Promise.resolve({ run: run, items: [] });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "runs" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; }
+    return tick().then(function () { inst.el.querySelector("[data-sync-run]").click(); return tick(); }).then(function () {
+      lastModal().querySelector("[data-sync-run-cancel]").click(); modalButton(lastModal(), "取消运行").click(); return tick();
+    }).then(function () {
+      ok(lastModal().textContent.indexOf("临时失败") >= 0); ok(!lastModal().querySelector("[data-sync-run-cancel]").disabled);
+      lastModal().querySelector("[data-sync-run-cancel]").click(); modalButton(lastModal(), "取消运行").click(); return tick();
+    }).then(function () { eq(writes, 2); ok(document.body.textContent.indexOf("取消请求已提交") >= 0); done(); }).catch(function (err) { done(); throw err; });
+  });
+
+  test("R6：未知原来源的对象形状可渲染，决议前禁止写入", function () {
+    var original = MC.api.requestV3, inst;
+    MC.api.requestV3 = function (method, path) {
+      if (/\/candidates$/.test(path)) return Promise.resolve({ items: [{ candidate_id: "c1", source_id: "s1", profile_id: "default", state: "pending", file_version_id: "v1" }], total: 1 });
+      if (/\/configs$/.test(path)) return Promise.resolve({ items: [{ config_id: "cfg1", name: "配置一" }] });
+      if (/\/releases$/.test(path)) return Promise.resolve({ items: [{ release_id: "rel1", version: "691" }] });
+      if (/apply-preview$/.test(path)) return Promise.resolve({ preview_id: "prv1", base: {}, base_known: false, needs_decision: ["p1"], can_apply: false,
+        items: [{ parameter_id: "p1", name: "参数一", action: "conflict", ours: { value: { type: "int", text: "1" } }, theirs: { value: { type: "int", text: "2" } }, allowed: ["use_new", "inherit_old", "manual"] }], blockers: [] });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "candidates" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; }
+    return tick().then(function () { inst.el.querySelector('[data-sync-candidate="c1"] button').click(); return tick().then(tick); }).then(function () {
+      lastModal().querySelector("[data-sync-preview]").click(); return tick();
+    }).then(function () {
+      var modal = lastModal(); ok(modal.querySelector("[data-sync-diff]")); ok(modal.textContent.indexOf("原来源未知") >= 0);
+      ok(modal.querySelector("[data-sync-apply]").disabled);
+      var select = modal.querySelector("[data-sync-decision]"); select.value = "use_new"; select.dispatchEvent(new Event("change"));
+      ok(!modal.querySelector("[data-sync-apply]").disabled); done();
+    }).catch(function (err) { done(); throw err; });
+  });
+
+  test("R6：配置文件使用唯一文件 API 分页，配置记录使用既有事件 API", function () {
+    var original = MC.api.getV3, calls = [], inst;
+    MC.api.getV3 = function (path, query) {
+      calls.push({ path: path, query: query || {} });
+      if (/file-selector$/.test(path)) return Promise.resolve({ items: [{ name: "A.xml", file_id: "f1", version_id: "v1", format: "xml" }], total: 51 });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.configv3(app, { arg: "files" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); MC.api.getV3 = original; cleanOverlays(); }
+    return tick().then(function () {
+      ok(inst.el.textContent.indexOf("A.xml") >= 0);
+      modalButton(inst.el, "下一页").click(); return tick();
+    }).then(function () {
+      var pages = calls.filter(function (call) { return /file-selector$/.test(call.path); }); eq(pages[pages.length - 1].query.offset, 50);
+      inst.update({ arg: "records" }); return tick();
+    }).then(function () { ok(calls.some(function (call) { return /\/profiles\/default\/events$/.test(call.path); })); done(); }).catch(function (err) { done(); throw err; });
+  });
+
+  test("R6：运行搜索在服务端分页前生效，失败过滤和复制错误可恢复", function () {
+    var original = MC.api.requestV3, originalCopy = MC.util.copyText, calls = [], copied = "", copyOk = false, inst;
+    var run = { run_id: "run-filter", state: "partial", trigger: "manual", counts: { total: 2, failed: 1, succeeded: 1 } };
+    MC.util.copyText = function (value) { copied = value; return Promise.resolve(copyOk); };
+    MC.api.requestV3 = function (method, path, opts) {
+      calls.push({ path: path, opts: opts || {} });
+      if (/\/runs$/.test(path)) return Promise.resolve({ items: [{ run: run }], total: 1 });
+      if (/\/runs\/run-filter$/.test(path)) return Promise.resolve({ run: run, items: [{ item_id: "ok", source_id: "s-ok", state: "succeeded", name: "ok.xml" }, { item_id: "bad", source_id: "s-bad", state: "failed", name: "target.xml" }] });
+      if (/\/events$/.test(path)) return Promise.resolve({ items: [{ seq: 1, item_id: "ok", message: "successful-log" }, { seq: 2, item_id: "bad", message: "failed-log" }] });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "runs" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; MC.util.copyText = originalCopy; }
+    return tick().then(function () {
+      var query = inst.el.querySelector('input[aria-label="搜索运行或来源文件"]'); query.value = "target.xml"; query.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })); return tick();
+    }).then(function () {
+      var check = inst.el.querySelector(".sync-filters label input"); check.checked = true; check.dispatchEvent(new Event("change")); return tick();
+    }).then(function () {
+      var lists = calls.filter(function (call) { return /\/runs$/.test(call.path); }); eq(lists[lists.length - 1].opts.query.q, "target.xml"); eq(lists[lists.length - 1].opts.query.failed_only, true);
+      inst.el.querySelector("[data-sync-run]").click(); return tick();
+    }).then(function () {
+      var modal = lastModal(), only = modal.querySelector("[data-sync-run-failures]"); only.checked = true; only.dispatchEvent(new Event("change"));
+      eq(getComputedStyle(modal.querySelector('[data-sync-run-item="ok"]')).display, "none");
+      ok(modal.querySelector(".sync-log-body").textContent.indexOf("successful-log") < 0);
+      modal.querySelector("[data-sync-copy-diagnostics]").click(); return tick().then(tick);
+    }).then(function () {
+      ok(lastModal().querySelector("[data-sync-download-error]").textContent.indexOf("剪贴板不可用") >= 0);
+      copyOk = true; lastModal().querySelector("[data-sync-copy-diagnostics]").click(); return tick().then(tick);
+    }).then(function () { eq(JSON.parse(copied).run.run_id, "run-filter"); eq(JSON.parse(copied).events.length, 2); ok(lastModal().querySelector("[data-sync-download-error]").hidden); done(); }).catch(function (err) { done(); throw err; });
+  });
+
+  test("R6：运行详情刷新状态与操作，保留失败筛选", function () {
+    var original = MC.api.requestV3, inst, phase = "succeeded";
+    var queued = { run_id: "run-live-state", state: "queued", trigger: "manual", counts: { total: 1 } };
+    MC.api.requestV3 = function (method, path) {
+      if (/\/runs$/.test(path)) return Promise.resolve({ items: [{ run: queued }], total: 1 });
+      if (/\/runs\/run-live-state$/.test(path)) return Promise.resolve({ run: { run_id: queued.run_id, state: phase, trigger: "manual", counts: { total: 1, succeeded: phase === "succeeded" ? 1 : 0, failed: phase === "failed" ? 1 : 0 } }, items: [{ item_id: "one", source_id: "source-one", name: "One.xml", state: phase }] });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "runs" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; }
+    return tick().then(function () { var trigger = inst.el.querySelector("[data-sync-run] button"); trigger.focus(); trigger.click(); return tick(); }).then(function () {
+      var modal = lastModal();
+      ok(modal.querySelector(".modal-sub").textContent.indexOf("已完成") >= 0, "最新 manifest 覆盖打开时的排队状态");
+      eq(getComputedStyle(modal.querySelector("[data-sync-run-cancel]")).display, "none");
+      eq(getComputedStyle(modal.querySelector("[data-sync-retry]")).display, "none");
+      var filter = modal.querySelector("[data-sync-run-failures]"); filter.checked = true; filter.dispatchEvent(new Event("change"));
+      phase = "failed";
+      modal.querySelector("[data-sync-detail-refresh]").click(); return tick();
+    }).then(function () {
+      var modal = lastModal();
+      ok(modal.querySelector(".modal-sub").textContent.indexOf("失败 1") >= 0);
+      ok(getComputedStyle(modal.querySelector("[data-sync-retry]")).display !== "none");
+      ok(modal.querySelector("[data-sync-run-failures]").checked);
+      ok(!modal.querySelector("[data-sync-detail-refresh]").disabled);
+      modalButton(modal, "关闭").click(); return tick().then(tick);
+    }).then(function () {
+      eq(document.activeElement, inst.el.querySelector("[data-sync-run] button"), "刷新列表后焦点回到运行入口");
+      done();
+    }).catch(function (err) { done(); throw err; });
+  });
+
+  test("配置列表：点击重试不把事件当 ID，空列表和失效配置不是加载失败", function () {
+    var previous = MC.workspaces.scopeId(); MC.workspaces.setActive("default");
+    var runner = productionRun();
+    return runner.run(function (r) {
+      var base = "/api/v3/workspaces/default/profiles/default/configs", failed = true, items = [], detailCalls = [];
+      r.useApi({ getV3: function (path) {
+        if (path === base) return failed ? Promise.reject({ code: "NETWORK_ERROR", message: "连接失败" }) : Promise.resolve({ items: items });
+        detailCalls.push(path);
+        if (path === base + "/cfg-present") return Promise.resolve({ config: { config_id: "cfg-present", name: "可用配置", releases: [] } });
+        return Promise.resolve({ items: [], nodes: [], edges: [], baselines: [] });
+      } });
+      var inst = r.mountView(MC.views.configv3(settingsApp(true)));
+      return tick().then(function () {
+        ok(inst.el.textContent.indexOf("加载失败") >= 0, "真实请求失败仍有错误反馈");
+        failed = false;
+        Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent.indexOf("重试") >= 0; })[0].click(); return tick();
+      }).then(function () {
+        eq(detailCalls.length, 0, "空列表重试不请求事件对象对应的配置");
+        ok(inst.el.textContent.indexOf("创建第一组固定配置") >= 0);
+        ok(inst.el.textContent.indexOf("加载失败") < 0);
+        items = [{ config_id: "cfg-present", name: "可用配置", code: "P", release_count: 0 }];
+        inst = r.mountView(MC.views.configv3(settingsApp(true), { query: { config: "cfg-deleted" } })); return tick();
+      }).then(function () {
+        ok(inst.el.textContent.indexOf("该配置已不存在") >= 0);
+        ok(inst.el.textContent.indexOf("加载失败") < 0);
+        eq(detailCalls.length, 0, "不反复请求已从权威列表移除的 ID");
+        Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent === "查看配置列表"; })[0].click(); return tick();
+      }).then(function () { ok(inst.el.textContent.indexOf("可用配置") >= 0); eq(detailCalls.length, 0, "目录页不自动打开详情"); });
+    }).then(function () { MC.workspaces.setActive(previous); }, function (err) { MC.workspaces.setActive(previous); throw err; });
+  });
+
+  test("连接重排：切换与刷新保留各自草稿，保存不跳过原修订冲突", function () {
+    var original = MC.api.requestV3, inst, revision = 1, submitted, acceptSave = false;
+    MC.api.requestV3 = function (method, path, opts) {
+      if (method === "PUT" && /\/heartbeat$/.test(path)) { submitted = opts; return acceptSave ? Promise.resolve(Object.assign({ revision: 10 }, opts.body)) : Promise.reject({ code: "REVISION_CONFLICT", message: "设置已被其他管理员修改" }); }
+      if (/\/connections$/.test(path)) return Promise.resolve({ items: ["a", "b"].map(function (id) { return { connection_id: id, name: "连接 " + id, origin: "https://example.invalid", enabled: true, credential: { state: "valid", auth_epoch: 2 } }; }) });
+      if (/\/heartbeat$/.test(path)) return Promise.resolve({ revision: revision, enabled: true, interval_minutes: 10, auto_relogin: true });
+      return Promise.resolve({ items: [] });
+    };
+    var app = settingsApp(true); app.can = function () { return true; };
+    inst = MC.views.updates(app, { arg: "connections" }); document.body.appendChild(inst.el);
+    function done() { inst.destroy(); inst.el.remove(); cleanOverlays(); MC.api.requestV3 = original; }
+    return tick().then(function () {
+      ok(!inst.el.querySelector(".sync-strip"), "状态不再单占一行");
+      ok(inst.el.querySelector(".sync-head [data-sync-connections]"), "连接入口应在标题行");
+      ok(!lastModal().querySelector("table"), "连接信息不用窄抽屉表格");
+      var input = inst.el.querySelector('[data-hb-interval="a"]'); input.value = "17"; input.dispatchEvent(new Event("input"));
+      var picker = inst.el.querySelector('select[aria-label="选择连接"]'); picker.value = "b"; picker.dispatchEvent(new Event("change"));
+      eq(inst.el.querySelector('[data-hb-interval="b"]').value, "10");
+      picker = inst.el.querySelector('select[aria-label="选择连接"]'); picker.value = "a"; picker.dispatchEvent(new Event("change"));
+      eq(inst.el.querySelector('[data-hb-interval="a"]').value, "17");
+      revision = 9; inst.el.querySelector("[data-connections-refresh]").click(); return tick();
+    }).then(function () {
+      eq(inst.el.querySelector('[data-hb-interval="a"]').value, "17");
+      ok(lastModal().querySelector('.modal-footer [data-hb-save="a"]'), "保存设置固定在底部");
+      inst.el.querySelector('[data-hb-save="a"]').click(); return tick();
+    }).then(function () {
+      eq(submitted.headers["If-Match"], "1");
+      ok(Array.prototype.some.call(lastModal().querySelectorAll(".form-error"), function (node) { return node.textContent && node.style.display !== "none"; }), "409 错误应显示");
+      eq(inst.el.querySelector('[data-hb-interval="a"]').value, "17");
+      inst.el.querySelector("[data-sync-sheet-close]").click();
+      inst.el.querySelector("[data-sync-connections]").click();
+      eq(inst.el.querySelector('[data-hb-interval="a"]').value, "17");
+      ok(inst.isDirty(), "连接草稿应标记未保存");
+      ok(lastModal().textContent.indexOf("当前服务器：保活开启 · 10 分钟") >= 0);
+      ok(lastModal().textContent.indexOf("您的设置：保活开启 · 17 分钟") >= 0);
+      inst.el.querySelector('[data-hb-confirm-revision="a"]').click();
+      acceptSave = true;
+      inst.el.querySelector('[data-hb-save="a"]').click(); return tick();
+    }).then(function () {
+      eq(submitted.headers["If-Match"], "9", "明确核对后才采用最新修订");
+      eq(submitted.body.interval_minutes, 17);
+      ok(!inst.isDirty(), "成功保存后清除对应连接草稿"); done();
+    }).catch(function (err) { done(); throw err; });
+  });
+
+  function configPrototypeFixture(r, frozen) {
+    var base = "/api/v3/workspaces/default/profiles/default/configs", requests = [], reads = [], previews = 0;
+    var param = { parameter_id: "p-one", name: "速度", directory: ["运动"], type: "number", unit: "mm/s" };
+    var values = { "p-one": { membership: "included", enabled: true, value_state: "present", value: "0" } };
+    var release = { release_id: "rel-one", version: "690", order: 1, definition_revision: 1, default_revision_id: frozen ? "d0-rel-one" : null, d0: { frozen: !!frozen, revision: 7, values: values } };
+    r.useApi({ getV3: function (path) {
+      reads.push(path);
+      if (path === base) return Promise.resolve({ items: [{ config_id: "cfg-one", name: "运行配置", code: "RUN", release_count: 1, parameter_count: 1, machine_count: 1, latest_release: { version: "690", frozen: frozen } }] });
+      if (path === base + "/cfg-one") return Promise.resolve({ config: { config_id: "cfg-one", name: "运行配置", code: "RUN", releases: [release] } });
+      if (path.indexOf("/parameters") >= 0) return Promise.resolve({ items: [param], total: 1 });
+      if (path.indexOf("/parameter-tree") >= 0) return Promise.resolve({ directories: [{ name: "运动", path: "运动", count: 1, has_children: false }], items: [], parameter_total: 0 });
+      if (path.indexOf("/branches/main") >= 0) return Promise.resolve({ baselines: [{ baseline_id: "bl-one", label: "B1", release_id: "rel-one", source_revision_id: "d0-rel-one" }] });
+      if (path.indexOf("/machines") >= 0) return Promise.resolve({ items: [{ machine_id: "machine-one", machine_no: "MC-001", release_id: "rel-one", head_id: "mr-one", revisions: [{ revision_id: "mr-one", label: "r1", release_id: "rel-one", base_revision_id: "bl-one" }] }] });
+      if (path.indexOf("/drafts/d0-") >= 0) return Promise.resolve({ revision: 7, values: values });
+      if (path.indexOf("/revisions/") >= 0) return Promise.resolve({ snapshot: { values: { "p-one": { membership: "included", enabled: true, value_state: "present", value: "9" } } } });
+      if (path.indexOf("/bindings") >= 0) return Promise.resolve({ binding_set: { bindings: { one: { parameter_id: "p-one", locator: "json:/Speed" } } } });
+      if (path.indexOf("/file-selector") >= 0) return Promise.resolve({ items: [{ version_id: "file-version", name: "template.json" }] });
+      if (path.indexOf("/overview") >= 0) return Promise.resolve({ columns: [], rows: [], total: 0 });
+      return Promise.resolve({ items: [] });
+    }, requestV3: function (method, path, options) {
+      requests.push({ method: method, path: path, options: options });
+      if (method === "PATCH") return Promise.reject({ code: "REVISION_CONFLICT", message: "并发更新", status: 409 });
+      if (path.indexOf("/commit") >= 0) return Promise.resolve({ artifact: { artifact_id: "artifact-one", filename: "result.json" } });
+      if (path.indexOf("/export-plans") >= 0) { previews++; return Promise.resolve({ plan: { plan_id: "plan-" + previews, preview_token: "token-" + previews, applied: 1, mapping_total: 1, mapping: [{ parameter_id: "p-one", name: "速度", locator: "json:/Speed", value: "0" }], preview: '{"Speed":0}' } }); }
+      return Promise.resolve({});
+    } });
+    return { reads: reads, requests: requests };
+  }
+
+  test("参数目录：无子目录不显示展开按钮，目录名称仍可选择", function () {
+    var t = productionRun();
+    return t.run(function (r) {
+      configPrototypeFixture(r, false);
+      var app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(app, { query: { config: "cfg-one", tab: "workbench" } }));
+      function wait(n) { return tick().then(function () { if (!inst.el.querySelector('[aria-label="选择目录 运动"]') && n) return wait(n - 1); }); }
+      return wait(20).then(function () {
+        ok(inst.el.querySelector('[aria-label="选择目录 运动"]'), "叶目录保留选择按钮");
+        ok(!inst.el.querySelector('[aria-label="展开 运动"], [aria-label="折叠 运动"]'), "无子目录不得伪装成可展开节点");
+      });
+    });
+  });
+
+  test("配置原型：目录先于详情，泳道选择真实修订，返回不自动重开", function () {
+    var runner = productionRun();
+    return runner.run(function (r) {
+      var fixture = configPrototypeFixture(r, true), app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(app));
+      function button(text) { return Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent.trim() === text; })[0]; }
+      return tick().then(function () {
+        eq(fixture.reads.length, 1, "目录不为每行提前请求全部详情");
+        ok(inst.el.querySelector(".cv-catalog-table")); ok(!inst.el.querySelector(".cv-graph-canvas"));
+        button("打开配置").click(); return tick().then(tick);
+      }).then(function () {
+        eq(inst.el.querySelectorAll("[data-config-revision]").length, 3, "D0、B1、机台 r1 泳道节点");
+        inst.el.querySelector('[data-config-revision="mr-one"]').click(); return tick().then(tick);
+      }).then(function () {
+        ok(fixture.reads.some(function (path) { return /\/revisions\/mr-one$/.test(path); }), "读取已选不可变机台快照");
+        button("参数工作台").click();
+        ok(inst.el.querySelector(".cv-param-data").textContent.indexOf("9") >= 0);
+        ok(!inst.el.querySelector('.cv-param-data input[aria-label="速度的配置值"]'), "历史机台值只读");
+        inst.el.querySelector(".cv-breadcrumb button").click();
+        ok(inst.el.querySelector(".cv-catalog-table")); ok(!inst.el.querySelector(".cv-graph-canvas"));
+      });
+    });
+  });
+
+  test("配置原型：视图切换与 409 保留逐 ID 草稿，取消离开仍可编辑", function () {
+    var runner = productionRun();
+    return runner.run(function (r) {
+      var fixture = configPrototypeFixture(r, false), app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(app, { query: { config: "cfg-one", tab: "workbench" } }));
+      function button(text) { return Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent.trim() === text; })[0]; }
+      return tick().then(tick).then(function () {
+        var input = inst.el.querySelector('[aria-label="速度的配置值"]'); eq(input.value, "0"); input.value = "17"; input.dispatchEvent(new Event("input"));
+        button("参数树").click(); return tick().then(tick);
+      }).then(function () {
+        eq(inst.el.querySelector('[aria-label="速度的配置值"]').value, "17", "切视图保留输入");
+        button("保存值").click(); return tick().then(tick);
+      }).then(function () {
+        eq(fixture.requests[0].options.body.expected_revision, 7);
+        eq(fixture.requests[0].options.body.items.length, 1);
+        eq(fixture.requests[0].options.body.items[0].value, "17");
+        eq(inst.el.querySelector('[aria-label="速度的配置值"]').value, "17"); ok(inst.isDirty(), "409 保留修改及离开保护");
+        inst.update({ arg: "configs", query: {} });
+        modalButton(lastModal(), "继续编辑").click();
+        ok(inst.el.querySelector('[aria-label="速度的配置值"]'));
+      });
+    });
+  });
+
+  test("配置原型：更改模板映射立即失效预览，再预览后才使用新令牌生成文件", function () {
+    var runner = productionRun();
+    return runner.run(function (r) {
+      var fixture = configPrototypeFixture(r, true), app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(app, { query: { config: "cfg-one", tab: "export" } }));
+      function button(text) { return Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent.trim() === text; })[0]; }
+      return tick().then(tick).then(function () { button("预览导出").click(); return tick().then(tick); }).then(function () {
+        var commit = inst.el.querySelector("[data-export-commit]"); ok(!commit.disabled);
+        var mapping = inst.el.querySelector('[aria-label="速度的模板落点"]'); mapping.value = "json:/Other"; mapping.dispatchEvent(new Event("input"));
+        ok(commit.disabled, "修改后不能提交旧预览"); commit.click(); eq(fixture.requests.length, 1);
+        button("预览导出").click(); return tick().then(tick);
+      }).then(function () {
+        eq(fixture.requests[1].options.body.mappings["p-one"], "json:/Other");
+        inst.el.querySelector("[data-export-commit]").click(); return tick().then(tick);
+      }).then(function () {
+        eq(fixture.requests[2].options.body.preview_token, "token-2");
+        ok(inst.el.querySelector("[data-export-download]"));
+      });
+    });
+  });
+
+  test("配置原型：未保存表单 Esc 确认可取消，主标签方向键切换并返回焦点", function () {
+    var runner = productionRun();
+    return runner.run(function (r) {
+      var fixture = configPrototypeFixture(r, false), app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(app));
+      function button(text) { return Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent.trim() === text; })[0]; }
+      return tick().then(function () {
+        button("新建固定配置").click();
+        var form = lastModal(), input = form.querySelector("input"); input.value = "NEW_CONFIG"; input.dispatchEvent(new Event("input", { bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        modalButton(lastModal(), "继续编辑").click();
+        ok(document.body.contains(form)); eq(input.value, "NEW_CONFIG");
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        modalButton(lastModal(), "放弃修改").click();
+        return tick().then(function () { ok(!document.body.contains(form)); eq(fixture.requests.length, 0); button("打开配置").click(); return tick().then(tick); });
+      }).then(function () {
+        var tab = inst.el.querySelector('.cv-tabs [aria-selected="true"]'); tab.focus(); tab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        eq(inst.el.querySelector('.cv-tabs [aria-selected="true"]').textContent.trim(), "参数工作台");
+        eq(document.activeElement.textContent.trim(), "参数工作台");
+        var panel = inst.el.querySelector('[role="tabpanel"]');
+        eq(panel.getAttribute("aria-labelledby"), document.activeElement.id);
+      });
+    });
   });
 
   /* 队尾先让出一个**宏任务**边界再汇总：V8 的 unhandledrejection 派发排在微任务链

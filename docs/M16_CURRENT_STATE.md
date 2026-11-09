@@ -1,5 +1,7 @@
 # M16 当前实现审计（M16-01 / INH-2166）
 
+> 本页为下述 SHA 的历史审计。2026-11-07 已按用户选择完成实际 collector + TLS 模拟 SDA 的本地闭环；当前 143 项前端和 824 项后端回归、现场/机台观测/持久化/流式限额边界见 [最新 R6 对照](M16_R6_UI_AUDIT.md)。历史 LOCAL-PASS 不等同于当前真实 SDA 全链路可用。
+
 > 状态：M16-01 只读审计，2026-11-02。审计 SHA：`beedeab453293237b4226d5b4582d1a5fb36194e`（`feat/mc-v3.1`，M16-00 合并后）。
 > 设计基线：`docs/MCChecker_V3.1_BASELINE.md`；计划：`docs/MCChecker_V3.1_PLAN.md`；ADR：`docs/adr/ADR-012-020-v3.1-sync-contract.md`。
 > 本文件只记录真实入参、状态、写盘位置、调用方与缺口，**不写业务代码、不写生产 data**。行号对应当前审计 SHA；HEAD 移动后需重跑 `grep -n` 复核。

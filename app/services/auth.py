@@ -42,7 +42,7 @@ class Actor:
         """角色标签（§4.1）：本机访问不再显示「游客」。"""
         if self.is_admin:
             return "管理员"
-        return "成员" if self.registered else "访客"
+        return "访客"
 
 
 def deployer_ips() -> frozenset:

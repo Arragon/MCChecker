@@ -58,6 +58,7 @@ def _safe(item: Dict[str, Any]) -> Dict[str, Any]:
     payload["superseded_by"] = item.get("superseded_by")
     payload["applied_revision"] = item.get("applied_revision")
     payload["applied_at"] = item.get("applied_at")
+    payload["base_file_version_id"] = item.get("base_file_version_id")
     return payload
 
 
@@ -77,6 +78,7 @@ def create_candidate(
     target_scope: str,
     file_version_id: Optional[str] = None,
     created_at: Optional[str] = None,
+    base_file_version_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     workspace_context.assert_profile(wid, profile_id)
@@ -89,6 +91,14 @@ def create_candidate(
     version_id = validate_id(file_version_id, "file_version_id") if file_version_id else None
     if version_id:
         _file_version_exists(wid, profile_id, version_id)
+    base_version = validate_id(base_file_version_id, "base_file_version_id") if base_file_version_id else None
+    if base_version:
+        _file_version_exists(wid, profile_id, base_version)
+        with storage.use_workspace(wid), storage.use_profile(profile_id):
+            original = file_versions.find_version(profile_id, base_version)
+            incoming = file_versions.find_version(profile_id, version_id) if version_id else None
+        if incoming is None or original["file_id"] != incoming["file_id"]:
+            raise AppError(INVALID_INPUT, "原来源与新来源必须属于同一文件资源", field="base_file_version_id")
     candidate_id = make_candidate_id(sid, revision, digest, scope)
     moment = created_at or _now()
 
@@ -123,6 +133,7 @@ def create_candidate(
             file_version_id=version_id,
         )
         payload = candidate.to_dict()
+        payload["base_file_version_id"] = base_version
         payload["seen_count"] = 1
         payload["last_seen_at"] = moment
         doc["items"].append(payload)

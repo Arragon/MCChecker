@@ -1,22 +1,10 @@
-"""M16-14 采集器进程骨架（Python 3.12；INH-2179）。
+"""Independent Python 3.12 collector entry point.
 
-这个文件只属于**独立 collector 环境**，不属于主应用：主应用是 Python 3.9.11 +
-标准库，`app/`、`run.py` 与核心 `requirements.txt` 都不得 import 本目录，也不得
-把 Playwright/Chromium/cryptography 带进去。M16-14 只交付**可被受管启动/停止的
-骨架**：真正的私有 stdio IPC 帧、Playwright/Chromium 会话在 M16-15 之后接入。
-
-本骨架刻意只 import 标准库：
-
-* `--self-test`：输出**一行** JSON 自检结论（协议版本、Python 版本、浏览器可用性），
-  `ok=false` 时退出码 2，让主应用把失败原因变成可观察的 `collector_*` 原因码，
-  而不是留下一个半死的子进程。
-* 无参数：进入极简 stdio 生命周期，一次一行 JSON（`ping` / `shutdown`），
-  stdout 只允许协议行，诊断文字一律去 stderr。
-* SIGTERM/SIGINT/SIGBREAK：干净退出（Windows 上由主应用的 `taskkill /T /F`
-  负责进程树，详见 `docs/M16_COLLECTOR.md`）。
-
-**版本不在文档里猜**：Playwright/Chromium/cryptography 的精确版本必须由目标
-Windows/Linux 环境锁定并写进 `requirements.lock`；本文件只检查它们**是否可解析**。
+--self-test emits one JSON line without importing browser/crypto libraries.
+Normal operation uses the existing length-prefixed private IPC. Browser login,
+connection sessions and encrypted credentials stay in this child process.
+Stdout contains protocol frames only; no credential or exception text is echoed.
+The stdlib host never imports collector code or its third-party dependencies.
 """
 
 from __future__ import annotations
@@ -33,8 +21,8 @@ import sys
 #: 跨进程握手只认这一个字符串；`tests/test_collector_manager.py` 会对比两处字面量。
 PROTOCOL_VERSION = "m16.collector/1"
 
-#: 骨架版本；真正的 collector 版本随 bundle 一起发布（M16-42）。
-COLLECTOR_VERSION = "0.1.0-skeleton"
+#: Runtime implementation version; production platform bundle validation is separate.
+COLLECTOR_VERSION = "0.2.0"
 
 #: 采集器环境的最低 Python 版本；主应用仍是 3.9。
 MIN_PYTHON = (3, 12)
@@ -120,48 +108,96 @@ def _install_stop_handlers():
 
 
 def _serve_stdio():
-    """极简生命周期：一次一行 JSON；不带 request_id 时不回显。"""
-    _install_stop_handlers()
-    while True:
-        line = sys.stdin.readline()
-        if not line:
-            return EXIT_OK
-        try:
-            frame = json.loads(line)
-        except ValueError:
-            _write_frame({"ok": False, "reason_code": REASON_INVALID_PAYLOAD})
-            continue
-        if not isinstance(frame, dict):
-            _write_frame({"ok": False, "reason_code": REASON_INVALID_PAYLOAD})
-            continue
+    """Length-prefixed IPC; Playwright stays on this thread, input/cancel on a reader."""
+    import queue
+    import threading
+    from datetime import datetime, timezone
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from collector import ipc
+    from collector.runtime import Runtime
 
-        request_id = frame.get("request_id")
-        operation = frame.get("op")
-        if operation == "ping":
-            response = {
-                "ok": True,
-                "op": "ping",
-                "protocol_version": PROTOCOL_VERSION,
-                "collector_version": COLLECTOR_VERSION,
-                "python_version": platform.python_version(),
-            }
-        elif operation == "shutdown":
-            response = {"ok": True, "op": "shutdown", "request_id": request_id}
-            _write_frame(response)
-            return EXIT_OK
-        else:
-            response = {
-                "ok": False,
-                "op": operation,
-                "reason_code": REASON_UNSUPPORTED_OPERATION,
-            }
-        if request_id is not None:
-            response["request_id"] = request_id
-        _write_frame(response)
+    _install_stop_handlers()
+    pending = queue.Queue(maxsize=32)
+    cancellations = {}
+    lock = threading.Lock()
+    stopping = threading.Event()
+
+    def receive():
+        try:
+            while not stopping.is_set():
+                frame = ipc.read_frame(sys.stdin.buffer)
+                if frame is None or frame.get("type") == "shutdown":
+                    stopping.set()
+                    with lock:
+                        for event in cancellations.values():
+                            event.set()
+                    pending.put(None)
+                    return
+                request_id = frame.get("request_id")
+                with lock:
+                    if frame.get("type") == "cancel":
+                        if request_id in cancellations:
+                            cancellations[request_id].set()
+                        continue
+                    event = threading.Event()
+                    cancellations[request_id] = event
+                pending.put((frame, event))
+        except Exception:
+            stopping.set()
+            pending.put(None)
+
+    threading.Thread(target=receive, daemon=True, name="collector-input").start()
+    runtime = Runtime()
+    instance = None
+    try:
+        while not stopping.is_set():
+            entry = pending.get()
+            if entry is None:
+                break
+            request, cancel = entry
+            request_id = request.get("request_id")
+            try:
+                if request.get("type") != "request" or request.get("protocol_version") != ipc.PROTOCOL_VERSION:
+                    raise ValueError("protocol_mismatch")
+                received_instance = request.get("collector_instance_id")
+                if not received_instance or instance is not None and received_instance != instance:
+                    raise ValueError("protocol_mismatch")
+                if not isinstance(request_id, str) or not 1 <= len(request_id) <= 100:
+                    raise ValueError("protocol_mismatch")
+                instance = received_instance
+                deadline = datetime.strptime(request["deadline_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) >= deadline:
+                    raise TimeoutError()
+                payload = runtime.handle(request, cancel)
+                if cancel.is_set():
+                    raise InterruptedError()
+                if datetime.now(timezone.utc) >= deadline:
+                    raise TimeoutError()
+                raw = payload.pop("content", None)
+                if isinstance(raw, bytes):
+                    ipc.write_frame(sys.stdout.buffer, {"type": "meta", "request_id": request_id,
+                        "collector_instance_id": instance, "result": payload})
+                else:
+                    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+                for frame in ipc.chunk_frames(request_id, raw):
+                    ipc.write_frame(sys.stdout.buffer, frame)
+            except Exception as exc:
+                reason = getattr(exc, "reason_code", None)
+                if not reason:
+                    reason = "collector_timeout" if isinstance(exc, TimeoutError) else "canceled" if isinstance(exc, InterruptedError) else "invalid_payload"
+                # Never echo exception text: it may contain credentials, cookies or a response.
+                ipc.write_frame(sys.stdout.buffer, {"type": "error", "request_id": request_id, "reason_code": reason, "message": "collector request failed"})
+            finally:
+                with lock:
+                    cancellations.pop(request_id, None)
+    finally:
+        stopping.set()
+        runtime.close()
+    return EXIT_OK
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="MCChecker collector skeleton (M16-14)")
+    parser = argparse.ArgumentParser(description="MCChecker independent collector")
     parser.add_argument(
         "--self-test",
         action="store_true",

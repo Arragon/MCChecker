@@ -1,0 +1,750 @@
+{
+  "generated_at": "2026-11-08T18:18:08Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-97181-61824/data",
+  "server": "http://127.0.0.1:55502",
+  "summary": {
+    "interactive_pass": 38,
+    "interactive_fail": 0,
+    "reachable_pass": 28,
+    "reachable_fail": 0,
+    "api_pass": 1,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "touch-controls",
+      "title": "移动触摸基本操作",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375×812 模拟触摸：来源打开/关闭、内容标签切换、计划面板打开/关闭"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "long-sources",
+      "title": "长名称路径与分页末项",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "desktop-1366 {'height': 682, 'rowBottom': 708, 'workspaceBottom': 768, 'rowVisible': True, 'horizontalEnd': True, 'overflow': 0, 'rows': 55}",
+        "phone-375 {'height': 726, 'rowBottom': 759.5, 'workspaceBottom': 812, 'rowVisible': True, 'horizontalEnd': True, 'overflow': 0, 'rows': 55}",
+        "移动触摸滑动仅滚动数据区，页面工具栏保持可见",
+        "触摸可展开完整路径"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "updates-sources-list",
+      "title": "来源列表/筛选/新建与批量工具条",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-source] ok",
+        "assert [data-sync-new] ok",
+        "assert [data-sync-batch] ok",
+        "停用来源不可更新",
+        "截图 docs/evidence/m16-40/updates-sources-list.png"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-sources-list.png"
+    },
+    {
+      "id": "updates-source-create",
+      "title": "新建来源抽屉（类型/连接/目标绑定）",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-kind] ok",
+        "assert [data-sync-connection] ok",
+        "assert [data-sync-target-kind] ok",
+        "截图 docs/evidence/m16-40/updates-source-create.png",
+        "抽屉已关闭"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-source-create.png"
+    },
+    {
+      "id": "updates-source-focus",
+      "title": "抽屉初始焦点、Esc 不关闭未保存抽屉与焦点恢复",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-kind] ok",
+        "焦点在抽屉内",
+        "Tab 从抽屉末尾循环到关闭按钮",
+        "抽屉已关闭",
+        "wait [data-sync-kind] ok",
+        "抽屉已关闭",
+        "焦点已恢复"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "updates-plan",
+      "title": "更新计划与全量预览入口",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-plan-preview] ok",
+        "assert [data-plan-save] ok",
+        "截图 docs/evidence/m16-40/updates-plan.png"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-plan.png"
+    },
+    {
+      "id": "updates-connections",
+      "title": "连接设置（管理员权限）",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-conn-create] ok",
+        "wait [data-conn-name] ok",
+        "assert [data-conn-create-submit] ok",
+        "连接表单校验关联和焦点正常",
+        "截图 docs/evidence/m16-40/updates-connections.png",
+        "assert [data-sync-sheet-close] ok",
+        "抽屉已关闭"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-connections.png"
+    },
+    {
+      "id": "updates-runs",
+      "title": "运行记录页渲染",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "text 运行记录 ok",
+        "截图 docs/evidence/m16-40/updates-runs.png"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-runs.png"
+    },
+    {
+      "id": "updates-candidates",
+      "title": "候选列表筛选与批量工具条",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-candidate-state] ok",
+        "assert [data-sync-candidate-profile] ok",
+        "截图 docs/evidence/m16-40/updates-candidates.png"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-candidates.png"
+    },
+    {
+      "id": "F01",
+      "title": "本地上传/导入入口",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/import?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F02",
+      "title": "链接导入入口",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/import?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F03",
+      "title": "文件列表",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F04",
+      "title": "结构树",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F05",
+      "title": "文件内搜索",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/search?q=x&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F06",
+      "title": "收藏",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F07",
+      "title": "速览",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F08",
+      "title": "修改建议 remarks",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F09",
+      "title": "审阅",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/review?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F10",
+      "title": "全局搜索",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/search?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F11",
+      "title": "历史版本",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=history&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F12",
+      "title": "对比",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=compare&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F13",
+      "title": "修改记录",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=records&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F14",
+      "title": "下载",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F15",
+      "title": "旧更新源入口（收口到更新管理）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/sources?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F16",
+      "title": "旧定时更新入口（收口到更新管理）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/schedule?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F17",
+      "title": "人员",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/people?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F18",
+      "title": "管理员",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/people?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F19",
+      "title": "变量绑定",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/bindings?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F20",
+      "title": "外部工具",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/tools?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F21",
+      "title": "DL 计算",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/dl?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F22",
+      "title": "多机型",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/profiles?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F23",
+      "title": "标签页",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F24",
+      "title": "身份",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F25",
+      "title": "删除文件",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F26",
+      "title": "旧布局迁移（服务层）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/profiles?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F27",
+      "title": "解析缓存（服务层）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F28",
+      "title": "启动与端口（服务层）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "roles-admin-member",
+      "title": "管理员可编辑 / 访客只读",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "admin_edit=True member_edit=True"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-sources-1366-admin.png"
+    },
+    {
+      "id": "viewport-desktop-1366",
+      "title": "视口 1366x768 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 265, 'footerVisible': True, 'height': 682, 'tableHeight': 443, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-sources-1366-admin.png"
+    },
+    {
+      "id": "viewport-desktop-1920",
+      "title": "视口 1920x1080 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 265, 'footerVisible': True, 'height': 994, 'tableHeight': 755, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-sources-1920-admin.png"
+    },
+    {
+      "id": "viewport-tablet-768",
+      "title": "视口 768x1024 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 293, 'footerVisible': True, 'height': 938, 'tableHeight': 679, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-sources-768-admin.png"
+    },
+    {
+      "id": "viewport-phone-375",
+      "title": "视口 375x812 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 453, 'footerVisible': True, 'height': 726, 'tableHeight': 307, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-sources-375-admin.png"
+    },
+    {
+      "id": "panel-source-desktop-1366",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 768, 'bodyHeight': 643.109375, 'footerTop': 711, 'footerBottom': 768, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-source-desktop-1366.png"
+    },
+    {
+      "id": "panel-plan-desktop-1366",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 768, 'bodyHeight': 659, 'footerTop': 711, 'footerBottom': 768, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-plan-desktop-1366.png"
+    },
+    {
+      "id": "panel-connection-desktop-1366",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 768, 'bodyHeight': 659, 'footerTop': 711, 'footerBottom': 768, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 480, 'height': 319, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-connection-desktop-1366.png"
+    },
+    {
+      "id": "panel-source-desktop-1920",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1080, 'bodyHeight': 955.109375, 'footerTop': 1023, 'footerBottom': 1080, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-source-desktop-1920.png"
+    },
+    {
+      "id": "panel-plan-desktop-1920",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1080, 'bodyHeight': 971, 'footerTop': 1023, 'footerBottom': 1080, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-plan-desktop-1920.png"
+    },
+    {
+      "id": "panel-connection-desktop-1920",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1080, 'bodyHeight': 971, 'footerTop': 1023, 'footerBottom': 1080, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 480, 'height': 319, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-connection-desktop-1920.png"
+    },
+    {
+      "id": "panel-source-tablet-768",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1024, 'bodyHeight': 899.109375, 'footerTop': 967, 'footerBottom': 1024, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-source-tablet-768.png"
+    },
+    {
+      "id": "panel-plan-tablet-768",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1024, 'bodyHeight': 915, 'footerTop': 967, 'footerBottom': 1024, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-plan-tablet-768.png"
+    },
+    {
+      "id": "panel-connection-tablet-768",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1024, 'bodyHeight': 915, 'footerTop': 967, 'footerBottom': 1024, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 480, 'height': 319, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-connection-tablet-768.png"
+    },
+    {
+      "id": "panel-source-phone-375",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 375, 'height': 812, 'bodyHeight': 687.109375, 'footerTop': 755, 'footerBottom': 812, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-source-phone-375.png"
+    },
+    {
+      "id": "panel-plan-phone-375",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 375, 'height': 812, 'bodyHeight': 683, 'footerTop': 747, 'footerBottom': 812, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-plan-phone-375.png"
+    },
+    {
+      "id": "panel-connection-phone-375",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 375, 'height': 812, 'bodyHeight': 683, 'footerTop': 747, 'footerBottom': 812, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 343, 'height': 337, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/m16-40/updates-panel-connection-phone-375.png"
+    },
+    {
+      "id": "shared-modal-settings",
+      "title": "共享弹窗其他调用方",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "设置/机型新增弹窗：进入焦点、Tab 循环、Escape 和焦点返回",
+        "外部工具添加弹窗：进入焦点、Escape 和焦点返回"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "source-error-recovery",
+      "title": "来源错误重试和空结果",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "长错误可换行；合成读取失败可重试并恢复真实 API；空搜索保留查询；连接弹窗长错误可读"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "admin-visitor-auth",
+      "title": "管理员与访客两档授权",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "访客（含旧 token）403；管理员不带 token 201"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "connection-settings",
+      "title": "隔离连接及保活设置",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "浏览器创建和编辑连接、保存 15 分钟停用保活；服务端配置不含令牌"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "diagnostic-download",
+      "title": "运行诊断文件下载",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375px 运行详情页脚换行且可达：{'footerVisible': True, 'bodyHeight': 357, 'overflow': 0}",
+        "下载文件中的运行 ID 和事件列表与隔离任务一致"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "workspace-plan-draft",
+      "title": "计划草稿与工作区切换",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "取消后保留草稿；确认后切换，旧草稿未串入新工作区"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "plan-save-preview",
+      "title": "计划保存、预览与并发冲突",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "计划保存与预览；草稿变化须重新对比，再次并发触发 409，确认后以最新修订保存"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "source-conflict",
+      "title": "来源新建与并发冲突恢复",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375px 长路径创建、409 草稿保留、对比确认与再次保存通过"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "permission-revocation",
+      "title": "来源编辑期间撤销权限",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "服务端 403、草稿保留、sources.json SHA-256 未变"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "candidate-responsive-synthetic",
+      "title": "合成候选长值与多视口详情",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "desktop-1366 {'bodyHeight': 320.5, 'width': 960, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}",
+        "desktop-1920 {'bodyHeight': 320.5, 'width': 960, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}",
+        "tablet-768 {'bodyHeight': 358, 'width': 736, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}",
+        "phone-375 {'bodyHeight': 436, 'width': 343, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "candidate-real-apply",
+      "title": "隔离文件候选真实服务写入草稿",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "合成文件候选经真实 API 预览；并发修改触发 409，重新预览后写入草稿，主分支 head 不变"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "candidate-conflict-contract",
+      "title": "候选显式基线与真实决议契约",
+      "level": "api",
+      "ok": true,
+      "notes": [
+        "真实 API：原来源文件值 1、本地值 2、新来源值 3 产生冲突；拒绝客户端改用任意修订，use_new 写入值 3"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "source-profile-scope",
+      "title": "来源机型范围与工作区全量预览",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "当前机型仅显示其来源；全量预览覆盖两个机型；切换后显示全部来源"
+      ],
+      "screenshot": null
+    }
+  ]
+}

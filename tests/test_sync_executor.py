@@ -14,12 +14,14 @@ from app.core import storage
 from app.core.sync_models import SyncRun
 from app.services import (
     sync_candidates,
+    config_v3_catalog,
     sync_connections,
     sync_http_adapter,
     sync_run_store,
     sync_sources,
     sync_tasks,
     tasks,
+    file_versions,
     workspace_catalog,
 )
 from app.services.context import RequestContext
@@ -81,27 +83,35 @@ def ctx(wid):
 
 
 def make_http_source(wid, url, name="A.xml"):
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        storage.save_config_file(name, b"<config/>")
+        file_id = file_versions.current_identity("default", name)["file_id"]
     return sync_sources.create_source(
         wid,
         {
             "profile_id": "default",
             "name": name,
             "kind": "http_file",
-            "target": {"kind": "file_archive", "file_id": "file-0001"},
+            "target": {"kind": "file_archive", "file_id": file_id},
             "resource_ref": url,
             "display_path": "/synthetic/" + name,
         },
     )
 
 
-def make_sda_source(wid, connection_id, name="S.xml", kind="sda_file"):
+def make_sda_source(wid, connection_id, name="S.xml", kind="sda_file", existing_target=False):
+    file_id = "file-0002"
+    if existing_target:
+        with storage.use_workspace(wid), storage.use_profile("default"):
+            storage.save_config_file(name, b"<config/>")
+            file_id = file_versions.current_identity("default", name)["file_id"]
     return sync_sources.create_source(
         wid,
         {
             "profile_id": "default",
             "name": name,
             "kind": kind,
-            "target": {"kind": "file_archive", "file_id": "file-0002"},
+            "target": {"kind": "file_archive", "file_id": file_id},
             "connection_id": connection_id,
             "resource_ref": "file:1",
             "display_path": "/sda/" + name,
@@ -167,7 +177,7 @@ def test_mixed_sda_auth_failure_and_http_success_is_partial(http_server):
 
 def test_sda_file_goes_through_the_same_trusted_commit():
     wid = make_workspace()
-    source = make_sda_source(wid, make_connection(wid), "S.xml")
+    source = make_sda_source(wid, make_connection(wid), "S.xml", existing_target=True)
 
     def reader(source_dict, cancel):
         return {
@@ -191,9 +201,14 @@ def test_sda_file_goes_through_the_same_trusted_commit():
     assert task["state"] == "succeeded"
 
 
-def test_sda_table_creates_candidate_without_writing_config():
+def test_sda_table_creates_precise_file_candidate_without_publishing_d0():
     wid = make_workspace()
-    source = make_sda_source(wid, make_connection(wid), "T.xml", kind="sda_table")
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        storage.save_config_file("T.json", b'{"rows":[]}')
+        fid = file_versions.current_identity("default", "T.json")["file_id"]
+        config = config_v3_catalog.create_config("default", {"code": "TABLE", "name": "Table"})
+        release = config_v3_catalog.create_release("default", config["config_id"], {"version": "1"})
+    source = sync_sources.create_source(wid, {"profile_id": "default", "name": "T.json", "kind": "sda_table", "connection_id": make_connection(wid), "resource_ref": "table-1", "target": {"kind": "default_candidate", "configuration_id": config["config_id"], "release_id": release["release_id"], "file_id": fid}})
     table = b'{"rows":[{"id":1}]}'
 
     def reader(source_dict, cancel):
@@ -204,10 +219,14 @@ def test_sda_table_creates_candidate_without_writing_config():
 
     assert doc["run"]["state"] == "succeeded"
     assert doc["run"]["counts"]["candidate_created"] == 1
-    assert current(wid, "T.xml") is None
+    assert current(wid, "T.json") == table
     candidates = sync_candidates.list_candidates(wid)
     assert candidates["total"] == 1
     assert candidates["items"][0]["content_hash"] == hashlib.sha256(table).hexdigest()
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        version = file_versions.find_version("default", candidates["items"][0]["file_version_id"])
+        assert version["blob_sha256"] == hashlib.sha256(table).hexdigest()
+        assert config_v3_catalog.get_config("default", config["config_id"])["releases"][0]["d0"] == release["d0"]
 
 
 def test_manual_schedule_and_retry_share_the_same_runner(http_server):

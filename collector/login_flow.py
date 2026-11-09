@@ -245,12 +245,24 @@ class _ContextRequest:
             for key, value in raw_headers.items()
             if str(key).lower() in contracts.SAFE_RESPONSE_HEADERS
         }
-        return SdaResponse(
-            status=int(getattr(response, "status", 0) or 0),
-            headers=safe_headers,
-            body=bytes(response.body() or b""),
-            final_url=str(getattr(response, "url", "") or url),
-        )
+        from .ipc import MAX_CONTENT_BYTES
+        from .stream_reader import StreamError
+        try:
+            envelope_limit = MAX_CONTENT_BYTES * 4 // 3 + 32768
+            declared = safe_headers.get("content-length")
+            if declared is not None and int(declared) > envelope_limit:
+                raise StreamError("too_large")
+            raw = bytes(response.body() or b"")
+            if len(raw) > envelope_limit:
+                raise StreamError("too_large")
+            return SdaResponse(
+                status=int(getattr(response, "status", 0) or 0), headers=safe_headers, body=raw,
+                final_url=str(getattr(response, "url", "") or url),
+                renewal_observed=any(str(key).lower() == "set-cookie" for key in raw_headers),
+            )
+        finally:
+            if hasattr(response, "dispose"):
+                response.dispose()
 
 
 class SdaLogin:

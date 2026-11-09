@@ -20,7 +20,7 @@
 | `MCHECKER_DATA_DIR` | 数据根（**不要**与代码同目录） |
 | `MCHECKER_TRUSTED_PROXIES` | 信任的反代地址（只有它们发的 `X-Forwarded-For` 才被采信） |
 | `MCHECKER_ALLOWED_HOSTS` | 允许的 Host 名单（反代/多域名部署必配） |
-| `MCHECKER_OPERATOR_TOKEN` | 独立运维授权 token（凭据导入/轮换/撤销必需） |
+| 管理员身份 | 连接、凭据和保活管理统一使用全局管理员权限；无需运维 token |
 | `MCHECKER_SECRET_KEY` | SecretStore 主密钥（V3.1 凭据加密；丢失=密文不可解，必须重新导入） |
 
 运行时零第三方依赖（Python 3.9.11）。collector 是**独立进程/独立环境**（Python 3.12 + Playwright + Chromium），见 §6。
@@ -82,7 +82,7 @@ python scripts/backup_v3.py restore --data-dir /srv/mcc-data --backup /backup/mc
 **凭据不可用**（密文损坏 / `MCHECKER_SECRET_KEY` 变更 / 撤销后）：
 
 1. 连接会进入 `disabled`/`locked` 状态，**不会**回退明文；业务功能（文件浏览、搜索、DL）不受影响，仅 SDA 同步不可用。
-2. 设置 `MCHECKER_OPERATOR_TOKEN` 后，在「连接设置」重新导入凭据候选 → probe → 激活。
+2. 使用管理员身份，在「连接设置」重新导入凭据候选 → probe → 激活。
 3. 密钥丢失无法解密历史密文：重新导入即可，旧密文会被新 generation 覆盖。
 
 **安全清理**：

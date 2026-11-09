@@ -49,7 +49,7 @@ class CollectorClient:
         self.last_meta: Dict[str, Any] = {}
         self.last_request_id: Optional[str] = None
         self._write_lock = threading.Lock()
-        self._request_lock = threading.Lock()
+        self._request_lock = threading.RLock()
         self._queue: "queue.Queue" = queue.Queue()
         self._stop = threading.Event()
         self._reader_thread = threading.Thread(
@@ -116,6 +116,7 @@ class CollectorClient:
         with self._request_lock:
             request_id = "req-" + secrets.token_hex(8)
             self.last_request_id = request_id
+            self.last_meta = {}
             envelope: Dict[str, Any] = {
                 "type": "request",
                 "protocol_version": self.protocol_version,
@@ -173,6 +174,12 @@ class CollectorClient:
             expected_policy_revision=expected_policy_revision,
             expected_auth_epoch=expected_auth_epoch,
         )
+
+    def request_with_meta(self, *args, **kwargs):
+        """Snapshot metadata before another serialized request can reset last_meta."""
+        with self._request_lock:
+            raw = self.request(*args, **kwargs)
+            return raw, dict(self.last_meta)
 
     def cancel(self, request_id: str) -> None:
         self._write(

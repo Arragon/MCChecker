@@ -3,8 +3,8 @@
 路径：`/api/v3/workspaces/{wid}/connections/{cid}/heartbeat`。
 
 - GET 只要 `read`，返回 `sync_heartbeat` 的安全状态投影（无 Cookie/凭据/明文）；
-- PUT 配置保活开关与间隔，先要求 `integration_credentials_manage`，再要求独立
-  运维 token（`X-Operator-Token`），并用 `If-Match` 做 revision CAS；
+- PUT 配置保活开关与间隔，要求管理员 `integration_credentials_manage`，
+  并用 `If-Match` 做 revision CAS；
 - POST `/run` 立即跑一次心跳：未启用或未注入 probe 时返回 202 操作
   `blocked/disabled`、`blocked/collector_offline`，绝不伪造成功。
 
@@ -22,14 +22,12 @@ from ..services import (
     authz,
     sync_connections,
     sync_heartbeat,
-    sync_operator_auth,
     sync_operations,
     workspace_catalog,
 )
 from ..services.context import RequestContext
 from .router import Response, Router, json_body
 
-OPERATOR_HEADER = "x-operator-token"
 IDEMPOTENCY_HEADER = "idempotency-key"
 
 _PROBE: Optional[Callable[[str, str], Dict[str, Any]]] = None
@@ -63,9 +61,8 @@ def _connection(wid: str, cid: str) -> Dict[str, Any]:
     return sync_connections.get_connection(wid, cid)
 
 
-def _operator(ctx: RequestContext) -> None:
-    authz.authorize(ctx, sync_operator_auth.OPERATOR_CAPABILITY)
-    sync_operator_auth.require_operator((ctx.headers or {}).get(OPERATOR_HEADER))
+def _require_admin(ctx: RequestContext) -> None:
+    authz.authorize(ctx, "integration_credentials_manage")
 
 
 def _if_match(ctx: RequestContext) -> int:
@@ -108,7 +105,7 @@ def configure_heartbeat(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     payload = json_body(body)
@@ -130,7 +127,7 @@ def run_heartbeat(
     query: Dict[str, List[str]],
     body: Optional[bytes],
 ) -> Response:
-    _operator(ctx)
+    _require_admin(ctx)
     wid = params["wid"]
     _connection(wid, params["cid"])
     payload = json_body(body)

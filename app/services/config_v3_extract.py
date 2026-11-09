@@ -391,10 +391,15 @@ def preview(
     offset: int = 0,
     limit: int = 100,
     filter_name: str = FILTER_ALL,
+    keyword: str = "",
 ) -> Dict[str, Any]:
     """只读提取预览：精确 FileVersion → 全量分类 → 分页。"""
     built = build(profile_id, config_id, version_id)
     filtered = filter_items(built["items"], filter_name)
+    if keyword.strip():
+        needle = keyword.strip().casefold()
+        filtered = [item for item in filtered if needle in
+                    (item["leaf_name"] + " " + item["display_path"]).casefold()]
     start = max(0, int(offset))
     size = max(1, min(int(limit), 1000))
     return {

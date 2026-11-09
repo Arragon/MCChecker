@@ -5,16 +5,16 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from app.core import config_values, storage
-from app.core.errors import INVALID_INPUT, NOT_FOUND, AppError
+from app.core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
 from app.services import (
     authz,
     config_v3_catalog,
-    config_v3_diff,
     config_v3_drafts,
     config_v3_import,
     sync_candidate_apply,
     sync_candidate_plans,
     sync_candidates,
+    sync_sources,
     workspace_catalog,
 )
 from ..services.context import RequestContext
@@ -101,28 +101,25 @@ def _definition_params(wid: str, pid: str, config_id: str, draft_id: str):
     return config, release, definition.get("parameters") or {}
 
 
-def _raw_entries(values, params):
-    out = {}
-    for parameter_id, row in (values or {}).items():
-        if not isinstance(row, dict) or parameter_id not in params:
-            continue
-        if row.get("membership", "not_introduced") != "included" or not row.get("enabled", True):
-            continue
-        if row.get("value_state") != "present":
+def _mapped_values(plan, params):
+    values, blockers = {}, []
+    for item in plan.get("items") or []:
+        parameter_id = item.get("parameter_id")
+        matches = item.get("candidates") or []
+        if not parameter_id and len(matches) == 1:
+            parameter_id = matches[0].get("parameter_id")
+        if not parameter_id or parameter_id in values:
+            blockers.append({"code": "mapping_ambiguous", "message": "来源参数未映射或重复映射，请先在配置管理中确认映射"})
             continue
         definition = params.get(parameter_id) or {}
         kind = _KIND_BY_TYPE.get(str(definition.get("type") or "").lower(), "string")
         try:
-            typed = config_values.parse_typed(
-                row.get("value"), kind, definition.get("unit") or None
-            )
+            typed = config_values.parse_typed(item.get("value"), kind, definition.get("unit") or None)
         except AppError:
+            blockers.append({"code": "type_invalid", "parameter_id": parameter_id, "message": "来源值无法转换为目标参数类型"})
             continue
-        out[parameter_id] = {
-            "value": typed.to_json(),
-            "intent": row.get("intent") or "inherit",
-        }
-    return out
+        values[parameter_id] = typed.to_json()
+    return values, blockers
 
 
 def candidate_preview(
@@ -148,6 +145,22 @@ def candidate_preview(
         )
     pid = candidate["profile_id"]
     config, release, params_map = _definition_params(wid, pid, config_id, draft_id)
+    expected_scope = "default_candidate:%s:%s" % (config_id, release["release_id"])
+    if str(candidate.get("target_scope") or "").startswith("default_candidate:") and candidate["target_scope"] != expected_scope:
+        raise AppError(INVALID_INPUT, "候选绑定到其他固定配置或软件版本", field="release_id")
+    source_guard = None
+    try:
+        source = sync_sources.get_source(wid, candidate["source_id"])
+    except AppError as exc:
+        if exc.code != NOT_FOUND:
+            raise
+        raise AppError(REVISION_CONFLICT, "来源已移除；候选仅可查看，请先重新配置来源", field="source_id")
+    else:
+        if int(source["revision"]) != int(candidate["binding_revision"]):
+            raise AppError(REVISION_CONFLICT, "来源绑定已变化，请重新获取候选", field="source_id")
+        source_guard = {"source_id": source["source_id"], "revision": source["revision"]}
+    if payload.get("base_revision_id"):
+        raise AppError(INVALID_INPUT, "比较基线由原来源文件版本确定，不能指定其他配置修订", field="base_revision_id")
     try:
         import_plan = config_v3_import.create(
             wid,
@@ -161,37 +174,16 @@ def candidate_preview(
             "无法从候选文件版本生成参数值：%s" % exc.message,
             field="file_version_id",
         )
-    candidate_values = {}
-    for item in import_plan.get("items") or []:
-        parameter_id = item.get("parameter_id")
-        candidates = item.get("candidates") or []
-        if not parameter_id and len(candidates) == 1:
-            parameter_id = candidates[0].get("parameter_id")
-        if not parameter_id or item.get("value") is None:
-            continue
-        definition = params_map.get(parameter_id) or {}
-        kind = _KIND_BY_TYPE.get(str(definition.get("type") or "").lower(), "string")
-        try:
-            typed = config_values.parse_typed(
-                item.get("value"), kind, definition.get("unit") or None
-            )
-        except AppError:
-            continue
-        candidate_values[parameter_id] = typed.to_json()
-
+    if import_plan["source"]["blob_sha256"] != candidate["content_hash"]:
+        raise AppError(INVALID_INPUT, "候选内容指纹与关联文件版本不符", field="file_version_id")
+    candidate_values, blockers = _mapped_values(import_plan, params_map)
     base = {}
-    base_revision_id = str(payload.get("base_revision_id") or "").strip()
-    if base_revision_id:
-        base_revision = config_v3_diff.resolve(config, base_revision_id)
-        base = _raw_entries(base_revision.get("values"), params_map)
-    else:
-        d0 = release.get("d0") or {}
-        if d0.get("frozen") and isinstance(d0.get("frozen_snapshot"), dict):
-            base = _raw_entries(d0.get("frozen_snapshot"), params_map)
-        else:
-            with storage.use_workspace(wid):
-                draft = config_v3_drafts.get_draft(pid, config_id, draft_id)
-            base = sync_candidate_plans._current_entries(draft, params_map)
+    base_version_id = candidate.get("base_file_version_id")
+    if base_version_id:
+        original = config_v3_import.create(wid, pid, config_id,
+            {"version_id": base_version_id, "release_id": release["release_id"]})
+        base, base_blockers = _mapped_values(original, params_map)
+        blockers.extend(base_blockers)
     preview = sync_candidate_plans.create_preview(
         wid,
         pid,
@@ -200,6 +192,9 @@ def candidate_preview(
         params["cid"],
         base,
         candidate_values,
+        base_known=bool(base_version_id),
+        extra_blockers=blockers,
+        source_guard=source_guard,
     )
     return Response(status=201, payload=preview)
 

@@ -15,8 +15,18 @@
 
 ## V3.1（M16，进行中）
 
+权限决策（2026-11-06）：全局只有管理员和访客。已登记非管理员也显示访客；连接/凭据/保活管理由 `authz.integration_credentials_manage` 映射管理员并在每次请求强制校验，不再要求独立运维 token。旧 `deployer` 能力键仅保留管理员同义兼容；SecretStore 密钥与凭据加密不受影响。
+
 设计/计划/ADR：`docs/MCChecker_V3.1_PLAN.md`、`docs/adr/ADR-012-020-v3.1-sync-contract.md`；
 当前实现审计：`docs/M16_CURRENT_STATE.md`；采集器边界：`docs/M16_COLLECTOR.md`。
+
+R6 接线修订：来源查询增加 configuration_id/release_id、失败/候选筛选与真实 freshness 投影；新增管理员来源输入检查 `/sync/source-tests` 和运行取消 `/sync/runs/{run_id}/cancel`。候选增加可选 `base_file_version_id`，只引用现有同一 FileResource 的精确版本，不迁移或覆盖旧记录。核验回执附来源绑定指纹，绑定变化后不能沿用旧核验或旧比较基线。来源显示名称不决定已绑定文件的存储路径。
+
+独立 collector 现已接入分帧 IPC、Vault/probe/read 与独立保活循环。`run.py` 仅在 `MCHECKER_COLLECTOR_CONFIG` 显式配置时安装 `sync_collector.CollectorBridge`；秘密根与业务 data 必须分离，缺密钥不回退明文。主应用只通过受管二进制管道访问子进程，不 import collector 或第三方库。文件/表正文通过既有 meta + chunk 协议传输，元数据在同一次请求锁内冻结；凭据仅通过私有存取操作进入子进程。
+
+用户指定使用自建模拟环境验收。TLS SDA 模拟器与固定 CONNECT 隧道在 `scripts/sda_simulator.py`，实际 Playwright 登录、Cookie 恢复、加密凭据、SDA 文件提交及表候选写草稿已通过本地端到端验证；真实 SDA 协议/目标平台仍未验证。SDA 表只把已验证 table_id 对应的 document 保存为精确 FileVersion，传输元数据不参与参数映射。来源、连接 policy_revision、auth_epoch 和目标版本均在提交前复核。
+
+机台观测仍缺旧 LogicalFile 与工作区归属契约，不能把 V3 FileResource 的 ID 当旧 LogicalFile ID，也不能写入无 workspace 的旧共享观测库。具体缺口与证据边界见 `docs/M16_R6_UI_AUDIT.md`。
 
 - 主应用仍是 Python 3.9.11 + 标准库；Sync/Collector 只做增量，不替换旧 v1 入口。
 - Collector 是独立目录 `collector/`（Python 3.12 + Playwright/Chromium/cryptography），
@@ -47,6 +57,8 @@ V3.0 的设计事实源是 Linear INH-2117 的原型 HTML + 后端设计 MD，�
 - 配置管理：FixedConfig/SoftwareRelease/参数身份/定义快照/BindingSet/D0/Bn/Machine rn/草稿/不可变 head；核心在 `services/config_v3_*.py`（catalog/drafts/baselines/machines/projection/diff/merge/merge_plans/import/export/history/extract/plans），API 在 `server/api_v3_config.py`、`api_v3_plans.py`、`api_v3_exports.py`、`api_v3_events.py`；数据在 `<profile>/configs_v3/`。
 - 提取（名称/层级，零写预览）、值导入（按已确认绑定）、O/L/N 合并（只产新草稿）、精确模板导出（不可变 artifact）、事件/恢复（新草稿，不改历史）彼此分离；发布只移动管理 head，不做物理机台下发。
 - 旧 config-domain 的 ChangeSet/registry/delivery/upgrade/lifecycle/audit 编排保留只读兼容；`MCHECKER_CONFIG_MANAGEMENT=readonly` 可停写。原 remarks/review、速览、文件、搜索、DL、工具、设置、机型、更新源、任务与旧链接保留。
+- 配置视图新增机台草稿值 PATCH、草稿/不可变修订 GET 与参数目录维护；复用配置域 CAS、管理员权限和 W/P 隔离。全局参数身份与每版冻结定义独立；空目录只增加可选定义元数据。导出支持本次映射和分页读取，保留来源、模板、产物真实身份。
+- DL 对外按时间读取：GET /api/v3/workspaces/{wid}/profiles/{pid}/dl/{item}/coefficients?at=...，模块发现同域 /dl/modules。dl_history.py 在既有历史文件保留生效时间线，受支持保存/恢复路径记录完整快照；展示历史删除/限额不影响时间线，旧记录标明不完整。普通 I/O 异常回滚、进程中断的不一致拒绝推断。详见 docs/DL_COEFFICIENTS_API.md。
 - 前端 `views/config-manager.js` 是原生配置管理视图；旧 `configspace` 深链映射到 configv3；宿主仍提供唯一文件列表、工作区/机型切换和全局搜索。
 - 迁移工具：`scripts/inspect_v3_workspace.py`、`backup_v3.py`、`migrate_v3.py`；发布包包含迁移/回退脚本。
 

@@ -18,7 +18,6 @@
     { kind: "review", label: "审阅修改", icon: "review", admin: true },
     { kind: "dl", label: "DL 计算", icon: "calc" },
     { kind: "configv3", label: "配置管理", icon: "list" },
-    { kind: "updates", label: "更新管理", icon: "refresh" },
     { kind: "tools", label: "外部工具", icon: "tool" },
     { kind: "settings", label: "设置", icon: "settings" },
   ];
@@ -563,7 +562,7 @@
         "button.nav-item",
         {
           type: "button",
-          "aria-current": active && active.kind === n.kind ? "page" : null,
+          "aria-current": active && (active.kind === n.kind || (n.kind === "configv3" && (active.kind === "updates" || active.kind === "configspace"))) ? "page" : null,
           title: title,
         },
         icon(n.icon),
@@ -777,7 +776,10 @@
 
   App.prototype.onRoute = function (r) {
     if (!r) return this.go({ kind: "overview" }, true);
-    if (r.kind === "configspace") r = Object.assign({}, r, { kind: "configv3" });
+    if (r.kind === "configspace") r = Object.assign({}, r, {
+      kind: r.query && r.query.surface === "updates" ? "updates" : "configv3",
+      arg: r.query && r.query.surface === "updates" ? "sources" : (r.arg || r.query && r.query.surface),
+    });
     if (r.kind === "settings" && (r.arg === "sources" || r.arg === "schedule")) {
       r = Object.assign({}, r, { kind: "updates", arg: r.arg });
     }

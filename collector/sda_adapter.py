@@ -24,6 +24,7 @@ class SdaResponse:
     headers: Dict[str, str] = field(default_factory=dict)
     body: bytes = b""
     final_url: str = ""
+    renewal_observed: bool = False
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class SdaResult:
     session_valid: Optional[bool] = None
     resource_ref: Optional[str] = None
     message: str = ""
+    renewal_observed: bool = False
 
 
 def _same_origin(url: str, origin: str) -> bool:
@@ -157,6 +159,7 @@ class SdaAdapter:
                 None,
                 data=table,
                 session_valid=True,
+                renewal_observed=response.renewal_observed,
                 resource_ref=resource_ref,
             )
         file_body = payload.get("file")
@@ -172,6 +175,7 @@ class SdaAdapter:
             None,
             data=file_body,
             session_valid=True,
+            renewal_observed=response.renewal_observed,
             resource_ref=resource_ref,
         )
 

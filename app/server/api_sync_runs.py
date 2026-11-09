@@ -35,6 +35,19 @@ def register(router: Router) -> None:
     router.add("GET", "/api/v3/workspaces/{wid}/sync/runs/{run_id}", get_run)
     router.add("GET", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/events", get_events)
     router.add("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/retry", retry_run)
+    router.add("POST", "/api/v3/workspaces/{wid}/sync/runs/{run_id}/cancel", cancel_run)
+
+
+def cancel_run(
+    ctx: RequestContext,
+    params: Dict[str, str],
+    query: Dict[str, List[str]],
+    body: Optional[bytes],
+) -> Response:
+    authz.authorize(ctx, "tasks_run")
+    _scope(params["wid"])
+    # Accepted means cancellation was requested; the worker owns the final outcome.
+    return Response(status=202, payload=sync_tasks.cancel_run(params["wid"], params["run_id"]))
 
 
 def _scope(wid: str) -> None:
@@ -144,6 +157,9 @@ def list_runs(
         cursor = str((query.get("cursor") or ["0"])[-1])
     except ValueError:
         raise AppError(INVALID_INPUT, "分页参数非法", field="limit")
+    failed_only = str((query.get("failed_only") or [""])[-1]).lower()
+    if failed_only not in ("", "true", "false", "1", "0"):
+        raise AppError(INVALID_INPUT, "failed_only 必须为布尔值", field="failed_only")
     return Response(
         payload=sync_run_store.list_runs(
             wid,
@@ -151,6 +167,8 @@ def list_runs(
             trigger=(query.get("trigger") or [None])[-1],
             limit=max(1, min(limit, 200)),
             cursor=cursor,
+            query=(query.get("q") or [""])[-1],
+            failed_only=failed_only in ("true", "1"),
         )
     )
 

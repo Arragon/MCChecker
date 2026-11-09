@@ -1,7 +1,7 @@
 """M16-40 浏览器 E2E 的场景清单（纯数据 + 纯函数，便于单测）。
 
 三级证据：
-- `interactive`：真的点击/输入/断言 DOM 变化（更新管理、焦点、409、运维 token）。
+- `interactive`：真的点击/输入/断言 DOM 变化（更新管理、焦点、409、管理员/访客）。
 - `reachable`：路由可达、视图挂载、无错误块、标题快照一致（旧 V3 的 F 面板）。
 - `api`：真实服务接口交互，不证明用户界面能发出相同请求。
 
@@ -102,11 +102,11 @@ UPDATE_SCENARIOS: List[Dict[str, object]] = [
     {
         "id": "updates-connections",
         "tab": "connections",
-        "title": "连接设置与运维 token 入口",
+        "title": "连接设置（管理员权限）",
         "steps": [
             "wait:[data-conn-create]",
             "click:[data-conn-create]",
-            "wait:[data-conn-token]",
+            "wait:[data-conn-name]",
             "assert:[data-conn-create-submit]",
             "validate-connection-form",
             "shot",
@@ -129,14 +129,6 @@ UPDATE_SCENARIOS: List[Dict[str, object]] = [
         "steps": ["wait:[data-sync-candidate-state]", "assert:[data-sync-candidate-profile]", "shot"],
     },
 ]
-
-#: 运维 token 的三段式验证：无 token / 错 token / 正确 token。
-OPERATOR_CASES = (
-    {"id": "operator-missing", "token": "", "expect_status": "403"},
-    {"id": "operator-wrong", "token": "wrong-token-value", "expect_status": "403"},
-    {"id": "operator-right", "token": "PROVISIONED", "expect_status": "其它"},
-)
-
 
 def route_path(kind: str, arg: str = "", query: Optional[str] = None, pid: str = "default") -> str:
     path = "#/p/%s/%s" % (pid, kind)

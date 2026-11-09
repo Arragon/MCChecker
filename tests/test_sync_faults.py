@@ -59,6 +59,10 @@ def test_stream_interruption_leaves_no_partial_file(tmp_path):
 
 
 def make_source(wid, name="A.xml"):
+    from app.services import file_versions
+    with storage.use_workspace(wid), storage.use_profile("default"):
+        storage.save_config_file(name, b"<R/>")
+        file_id = file_versions.current_identity("default", name)["file_id"]
     connection = sync_connections.create_connection(wid, "SDA", "https://sda.invalid")
     return sync_sources.create_source(
         wid,
@@ -66,7 +70,7 @@ def make_source(wid, name="A.xml"):
             "profile_id": "default",
             "name": name,
             "kind": "sda_file",
-            "target": {"kind": "file_archive", "file_id": "file-0001"},
+            "target": {"kind": "file_archive", "file_id": file_id},
             "connection_id": connection["connection_id"],
             "resource_ref": "file:1",
             "display_path": "/sda/" + name,

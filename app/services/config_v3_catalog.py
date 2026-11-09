@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import fsutil, locks, storage
-from ..core.errors import FILE_EXISTS, INVALID_INPUT, LIFECYCLE_BLOCKED, NOT_FOUND, AppError
+from ..core.errors import FILE_EXISTS, INVALID_INPUT, LIFECYCLE_BLOCKED, NOT_FOUND, REVISION_CONFLICT, AppError
 
 SCHEMA_VERSION = 1
 _CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -75,10 +75,20 @@ def _public_config(config: Dict[str, Any], detail: bool = False) -> Dict[str, An
         "created_at": config["created_at"],
         "updated_at": config.get("updated_at", config["created_at"]),
         "release_count": len(releases),
+        "parameter_count": len((config.get("definition", {}).get("current") or {}).get("parameters") or {}),
+        "machine_count": len(config.get("machines") or {}),
+        "latest_release": ({"version": latest["version"], "frozen": bool(latest.get("default_revision_id"))}
+                           if (latest := max(releases, key=lambda item: item["order"], default=None)) else None),
+        "draft_count": sum(not rel.get("default_revision_id") for rel in releases)
+            + sum((rel.get("baseline_draft") or {}).get("status") == "draft" for rel in releases)
+            + sum((machine.get("draft") or {}).get("status") == "draft" for machine in (config.get("machines") or {}).values()),
     }
     if detail:
         row["releases"] = [
-            _public_release(rel) for rel in sorted(releases, key=lambda r: r["order"])
+            dict(_public_release(rel), parameter_count=next((len(snapshot.get("parameters") or {})
+                 for snapshot in (config.get("definition", {}).get("history") or [])
+                 if snapshot.get("revision") == rel.get("definition_revision")), 0))
+            for rel in sorted(releases, key=lambda r: r["order"])
         ]
     return row
 
@@ -96,6 +106,8 @@ def _public_release(release: Dict[str, Any]) -> Dict[str, Any]:
         "d0": copy.deepcopy(release["d0"]),
         "baseline_ids": list(release.get("baseline_ids") or []),
         "merge_parent_ids": list(release.get("merge_parent_ids") or []),
+        "baseline_draft": {key: value for key, value in (release.get("baseline_draft") or {}).items()
+                           if key in {"draft_id", "status", "revision", "source_revision_id", "created_at"}},
     }
 
 
@@ -259,16 +271,27 @@ def _find_parameter(config: Dict[str, Any], parameter_id: str) -> Optional[Dict[
     return (_definition(config)["current"].get("parameters") or {}).get(str(parameter_id))
 
 
+def _parameter_definition(config: Dict[str, Any], release_id: str = "") -> Dict[str, Any]:
+    if not release_id:
+        definition = _definition(config)
+        return dict(definition["current"], revision=definition["revision"])
+    release = (config.get("releases") or {}).get(release_id)
+    if release is None:
+        raise AppError(NOT_FOUND, "软件版本不存在", field="release_id")
+    revision = int(release.get("definition_revision", 0))
+    return next((snapshot for snapshot in (_definition(config).get("history") or []) if snapshot.get("revision") == revision), {"revision": revision, "parameters": {}})
+
+
 def list_parameters(
-    profile_id: str, config_id: str, offset: int = 0, limit: Optional[int] = None
+    profile_id: str, config_id: str, offset: int = 0, limit: Optional[int] = None, release_id: str = ""
 ) -> Dict[str, Any]:
     with storage.use_profile(profile_id):
         doc = _load(profile_id)
     config = doc["configs"].get(config_id)
     if config is None:
         raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
-    definition = _definition(config)
-    rows = list(definition["current"]["parameters"].values())
+    definition = _parameter_definition(config, release_id)
+    rows = list((definition.get("parameters") or {}).values())
     start = max(0, int(offset))
     size = None if limit is None else max(1, min(int(limit), 500))
     page = rows[start:] if size is None else rows[start : start + size]
@@ -282,7 +305,7 @@ def list_parameters(
 
 
 def parameter_tree(
-    profile_id: str, config_id: str, parent: str = "", offset: int = 0, limit: int = 50
+    profile_id: str, config_id: str, parent: str = "", offset: int = 0, limit: int = 50, release_id: str = "", recursive: bool = False
 ) -> Dict[str, Any]:
     """目录分组树：只返回 `parent` 的直接子目录与当前目录参数页（不建全量树）。"""
     raw_parent = str(parent or "").strip().strip("/")
@@ -297,24 +320,35 @@ def parameter_tree(
     config = doc["configs"].get(config_id)
     if config is None:
         raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
-    definition = _definition(config)
+    definition = _parameter_definition(config, release_id)
     depth = len(parent_parts)
     children: Dict[tuple, int] = {}
+    children_with_children = set()
     leaves = []
-    for row in (definition["current"].get("parameters") or {}).values():
+    for row in (definition.get("parameters") or {}).values():
         directory = list(row.get("directory") or [])
         if directory[:depth] != parent_parts:
             continue
-        if len(directory) == depth:
+        if len(directory) > depth + 1:
+            children_with_children.add(tuple(directory[:depth + 1]))
+        if recursive:
             leaves.append(row)
+        if len(directory) == depth:
+            if not recursive:
+                leaves.append(row)
         else:
             child = tuple(parent_parts + [directory[depth]])
             children[child] = children.get(child, 0) + 1
+    for directory in definition.get("directories") or []:
+        if directory[:depth] == parent_parts and len(directory) > depth:
+            children.setdefault(tuple(directory[:depth + 1]), 0)
+            if len(directory) > depth + 1:
+                children_with_children.add(tuple(directory[:depth + 1]))
     leaves.sort(key=lambda row: (str(row.get("name") or "").lower(), str(row.get("name") or "")))
     start = max(0, int(offset))
     size = max(1, min(int(limit), 200))
     directories = [
-        {"name": path[-1], "path": "/".join(path), "count": count}
+        {"name": path[-1], "path": "/".join(path), "count": count, "has_children": path in children_with_children}
         for path, count in sorted(children.items(), key=lambda item: item[0][-1].lower())
     ]
     return {
@@ -326,6 +360,84 @@ def parameter_tree(
         "limit": size,
         "items": leaves[start : start + size],
     }
+
+
+def _editable_release(config: Dict[str, Any], payload: Dict[str, Any]):
+    if not payload.get("release_id"):
+        return None
+    definition_revision = payload.get("expected_definition_revision")
+    if isinstance(definition_revision, bool) or not isinstance(definition_revision, int):
+        raise AppError(INVALID_INPUT, "缺少参数定义修订", field="expected_definition_revision")
+    if definition_revision != _definition(config)["revision"]:
+        raise AppError(REVISION_CONFLICT, "参数定义已变化，请核对后重试", field="expected_definition_revision")
+    release = (config.get("releases") or {}).get(payload["release_id"])
+    if release is None:
+        raise AppError(NOT_FOUND, "软件版本不存在", field="release_id")
+    if release.get("default_revision_id") or release.get("d0", {}).get("frozen"):
+        raise AppError(REVISION_CONFLICT, "版本默认已固化，不能修改其参数定义", field="release_id")
+    expected = payload.get("expected_draft_revision")
+    if isinstance(expected, bool) or not isinstance(expected, int):
+        raise AppError(INVALID_INPUT, "缺少准备版本的草稿修订", field="expected_draft_revision")
+    if expected != int(release.get("d0", {}).get("revision", 0)):
+        raise AppError(REVISION_CONFLICT, "准备版本草稿已变化，请重新打开表单", field="expected_draft_revision")
+    return release
+
+
+def _adopt_parameter(config: Dict[str, Any], release, parameter_id: str) -> None:
+    if release is None:
+        return
+    release["definition_revision"] = _definition(config)["revision"]
+    release["d0"].setdefault("values", {}).setdefault(parameter_id, {"membership": "included", "enabled": True, "value_state": "unset"})
+    release["d0"]["revision"] = int(release["d0"].get("revision", 0)) + 1
+
+
+def mutate_directory(profile_id: str, config_id: str, payload: Dict[str, Any], action: str) -> Dict[str, Any]:
+    path = _clean_directory(payload.get("path"))
+    target = _clean_directory(payload.get("new_path")) if action == "move" else path
+    if not path or action == "move" and not target:
+        raise AppError(INVALID_INPUT, "目录路径不能为空", field="path")
+    if action == "move" and target[:len(path)] == path:
+        raise AppError(INVALID_INPUT, "不能将目录移动到自身内部", field="new_path")
+    with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
+        doc = _load(profile_id)
+        config = doc["configs"].get(config_id)
+        if config is None:
+            raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        definition = _definition(config)
+        expected = payload.get("expected_definition_revision")
+        if isinstance(expected, bool) or not isinstance(expected, int) or expected != definition["revision"]:
+            raise AppError(REVISION_CONFLICT, "参数目录已变化，请刷新后重试", field="expected_definition_revision")
+        release = _editable_release(config, payload)
+        current = definition["current"]
+        directories = current.setdefault("directories", [])
+        parameters = list((current.get("parameters") or {}).values())
+        known = directories + [p.get("directory") or [] for p in parameters]
+        exists = any(item[:len(path)] == path for item in known)
+        if action != "create" and not exists:
+            raise AppError(NOT_FOUND, "目录不存在", field="path")
+        if action == "create" and exists or action == "move" and any(item[:len(target)] == target for item in known):
+            raise AppError(FILE_EXISTS, "目标目录已存在", field="new_path" if action == "move" else "path")
+        if action == "delete" and any((p.get("directory") or [])[:len(path)] == path for p in parameters):
+            raise AppError(INVALID_INPUT, "目录中仍有参数，请先移动参数后再删除", field="path")
+        if action == "create":
+            directories.append(path)
+        elif action == "move":
+            for parameter in parameters:
+                value = parameter.get("directory") or []
+                if value[:len(path)] == path:
+                    parameter["directory"] = target + value[len(path):]
+            current["directories"] = [target + value[len(path):] if value[:len(path)] == path else value for value in directories]
+        elif action == "delete":
+            current["directories"] = [value for value in directories if value[:len(path)] != path]
+        else:
+            raise AppError(INVALID_INPUT, "目录操作无效")
+        _snapshot_definition(config)
+        if release is not None:
+            release["definition_revision"] = definition["revision"]
+            release["d0"]["revision"] = int(release["d0"].get("revision", 0)) + 1
+        config["updated_at"] = _now()
+        _save(profile_id, doc)
+        return {"path": target, "revision": definition["revision"], "action": action}
 
 
 def create_parameter(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -345,6 +457,7 @@ def create_parameter(profile_id: str, config_id: str, payload: Dict[str, Any]) -
         config = doc["configs"].get(config_id)
         if config is None:
             raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        release = _editable_release(config, payload)
         parameters = _definition(config)["current"].setdefault("parameters", {})
         if any(row.get("name") == name and row.get("directory") == directory for row in parameters.values()):
             raise AppError(FILE_EXISTS, "同一目录下已存在同名参数", field="name")
@@ -362,6 +475,7 @@ def create_parameter(profile_id: str, config_id: str, payload: Dict[str, Any]) -
         }
         parameters[pid] = row
         _snapshot_definition(config)
+        _adopt_parameter(config, release, pid)
         config["updated_at"] = _now()
         _save(profile_id, doc)
         return copy.deepcopy(_definition(config)["current"]["parameters"][pid])
@@ -375,6 +489,7 @@ def update_parameter(
         config = doc["configs"].get(config_id)
         if config is None:
             raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        release = _editable_release(config, payload)
         current = _definition(config)["current"].setdefault("parameters", {})
         row = current.get(str(parameter_id))
         if row is None:
@@ -403,6 +518,7 @@ def update_parameter(
         if duplicates:
             raise AppError(FILE_EXISTS, "同一目录下已存在同名参数", field="name")
         _snapshot_definition(config)
+        _adopt_parameter(config, release, parameter_id)
         config["updated_at"] = _now()
         _save(profile_id, doc)
         return copy.deepcopy(_definition(config)["current"]["parameters"][row["parameter_id"]])
@@ -468,6 +584,18 @@ def create_binding(
     version_id = _clean_parameter_text(payload.get("version_id", ""), "version_id", limit=100)
     if payload.get("confirmed") is not True:
         raise AppError(INVALID_INPUT, "绑定候选必须显式确认", field="confirmed")
+    binding_id = str(payload.get("binding_id") or "")
+    if payload.get("verify_source") is True:
+        # Reuse the same exact file parser as extraction; names alone are not identities.
+        from . import config_v3_extract
+        source = config_v3_extract.build(profile_id, config_id, version_id)
+        if source["source"]["file_id"] != file_id_value:
+            raise AppError(INVALID_INPUT, "文件与所选版本不一致", field="file_id")
+        exact = locator[5:] if locator.startswith("json:") else locator
+        candidates = [row for row in source["items"] if row["display_path"] == exact
+                      and row["locator_kind"] not in ("attribute", "element_text")]
+        if len(candidates) != 1:
+            raise AppError(INVALID_INPUT, "请从文件选择唯一的参数字段", field="locator")
     with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
         doc = _load(profile_id)
         config = doc["configs"].get(config_id)
@@ -481,12 +609,20 @@ def create_binding(
             raise AppError(FILE_EXISTS, "绑定集已冻结", field="bindings")
         if _find_parameter(config, parameter_id) is None:
             raise AppError(NOT_FOUND, "参数不存在", parameter_id=parameter_id)
+        existing = binding_set["bindings"].get(binding_id) if binding_id else None
+        if binding_id and (not existing or existing["parameter_id"] != parameter_id):
+            raise AppError(NOT_FOUND, "版本绑定不存在", field="binding_id")
+        if binding_id or "expected_revision" in payload:
+            expected = payload.get("expected_revision")
+            if isinstance(expected, bool) or not isinstance(expected, int) or expected != binding_set["revision"]:
+                raise AppError(FILE_EXISTS, "版本绑定已变化，请重新打开后确认", field="expected_revision")
         if any(
-            row.get("parameter_id") == parameter_id or row.get("locator") == locator
+            (row.get("parameter_id") == parameter_id or row.get("locator") == locator)
+            and row.get("binding_id") != binding_id
             for row in binding_set["bindings"].values()
         ):
             raise AppError(FILE_EXISTS, "绑定位置或参数已存在", field="locator")
-        binding_id = "b-" + uuid.uuid4().hex[:12]
+        binding_id = binding_id or "b-" + uuid.uuid4().hex[:12]
         binding_set["bindings"][binding_id] = {
             "binding_id": binding_id,
             "parameter_id": parameter_id,

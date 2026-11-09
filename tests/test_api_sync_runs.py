@@ -7,6 +7,8 @@ from authz_fixtures import as_role, make_server, seed_roles
 
 from app.core.errors import BUSY, AppError
 from app.services import sync_connections, sync_sources, sync_tasks
+from app.services import sync_run_store
+from app.core.sync_models import SyncRun
 
 
 def make_workspace(caller, name):
@@ -51,6 +53,47 @@ def make_source(wid, cid, profile_id, name, enabled=True, mode="inherit"):
 
 def runs_url(wid):
     return "/api/v3/workspaces/%s/sync/runs" % wid
+
+
+def test_cancel_run_is_admin_only_workspace_scoped_and_idempotent():
+    seed_roles("sync-runs-cancel")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        visitor = as_role(server, "visitor")
+        wid = make_workspace(admin, "Cancel run")
+        other = make_workspace(admin, "Other workspace")
+        run = SyncRun(run_id="run-cancel-api", workspace_id=wid, trigger="manual",
+                      state="queued", counts={"total": 1, "queued": 1},
+                      created_at="2026-11-06T00:00:00Z")
+        sync_run_store.create_run(wid, run)
+        url = runs_url(wid) + "/" + run.run_id + "/cancel"
+        assert visitor.json("POST", url, {})[0] == 403
+        assert sync_run_store.get_run(wid, run.run_id)["run"]["state"] == "queued"
+        assert admin.json("POST", runs_url(other) + "/" + run.run_id + "/cancel", {})[0] == 404
+        status, _, canceled = admin.json("POST", url, {})
+        assert status == 202, canceled
+        assert canceled["run"]["state"] == "canceled"
+        assert canceled["run"]["counts"] == {"total": 1, "canceled": 1}
+        status, _, again = admin.json("POST", url, {})
+        assert status == 202 and again == canceled
+
+
+def test_run_search_and_failure_filter_precede_pagination():
+    seed_roles("run-search")
+    with make_server() as server:
+        admin, visitor = as_role(server, "admin"), as_role(server, "visitor")
+        wid = make_workspace(admin, "Run search")
+        for index, state, filename in [(1, "failed", "target.xml"), (2, "succeeded", "target.xml"), (3, "failed", "other.xml")]:
+            run = SyncRun(run_id="run-search-%s" % index, workspace_id=wid, trigger="manual", state="queued",
+                counts={"total": 1, "queued": 1}, created_at="2026-11-06T00:00:0%sZ" % index)
+            sync_run_store.create_run(wid, run, items=[{"name": filename, "source_id": "source-%s" % index}])
+            sync_run_store.finish_run(wid, run.run_id, state, counts={"total": 1})
+        status, _, page = visitor.json("GET", runs_url(wid) + "?q=TARGET.XML&failed_only=true&limit=1")
+        assert status == 200 and page["total"] == 1, page
+        assert page["items"][0]["run"]["run_id"] == "run-search-1"
+        assert visitor.json("GET", runs_url(wid) + "?q=target.xml")[2]["total"] == 2
+        assert visitor.json("GET", runs_url(wid) + "?q=run-search-3")[2]["total"] == 1
+        assert visitor.json("GET", runs_url(wid) + "?failed_only=invalid")[0] == 400
 
 
 def test_workspace_all_run_spans_profiles_and_keeps_manual_skips_disabled():

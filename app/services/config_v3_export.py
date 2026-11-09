@@ -14,13 +14,14 @@ import os
 import threading
 import uuid
 import xml.etree.ElementTree as ET
+from collections import Counter
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import config_mapping, fsutil, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, PARSE_FAILED, REVIEW_CONFLICT, AppError
-from . import config_v3_catalog, config_v3_extract, config_v3_merge, config_v3_provenance, documents, file_versions
+from . import config_v3_catalog, config_v3_extract, config_v3_merge, config_v3_parse, config_v3_provenance, documents, file_versions
 
 _LOCK = threading.RLock()
 _PLANS: Dict[str, Dict[str, Any]] = {}
@@ -106,7 +107,7 @@ def _set_xml(root: ET.Element, display_path: str, value: Any) -> None:
     if node.tag.split("}")[-1] != first_name:
         raise AppError(INVALID_INPUT, "模板根节点与绑定路径不一致", field="locator")
     for name, occurrence in steps[1:]:
-        matches = [child for child in list(node) if child.tag.split("}")[-1] == name]
+        matches = [child for child in list(node) if isinstance(child.tag, str) and child.tag.split("}")[-1] == name]
         if occurrence > len(matches):
             raise AppError(INVALID_INPUT, "模板缺少 XML 节点", field="locator", path=display_path)
         node = matches[occurrence - 1]
@@ -162,8 +163,24 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
     release = (config.get("releases") or {}).get(release_id)
     if release is None:
         raise AppError(NOT_FOUND, "软件版本不存在", release_id=release_id)
-    definitions = (config_v3_catalog._definition(config).get("current", {}).get("parameters") or {})
-    bindings = ((release.get("binding_set") or {}).get("bindings") or {}).values()
+    if revision["release_id"] != release_id:
+        raise AppError(INVALID_INPUT, "修订不属于所选软件版本", field="revision_id")
+    definitions = next((snapshot.get("parameters") or {} for snapshot in (config.get("definition", {}).get("history") or [])
+                        if snapshot.get("revision") == revision["definition_revision"]), {})
+    by_parameter = {b["parameter_id"]: copy.deepcopy(b) for b in ((release.get("binding_set") or {}).get("bindings") or {}).values()}
+    overrides = payload.get("mappings") or {}
+    if not isinstance(overrides, dict):
+        raise AppError(INVALID_INPUT, "模板映射必须按参数身份提交", field="mappings")
+    for pid, locator in overrides.items():
+        if pid not in definitions or not isinstance(locator, str) or len(locator) > 2000:
+            raise AppError(INVALID_INPUT, "模板映射必须引用该修订的参数和精确路径", field="mappings")
+        by_parameter.pop(pid, None)
+        if locator:
+            by_parameter[pid] = {"parameter_id": pid, "locator": locator}
+    bindings = list(by_parameter.values())
+    active_locators = [b.get("locator") for b in bindings if not b.get("file_id") or b["file_id"] == identified["file_id"]]
+    if len(set(active_locators)) != len(active_locators):
+        raise AppError(INVALID_INPUT, "多个参数不能写入同一个模板落点", field="mappings")
     values = revision["values"]
     issues = []
     blocked = []
@@ -185,19 +202,23 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
         raise AppError(INVALID_INPUT, "绑定参数缺值", field="values", issues=issues)
     blocked_ids = {row["parameter_id"] for row in blocked}
     output = raw.data
+    targets = None
     if fmt == "json":
         try:
+            targets = Counter(entry["locator"]["pointer"] for entry in config_v3_parse.json_locators(output))
             document = json.loads(output.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             raise AppError(PARSE_FAILED, "模板 JSON 无法解析") from exc
     elif fmt == "xml":
         try:
-            root = ET.fromstring(output)
+            targets = Counter(entry["display_path"] for entry in config_v3_parse.xml_locators(output))
+            root = ET.fromstring(output, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True, insert_pis=True)))
         except ET.ParseError as exc:
             raise AppError(PARSE_FAILED, "模板 XML 无法解析") from exc
     else:
         text = output.decode("utf-8-sig")
     applied = 0
+    mapping = []
     for binding in bindings:
         if binding.get("file_id") and binding["file_id"] != identified["file_id"]:
             continue
@@ -208,6 +229,9 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
         if str(row.get("value_state") or "unset") not in ("present", "null"):
             continue
         locator = str(binding.get("locator") or "")
+        exact = locator[5:] if fmt == "json" and locator.startswith("json:") else locator
+        if targets is not None and (not exact or targets.get(exact) != 1):
+            raise AppError(INVALID_INPUT, "模板落点不存在、重复或无法精确定位", field="mappings", parameter_id=parameter_id)
         target = _typed_value(row, definitions.get(parameter_id) or {}) if fmt == "json" \
             else (None if str(row.get("value_state")) == "null" else row.get("value"))
         if fmt == "json":
@@ -216,7 +240,15 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
             _set_xml(root, locator, target)
         else:
             text = _set_ini(text, locator, target)
+        mapping.append({"parameter_id": parameter_id, "name": definitions.get(parameter_id, {}).get("name", parameter_id),
+                        "locator": locator, "value": row.get("value"), "value_state": row.get("value_state")})
         applied += 1
+    mapped_ids = {row["parameter_id"] for row in mapping}
+    for pid, parameter in definitions.items():
+        if pid not in mapped_ids:
+            row = values.get(pid) or {}
+            mapping.append({"parameter_id": pid, "name": parameter.get("name", pid), "locator": "",
+                            "value": row.get("value"), "value_state": row.get("value_state"), "unmapped": True})
     if fmt == "json":
         output = json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
     elif fmt == "xml":
@@ -238,6 +270,7 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
                      "format": fmt},
         "output": output, "digest": digest, "applied": applied,
         "blocked": blocked, "confirmed": confirmed,
+        "mapping": mapping,
         "preview_token": hashlib.sha256((digest + revision_id).encode()).hexdigest(),
         "created_at": _now(),
     }
@@ -246,21 +279,33 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
     return _public(plan)
 
 
-def _public(plan: Dict[str, Any]) -> Dict[str, Any]:
+def _public(plan: Dict[str, Any], offset: int = 0, limit: int = 50) -> Dict[str, Any]:
     return {
         "plan_id": plan["plan_id"], "config_id": plan["config_id"],
         "release_id": plan["release_id"], "template": copy.deepcopy(plan["template"]),
         "revision_id": plan["revision"]["revision_id"], "digest": plan["digest"],
         "preview_token": plan["preview_token"], "applied": plan["applied"],
         "blocked": copy.deepcopy(plan["blocked"]),
+        "mapping": copy.deepcopy(plan.get("mapping", [])[offset:offset + limit]),
+        "mapping_total": len(plan.get("mapping", [])), "mapping_offset": offset,
         "preview": plan["output"].decode("utf-8", "replace")[:4000],
     }
+
+
+def get_plan(profile_id: str, config_id: str, plan_id: str, offset: int = 0, limit: int = 50) -> Dict[str, Any]:
+    if offset < 0 or not 1 <= limit <= 100:
+        raise AppError(INVALID_INPUT, "映射分页参数无效", field="offset")
+    with _LOCK:
+        plan = _PLANS.get(str(plan_id))
+        if plan is None or plan["workspace_id"] != storage.get_active_workspace() or plan["profile_id"] != profile_id or plan["config_id"] != config_id:
+            raise AppError(NOT_FOUND, "导出计划不存在", plan_id=plan_id)
+        return _public(plan, offset, limit)
 
 
 def commit(profile_id: str, config_id: str, plan_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     with _LOCK:
         plan = _PLANS.get(str(plan_id))
-        if plan is None or plan["profile_id"] != profile_id or plan["config_id"] != config_id:
+        if plan is None or plan["workspace_id"] != storage.get_active_workspace() or plan["profile_id"] != profile_id or plan["config_id"] != config_id:
             raise AppError(NOT_FOUND, "导出计划不存在", plan_id=plan_id)
         if str(payload.get("preview_token") or "") != plan["preview_token"]:
             raise AppError(REVIEW_CONFLICT, "预览令牌不匹配，请重新预览", field="preview_token")
@@ -273,6 +318,9 @@ def commit(profile_id: str, config_id: str, plan_id: str, payload: Dict[str, Any
     meta = {
         "artifact_id": artifact_id, "config_id": config_id, "release_id": plan["release_id"],
         "revision_id": plan["revision"]["revision_id"], "template": plan["template"],
+        "revision_hash": plan["revision"]["content_hash"],
+        "definition_revision": plan["revision"]["definition_revision"],
+        "mapping": [{"parameter_id": row["parameter_id"], "locator": row["locator"]} for row in plan.get("mapping", []) if not row.get("unmapped")],
         "digest": plan["digest"], "filename": filename, "created_at": _now(),
         "deployed": False,
     }

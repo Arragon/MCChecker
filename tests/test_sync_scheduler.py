@@ -24,6 +24,21 @@ NOW = datetime(2026, 11, 2, 12, 0, 0, tzinfo=timezone.utc)
 SIX_HOURS = timedelta(hours=6)
 
 
+def test_next_sync_time_reads_only_live_anchor_and_respects_pause(monkeypatch):
+    sched = scheduler_module.Scheduler()
+    source = {"source_id": "s1", "workspace_id": "w1", "profile_id": "default", "enabled": True, "schedule_mode": "inherit"}
+    policy = {"enabled": True, "default_interval_hours": 6}
+    assert sched.next_sync_at("w1", source, policy) is None
+    monkeypatch.setattr(sched, "is_alive", lambda: True)
+    assert sched.next_sync_at("w1", source, policy) is None, "A GET must not seed a future schedule"
+    sched._sync_anchors[("w1", "s1")] = datetime(2026, 11, 2, 12, 0, 0)
+    assert sched.next_sync_at("w1", source, policy) == datetime(2026, 11, 2, 18, 0, 0)
+    assert sched.next_sync_at("w2", source, policy) is None
+    assert sched.next_sync_at("w1", source, dict(policy, enabled=False)) is None
+    sched._stopping.set()
+    assert sched.next_sync_at("w1", source, policy) is None
+
+
 # ---------------------------------------------------------------------------
 # 纯函数输入构造
 # ---------------------------------------------------------------------------

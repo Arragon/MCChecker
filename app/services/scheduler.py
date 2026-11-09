@@ -405,6 +405,19 @@ class Scheduler(threading.Thread):
     # M16-09：同步来源到期扫描（只读；不投递、不写盘）
     # ------------------------------------------------------------------
 
+    def next_sync_at(self, workspace_id: str, source: Dict[str, Any], policy: Dict[str, Any]) -> Optional[datetime]:
+        """Project the live scheduler anchor without seeding or changing the schedule."""
+        if self._stopping.is_set() or not self.is_alive():
+            return None
+        interval = sync_scheduler.effective_interval(policy, source)
+        if interval is None:
+            return None
+        with self._lock:
+            anchor = self._sync_anchors.get((workspace_id, source["source_id"]))
+        if anchor is None:
+            anchor = sync_scheduler.parse_timestamp(policy.get("anchor"))
+        return anchor + timedelta(hours=interval) if anchor is not None else None
+
     @property
     def pending_sync_sources(self) -> List[sync_scheduler.DueSource]:
         """最近一次到期扫描形成的待投递清单（进程内，不落盘）。"""

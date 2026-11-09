@@ -208,6 +208,10 @@ def begin_candidate(
         }
         record["revision"] = int(record.get("revision") or 0) + 1
         record["last_error"] = None
+        if record.get("state") == "locked":
+            # Explicit replacement credentials release the lockout. The previous active
+            # generation stays unchanged until the new candidate actually verifies.
+            record["state"] = "valid" if record.get("active_generation") is not None else "unconfigured"
         doc["items"][cid] = record
         return doc
 

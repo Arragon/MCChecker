@@ -1,5 +1,7 @@
 # M16 更新管理真实浏览器 E2E 记录（M16-40）
 
+> 2026-11-07 更新：最新本地交互 38/38、旧路由可达 28/28、API 1/1；实际 collector + Chromium + TLS 模拟 SDA 另有 4 项端到端及 113.4 秒闲置验证，见 [当前 R6 对照和证据范围](M16_R6_UI_AUDIT.md)。下面 2026-11-02 的 token 与 13 项记录保留作历史，不代表当前授权规则；当前只区分管理员/访客。真实 SDA/目标平台未验收；不再等待现场输入阻塞模拟测试。
+
 > 状态：2026-11-02。**由可复跑脚本驱动**：`scripts/e2e_browser.py`（stdlib CDP）+ `scripts/e2e_scenarios.py`（场景清单），
 > 每次运行产出 JSON 报告与逐场景截图。最近一次全量：**interactive 13/13 通过、reachable 28/28 通过**。
 > 环境：macOS + Google Chrome 156 headless（CDP）、临时数据根（`~/.cache/mcc-e2e-40-*`）、Python 3.9.11 主应用。未使用公司内网、未接触真实 SDA。
