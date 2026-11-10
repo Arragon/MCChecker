@@ -8,6 +8,10 @@
 
 更新内容、接口与兼容边界见 [V3.2 更新说明](docs/MCChecker_V3.2_RELEASE_NOTES.md)，开发验收记录见 [实施与验收](docs/MCChecker_V3.2_PLAN.md)。版本标识为 `3.2.0`；本地交付与真实 SDA、目标设备、Windows/Linux 实机验收分别记录，不因打包成功宣称外部发布通过。
 
+## API 接入
+
+[DL 系数按时间查询 API 使用教程](docs/DL_COEFFICIENTS_API.md)：按工作区、机型、计算模块及指定时间获取当时生效的完整系数配置，包含 curl、Python、JavaScript 示例和错误处理。
+
 ## 快速启动
 
 ```bash
