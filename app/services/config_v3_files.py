@@ -21,7 +21,8 @@ def list_files(profile_id: str, query: str = "", offset: str = "0", limit: str =
     pending = {}
     cursor = "0"
     while cursor is not None:
-        page = sync_candidates.list_candidates(storage.get_active_workspace(), profile_id=profile_id, pending_only=True, limit=200, cursor=cursor)
+        # Legacy storage uses an empty scope; Sync uses the explicit default ID.
+        page = sync_candidates.list_candidates(storage.get_active_workspace() or "default", profile_id=profile_id, pending_only=True, limit=200, cursor=cursor)
         for candidate in page["items"]:
             parts = candidate["target_scope"].split(":")
             if len(parts) == 3 and parts[0] == "default_candidate":

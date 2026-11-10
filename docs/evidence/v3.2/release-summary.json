@@ -2,8 +2,8 @@
   "version": "3.2.0",
   "branch": "codex/v32-config-management-20261109",
   "package": "dist/MCChecker-3.2.0.zip",
-  "package_bytes": 1014119,
-  "package_sha256": "ab772d65656b43ccc1d60122671229cc87375effecd9cc53dc63068950b6bd9f",
+  "package_bytes": 1014307,
+  "package_sha256": "5f57e1d01d0cb9989419e3c4e50a7dd67e0b8d3ebfaabdb2c63f2109a68e3e5d",
   "source_files": 224,
   "zip_members": 225,
   "manifest_verified": true,
@@ -31,5 +31,11 @@
   ],
   "simulated_sda_integration_passed": 4,
   "git_pushed": false,
-  "user_data_unchanged_after_python_checks": true
+  "user_data_unchanged_after_python_checks": true,
+  "hotfix": {
+    "issue": "默认工作区配置管理首页 workspace_id 不能为空",
+    "targeted_tests_passed": 12,
+    "package_verified": true,
+    "full_suite_after_hotfix": false
+  }
 }

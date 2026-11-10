@@ -13,6 +13,17 @@ def _root(wid):
     return "/api/v3/workspaces/%s/profiles/default" % wid
 
 
+def test_default_workspace_file_home_accepts_legacy_storage_scope():
+    seed_roles("v32-default-home")
+    with make_server() as server:
+        admin = as_role(server, "admin")
+        _put(server, "default", "Default.xml", b"<Root/>", "application/xml")
+        for role in (admin, as_role(server, "visitor")):
+            status, _, page = role.json("GET", _root("default") + "/config-files")
+            assert status == 200, page
+            assert any(row["name"] == "Default.xml" for row in page["items"])
+
+
 def test_file_home_joins_explicit_identity_and_preserves_legacy_configs(monkeypatch):
     seed_roles("v32-files")
     with make_server() as server:
