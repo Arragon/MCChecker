@@ -63,6 +63,8 @@ def list_candidates(
             state=query_param(query, "state") or None,
             limit=max(1, min(_int(query_param(query, "limit"), 50), 200)),
             cursor=query_param(query, "cursor") or "0",
+            configuration_id=query_param(query, "configuration_id") or None,
+            pending_only=query_param(query, "pending_only").lower() in ("true", "1"),
         )
     )
 
@@ -212,7 +214,10 @@ def candidate_apply(
     preview_id = str(payload.get("preview_id") or "").strip()
     if not preview_id:
         raise AppError(INVALID_INPUT, "preview_id 必填", field="preview_id")
-    preview = sync_candidate_plans.get_preview(wid, preview_id)
+    # The service validates after checking its immutable receipt. A successful
+    # write changes its own draft, so validating here would reject lost-response
+    # retries before they could retrieve that receipt.
+    preview = sync_candidate_plans.stored_preview(wid, preview_id)
     if preview.get("candidate_id") != params["cid"]:
         raise AppError(NOT_FOUND, "预览不属于该候选", field="candidate_id")
     result = sync_candidate_apply.apply_preview(

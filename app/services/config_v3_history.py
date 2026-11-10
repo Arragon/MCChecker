@@ -49,6 +49,7 @@ def record(
     source: Any = None,
     request_id: str = "",
     undo_of: str = "",
+    once: bool = False,
 ) -> Dict[str, Any]:
     event = {
         "event_id": "ev-" + uuid.uuid4().hex[:12],
@@ -68,6 +69,10 @@ def record(
     }
     with _LOCK, locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
         events = _load(profile_id)
+        if once:
+            for existing in events:
+                if (existing.get("config_id"), existing.get("type"), existing.get("source")) == (config_id, event_type, source):
+                    return copy.deepcopy(existing)
         event["seq"] = len(events) + 1
         events.append(event)
         fsutil.atomic_write_json(_events_path(profile_id), events)
@@ -87,6 +92,16 @@ def list_events(profile_id: str, config_id: str = "", q: str = "") -> List[Dict[
         out.append(copy.deepcopy(event))
     out.sort(key=lambda row: (row["at"], int(row.get("seq", 0))), reverse=True)
     return out
+
+
+def saved_authors(profile_id: str, config_id: str) -> Dict[str, str]:
+    authors: Dict[str, str] = {}
+    for event in list_events(profile_id, config_id):
+        source = event.get("source")
+        record_id = source.get("revision_id") if isinstance(source, dict) else None
+        if event.get("type") in ("freeze", "baseline", "machine") and record_id and event.get("principal"):
+            authors.setdefault(record_id, event["principal"])
+    return authors
 
 
 def restore(profile_id: str, config_id: str, payload: Dict[str, Any], actor: Any = None, ip: str = "") -> Dict[str, Any]:

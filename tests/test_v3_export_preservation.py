@@ -66,6 +66,30 @@ def test_manual_template_mapping_is_previewed_scoped_and_does_not_rebind():
         assert _export_plan(server, wid, cid, dict(payload, mappings={"p-absent": "json:/P1"}))[0] == 400
 
 
+def test_visitor_exports_saved_snapshot_without_modifying_configuration():
+    seed_roles("v32-visitor-export")
+    with make_server() as server:
+        wid, cid = _base(server)
+        pid = _param(server, wid, cid, "P1")
+        rid = _release(server, wid, cid)
+        _values(server, wid, cid, rid, [{"parameter_id": pid, "membership": "included", "value_state": "present", "value": "0"}])
+        template = _put(server, wid, "readonly.json", b'{"P1":9,"Keep":false}', "application/json")
+        _binding(server, wid, cid, rid, pid, "json:/P1", template)
+        _freeze(server, wid, cid, rid)
+        visitor = as_role(server, "visitor")
+        base = "/api/v3/workspaces/%s/profiles/default/configs/%s" % (wid, cid)
+        before = visitor.json("GET", base)[2]
+        payload = {"release_id": rid, "revision_id": "d0-" + rid, "version_id": template["version_id"]}
+        status, _, response = visitor.json("POST", base + "/export-plans", payload)
+        assert status == 201, response
+        plan = response["plan"]
+        status, _, result = visitor.json("POST", base + "/export-plans/" + plan["plan_id"] + "/commit", {"preview_token": plan["preview_token"]})
+        assert status == 200, result
+        assert result["artifact"]["digest"] == hashlib.sha256(plan["preview"].encode()).hexdigest()
+        assert visitor.json("GET", base)[2] == before
+        assert visitor.json("POST", base + "/drafts/d0-" + rid + "/freeze", {"request_id": "forbidden"})[0] == 403
+
+
 def test_xml_export_keeps_comments_and_processing_instructions():
     seed_roles("export-comments")
     with make_server() as server:

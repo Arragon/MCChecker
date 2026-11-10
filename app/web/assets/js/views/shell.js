@@ -300,14 +300,17 @@
 
   App.prototype.confirmContext = function (title) {
     var self = this;
-    var dirty = Object.keys(this.instances || {}).filter(function (key) {
-      var inst = self.instances[key];
-      return inst && inst.isDirty && inst.isDirty();
-    }).length;
-    try { dirty += document.querySelectorAll("dialog[open]").length; } catch (e) {}
-    return dirty
-      ? MC.confirm({ title: title, message: "有 " + dirty + " 个页面或弹窗存在未保存的修改，切换后这些修改会丢失。", confirmText: "仍然切换", danger: true })
-      : Promise.resolve(true);
+    var instances = Object.keys(this.instances || {}).map(function (key) { return self.instances[key]; });
+    var proceed = Promise.resolve(true);
+    instances.filter(function (inst) { return inst && inst.confirmLeave && inst.isDirty && inst.isDirty(); }).forEach(function (inst) {
+      proceed = proceed.then(function (ok) { return ok ? inst.confirmLeave() : false; });
+    });
+    return proceed.then(function (ok) {
+      if (!ok) return false;
+      var dirty = instances.filter(function (inst) { return inst && !inst.confirmLeave && inst.isDirty && inst.isDirty(); }).length;
+      try { dirty += document.querySelectorAll("dialog[open]").length; } catch (e) {}
+      return dirty ? MC.confirm({ title: title, message: "有 " + dirty + " 个页面或弹窗存在未保存的修改，切换后这些修改会丢失。", confirmText: "仍然切换", danger: true }) : true;
+    });
   };
 
   App.prototype.saveActiveRoute = function () {
@@ -918,6 +921,7 @@
     var inst = this.instances[key];
     var needsConfirm = !silent && inst && inst.isDirty && inst.isDirty();
     if (!needsConfirm) return Promise.resolve(this._removeTab(key, silent));
+    if (inst.confirmLeave) return inst.confirmLeave().then(function (ok) { return ok ? self._removeTab(key, silent) : false; });
     return MC.confirm({ title: "关闭页面", message: "该页面有未保存的修改，关闭后将丢失。", confirmText: "关闭并放弃修改", danger: true }).then(function (ok) {
       if (!ok) return false;
       return self._removeTab(key, silent);
@@ -950,13 +954,16 @@
     var moreBtn = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "标签操作", style: "margin:0 0 4px auto;flex:none" }, icon("more"));
     moreBtn.addEventListener("click", function () {
       function closeMany(keys, goOverview) {
-        var dirty = keys.some(function (k) {
+        var proceed = Promise.resolve(true);
+        keys.forEach(function (k) {
           var inst = self.instances[k];
-          return inst && inst.isDirty && inst.isDirty();
+          if (inst && inst.confirmLeave && inst.isDirty && inst.isDirty()) proceed = proceed.then(function (ok) { return ok ? inst.confirmLeave() : false; });
         });
-        var proceed = dirty
-          ? MC.confirm({ title: "关闭页面", message: "其中有未保存的修改，关闭后将丢失。", confirmText: "关闭并放弃修改", danger: true })
-          : Promise.resolve(true);
+        proceed = proceed.then(function (ok) {
+          if (!ok) return false;
+          var dirty = keys.some(function (k) { var inst = self.instances[k]; return inst && !inst.confirmLeave && inst.isDirty && inst.isDirty(); });
+          return dirty ? MC.confirm({ title: "关闭页面", message: "其中有未保存的修改，关闭后将丢失。", confirmText: "关闭并放弃修改", danger: true }) : true;
+        });
         proceed.then(function (ok) {
           if (!ok) return;
           keys.forEach(function (k) { self._removeTab(k, true); });

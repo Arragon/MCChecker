@@ -42,12 +42,16 @@ def _base(config: Dict[str, Any], release: Dict[str, Any], kind: str, revision_i
     if kind == "default":
         if not release.get("default_revision_id"):
             raise AppError(INVALID_INPUT, "canonical D0 尚未冻结，不能建机台分支")
+        if revision_id and revision_id != release["default_revision_id"]:
+            raise AppError(INVALID_INPUT, "所选标准不属于此软件版本", field="base_revision_id")
         return release["d0"].get("frozen_snapshot") or {}
     if kind == "baseline":
         branch = config.setdefault("main_branch", {"head_id": None, "next_seq": 1, "baselines": {}})
         row = (branch.get("baselines") or {}).get(revision_id)
         if row is None:
             raise AppError(NOT_FOUND, "基线不存在", baseline_id=revision_id)
+        if row.get("release_id") != release["release_id"]:
+            raise AppError(INVALID_INPUT, "所选标准不属于此软件版本", field="base_revision_id")
         return row.get("values") or {}
     raise AppError(INVALID_INPUT, "base_kind 只能是 default/baseline", field="base_kind")
 
@@ -69,6 +73,7 @@ def _public(machine: Dict[str, Any]) -> Dict[str, Any]:
                 "base_revision_id": row.get("base_revision_id"),
                 "release_id": row.get("release_id"),
                 "published_at": row["published_at"],
+                "note": row.get("note", ""),
             }
             for row in (machine.get("revisions") or {}).values()
         ],
@@ -187,6 +192,8 @@ def patch_values(profile_id: str, config_id: str, machine_id: str,
         draft = machine.get("draft") or {}
         if draft.get("status") != "draft":
             raise AppError(REVISION_CONFLICT, "机台没有可编辑草稿", machine_id=machine_id)
+        if payload.get("expected_draft_id") is not None and payload["expected_draft_id"] != draft.get("draft_id"):
+            raise AppError(REVISION_CONFLICT, "配置草稿已变化，请重新核对", draft_id=draft.get("draft_id"))
         receipts = draft.setdefault("receipts", {})
         if request_id in receipts:
             return copy.deepcopy(draft)
@@ -217,6 +224,10 @@ def publish_machine(
     payload: Dict[str, Any],
     if_match: Optional[str],
 ) -> Tuple[Dict[str, Any], int]:
+    note = config_v3_drafts.save_note(payload)
+    request_id = payload.get("request_id", "")
+    if not isinstance(request_id, str) or len(request_id) > 100:
+        raise AppError(INVALID_INPUT, "request_id 最多 100 个字符", field="request_id")
     raw = if_match if if_match is not None and str(if_match).strip() else payload.get("expected_revision")
     expected_raw = str(raw if raw is not None else "").strip().strip('"')
     try:
@@ -229,9 +240,19 @@ def publish_machine(
         if config is None:
             raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
         machine = _find(config, machine_id)
+        receipts = machine.setdefault("publish_receipts", {})
+        if request_id and request_id in receipts:
+            receipt = receipts[request_id]
+            if payload.get("expected_draft_id") is not None and payload["expected_draft_id"] != receipt["draft_id"]:
+                raise AppError(REVISION_CONFLICT, "保存请求对应另一份草稿")
+            result = _public(machine)
+            result.update(published_revision_id=receipt["revision_id"], replayed=True)
+            return result, receipt["seq"]
         draft = machine.get("draft")
         if not isinstance(draft, dict) or draft.get("status") != "draft":
             raise AppError(REVISION_CONFLICT, "机台没有可发布的草稿", machine_id=machine_id)
+        if payload.get("expected_draft_id") is not None and payload["expected_draft_id"] != draft.get("draft_id"):
+            raise AppError(REVISION_CONFLICT, "配置草稿已变化，请重新核对", draft_id=draft.get("draft_id"))
         if int(draft.get("revision", 0)) != expected:
             raise AppError(REVISION_CONFLICT, "草稿已被其他编辑者更新", current=int(draft.get("revision", 0)))
         release = (config.get("releases") or {}).get(machine["release_id"])
@@ -251,12 +272,17 @@ def publish_machine(
             "values": copy.deepcopy(draft.get("values") or {}),
             "published_at": _now(),
             "draft_id": draft.get("draft_id"),
+            "note": note,
         }
         machine["head_id"] = rid
         machine["next_rev"] = seq + 1
         draft["status"] = "published"
+        if request_id:
+            receipts[request_id] = {"revision_id": rid, "seq": seq, "draft_id": draft.get("draft_id")}
         config_v3_catalog._save(profile_id, doc)
-        return _public(machine), seq
+        result = _public(machine)
+        result["published_revision_id"] = rid
+        return result, seq
 
 
 def get_machine(profile_id: str, config_id: str, machine_id: str) -> Dict[str, Any]:

@@ -26,7 +26,7 @@ from app.core.sync_models import (
     validate_workspace_id,
 )
 
-from . import sync_events, sync_store
+from . import sync_events, sync_store, sync_config_scope, workspace_context
 from .sync_paths import ensure_dir, run_dir, runs_root
 
 MANIFEST = "manifest.json"
@@ -204,8 +204,17 @@ def list_runs(
     cursor: str = "0",
     query: str = "",
     failed_only: bool = False,
+    configuration_id: Optional[str] = None,
+    profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
+    if profile_id:
+        workspace_context.assert_profile(wid, profile_id)
+    if configuration_id:
+        validate_id(configuration_id, "configuration_id")
+        if not profile_id:
+            raise AppError(INVALID_INPUT, "按配置筛选时必须指定机型", field="profile_id")
+    owned_file = sync_config_scope.file_id(wid, profile_id, configuration_id)
     if state is not None:
         validate_enum(state, RUN_STATES, "state")
     if trigger is not None:
@@ -230,6 +239,15 @@ def list_runs(
             except AppError:
                 continue
             run = doc["run"]
+            if profile_id and (doc.get("frozen") or {}).get("profile_id") != profile_id:
+                continue
+            if configuration_id and not any(
+                row.get("profile_id") == profile_id and sync_config_scope.matches(row.get("target") or {}, configuration_id, owned_file)
+                for row in (doc.get("frozen") or {}).get("source_targets") or []
+            ):
+                # Old runs without a frozen target remain in workspace history;
+                # rejoining today's source would incorrectly reassign their past.
+                continue
             if state is not None and run.get("state") != state:
                 continue
             if trigger is not None and run.get("trigger") != trigger:

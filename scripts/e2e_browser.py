@@ -570,6 +570,59 @@ class Runner:
             if sync_candidates.get_candidate(wid, candidate["candidate_id"])["state"] != "applied":
                 raise AssertionError("服务端候选状态未更新")
             notes.append("合成文件候选经真实 API 预览；并发修改触发 409，重新预览后写入草稿，主分支 head 不变")
+            # V3.2: a frozen standard with an existing edit draft must compare
+            # and guard that draft; accepting it is not yet a formal save.
+            base = "/api/v3/workspaces/%s/profiles/default/configs/%s" % (wid, cid)
+            def request(method, path, body=None, **kwargs):
+                status, result = api(self.server, method, path, body, **kwargs)
+                assert 200 <= status < 300, (status, result)
+                return result
+            request("PUT", base + "/file", {"file_id": file_row["file_id"]})
+            request("POST", base + "/drafts/" + did + "/freeze", {"expected_revision": after["revision"], "request_id": "v32-first-save"})
+            edit_draft = request("POST", base + "/releases/" + release["release_id"] + "/baseline-drafts")["draft"]
+            def patch(value, revision, key):
+                return request("PATCH", base + "/baseline-drafts/" + edit_draft["draft_id"] + "/values", {"expected_revision": revision, "request_id": key,
+                    "items": [{"parameter_id": pid, "membership": "included", "value_state": "present", "value": value}]})
+            patch("5", 0, "v32-edit")
+            with storage.use_workspace(wid), storage.use_profile("default"):
+                storage.save_config_file("candidate.xml", b"<R><x>4</x></R>")
+                incoming = file_versions.current_identity("default", "candidate.xml")
+            changed_source = request("PATCH", "/api/v3/workspaces/%s/sync/sources/%s" % (wid, source["source_id"]),
+                {"target": {"kind": "default_candidate", "configuration_id": cid, "release_id": release["release_id"]}}, headers={"If-Match": '"1"'})
+            incoming_candidate = sync_candidates.create_candidate(wid, "default", source["source_id"], changed_source["revision"], incoming["blob_sha256"],
+                "default_candidate:%s:%s" % (cid, release["release_id"]), file_version_id=incoming["version_id"], base_file_version_id=file_row["version_id"])
+            b.navigate("about:blank")
+            b.navigate(self.url(e2e_scenarios.updates_hash("candidates", wid) + "&config=" + cid))
+            selector = '[data-sync-candidate="%s"] button' % incoming_candidate["candidate_id"]
+            assert b.wait_for("!!document.querySelector(%s)" % json.dumps(selector), timeout=15)
+            b.eval("document.querySelector(%s).click()" % json.dumps(selector))
+            assert b.wait_for("document.querySelector('[aria-label=\\\"软件版本\\\"]')?.options.length===2", timeout=15)
+            assert b.eval("document.querySelector('[aria-label=\\\"固定配置\\\"]').disabled")
+            b.eval("document.querySelector('[data-sync-preview]').click()")
+            assert b.wait_for("!!document.querySelector('[data-sync-decision]')", timeout=15)
+            cells = b.eval("Array.from(document.querySelector('[data-sync-diff]').querySelectorAll('td')).map(x=>x.textContent)")
+            assert cells[3:6] == ["2", "5", "4"], cells
+            b.eval("var s=document.querySelector('[data-sync-decision]');s.value='use_new';s.dispatchEvent(new Event('change',{bubbles:true}))")
+            patch("7", 1, "v32-second-client")
+            b.eval("document.querySelector('[data-sync-apply]').click()")
+            assert b.wait_for("!!document.querySelector('[data-sync-repreview]')", timeout=15)
+            b.eval("document.querySelector('[data-sync-repreview]').click()")
+            assert b.wait_for("!!document.querySelector('[data-sync-decision]')&&!document.querySelector('[data-sync-repreview]')", timeout=15)
+            assert b.eval("document.querySelector('[data-sync-decision]').value") == "use_new"
+            b.eval("document.querySelector('[data-sync-apply]').click()")
+            assert b.wait_for("!!document.querySelector('[data-sync-applied]')", timeout=15)
+            pending_url = "/api/v3/workspaces/%s/sync/candidates?profile_id=default&configuration_id=%s&pending_only=true" % (wid, cid)
+            pending = request("GET", pending_url)
+            assert pending["total"] == 1 and pending["items"][0]["review_state"] == "awaiting_save", pending
+            b.eval("document.querySelector('[data-sync-goto-v3]').click()")
+            assert b.wait_for("!!document.querySelector('.cv32-editbar')&&!document.querySelector('.sync-candidate-dialog')", timeout=15)
+            b.eval("Array.from(document.querySelectorAll('.cv32-editbar button')).find(x=>x.textContent.trim()==='核对并保存').click()")
+            assert b.wait_for("!!document.querySelector('.cv-dialog .cv32-review-table')", timeout=15)
+            b.eval("Array.from(document.querySelectorAll('.modal-footer button')).find(x=>x.textContent.trim()==='保存配置').click()")
+            assert b.wait_for("document.querySelector('.cv32-object-heading')?.textContent.includes('已保存')&&!document.querySelector('.cv32-editbar')", timeout=15)
+            assert request("GET", pending_url)["total"] == 0
+            assert request("GET", base + "/revisions/" + did)["snapshot"]["values"][pid]["value"] == "2"
+            notes.append("V3.2 真实文件内候选：正式2/已有草稿5/来源4同时展示；二次编辑7触发409，核对后写同一草稿；正式保存前仍待处理，保存后移除，D0历史不变")
             ok = True
         except Exception as exc:
             notes.append(str(exc))

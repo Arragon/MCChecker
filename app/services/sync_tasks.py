@@ -242,6 +242,8 @@ def submit_sync_run(
             "profile_id": profile_id,
             "request_fingerprint": fingerprint,
             "source_ids": [source["source_id"] for source in normalized],
+            "source_targets": [{"source_id": source["source_id"], "profile_id": profile_id,
+                                "target": source.get("target") or {}} for source in normalized],
         },
     )
 

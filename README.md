@@ -2,6 +2,12 @@
 
 基于 Python 标准库 HTTP 服务的离线内网配置文件解析检查工具，支持 XML/JSON 格式配置的在线解析、查看、搜索、对比和版本管理。
 
+## V3.2 配置管理更新
+
+配置管理以配置文件列表为首页。进入文件后，使用版本演进、更新管理和操作记录；软件版本与机台在完整页面查看参数。编辑流程收为“编辑 → 核对并保存”，并保留暂存、冲突核对、历史快照和只读导出。
+
+更新内容、接口与兼容边界见 [V3.2 更新说明](docs/MCChecker_V3.2_RELEASE_NOTES.md)，开发验收记录见 [实施与验收](docs/MCChecker_V3.2_PLAN.md)。版本标识为 `3.2.0`；本地交付与真实 SDA、目标设备、Windows/Linux 实机验收分别记录，不因打包成功宣称外部发布通过。
+
 ## 快速启动
 
 ```bash
@@ -70,7 +76,7 @@ python scripts/migrate_v3.py execute --data-dir data --backup backups/v3-full
 python scripts/migrate_v3.py rollback --data-dir data --yes
 ```
 
-发布包：`python scripts/make_release.py --out dist/`。V3 最终发布门禁仍受真实浏览器/真实模板/设备/Windows/Linux/离线证据与 `INH-1910`/`INH-1978` 阻塞，见 `docs/V3_RELEASE_GATE.md`；在此之前不要把 V3 称为“已发布”。
+发布包：`python scripts/make_release.py`（默认写入 `dist/MCChecker-<版本>.zip`）。V3 最终发布门禁仍受真实浏览器/真实模板/设备/Windows/Linux/离线证据与 `INH-1910`/`INH-1978` 阻塞，见 `docs/V3_RELEASE_GATE.md`；在此之前不要把 V3 称为“已发布”。
 
 ## V3.1（M16）更新管理、SDA 会话与可信同步
 
@@ -121,7 +127,7 @@ python run.py --restore-backup backups/mcc-backup --data-dir data
 python run.py --restore-backup backups/mcc-backup --data-dir data --apply-restore
 ```
 
-发布包与兼容性：`python scripts/make_release.py --out dist/`；`check_py39.sh` 覆盖 `app/`、`run.py`、`main.py` 与 `scripts/`。跨版本/真实设备/物理断网证据仍未全部取得，详见 `docs/MCChecker_LEFTOVERS.md` 与验收台账。
+发布包与兼容性：`python scripts/make_release.py`；`check_py39.sh` 覆盖 `app/`、`run.py`、`main.py` 与 `scripts/`。跨版本/真实设备/物理断网证据仍未全部取得，详见 `docs/MCChecker_LEFTOVERS.md` 与验收台账。
 
 ## 配置说明
 

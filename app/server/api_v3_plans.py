@@ -205,6 +205,8 @@ def commit_merge_plan(
         params["pid"], params["cid"], "merge_commit", actor=ctx.actor, ip=ctx.ip,
         after={"draft_id": (result.get("draft") or {}).get("draft_id")},
         request_id=str((json_body(body) or {}).get("request_id") or ""),
+        source={"plan_id": params["plan_id"], "request_id": str((json_body(body) or {}).get("request_id") or "")},
+        once=result.get("mode") == "machine_upgrade",
     )
     return Response(payload=result)
 
@@ -250,6 +252,8 @@ def commit_value_plan(
     config_v3_history.record(
         params["pid"], params["cid"], "value_import", actor=ctx.actor, ip=ctx.ip,
         after={"applied": result.get("applied"), "created": result.get("created")},
+        source={"plan_id": params["plan_id"], "request_id": str((json_body(body) or {}).get("request_id") or "")},
+        once=bool((json_body(body) or {}).get("request_id")),
         request_id=str((json_body(body) or {}).get("request_id") or ""),
     )
     return Response(payload=result)

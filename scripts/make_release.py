@@ -73,6 +73,7 @@ RELEASE_ENTRIES: Tuple[str, ...] = (
     "docs/manual.md",
     "docs/V3_API.md",
     "docs/V3_ROLES.md",
+    "docs/MCChecker_V3.2_RELEASE_NOTES.md",
     "scripts/config_backup.py",
     "scripts/inspect_config_management.py",
     "scripts/inspect_v3_workspace.py",

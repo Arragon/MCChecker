@@ -62,6 +62,7 @@ def resolve(config: Dict[str, Any], revision_id: str) -> Dict[str, Any]:
         return {
             "revision_id": rid,
             "kind": "default",
+            "note": d0.get("note", ""),
             "label": "D0 " + str(release.get("version")),
             "definition_revision": int(release.get("definition_revision", 0)),
             "values": copy.deepcopy(d0.get("frozen_snapshot") or {}),
@@ -74,6 +75,7 @@ def resolve(config: Dict[str, Any], revision_id: str) -> Dict[str, Any]:
         return {
             "revision_id": rid,
             "kind": "baseline",
+            "note": row.get("note", ""),
             "label": row.get("label"),
             "definition_revision": int(row.get("definition_revision", 0)),
             "values": copy.deepcopy(row.get("values") or {}),
@@ -86,6 +88,7 @@ def resolve(config: Dict[str, Any], revision_id: str) -> Dict[str, Any]:
             return {
                 "revision_id": rid,
                 "kind": "machine",
+                "note": row.get("note", ""),
                 "label": machine.get("machine_no") + "·" + row.get("label", ""),
                 "definition_revision": int(row.get("definition_revision", 0)),
                 "values": copy.deepcopy(row.get("values") or {}),

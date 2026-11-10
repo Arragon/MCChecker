@@ -146,6 +146,14 @@ def test_candidate_apply_preview_and_apply_write_only_draft():
         })
         assert status == 200, applied
         assert applied["changed"]
+        # A successful apply invalidates its own preview. Lost-response retries
+        # must reach the persisted receipt instead of failing that stale check.
+        status, _, replay = admin.json("POST", url + "/apply", {
+            "preview_id": preview["preview_id"], "request_id": "r2",
+            "decisions": {item["parameter_id"]: "use_new" for item in conflicts},
+        })
+        assert status == 200 and replay["replayed"] is True, replay
+        assert replay["draft_revision"] == applied["draft_revision"]
         with storage.use_workspace(wid):
             draft = config_v3_drafts.get_draft("default", cid, did)
         assert list(draft["values"].values())[0]["value"] == "2"

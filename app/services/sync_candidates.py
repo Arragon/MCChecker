@@ -23,7 +23,7 @@ from app.core.sync_models import (
     validate_workspace_id,
 )
 
-from . import file_versions, sync_store, workspace_context
+from . import file_versions, sync_store, workspace_context, sync_config_scope, sync_candidate_review
 
 FILE = "candidates.json"
 DEFAULT_DOC: Dict[str, Any] = {"revision": 0, "items": []}
@@ -200,10 +200,16 @@ def list_candidates(
     state: Optional[str] = None,
     limit: int = 50,
     cursor: str = "0",
+    configuration_id: Optional[str] = None,
+    pending_only: bool = False,
 ) -> Dict[str, Any]:
     wid = validate_workspace_id(workspace_id)
     if profile_id:
         workspace_context.assert_profile(wid, profile_id)
+    if configuration_id:
+        validate_id(configuration_id, "configuration_id")
+        if not profile_id:
+            raise AppError(INVALID_INPUT, "按配置筛选时必须指定机型", field="profile_id")
     if state is not None:
         validate_enum(state, CANDIDATE_STATES, "state")
     try:
@@ -221,9 +227,14 @@ def list_candidates(
             continue
         if profile_id and item.get("profile_id") != profile_id:
             continue
-        if state and item.get("state") != state:
+        if state and not pending_only and item.get("state") != state:
+            continue
+        if configuration_id and not sync_config_scope.candidate_matches(item, configuration_id):
             continue
         rows.append(_safe(item))
+    sync_candidate_review.annotate(wid, rows)
+    if pending_only:
+        rows = [row for row in rows if row.get("review_state") in ("needs_review", "awaiting_save")]
     rows.sort(key=lambda row: (str(row.get("created_at") or ""), row["candidate_id"]), reverse=True)
     total = len(rows)
     page = rows[offset : offset + limit]

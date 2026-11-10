@@ -54,6 +54,40 @@ def _validated_values(release: Dict[str, Any], config: Dict[str, Any], values: D
             parsed.validate()
 
 
+def latest_saved_baseline(config: Dict[str, Any], release_id: str) -> Optional[Dict[str, Any]]:
+    """Select within one software release using the persisted Bn sequence."""
+    rows = (config.get("main_branch") or {}).get("baselines") or {}
+    return max(
+        (row for row in rows.values() if row.get("release_id") == release_id),
+        key=lambda row: int(row["label"][1:]),
+        default=None,
+    )
+
+
+def draft_from_standard(config: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepare a new in-memory draft from this release; caller owns persistence."""
+    saved = latest_saved_baseline(config, release["release_id"])
+    if saved:
+        source = saved["values"]
+        source_label = saved["baseline_id"]
+    else:
+        source = release["d0"].get("frozen_snapshot") or {}
+        source_label = release["default_revision_id"]
+    draft_id = "bd-" + uuid_hex()
+    draft = {
+        "draft_id": draft_id,
+        "release_id": release["release_id"],
+        "status": "draft",
+        "revision": 0,
+        "values": copy.deepcopy(source),
+        "source_revision_id": source_label,
+        "definition_revision": int(release.get("definition_revision", 0)),
+        "created_at": _now(),
+        "receipts": {},
+    }
+    return draft
+
+
 def create_baseline_draft(profile_id: str, config_id: str, release_id: str) -> Dict[str, Any]:
     with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
         doc = config_v3_catalog._load(profile_id)
@@ -68,26 +102,7 @@ def create_baseline_draft(profile_id: str, config_id: str, release_id: str) -> D
         existing = release.get("baseline_draft")
         if isinstance(existing, dict) and existing.get("status") == "draft":
             raise AppError(REVISION_CONFLICT, "该版本已有未发布的基线草稿", draft_id=existing["draft_id"])
-        branch = _branch(config)
-        head_id = branch.get("head_id")
-        if head_id:
-            source = branch["baselines"][head_id]["values"]
-            source_label = head_id
-        else:
-            source = release["d0"].get("frozen_snapshot") or {}
-            source_label = release["default_revision_id"]
-        draft_id = "bd-" + uuid_hex()
-        draft = {
-            "draft_id": draft_id,
-            "release_id": release_id,
-            "status": "draft",
-            "revision": 0,
-            "values": copy.deepcopy(source),
-            "source_revision_id": source_label,
-            "definition_revision": int(release.get("definition_revision", 0)),
-            "created_at": _now(),
-            "receipts": {},
-        }
+        draft = draft_from_standard(config, release)
         release["baseline_draft"] = draft
         config_v3_catalog._save(profile_id, doc)
         return _public_draft(draft)
@@ -193,6 +208,7 @@ def publish_baseline(
     payload: Dict[str, Any],
     if_match: Optional[str],
 ) -> Tuple[Dict[str, Any], str]:
+    note = config_v3_drafts.save_note(payload)
     request_id = str(payload.get("request_id") or "").strip()
     if not request_id or len(request_id) > 100:
         raise AppError(INVALID_INPUT, "request_id 必填且 ≤100 字符", field="request_id")
@@ -206,6 +222,13 @@ def publish_baseline(
         config = doc["configs"].get(config_id)
         if config is None:
             raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        # The release keeps only its active draft. A receipt must survive opening
+        # the next draft, so old saves are also resolved from the immutable record.
+        for saved in _branch(config)["baselines"].values():
+            if saved.get("draft_id") == draft_id and saved.get("save_request_id") == request_id:
+                result = copy.deepcopy(saved)
+                result["replayed"] = True
+                return result, _etag(int(saved.get("saved_draft_revision", 0)))
         release, draft = _find_draft(config, draft_id)
         receipts = draft.setdefault("publish_receipts", {})
         if request_id in receipts:
@@ -231,6 +254,9 @@ def publish_baseline(
             "values": copy.deepcopy(draft.get("values") or {}),
             "published_at": _now(),
             "draft_id": draft_id,
+            "note": note,
+            "save_request_id": request_id,
+            "saved_draft_revision": expected,
         }
         branch["baselines"][baseline_id] = baseline
         branch["head_id"] = baseline_id
@@ -260,6 +286,7 @@ def get_branch(profile_id: str, config_id: str) -> Dict[str, Any]:
                 "release_id": row["release_id"],
                 "definition_revision": row["definition_revision"],
                 "published_at": row["published_at"],
+                "note": row.get("note", ""),
                 "parent_id": row.get("parent_id"),
                 "source_revision_id": row.get("source_revision_id"),
             }

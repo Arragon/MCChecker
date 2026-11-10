@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core import config_values, locks, storage
 from ..core.errors import INVALID_INPUT, NOT_FOUND, PLAN_STALE, AppError
-from . import config_v3_baselines, config_v3_catalog, config_v3_machines, config_v3_merge
+from . import config_v3_baselines, config_v3_catalog, config_v3_machines, config_v3_merge, config_v3_upgrade
 
 _LOCK = threading.RLock()
 _PLANS: Dict[str, Dict[str, Any]] = {}
@@ -113,6 +113,10 @@ def _refresh(plan: Dict[str, Any], force: bool = False) -> None:
         return
     plan["_checked_at"] = now
     try:
+        if plan.get("machine_id"):
+            config_v3_upgrade.validate(plan["profile_id"], plan["config_id"], plan)
+            plan["status"] = STATUS_OPEN
+            return
         for ref in plan["read_set"]:
             current = config_v3_merge.resolve_revision(plan["profile_id"], plan["config_id"], ref["revision_id"])
             if current["content_hash"] != ref["content_hash"]:
@@ -134,15 +138,15 @@ def _get(wid: str, pid: str, cid: str, plan_id: str) -> Dict[str, Any]:
 
 
 def create(wid: str, pid: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    result = config_v3_merge.merge_revisions(
+    result = config_v3_upgrade.create(pid, cid, payload) if payload.get("machine_id") else config_v3_merge.merge_revisions(
         pid, cid, payload.get("base_revision_id"), payload.get("ours_revision_id"),
         payload.get("theirs_revision_id"),
     )
     rows = []
     for item in result["items"]:
         row = copy.deepcopy(item)
-        row["default_decision"] = _default_decision(item)
-        row["allowed_decisions"] = _allowed(item)
+        row["default_decision"] = item.get("default_decision", _default_decision(item))
+        row["allowed_decisions"] = item.get("allowed_decisions", _allowed(item))
         rows.append(row)
     plan = {
         "plan_id": "mp-" + uuid.uuid4().hex[:16],
@@ -160,6 +164,8 @@ def create(wid: str, pid: str, cid: str, payload: Dict[str, Any]) -> Dict[str, A
         "created_at": _now(),
         "_checked_at": 0.0,
     }
+    if result.get("machine_id"):
+        plan.update(machine_id=result["machine_id"], guard=result["guard"])
     with _LOCK:
         _PLANS[plan["plan_id"]] = plan
         scoped = [p for p in _PLANS.values() if p["workspace_id"] == wid and p["profile_id"] == pid]
@@ -249,6 +255,9 @@ def decisions(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any
 def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     plan = _get(wid, pid, cid, plan_id)
     with _LOCK:
+        if plan.get("machine_id"):
+            result = config_v3_upgrade.commit(pid, cid, plan, payload, _effective)
+            return dict(_summary(plan), **result)
         _refresh(plan, force=True)
         if plan["status"] == STATUS_STALE:
             raise AppError(PLAN_STALE, "合并计划已过期，请重算", plan_id=plan_id)

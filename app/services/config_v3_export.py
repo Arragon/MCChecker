@@ -163,6 +163,8 @@ def create_plan(profile_id: str, config_id: str, payload: Dict[str, Any]) -> Dic
     release = (config.get("releases") or {}).get(release_id)
     if release is None:
         raise AppError(NOT_FOUND, "软件版本不存在", release_id=release_id)
+    if revision["kind"] == "default" and not release.get("default_revision_id"):
+        raise AppError(INVALID_INPUT, "请先保存配置，或选择上次保存的配置导出", field="revision_id")
     if revision["release_id"] != release_id:
         raise AppError(INVALID_INPUT, "修订不属于所选软件版本", field="revision_id")
     definitions = next((snapshot.get("parameters") or {} for snapshot in (config.get("definition", {}).get("history") or [])

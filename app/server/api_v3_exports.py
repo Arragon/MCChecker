@@ -28,7 +28,7 @@ def _scope(wid: str, pid: str) -> None:
 def create_plan(
     ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
 ) -> Response:
-    authz.authorize(ctx, "config_registry_write")
+    authz.authorize(ctx, "config_read")
     _scope(params["wid"], params["pid"])
     return Response(status=201, payload={"plan": config_v3_export.create_plan(
         params["pid"], params["cid"], json_body(body)
@@ -49,7 +49,7 @@ def get_plan(ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[
 def commit_plan(
     ctx: RequestContext, params: Dict[str, str], query: Dict[str, List[str]], body: Optional[bytes]
 ) -> Response:
-    authz.authorize(ctx, "config_registry_write")
+    authz.authorize(ctx, "config_read")
     _scope(params["wid"], params["pid"])
     result = config_v3_export.commit(
         params["pid"], params["cid"], params["plan_id"], json_body(body)

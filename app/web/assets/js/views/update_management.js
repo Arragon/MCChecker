@@ -170,6 +170,45 @@
   }
 
   MC.views.updates = function (app, route) {
+    var disposed = false, contextVersion = 0, dialogs = [];
+    function viewModal(options) {
+      var closed = options.onClose, modal;
+      options.onClose = function (result) { dialogs = dialogs.filter(function (d) { return d !== modal; }); if (closed) closed(result); };
+      modal = MC.modal(options); dialogs.push(modal); return modal;
+    }
+    function captureOrigin() {
+      var origin = captureWorkspace(), version = contextVersion;
+      return Object.assign({}, origin, { current: function () { return !disposed && version === contextVersion && origin.current(); } });
+    }
+    var fileConfig = route && route.query && route.query.config || "", fileDetail = null, fileError = null, fileSeq = 0;
+    var fileNav = h("div");
+    var requestedPreview = "";
+    function maybeRequestedPreview(next) {
+      var key = workspaceId() + ":preview_all:" + (next && next.query && next.query.request || "initial");
+      if (!fileConfig && next && next.query && next.query.action === "preview_all" && requestedPreview !== key && canRun()) {
+        requestedPreview = key; previewSources(null);
+      }
+    }
+    function fileQuery(query) { return fileConfig ? Object.assign({}, query || {}, { config: fileConfig }) : query; }
+    function scopeQuery(query) { return fileConfig ? Object.assign({}, query || {}, { configuration_id: fileConfig, profile_id: app.pid }) : query; }
+    function filePreviewScope() { return fileConfig ? { scope: "current_configuration", configuration_id: fileConfig, profile_id: app.pid } : { scope: "workspace_all" }; }
+    function loadFileContext() {
+      var seq = ++fileSeq, id = fileConfig, wid = workspaceId(); fileDetail = null; fileError = null;
+      paintFileNav();
+      if (!id) return;
+      MC.api.requestV3("GET", "/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles/" + encodeURIComponent(app.pid) + "/configs/" + encodeURIComponent(id), {}).then(function (res) {
+        if (seq !== fileSeq || wid !== workspaceId()) return;
+        fileDetail = res.config; paintFileNav(); paintChrome(); renderBody();
+      }, function (err) { if (seq === fileSeq && wid === workspaceId()) { fileError = err; paintChrome(); renderBody(); } });
+    }
+    function paintFileNav() {
+      util.clear(fileNav);
+      if (!fileConfig) { fileNav.appendChild(MC.configWorkspaceNav(app, "updates")); return; }
+      fileNav.appendChild(h("div.sync-file-context", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置文件"),
+        h("strong", fileDetail && (fileDetail.file && fileDetail.file.name || fileDetail.name) || "正在读取文件…"),
+        h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig } }); } }, "版本演进"),
+        h("span.small", "更新管理"), h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig, tab: "history" } }); } }, "操作记录")));
+    }
     function freshPlan() {
       return { loadedFor: "", loading: false, error: "", policy: null, draft: null, sources: [], preview: null,
         previewWorkspaceId: "", previewing: false, validating: false, saving: false, conflict: false,
@@ -276,7 +315,7 @@
           state.tab = tab.id;
           renderTabs();
           renderBody();
-          if (app && app.go) app.go({ kind: "updates", arg: tab.id });
+          if (app && app.go) app.go({ kind: "updates", arg: tab.id, query: fileQuery() });
             });
             return;
           }
@@ -284,7 +323,7 @@
           state.tab = tab.id;
           renderTabs();
           renderBody();
-          if (app && app.go) app.go({ kind: "updates", arg: tab.id });
+          if (app && app.go) app.go({ kind: "updates", arg: tab.id, query: fileQuery() });
         });
         button.addEventListener("keydown", function (event) {
           var index = TABS.indexOf(tab);
@@ -340,7 +379,7 @@
         limit: 50,
         cursor: S.expanded && S.next_cursor ? S.next_cursor : "0",
       };
-      return MC.api.requestV3("GET", sourcesPath(), { query: query }).then(function (data) {
+      return MC.api.requestV3("GET", sourcesPath(), { query: scopeQuery(query) }).then(function (data) {
         if (seq !== S.loadSeq) return;
         var incoming = (data && data.items) || [];
         S.items = S.expanded ? S.items.concat(incoming) : incoming;
@@ -435,14 +474,16 @@
     }
 
     function openEditor(source) {
+      if (fileConfig && (!fileDetail || fileError)) return;
       var isCreate = !source;
       source = source || {};
       var hadTarget = !!(source && source.target);
       var targetDirty = false;
       var target0 = targetOfSource(source);
+      if (isCreate && fileConfig) target0 = { kind: "default_candidate", configuration_id: fileConfig, file_id: fileDetail.file_id || "", release_id: "" };
       var draft = {
         name: source.name || "",
-        profile_id: source.profile_id || workspaceProfiles()[0].id,
+        profile_id: source.profile_id || (fileConfig ? app.pid : workspaceProfiles()[0].id),
         kind: source.kind || "http_file",
         connection_id: source.connection_id || "",
         resource_ref: source.resource_ref || "",
@@ -470,7 +511,7 @@
         workspaceProfiles().map(function (profile) { return h("option", { value: profile.id }, profile.name); })
       );
       profileSelect.value = draft.profile_id;
-      if (!isCreate) profileSelect.disabled = true;
+      if (!isCreate || fileConfig) profileSelect.disabled = true;
       var kindSelect = h("select.input", { "data-sync-kind": "1" },
         KIND_OPTIONS.map(function (kind) { return h("option", { value: kind }, KIND_LABEL[kind]); })
       );
@@ -549,7 +590,7 @@
       function renderTargetBlock() {
         util.clear(targetBlock);
         var kindField = h("select.input", { "data-sync-target-kind": "1" },
-          TARGET_OPTIONS.map(function (kind) { return h("option", { value: kind }, TARGET_LABEL[kind]); })
+          TARGET_OPTIONS.filter(function (kind) { return !fileConfig || kind === "default_candidate" || kind === "file_archive" && fileDetail.file_id; }).map(function (kind) { return h("option", { value: kind }, TARGET_LABEL[kind]); })
         );
         kindField.value = draft.target_kind;
         kindField.addEventListener("change", function () {
@@ -561,9 +602,12 @@
         targetBlock.appendChild(field("目标类型", kindField));
         if (draft.target_kind === "file_archive") {
           var fileSelect = h("select.input", { "data-sync-target-file": "1" },
-            h("option", { value: "" }, fileItems.length ? "选择目标文件…" : "正在读取文件…")
+            h("option", { value: "" }, fileItems.length ? "选择目标文件…" : "正在读取文件…"),
+            fileItems.filter(function (item) { return !fileConfig || item.file_id === fileDetail.file_id; }).map(function (item) { return h("option", { value: item.file_id }, item.name); })
           );
           fileSelect.value = draft.target_file_id;
+          fileSelect.disabled = !!fileConfig;
+          if (fileConfig) draft.target_file_id = fileDetail.file_id;
           fileSelect.addEventListener("change", function () {
             draft.target_file_id = fileSelect.value;
             targetDirty = true;
@@ -576,7 +620,7 @@
               "/profiles/" + encodeURIComponent(profileSelect.value) + "/file-selector", {})
               .then(function (data) {
                 fileItems = (data && data.items) || [];
-                var keep = draft.target_file_id;
+                var keep = fileConfig ? fileDetail.file_id : draft.target_file_id;
                 util.clear(fileSelect);
                 fileSelect.appendChild(h("option", { value: "" }, fileItems.length ? "选择目标文件…" : "当前机型没有文件资源"));
                 fileItems.forEach(function (item) {
@@ -593,6 +637,7 @@
             h("option", { value: "" }, configItems.length ? "选择固定配置…" : "正在读取配置…")
           );
           configSelect.value = draft.target_config_id;
+          configSelect.disabled = !!fileConfig;
           var releaseSelect = h("select.input", { "data-sync-target-release": "1" },
             h("option", { value: "" }, "选择软件版本…")
           );
@@ -622,12 +667,12 @@
           });
           targetBlock.appendChild(field("固定配置", configSelect));
           targetBlock.appendChild(field("软件版本", releaseSelect));
-          targetBlock.appendChild(h("p.xsmall.muted", "只形成候选，不自动发布 D0/Bn/rn。"));
+          targetBlock.appendChild(h("p.xsmall.muted", "获取参数变化供您核对，不会自动保存配置或下发机台。"));
           if (!configItems.length) {
             MC.api.requestV3("GET", "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
               "/profiles/" + encodeURIComponent(profileSelect.value) + "/configs", {})
               .then(function (data) {
-                configItems = (data && data.items) || [];
+                configItems = ((data && data.items) || []).filter(function (item) { return !fileConfig || item.config_id === fileConfig; });
                 util.clear(configSelect);
                 configSelect.appendChild(h("option", { value: "" }, configItems.length ? "选择固定配置…" : "当前机型没有固定配置"));
                 configItems.forEach(function (item) {
@@ -916,7 +961,7 @@
         : h("p.xsmall.muted", "保存设置后，下次更新使用新设置。发生冲突时会保留你的输入。");
 
       var requestDismiss = function () {};
-      var modal = MC.modal({
+      var modal = viewModal({
         title: isCreate ? "新建更新源" : "编辑更新源",
         subtitle: isCreate
           ? "工作区 " + workspaceId()
@@ -1060,7 +1105,7 @@
     }
 
     function deleteSource(source) {
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       MC.confirm({
         title: "删除更新源「" + source.name + "」？",
         message: "此来源将停止参与更新。已保存的文件、历史版本、候选和运行记录都会保留。",
@@ -1114,7 +1159,7 @@
     function editSelectedSchedule() {
       var rows = selectedSourceRows().filter(function (row) { return !row.deleted; });
       if (!rows.length) return;
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var error = h("div.form-error", { role: "alert", hidden: true });
       var mode = h("select.input", { "aria-label": "所选来源更新频率" },
         h("option", { value: "inherit" }, "继承工作区计划"), h("option", { value: "custom" }, "独立频率"), h("option", { value: "manual" }, "仅手动"));
@@ -1127,7 +1172,7 @@
         if (!dirty) { close(); return; }
         MC.confirm({ title: "放弃未保存的计划？", message: "尚未保存任何来源。", confirmText: "放弃修改", cancelText: "继续编辑" }).then(function (ok) { if (ok) close(); });
       }
-      MC.modal({ title: "调整 " + rows.length + " 个来源的更新计划", size: "wide", onDismiss: dismiss,
+      viewModal({ title: "调整 " + rows.length + " 个来源的更新计划", size: "wide", onDismiss: dismiss,
         onClose: function () { activeEditorDirty = false; },
         body: h("div.col", { style: "gap:12px" }, h("p.small.muted", "只修改所选来源的频率。任一来源发生变化时，整批均不保存。"),
           field("更新频率", mode), field("间隔（小时）", hours), h("div.sync-card-scroll", rows.map(function (row) { return h("div.small", row.name); })), error),
@@ -1155,13 +1200,13 @@
       var all = rows === null;
       rows = (rows || []).filter(function (row) { return !row.deleted; });
       if (!all && !rows.length) return;
-      var origin = captureWorkspace(), preview = null;
+      var origin = captureOrigin(), preview = null;
       var content = h("div.col", { style: "gap:10px" });
       var error = h("div.form-error", { role: "alert", hidden: true });
       var start;
       function load() {
         preview = null; start.disabled = true; error.hidden = true; util.clear(content); content.appendChild(h("p.muted", "正在核对所选来源及目标…"));
-        MC.api.requestV3("POST", previewsPath(), { body: all ? { scope: "workspace_all" } : { scope: "selected_sources", source_ids: rows.map(function (row) { return row.source_id; }) } }).then(function (data) {
+        MC.api.requestV3("POST", previewsPath(), { body: all ? filePreviewScope() : { scope: "selected_sources", source_ids: rows.map(function (row) { return row.source_id; }) } }).then(function (data) {
           if (!origin.current()) return;
           preview = data; util.clear(content);
           content.appendChild(h("p.small", "将更新 " + data.total + " 个来源；不发布配置。"));
@@ -1170,7 +1215,7 @@
           start.disabled = !data.total;
         }, function (err) { util.clear(content); error.textContent = errorText(err); error.hidden = false; });
       }
-      MC.modal({ title: all ? "工作区全量更新" : "更新所选来源", subtitle: all ? "包含工作区内所有已启用来源，不受列表筛选影响" : "仅处理当前勾选的来源", size: "wide", body: h("div.col", content, error), footer: function (close) {
+      viewModal({ title: all ? fileConfig ? "更新当前文件" : "工作区全量更新" : "更新所选来源", subtitle: all ? fileConfig ? "仅包含当前文件的已启用来源，不受列表筛选影响" : "包含工作区内所有已启用来源，不受列表筛选影响" : "仅处理当前勾选的来源", size: "wide", body: h("div.col", content, error), footer: function (close) {
         start = h("button.btn.btn-primary", { type: "button", disabled: true, "data-sync-selected-start": "1", onclick: function () {
           if (!preview || !origin.current()) return;
           start.disabled = true; error.hidden = true;
@@ -1186,7 +1231,7 @@
       var rows = selectedSourceRows().filter(function (row) { return !row.deleted; });
       var S = state.sources;
       if (!rows.length || S.busy) return;
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var label = action === "enable" ? "启用" : (action === "disable" ? "停用" : "删除");
       MC.confirm({
         title: "批量" + label + " " + rows.length + " 个来源？",
@@ -1270,7 +1315,7 @@
     function refreshPlan() {
       if (!planDirty()) return loadPlan();
       var P = state.plan;
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       return MC.confirm({
         title: "刷新更新计划？",
         message: "刷新将放弃当前尚未保存的计划修改。",
@@ -1283,7 +1328,7 @@
     function loadPlan() {
       var P = state.plan;
       if (P.loading) return Promise.resolve();
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var wid = origin.id;
       P.loading = true;
       P.loadedFor = wid;
@@ -1375,7 +1420,7 @@
         return;
       }
       P.invalidField = "";
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var revision = P.policy && P.policy.revision != null ? P.policy.revision : 0;
       P.saving = true;
       P.error = "";
@@ -1407,7 +1452,7 @@
     function loadPlanConflict() {
       var P = state.plan;
       if (!P.conflict || P.conflictLoading) return;
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var wid = origin.id;
       P.conflictLoading = true;
       P.conflictComparison = null;
@@ -1450,7 +1495,7 @@
       var P = state.plan;
       if (!canSavePlan() || P.previewing) return;
       // 失败筛选只影响下方列表显示；预览请求始终冻结 workspace_all 全量 read_set。
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var wid = origin.id;
       P.previewing = true;
       P.error = "";
@@ -1474,7 +1519,7 @@
     function validatePlanPreview() {
       var P = state.plan;
       if (!canSavePlan() || !P.preview || P.validating) return;
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var wid = P.previewWorkspaceId || workspaceId();
       if (wid !== origin.id) return;
       var path = "/api/v3/workspaces/" + encodeURIComponent(wid)
@@ -1514,7 +1559,7 @@
     function runWorkspaceAll() {
       var P = state.plan;
       if (!canRunPlan() || P.running) return;
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var wid = origin.id;
       var body = { scope: "workspace_all" };
       if (P.preview && P.preview.preview_id && P.previewWorkspaceId === wid) {
@@ -2011,7 +2056,7 @@
       var cid = conn.connection_id;
       var draft = connectionDrafts()[cid];
       var hb = draft || state.connections.heartbeats[cid] || { revision: 0 };
-      var origin = captureWorkspace();
+      var origin = captureOrigin();
       var interval = Number(intervalInput.value);
       if (!isFinite(interval) || interval < 1 || interval > 60) {
         showError("保活间隔必须在 1–60 分钟", intervalInput);
@@ -2072,7 +2117,7 @@
 
       var showError = fieldErrors(error);
 
-      var modal = MC.modal({
+      var modal = viewModal({
         title: "新建连接",
         body: h("div.col", { style: "gap:12px" },
           error,
@@ -2117,7 +2162,7 @@
 
       var showError = fieldErrors(error);
 
-      var modal = MC.modal({
+      var modal = viewModal({
         title: "编辑连接",
         subtitle: conn.name + " · " + conn.connection_id,
         body: h("div.col", { style: "gap:12px" },
@@ -2169,7 +2214,7 @@
 
       var showError = fieldErrors(error);
 
-      var modal = MC.modal({
+      var modal = viewModal({
         title: "更换凭据",
         subtitle: conn.name + " · 当前状态 " + credentialLabel(cred),
         body: h("div.col", { style: "gap:12px" },
@@ -2219,7 +2264,7 @@
 
       var showError = fieldErrors(error);
 
-      var modal = MC.modal({
+      var modal = viewModal({
         title: title,
         subtitle: conn.name,
         body: h("div.col", { style: "gap:12px" },
@@ -2496,7 +2541,7 @@
       var refresh = h("button.btn.btn-sm", { type: "button", "data-sync-refresh": "1", onclick: function () { loadSources(true); loadRecentRun(); } }, "刷新");
       toolbar.appendChild(search);
       toolbar.appendChild(searchBtn);
-      toolbar.appendChild(scope);
+      if (!fileConfig) toolbar.appendChild(scope);
       function targetFilter(key, items, title) {
         var control = h("select.input", { "aria-label": title }, h("option", { value: "" }, title),
           items.map(function (item) { return h("option", { value: item.id }, item.label || item.id); }));
@@ -2504,7 +2549,7 @@
         control.addEventListener("change", function () { S[key] = control.value; S.selected = {}; loadSources(true); });
         return control;
       }
-      toolbar.appendChild(targetFilter("configuration_id", S.filters.configurations || [], "全部固定配置"));
+      if (!fileConfig) toolbar.appendChild(targetFilter("configuration_id", S.filters.configurations || [], "全部固定配置"));
       toolbar.appendChild(targetFilter("release_id", S.filters.releases || [], "全部软件版本"));
       toolbar.appendChild(status);
       toolbar.appendChild(h("button.btn.btn-sm", { type: "button", "aria-label": "来源排序", onclick: function (event) {
@@ -2689,9 +2734,10 @@
     }
 
     function loadRecentRun() {
-      var origin = captureWorkspace();
-      return MC.api.requestV3("GET", runsPath(), { query: { limit: 1, cursor: "0" } }).then(function (data) {
-        if (!origin.current()) return;
+      var origin = captureOrigin();
+      var selectedConfig = fileConfig;
+      return MC.api.requestV3("GET", runsPath(), { query: scopeQuery({ limit: 1, cursor: "0" }) }).then(function (data) {
+        if (!origin.current() || selectedConfig !== fileConfig) return;
         var first = data && data.items && data.items[0];
         state.recentRun = first && (first.run || first);
         if (state.tab === "sources") renderBody();
@@ -2735,13 +2781,13 @@
       renderBody();
       var append = !reset && R.expanded && !!R.next_cursor;
       return MC.api.requestV3("GET", runsPath(), {
-        query: {
+        query: scopeQuery({
           state: R.state || undefined,
           q: R.query || undefined,
           failed_only: R.failedOnly || undefined,
           limit: 50,
           cursor: append ? R.next_cursor : "0",
-        },
+        }),
       }).then(function (data) {
         if (seq !== R.loadSeq || wid !== workspaceId()) return;
         var incoming = (data && data.items) || [];
@@ -2819,12 +2865,13 @@
     }
 
     function openRun(run) {
-      var runOrigin = captureWorkspace(), detailPath = runPath(run.run_id), detailSeq = 0;
+      if (fileConfig && !fileDetail) return;
+      var runOrigin = captureOrigin(), detailPath = runPath(run.run_id), detailSeq = 0;
       var returnFocusText = document.activeElement && document.activeElement.tagName === "BUTTON" ? document.activeElement.textContent : "";
       var refreshButton = h("button.btn", { type: "button", "data-sync-detail-refresh": "1", onclick: function () { loadDetails(); } }, "刷新详情");
       var bodyNode = h("div.col", { style: "gap:12px" }, h("p.muted.small", "正在读取运行详情…"));
       var downloadError = h("div.form-error", { "data-sync-download-error": "1", role: "alert", hidden: true });
-      var modal = MC.modal({
+      var modal = viewModal({
         title: "运行 " + run.run_id,
         subtitle: run.trigger + " · " + runStateText(run.state) + " · " + runCounts(run),
         size: "xwide",
@@ -2842,8 +2889,8 @@
         },
         footer: function (close) {
           var buttons = [];
-          if (canRun()) {
-            var cancelOrigin = captureWorkspace();
+          if (canRun() && !fileConfig) {
+            var cancelOrigin = captureOrigin();
             var cancelButton = h("button.btn", { type: "button", "data-sync-run-cancel": "1", onclick: function () {
               MC.confirm({ title: "取消本次运行？", message: "已完成的结果会保留；尚未完成的来源将停止处理。", confirmText: "取消运行", cancelText: "继续运行" }).then(function (ok) {
                 if (!ok || !cancelOrigin.current()) return;
@@ -2861,9 +2908,10 @@
             cancelButton.hidden = ["queued", "running"].indexOf(run.state) < 0;
             buttons.push(cancelButton);
           }
-          if (canRun()) {
+          if (canRun() && !fileConfig) {
             buttons.push(h("button.btn.btn-primary", { type: "button", "data-sync-retry": "1", hidden: ["partial", "failed", "interrupted"].indexOf(run.state) < 0, onclick: function () { retryRun(run, close); } }, "重试失败项"));
           }
+          if (fileConfig) buttons.push(h("button.btn", { type: "button", onclick: function () { close(); app.go({ kind: "updates", arg: "runs" }); } }, "在工作区管理完整任务"));
           var downloadButton = h("button.btn", { type: "button", onclick: function () {
             downloadButton.disabled = true;
             exportDiagnostics(run, function (err) {
@@ -2875,7 +2923,7 @@
               downloadError.hidden = !truncated;
               downloadError.textContent = truncated ? "事件达到 20000 条上限，已下载的诊断可能不完整。" : "";
             });
-          } }, "下载诊断");
+          } }, fileConfig ? "下载完整任务诊断" : "下载诊断");
           buttons.push(downloadButton);
           var copyButton = h("button.btn", { type: "button", "data-sync-copy-diagnostics": "1", onclick: function () {
             copyButton.disabled = true;
@@ -2920,7 +2968,16 @@
         if (retryControl) retryControl.hidden = ["partial", "failed", "interrupted"].indexOf(run.state) < 0;
         var events = results[1];
         var items = detail.items || [];
+        if (fileConfig) {
+          var owned = {};
+          ((detail.frozen || {}).source_targets || []).forEach(function (row) {
+            var target = row.target || {};
+            if (row.profile_id === app.pid && (target.configuration_id === fileConfig || target.kind === "file_archive" && target.file_id === fileDetail.file_id)) owned[row.source_id] = true;
+          });
+          items = items.filter(function (row) { return owned[row.source_id]; });
+        }
         util.clear(bodyNode);
+        if (fileConfig) bodyNode.appendChild(h("p.small.muted", "此处显示当前文件的来源。任务汇总及诊断包含整个任务；取消或重试请到工作区管理。"));
         var itemList = h("div.sync-log-items", { "aria-label": "运行来源" });
         var log = h("div.sync-log-body", { "aria-live": "polite" });
         var buttons = [];
@@ -2937,7 +2994,7 @@
           log.appendChild(h("h3", item ? (item.name || item.source_id) : "全部事件"));
           var visible = item ? events.filter(function (event) {
             return event.item_id === item.item_id || (!event.item_id && event.source_id === item.source_id);
-          }) : events;
+          }) : events.filter(function (event) { return !fileConfig || !event.source_id && !event.item_id || items.some(function (row) { return event.source_id && event.source_id === row.source_id || event.item_id && event.item_id === row.item_id; }); });
           if (!item && failuresOnly && failuresOnly.checked) visible = visible.filter(function (event) {
             if (!event.item_id && !event.source_id) return true;
             return items.some(function (row) { return ["failed", "blocked", "interrupted"].indexOf(row.state) >= 0 && (event.item_id === row.item_id || !event.item_id && event.source_id === row.source_id); });
@@ -3080,12 +3137,13 @@
       if (reset) { C.items = []; C.next_cursor = null; C.selected = {}; }
       renderBody();
       return MC.api.requestV3("GET", candidatesPath(), {
-        query: {
-          state: C.state || undefined,
+        query: scopeQuery({
+          state: C.state === "all" ? undefined : C.state || undefined,
+          pending_only: fileConfig && (!C.state || C.state === "pending") ? true : undefined,
           profile_id: C.profile_id || undefined,
           limit: 50,
           cursor: more && C.next_cursor ? C.next_cursor : "0",
-        },
+        }),
       }).then(function (data) {
         if (seq !== C.loadSeq || wid !== workspaceId()) return;
         var incoming = (data && data.items) || [];
@@ -3111,9 +3169,11 @@
       var error = h("div.form-error.sync-form-error", { style: "display:none" });
       var configs = [];
       var configSelect = h("select.input", { "aria-label": "固定配置" });
+      configSelect.disabled = !!fileConfig;
       var releaseSelect = h("select.input", { "aria-label": "软件版本" });
       var previewBox = h("div");
       var previewSeq = 0;
+      var compareOffset = 0;
       var releaseSeq = 0;
       var configPath = "/api/v3/workspaces/" + encodeURIComponent(workspaceId()) +
         "/profiles/" + encodeURIComponent(candidate.profile_id) + "/configs";
@@ -3144,7 +3204,7 @@
       }
       configSelect.addEventListener("change", function () { invalidatePreview(); loadReleases(); });
       releaseSelect.addEventListener("change", invalidatePreview);
-      var modal = MC.modal({
+      var modal = viewModal({
         title: "候选 " + candidate.candidate_id,
         subtitle: "来源 " + candidate.source_id + " · " + candidate.state,
         size: "xwide",
@@ -3168,7 +3228,7 @@
         showError("该候选没有关联文件版本，无法生成参数差异（SDA 表候选需后续协议支持）");
       }
       MC.api.requestV3("GET", configPath, {}).then(function (data) {
-        configs = data.items || [];
+        configs = (data.items || []).filter(function (item) { return !fileConfig || item.config_id === fileConfig; });
         util.clear(configSelect);
         configs.forEach(function (config) {
           configSelect.appendChild(h("option", { value: config.config_id }, (config.code || "") + " " + (config.name || config.config_id)));
@@ -3186,6 +3246,10 @@
           .map(function (item) { return item.parameter_id; });
         var base = preview.base || [];
         var applying = false;
+        Object.keys(decisions).forEach(function (pid) {
+          var row = items.filter(function (it) { return it.parameter_id === pid; })[0];
+          if (!row || (row.allowed && row.allowed.length && row.allowed.indexOf(decisions[pid]) < 0)) delete decisions[pid];
+        });
 
         function pendingCount() {
           return conflicts.filter(function (pid) { return !decisions[pid]; }).length;
@@ -3220,10 +3284,11 @@
           var skipped = 0;
           conflicts.forEach(function (pid) {
             var select = selects[pid];
-            var allowed = select && Array.prototype.some.call(select.options, function (option) { return option.value === value; });
+            var row = items.filter(function (item) { return item.parameter_id === pid; })[0];
+            var allowed = ((row.allowed && row.allowed.length) ? row.allowed : ["use_new", "inherit_old", "manual"]).indexOf(value) >= 0;
             if (!allowed) { skipped++; return; }
             decisions[pid] = value;
-            select.value = value;
+            if (select) select.value = value;
           });
           refreshApplyState();
           batchHint.textContent = skipped ? skipped + " 项不支持此决议，保留原有选择；请逐项确认。" : "已应用到所有冲突项。";
@@ -3236,7 +3301,7 @@
           refreshApplyState();
         }
 
-        var rows = items.map(function (item) {
+        var rows = items.slice(compareOffset, compareOffset + 30).map(function (item) {
           var cell;
           if (item.action === "conflict") {
             var allowed = (item.allowed && item.allowed.length)
@@ -3287,6 +3352,7 @@
             h("td", h("div.small", item.name || item.parameter_id), h("div.xsmall.muted", item.parameter_id)),
             h("td", h("span.badge", { keep: "保留", from_new: "采用新值", drop: "移除", conflict: "冲突", manual: "人工处理" }[item.action] || item.action)),
             h("td", h("span.xsmall.mono", preview.base_known === false ? "原来源未知" : valueText(baseValue))),
+            h("td", h("span.xsmall.mono", valueText((preview.saved && preview.saved[item.parameter_id] || {}).value))),
             h("td", h("span.xsmall.mono", valueText(item.ours ? item.ours.value : undefined))),
             h("td", h("span.xsmall.mono", valueText(item.theirs ? item.theirs.value : undefined))),
             h("td", cell)
@@ -3303,16 +3369,21 @@
         ));
         previewBox.appendChild(h("div.sync-diff-wrap", h("table.table",
           h("thead", h("tr",
-            h("th", "参数"), h("th", "计划"), h("th", "原来源"), h("th", "本地值"), h("th", "新来源"), h("th", "决议")
+            h("th", "参数"), h("th", "变化"), h("th", "原来源"), h("th", "正式配置"), h("th", "当前草稿"), h("th", "新来源"), h("th", "处理方式")
           )),
           h("tbody", rows)
         )));
+        var pages = Math.max(1, Math.ceil(items.length / 30));
+        if (pages > 1) previewBox.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
+          h("button.btn.btn-sm", { type: "button", disabled: compareOffset <= 0, onclick: function () { compareOffset = Math.max(0, compareOffset - 30); renderPreview(preview, true, targetConfig, targetRelease); } }, "上一页"),
+          h("span.small.muted", "第 " + (Math.floor(compareOffset / 30) + 1) + " / " + pages + " 页 · 共 " + items.length + " 项"),
+          h("button.btn.btn-sm", { type: "button", disabled: compareOffset + 30 >= items.length, onclick: function () { compareOffset += 30; renderPreview(preview, true, targetConfig, targetRelease); } }, "下一页")));
         if (preview.blockers && preview.blockers.length) {
           previewBox.appendChild(h("div.form-error", { "data-sync-blockers": "1" },
             preview.blockers.map(function (row) { return row.message || row.code; }).join("；")));
         }
         if (preview.d0_frozen) {
-          previewBox.appendChild(h("p.small", "D0 已冻结。确认后会新建基线变更草稿并写入勾选的新值，不改 D0，也不发布。"));
+          previewBox.appendChild(h("p.small", preview.editing_draft_id ? "当前草稿已纳入比较。确认后只写入选中的值，冲突项目需要明确选择。" : "确认后建立编辑草稿；已保存的配置和历史保持不变。"));
         }
 
         var frozen = !!preview.d0_frozen;
@@ -3342,32 +3413,32 @@
                 create_baseline: frozen,
               },
             }).then(function (result) {
-              configSelect.disabled = false;
+              configSelect.disabled = !!fileConfig;
               releaseSelect.disabled = false;
               modal.el.querySelector("[data-sync-preview]").disabled = false;
               showError("");
               var done = h("div.card", h("div.card-b", h("div.col", { style: "gap:8px" },
                 h("p", { "data-sync-applied": "1" },
-                  (result.target === "baseline_draft" ? "已创建基线变更草稿" : "已写入准备版草稿")
-                  + "（rev " + result.draft_revision + "）"
-                  + (result.replayed ? "；本次为幂等重放，没有重复写入" : "")),
-                h("p.xsmall.muted", "没有发布。发布仍在配置管理里显式操作。"),
+                  "已写入编辑草稿"),
+                h("p.xsmall.muted", "请核对并保存配置；未保存的参数变化仍保留在待处理中。"),
                 h("button.btn.btn-sm", {
                   type: "button",
                   "data-sync-goto-v3": "1",
                   onclick: function () {
                     if (app && app.go) {
+                      modal.close();
                       app.go({
                         kind: "configv3",
                         query: {
                           config: config.config_id,
                           release: targetRelease,
-                          draft: "d0-" + targetRelease,
+                          draft: result.draft_id || "d0-" + targetRelease,
+                          tab: "workbench",
                         },
                       });
                     }
                   },
-                }, "去配置管理发布")
+                }, "核对并保存配置")
               )));
               previewBox.appendChild(done);
               loadCandidates(true);
@@ -3375,7 +3446,7 @@
               applying = false;
               Object.keys(selects).forEach(function (pid) { selects[pid].disabled = false; });
               Array.prototype.forEach.call(previewBox.querySelectorAll("[data-sync-all-new], [data-sync-all-old]"), function (button) { button.disabled = !conflicts.length; });
-              configSelect.disabled = false;
+              configSelect.disabled = !!fileConfig;
               releaseSelect.disabled = false;
               modal.el.querySelector("[data-sync-preview]").disabled = false;
               refreshApplyState();
@@ -3394,10 +3465,10 @@
               showError(errorText(err));
             });
           },
-        }, frozen ? "创建基线变更草稿" : "写入准备版草稿");
+        }, "写入编辑草稿");
         previewBox.appendChild(h("div.row", { style: "gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center" },
           applyBtn, pendingHint,
-          h("span.xsmall.muted", "只写草稿，不发布 D0/Bn/rn")
+          h("span.xsmall.muted", "写入草稿后仍需核对并保存")
         ));
         refreshApplyState();
       }
@@ -3410,6 +3481,7 @@
         var seq = ++previewSeq;
         showError("");
         if (!keepDecisions) util.clear(previewBox);
+        compareOffset = 0;
         MC.api.requestV3("POST", candidatesPath() + "/" + encodeURIComponent(candidate.candidate_id) + "/apply-preview", {
           body: { config_id: targetConfig, draft_id: "d0-" + targetRelease },
         }).then(function (preview) {
@@ -3467,7 +3539,7 @@
         });
       }
       configSelect.addEventListener("change", fillReleases);
-      var modal = MC.modal({
+      var modal = viewModal({
         title: "批量写入草稿（" + rows.length + " 个候选）",
         subtitle: "目标机型 " + pid,
         body: h("div.col", { style: "gap:12px" },
@@ -3494,7 +3566,8 @@
         },
       });
       MC.api.requestV3("GET", configPath, {}).then(function (data) {
-        configs = (data && data.items) || [];
+        configs = ((data && data.items) || []).filter(function (item) { return !fileConfig || item.config_id === fileConfig; });
+        configSelect.disabled = !!fileConfig;
         util.clear(configSelect);
         configSelect.appendChild(h("option", { value: "" }, configs.length ? "选择固定配置…" : "该机型没有固定配置"));
         configs.forEach(function (config) {
@@ -3577,7 +3650,8 @@
       var C = state.candidates;
       var toolbar = h("div.row.sync-filters", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
       var stateSelect = h("select.input", { "data-sync-candidate-state": "1", "aria-label": "候选状态" },
-        h("option", { value: "" }, "全部状态"),
+        h("option", { value: "" }, fileConfig ? "待处理" : "全部状态"),
+        fileConfig ? h("option", { value: "all" }, "全部状态") : null,
         Object.keys(CANDIDATE_STATE_LABEL).map(function (key) {
           return h("option", { value: key }, CANDIDATE_STATE_LABEL[key]);
         })
@@ -3591,7 +3665,7 @@
       profileSelect.value = C.profile_id;
       profileSelect.addEventListener("change", function () { C.profile_id = profileSelect.value; loadCandidates(true); });
       toolbar.appendChild(stateSelect);
-      toolbar.appendChild(profileSelect);
+      if (!fileConfig) toolbar.appendChild(profileSelect);
       toolbar.appendChild(h("button.btn.btn-sm", {
         type: "button", "data-sync-candidate-refresh": "1", onclick: function () { loadCandidates(true); },
       }, "刷新"));
@@ -3652,7 +3726,7 @@
         var title = h("button.btn.btn-ghost.sync-candidate-title", { type: "button", onclick: function () { openCandidate(candidate); } }, candidate.source_id || candidate.candidate_id);
         var card = h("article.sync-candidate-card", { "data-sync-candidate": candidate.candidate_id },
           h("div.sync-candidate-heading", checkbox, title,
-            h("span.badge", CANDIDATE_STATE_LABEL[candidate.state] || candidate.state)),
+            h("span.badge", { awaiting_save: "草稿待保存", saved: "已保存配置", needs_review: "待核对" }[candidate.review_state] || CANDIDATE_STATE_LABEL[candidate.state] || candidate.state)),
           h("div.small.muted", "机型 " + (candidate.profile_id || "—") + " · " + util.formatTime(candidate.created_at)),
           h("div.xsmall.muted", candidate.file_version_id ? "关联文件版本 " + candidate.file_version_id : "无文件版本"),
           h("div.xsmall.muted", "内容指纹 ", h("code", candidate.content_hash || "—")),
@@ -3694,7 +3768,7 @@
       sheet.hidden = false;
       if (!sheetModal) {
         sheetHost = h("div.sync-sheet-card");
-        sheetModal = MC.modal({
+        sheetModal = viewModal({
           title: state.sheet === "plan" ? "更新计划与全量预览" : "连接设置",
           body: sheetHost,
           size: "wide",
@@ -3740,6 +3814,7 @@
 
     function renderBody() {
       util.clear(body);
+      if (fileConfig && fileError) { body.appendChild(MC.stateBlock({ kind: "error", title: "无法打开此文件的更新管理", desc: errorText(fileError), actions: [h("button.btn", { type: "button", onclick: loadFileContext }, "重试")] })); return; }
       var tab = tabById(state.tab);
       if (tab.id === "runs") {
         renderRuns();
@@ -3767,6 +3842,7 @@
         headActions.appendChild(h("button.btn.btn-sm", {
           type: "button",
           "data-sync-new": "1",
+          disabled: !!fileConfig && !fileDetail,
           onclick: function () { openEditor(null); },
         }, "新增更新源"));
       }
@@ -3774,8 +3850,9 @@
         headActions.appendChild(h("button.btn.btn-sm.btn-primary", {
           type: "button",
           "data-sync-all": "1",
+          disabled: !!fileConfig && !fileDetail,
           onclick: function () { previewSources(null); },
-        }, "工作区全量更新"));
+        }, fileConfig ? "更新当前文件" : "工作区全量更新"));
       }
     }
     function renderStrip() {
@@ -3792,7 +3869,7 @@
           onclick: function () { showSheet("connections"); } }, "连接设置"),
         h("button.btn.btn-sm", { type: "button", "data-sync-plan": "1",
           title: state.plan.error || "配置工作区自动更新计划", onclick: function () { showSheet("plan"); } },
-          "自动更新 · " + (plan ? (auto ? "每 " + hours + " 小时" : "已暂停") : state.plan.error ? "读取失败" : "读取中…")));
+          (fileConfig ? "工作区计划 · " : "自动更新 · ") + (plan ? (auto ? "每 " + hours + " 小时" : "已暂停") : state.plan.error ? "读取失败" : "读取中…")));
     }
 
     var stripHost = h("div");
@@ -3802,7 +3879,7 @@
       stripHost.appendChild(renderStrip());
     }
     el.appendChild(h("div.view-body.sync-page",
-      MC.configWorkspaceNav(app, "updates"),
+      fileNav,
       h("div.sync-head",
         h("div.sync-title", h("strong", "更新管理"), h("span.sync-caption", workspaceId())),
         h("div.sync-head-tools", stripHost, headActions)
@@ -3817,6 +3894,7 @@
       if (state.tab === "runs" && !state.runs.expanded) loadRuns(true);
       if (state.tab === "candidates") loadCandidates(true);
     });
+    loadFileContext();
     renderTabs();
     paintChrome();
     renderBody();
@@ -3825,12 +3903,25 @@
     if (state.tab === "runs") loadRuns(true);
     if (!state.connections.loading) loadConnections(true);
     if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
+    maybeRequestedPreview(route);
 
     return {
       el: el,
       title: "更新管理",
       icon: "settings",
-      update: function (next) {
+      update: function update(next, approved) {
+        var nextConfig = next && next.query && next.query.config || "";
+        if (nextConfig !== fileConfig && activeEditorDirty && !approved) {
+          MC.confirm({ title: "放弃未保存的更新来源？", message: "当前输入尚未保存，切换文件后将丢失。", confirmText: "放弃并切换", cancelText: "继续编辑", danger: true }).then(function (ok) { if (ok && !disposed) { activeEditorDirty = false; update(next, true); } }); return;
+        }
+        if (nextConfig !== fileConfig) {
+          contextVersion++; dialogs.slice().forEach(function (dialog) { dialog.close(); });
+          fileConfig = nextConfig; state.sources.loadSeq++; state.runs.loadSeq++; state.candidates.loadSeq++;
+          state.sources.selected = {}; state.sources.items = []; state.sources.loading = false; state.sources.configuration_id = ""; state.sources.release_id = "";
+          state.runs.items = []; state.runs.loading = false; state.recentRun = null;
+          state.candidates.items = []; state.candidates.loading = false; state.candidates.loadedFor = ""; state.candidates.selected = {};
+          loadFileContext();
+        }
         state.tab = tabById(next && next.arg).id;
         if (sheetModal) sheetModal.close();
         if (state.plan.loadedFor !== workspaceId()) { state.plan = freshPlan(); state.recentRun = null; }
@@ -3843,9 +3934,13 @@
         if (state.tab === "runs") loadRuns(true);
         if (state.tab === "candidates" && state.candidates.loadedFor !== workspaceId()) loadCandidates(true);
         if (state.plan.loadedFor !== workspaceId() && !state.plan.loading) loadPlan();
+        maybeRequestedPreview(next);
       },
       isDirty: function () { return !!activeEditorDirty || planDirty() || Object.keys(connectionDrafts()).length > 0; },
       destroy: function () {
+        disposed = true; contextVersion++; fileSeq++;
+        state.sources.loadSeq++; state.runs.loadSeq++; state.candidates.loadSeq++; state.connections.loadSeq++;
+        dialogs.slice().forEach(function (dialog) { dialog.close(); });
         stopTaskUpdates();
         if (sheetModal) sheetModal.close();
         activeEditorDirty = false;

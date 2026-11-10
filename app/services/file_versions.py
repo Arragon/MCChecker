@@ -157,6 +157,14 @@ def current_identity(profile_id: str, name: str) -> Dict[str, Any]:
     return identity(profile_id, name, "current")
 
 
+def find_resource(profile_id: str, resource_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve a live file identity without hashing unrelated file contents."""
+    for entry in documents.list_files(profile_id):
+        if file_id(profile_id, entry["name"]) == resource_id:
+            return current_identity(profile_id, entry["name"])
+    return None
+
+
 def _archives(profile_id: str, name: str) -> List[str]:
     directory = os.path.join(storage.get_archive_root_dir(profile_id), name)
     return _files_in(directory)

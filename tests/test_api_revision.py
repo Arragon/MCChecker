@@ -32,6 +32,9 @@ XML = "<R><params><item>1</item><param_01 min=\"0\" max=\"10\">5</param_01></par
 
 #: 每条写路由的修订语义。`None` = 成功也不递增（纯计算/临时区/对比）。
 WRITE_ROUTE_EXPECTATIONS = {
+    # V3.2 file ownership changes only the config catalog; POST query is read-only.
+    ("PUT", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/file"): None,
+    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-query"): None,
     ("POST", "/api/v1/p/{pid}/favorites"): "favorites",
     ("PATCH", "/api/v1/p/{pid}/favorites"): "favorites",
     ("DELETE", "/api/v1/p/{pid}/favorites"): "favorites (only if removed)",
@@ -251,6 +254,8 @@ WRITE_ROUTE_EXPECTATIONS = {
     # 交付登记与核验报告都是新增对象，不改已有对象
     ("POST", "/api/v1/p/{pid}/config/deliveries"): None,
     ("POST", "/api/v1/p/{pid}/config/artifacts/{aid}/verifications"): None,
+    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/discard-draft"): None,
+
 }
 
 _PARAM_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>\[\^/\][^)]*\)")

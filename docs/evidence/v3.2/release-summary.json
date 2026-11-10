@@ -1,0 +1,35 @@
+{
+  "version": "3.2.0",
+  "branch": "codex/v32-config-management-20261109",
+  "package": "dist/MCChecker-3.2.0.zip",
+  "package_bytes": 1014119,
+  "package_sha256": "ab772d65656b43ccc1d60122671229cc87375effecd9cc53dc63068950b6bd9f",
+  "source_files": 224,
+  "zip_members": 225,
+  "manifest_verified": true,
+  "working_tree_bytes_match": true,
+  "checks": {
+    "python_full": {
+      "passed": 3145,
+      "skipped": 1,
+      "skip_reason": "Windows实机进程树回收"
+    },
+    "latest_history_backend_passed": 43,
+    "package_security_api_passed": 511,
+    "frontend_browser_unit_passed": 166,
+    "editor_evolution_unit_passed": 15,
+    "browser_report": "config-v32-release-acceptance.json",
+    "python39_guard": true,
+    "diff_check": true
+  },
+  "external_unverified": [
+    "真实SDA部署",
+    "真实机台及下发",
+    "Windows/Linux实机",
+    "物理触屏",
+    "原生浏览器200%缩放"
+  ],
+  "simulated_sda_integration_passed": 4,
+  "git_pushed": false,
+  "user_data_unchanged_after_python_checks": true
+}

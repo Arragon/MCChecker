@@ -162,7 +162,7 @@ def apply_preview(
     digest = _hash(pid, normalized)
     receipt_key = pid + "|" + key
 
-    with sync_store.workspace_lock(wid):
+    with sync_store.workspace_lock(wid), storage.use_workspace(wid), storage.use_profile(profile_id), storage.profile_write(profile_id):
         receipt = _load_doc(wid)["items"].get(receipt_key)
         if isinstance(receipt, dict):
             if receipt.get("request_hash") != digest:

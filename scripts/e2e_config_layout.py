@@ -15,7 +15,31 @@ def audit(runner, route, cid, revision_id, file, prepared_release, notes, merge_
         b.eval("(" + target + ").click()")
 
     def tab(name):
-        click(name, "document.querySelector('.cv-tabs')")
+        wait("!!document.querySelector('.cv-tabs') && !document.querySelector('.config-root>.state.is-loading')")
+        if name in ("版本演进", "配置历史"):
+            if b.eval("!!document.querySelector('.cv32-object-heading')"):
+                b.eval("document.querySelector('[aria-label=\"当前配置的更多操作\"]').click()")
+                click("版本关系", "document.querySelector('[role=menu]')")
+            if not b.eval("!!document.querySelector('.cv32-evo-scroll')"):
+                click("版本演进", "document.querySelector('.cv-tabs')")
+            wait("!!document.querySelector('.cv32-evo-scroll')")
+            if name == "配置历史":
+                click("操作记录", "document.querySelector('.cv-tabs')")
+        elif name in ("参数工作台", "参数总览", "模板导出"):
+            if not b.eval("!!document.querySelector('.cv32-object-heading')"):
+                wait("!!document.querySelector('.cv-release-band button')")
+                b.eval("document.querySelector('.cv-release-band button').click()")
+                wait("!!document.querySelector('.cv32-object-heading') && !document.querySelector('.state.is-loading')")
+            if name == "参数工作台":
+                b.eval("Array.from(document.querySelectorAll('.cv-tabs button')).find(x=>['参数','标准参数'].includes(x.textContent.trim())).click()")
+            elif name == "参数总览":
+                b.eval("document.querySelector('[aria-label=\"当前配置的更多操作\"]').click()")
+                click("管理参数", "document.querySelector('[role=menu]')")
+            else:
+                click("导出文件", "document.querySelector('.cv32-object-heading')")
+                if b.eval("!!document.querySelector('.modal')"):
+                    click("导出上次保存的配置", "document.querySelector('.modal')")
+        wait("!!document.querySelector('.cv-tab-content')")
 
     def check(name, width, height):
         wait("!!document.querySelector('.modal')")
@@ -45,23 +69,28 @@ def audit(runner, route, cid, revision_id, file, prepared_release, notes, merge_
         tab("版本演进")
         overflow = b.eval("Array.from(document.querySelectorAll('.cv-graph-node,.cv-release-band,.cv-lane-label')).filter(e=>e.scrollWidth>e.clientWidth+2).map(e=>e.className)")
         assert not overflow, (width, overflow)
-        for action, name in [("新建软件版本", "new-release"), ("新建机台分支", "new-machine"), ("读图说明", "graph-help")]:
+        for action, name in [("新建软件版本", "new-release"), ("新建机台", "new-machine"), ("读图说明", "graph-help")]:
             click(action); check(name, width, height); close()
         tab("参数工作台")
-        b.eval("document.querySelector('.cv-revision-picker').click()")
-        check("revision-picker", width, height); close()
-        click("创建编辑草稿")
-        wait("!!Array.from(document.querySelectorAll('button')).find(x=>x.textContent.trim()==='发布修订')")
-        click("发布修订"); check("publish-confirmation", width, height); close()
-        click("从文件提取参数")
+        runner.shoot("v32-parameters-%s" % width)
+        b.eval("document.querySelector('.cv32-parameter-name').click()")
+        check("parameter-details", width, height); close()
+        b.eval("document.querySelector('[aria-label=\"参数表显示设置\"]').click()")
+        check("parameter-display", width, height); close()
+        b.eval("Array.from(document.querySelectorAll('.cv32-object-heading button')).find(x=>['编辑参数','继续编辑草稿'].includes(x.textContent.trim())).click()")
+        wait("!!Array.from(document.querySelectorAll('button')).find(x=>x.textContent.trim()==='核对并保存')")
+        click("核对并保存"); check("save-review", width, height); close()
+        b.eval("document.querySelector('[aria-label=\"当前配置的更多操作\"]').click()")
+        click("从文件提取参数", "document.querySelector('[role=menu]')")
         wait("!!document.querySelector('.modal [aria-label=\"配置文件\"]')")
         check("extract-picker", width, height)
         click("预览参数", modal)
         wait("!!document.querySelector('.modal .table-wrap') || !!document.querySelector('.modal .state.is-error')")
         check("extract-preview", width, height); close()
-        click("合并配置")
+        b.eval("document.querySelector('[aria-label=\"当前配置的更多操作\"]').click()")
+        click("合并配置", "document.querySelector('[role=menu]')")
         check("merge-picker", width, height)
-        b.eval("var sourceO=document.querySelector('[aria-label=\"共同基准 O\"]'),sourceN=document.querySelector('[aria-label=\"目标配置 N\"]');sourceO.value=%s;sourceN.value=%s;sourceN.dispatchEvent(new Event('change',{bubbles:true}))" % (json.dumps(revision_id), json.dumps(merge_target)))
+        b.eval("var sourceO=document.querySelector('[aria-label=\"原来的标准\"]'),sourceN=document.querySelector('[aria-label=\"新的标准\"]');sourceO.value=%s;sourceN.value=%s;sourceN.dispatchEvent(new Event('change',{bubbles:true}))" % (json.dumps(revision_id), json.dumps(merge_target)))
         click("预览合并", modal)
         wait("!!document.querySelector('.modal .table-wrap') || !!document.querySelector('.modal .state.is-error')")
         check("merge-preview", width, height)
@@ -101,12 +130,12 @@ def audit(runner, route, cid, revision_id, file, prepared_release, notes, merge_
         wait("!!document.querySelector('.cv-field-picker')")
         check("nested-field-picker", width, height); close(); close()
         tab("参数工作台")
-        click("确认版本默认")
+        click("核对并保存")
         check("freeze-confirmation", width, height); close()
         # No saves or publication are committed by the dialog inventory.
-        click("固定配置", "document.querySelector('.cv-breadcrumb')")
+        click("其他配置", "document.querySelector('.cv-breadcrumb')")
         assert b.eval("document.documentElement.scrollWidth<=innerWidth+2")
-        click("新建固定配置")
+        click("新建配置分组")
         check("new-config", width, height); close()
         for surface, label in [("files", "配置文件"), ("records", "配置记录")]:
             b.navigate(runner.url("#/p/default/configv3/" + surface + "?workspace=" + route.split("workspace=", 1)[1]))

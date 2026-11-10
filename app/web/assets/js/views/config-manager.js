@@ -1,7 +1,7 @@
 /*
  * V3 配置管理工作台（M12-07 / INH-2142）。
  * 唯一配置域入口：固定配置 → 软件版本 → canonical D0 → Bn / 机台 rn。
- * 页面结构与所选修订遵循用户指定的 V3.1 HTML；数据来自配置域 API。
+ * 页面逐步对齐用户指定的 V3.2 HTML；数据来自配置域 API。
  */
 (function (global) {
   "use strict";
@@ -12,19 +12,29 @@
   var api = MC.api;
 
   function enc(v) { return encodeURIComponent(String(v)); }
+  var eventLabels = { restore: "从历史记录继续编辑", export: "导出配置文件", extract: "提取参数", extract_commit: "导入参数名称", merge: "合并配置", merge_commit: "更新编辑草稿", import: "导入参数值", value_import: "导入参数值", freeze: "首次保存版本标准", baseline: "保存版本标准", machine: "保存机台配置", create_config: "创建配置分组", create_release: "创建软件版本", associate_file: "关联配置文件", discard_draft: "放弃编辑草稿", directory: "管理参数目录" };
 
   MC.views.configv3 = function (app, route) {
-    var el = h("div.view.config-root");
+    var el = h("div.view.config-root.v32");
     // M16-36：支持从更新候选"写入草稿"后深链直达指定配置/版本（不自动发布）。
     var q = (route && route.query) || {};
-    var surface = route && route.arg || q.surface || "configs";
+    var surface = route && route.arg || q.surface || (q.config ? "configs" : "files");
     if (["configs", "files", "records"].indexOf(surface) < 0) surface = "configs";
     var catalogPage = { loaded: "", loading: false, items: [], total: 0, offset: 0, query: "", error: null, seq: 0 };
     var disposed = false, dialogs = [], formDrafts = [];
+    var activeMenu = null;
+    function viewMenu(anchor, items) {
+      activeMenu = MC.menu(anchor, items); activeMenu.el.classList.add("cv-menu");
+      var box = activeMenu.el.getBoundingClientRect();
+      if (box.bottom > global.innerHeight - 8) activeMenu.el.style.top = Math.max(8, global.innerHeight - box.height - 8) + "px";
+      return activeMenu;
+    }
     function viewModal(options) {
       var onClose = options.onClose, modal;
       options.onClose = function (result) { dialogs = dialogs.filter(function (item) { return item !== modal; }); if (onClose) onClose(result); };
-      modal = MC.modal(options); modal.el.classList.add("cv-dialog"); modal.el.parentNode.classList.add("cv-dialog-backdrop"); dialogs.push(modal); return modal;
+      modal = MC.modal(options); modal.el.classList.add("cv-dialog"); modal.el.parentNode.classList.add("cv-dialog-backdrop");
+      if (options.focusTitle) { var heading = modal.el.querySelector("h2"); heading.tabIndex = 0; heading.setAttribute("autofocus", ""); }
+      dialogs.push(modal); return modal;
     }
     function viewConfirm(options) {
       var result = MC.confirm(options);
@@ -35,45 +45,89 @@
     var loadSeq = 0, detailSeq = 0, selectedSeq = 0, overviewSeq = 0, parameterSeq = 0, directorySeq = 0, historySeq = 0;
     var S = {
       configs: [], cid: q.config || null, opened: !!q.config, selected: q.revision || q.draft || null, revisions: [], edits: {}, contextEpoch: 0,
+      objectRole: q.role || null,
+      expectedMachine: q.machine || null, expectedStandard: q.standard || null, missingRevision: null,
       missingConfig: null, detail: null, graph: null, params: null, branch: null,
-      machines: [], releaseId: q.release || null, tab: q.tab || "versions", draft: null, loading: true, error: null,
+      machines: [], releaseId: q.release || q.standard || null, tab: q.tab || (q.machine || q.standard ? "workbench" : "versions"), draft: null, loading: true, error: null,
+      evoView: q.view === "list" ? "list" : "graph", evoQuery: "", evoFilter: "all", evoZoom: 1,
+      evoCollapsed: new Set(), evoSearchCollapsed: new Set(), evoPositions: { graph: { left: 0, top: 0 }, list: { left: 0, top: 0 } },
       filter: "", overview: null, overviewMachine: "", overviewCompare: "",
+      parameterFilter: "all", showFileField: true, parameterDensity: "comfortable",
       overviewOffset: 0, overviewLimit: 100, overviewTotal: 0,
       paramMode: "list", selectedParam: null, paramTree: null,
-      paramPage: null, paramTotal: 0, paramOffset: 0, paramLimit: 100, paramLoading: false, allParams: null,
+      paramPage: null, paramTotal: 0, paramOffset: 0, paramLimit: 30, paramLoading: false, allParams: null, workbenchQuery: null, definitionTotal: 0,
       dirParent: "", dirData: null, dirLoading: false, dirError: null, dirOffset: 0,
       allLoading: false,
       exportFiles: null, exportFileId: "", exportRevisionId: "", exportPlan: null,
       exportArtifact: null, exportBusy: false, exportError: null,
-      historyEvents: null, historyLoading: false, historyError: null, historyQ: "", dirty: false, onlyDiff: false,
+      historyEvents: null, historyLoading: false, historyError: null, historyQ: "", dirty: false, onlyDiff: false, editErrors: {}, explicitModes: new Set(),
     };
     var canWrite = function () { return app.can("config_registry_write"); };
     function root(rest) {
       return "/api/v3/workspaces/" + enc(MC.workspaces.scopeId()) + "/profiles/" + enc(app.pid) + rest;
     }
     function cfgPath(rest) { return root("/configs/" + enc(S.cid) + (rest || "")); }
+    function parameterRecordQuery(releaseId) { return releaseId && S.selected ? "&revision_id=" + enc(S.selected) : ""; }
     function release() {
       return (S.detail && S.detail.releases || []).filter(function (r) { return r.release_id === S.releaseId; })[0] || null;
     }
     function draftId() { return S.releaseId ? "d0-" + S.releaseId : ""; }
     function revision() { return S.revisions.filter(function (item) { return item.id === S.selected; })[0] || null; }
-    function editable() { var item = revision(); return canWrite() && (!item || item.status === "draft"); }
-    function revisionLabel(item) { return item ? (item.machine_no || "主线") + " / " + labelOf(item.release_id) + " / " + item.label : "尚无修订"; }
+    function editable() { var item = revision(); return canWrite() && !S.basisMissing && !S.discarding && S.tab !== "initial" && S.objectRole !== "historical" && (!item || item.status === "draft"); }
+    function revisionLabel(item) { return item ? (item.machine_no || "版本标准") + " / 软件 " + labelOf(item.release_id) + " / " + (item.status === "draft" ? "编辑草稿" : item.at ? util.formatTime(item.at) : "已保存配置") : "没有配置记录"; }
+    function latestStandard(releaseId) {
+      var candidates = S.revisions.filter(function (r) { return r.release_id === releaseId && r.kind === "baseline" && r.status === "published"; });
+      candidates.sort(function (a, b) { return Number(b.label.slice(1)) - Number(a.label.slice(1)); });
+      return candidates[0] || S.revisions.filter(function (r) { return r.release_id === releaseId && r.kind === "default" && r.status === "published"; })[0];
+    }
+    function parameterReference(item) {
+      if (!item) return null;
+      if (item.kind !== "machine") return release() && release().initial_revision_id || null;
+      var machine = S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0];
+      // Old records compare with their actual historical source; the current object
+      // compares against the latest saved standard without changing inheritance.
+      if (item.status === "published" && machine && machine.head_id !== item.id) return item.source || null;
+      var standard = latestStandard(item.release_id); return standard && standard.id || null;
+    }
+    function historicalRecord(item) {
+      if (!item || item.status !== "published") return false;
+      if (S.objectRole === "historical") return true;
+      if (S.tab === "initial" || S.objectRole === "initial") return false;
+      if (item.kind === "machine") {
+        var machine = S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0];
+        return !!machine && machine.head_id !== item.id;
+      }
+      var latest = latestStandard(item.release_id); return !!latest && latest.id !== item.id;
+    }
     function buildRevisions() {
       var result = [];
       (S.detail.releases || []).forEach(function (r) {
-        result.push({ id: "d0-" + r.release_id, release_id: r.release_id, kind: "default", label: "D0", status: r.default_revision_id ? "published" : "draft", at: r.default_frozen_at || r.created_at });
+        result.push({ id: "d0-" + r.release_id, release_id: r.release_id, kind: "default", label: "D0", note: (r.d0 || {}).note || "", status: r.default_revision_id ? "published" : "draft", at: r.default_frozen_at || r.created_at });
         var draft = r.baseline_draft;
         if (draft && draft.status === "draft") result.push({ id: draft.draft_id, release_id: r.release_id, kind: "baseline", label: "基线草稿", status: "draft", source: draft.source_revision_id, at: draft.created_at });
       });
-      ((S.branch && S.branch.baselines) || []).forEach(function (b) { result.push({ id: b.baseline_id, release_id: b.release_id, kind: "baseline", label: b.label, status: "published", source: b.source_revision_id, parent: b.parent_id, at: b.published_at }); });
+      ((S.branch && S.branch.baselines) || []).forEach(function (b) { result.push({ id: b.baseline_id, release_id: b.release_id, kind: "baseline", label: b.label, note: b.note || "", status: "published", source: b.source_revision_id, parent: b.parent_id, at: b.published_at }); });
       (S.machines || []).forEach(function (m) {
-        (m.revisions || []).forEach(function (r) { result.push({ id: r.revision_id, release_id: r.release_id || m.release_id, kind: "machine", machine_id: m.machine_id, machine_no: m.machine_no, label: r.label, status: "published", source: r.base_revision_id, parent: r.parent_id, at: r.published_at }); });
+        (m.revisions || []).forEach(function (r) { result.push({ id: r.revision_id, release_id: r.release_id || m.release_id, kind: "machine", machine_id: m.machine_id, machine_no: m.machine_no, label: r.label, note: r.note || "", status: "published", source: r.base_revision_id, parent: r.parent_id, at: r.published_at }); });
         if (m.draft && m.draft.status === "draft") result.push({ id: m.draft.draft_id, release_id: m.release_id, kind: "machine", machine_id: m.machine_id, machine_no: m.machine_no, label: "机台草稿", status: "draft", source: m.draft.base_revision_id, parent: m.head_id, at: m.draft.created_at });
       });
       S.revisions = result;
+      if (!S.selected && S.expectedMachine) {
+        var owner = S.machines.filter(function (m) { return m.machine_id === S.expectedMachine; })[0];
+        S.selected = owner && (owner.head_id || owner.draft && owner.draft.draft_id);
+        if (!S.selected) { S.missingRevision = "机台"; return; }
+      }
+      if (!S.selected && S.expectedStandard) {
+        var standard = latestStandard(S.expectedStandard);
+        S.selected = standard ? standard.id : "d0-" + S.expectedStandard;
+      }
+      if (S.selected && !validRecord(revision())) { S.missingRevision = S.selected; return; }
       if (!revision()) S.selected = draftId();
       if (revision()) S.releaseId = revision().release_id;
+    }
+    function validRecord(item) {
+      return !!item && (!S.expectedMachine || item.machine_id === S.expectedMachine) &&
+        (!S.expectedStandard || item.kind !== "machine" && item.release_id === S.expectedStandard);
     }
     function loadSelected() {
       var item = revision();
@@ -81,8 +135,15 @@
       var selectedId = item.id, scope = cfgPath("");
       var request = ++selectedSeq;
       function current() { return !disposed && request === selectedSeq && S.selected === selectedId && cfgPath("") === scope; }
-      var basis = item.source ? api.getV3(scope + "/revisions/" + enc(item.source)).then(function (res) { if (current()) S.basis = (res.snapshot || {}).values || {}; }) : Promise.resolve().then(function () { if (current()) S.basis = null; });
+      S.basisMissing = item.kind === "machine" && !item.source;
+      var basis = item.source ? api.getV3(scope + "/revisions/" + enc(item.source)).then(function (res) { if (current()) S.basis = (res.snapshot || {}).values || {}; }, function (err) {
+        if (item.kind !== "machine" || err.status !== 404) throw err;
+        if (current()) { S.basis = null; S.basisMissing = true; }
+      }) : Promise.resolve().then(function () { if (current()) S.basis = null; });
       var bindings = api.getV3(scope + "/releases/" + enc(item.release_id) + "/bindings").then(function (res) { if (current()) S.bindingRevision = (res.binding_set || {}).revision; S.bindings = Object.keys((res.binding_set || {}).bindings || {}).map(function (id) { return res.binding_set.bindings[id]; }); });
+      var savedId = item.status === "published" ? item.id : item.kind === "machine" ? item.parent : (latestStandard(item.release_id) || {}).id;
+      var saved = savedId ? api.getV3(scope + "/revisions/" + enc(savedId)).then(function (res) { if (current()) { S.lastSavedId = savedId; S.lastSavedValues = (res.snapshot || {}).values || {}; } })
+        : Promise.resolve().then(function () { if (current()) { S.lastSavedId = null; S.lastSavedValues = {}; } });
       var snapshot;
       if (item.kind === "machine" && item.status === "draft") {
         S.draft = S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0].draft;
@@ -93,25 +154,36 @@
           : "/revisions/" + enc(item.id);
         snapshot = api.getV3(scope + path).then(function (data) { if (current()) S.draft = data.snapshot || data; });
       }
-      return Promise.all([snapshot, basis, bindings]);
+      return Promise.all([snapshot, basis, bindings, saved]);
     }
     function chooseRevision(item, tab) {
-      confirmDiscard(function () {
+      return new Promise(function (resolve) { confirmDiscard(function () {
         if (S.releaseId !== item.release_id) { S.paramOffset = 0; S.overviewOffset = 0; S.overviewDirectory = ""; S.overviewQ = ""; S.overviewCompare = ""; S.overviewOnly = false; S.overviewColumns = {}; S.exportMappings = {}; }
-        S.contextEpoch++; S.savingValues = false; S.valueError = null;
-        S.selected = item.id; S.releaseId = item.release_id; S.edits = {}; S.exportPlan = null; S.exportArtifact = null;
+        S.contextEpoch++; directorySeq++; parameterSeq++; S.savingValues = false; S.valueError = null;
+        S.discardError = null; S.pendingDiscard = null;
+        S.missingRevision = null; S.expectedMachine = item.machine_id || null; S.expectedStandard = item.kind === "machine" ? null : item.release_id;
+        S.pendingSave = null; S.parameterFilter = "all"; S.selected = item.id; S.releaseId = item.release_id; S.edits = {}; S.editErrors = {}; S.explicitModes.clear(); S.workbenchQuery = null; S.exportPlan = null; S.exportArtifact = null;
         if (tab) S.tab = tab;
         S.loading = true; render();
-        reloadDetail().then(function () { if (disposed) return; S.loading = false; S.focusRevision = S.tab === "versions"; render(); });
-      });
+        reloadDetail().then(function () { if (disposed) { resolve(); return; } S.loading = false; S.focusRevision = S.tab === "versions"; render(); routeSelection(false); resolve(); });
+      }); });
     }
     function openConfig(id) {
-      confirmDiscard(function () { S.contextEpoch++; clearConfigData(); S.opened = true; S.cid = id; S.tab = "versions";
+      confirmDiscard(function () {
+        rememberEvolution();
+        if (S.cid !== id) {
+          S.evoQuery = ""; S.evoFilter = "all"; S.evoCollapsed.clear(); S.evoSearchCollapsed.clear();
+          S.evoPositions = { graph: { left: 0, top: 0 }, list: { left: 0, top: 0 } };
+        }
+        S.contextEpoch++; clearConfigData(); S.opened = true; S.cid = id; S.tab = "versions";
         app.go({ kind: "configv3", arg: "configs", query: { config: id } }); load(id); });
     }
     function clearConfigData() {
-      S.detail = null; S.selected = null; S.releaseId = null; S.revisions = []; S.draft = null; S.edits = {}; S.dirty = false; S.savingValues = false; S.valueError = null;
-      S.paramOffset = 0; S.paramTotal = 0; S.paramPage = null; S.allParams = null; S.selectedParam = null; S.folderActive = false; S.dirData = null; S.dirParent = ""; S.dirOffset = 0; S.dirError = null;
+      S.basisMissing = false;
+      S.recordHistoryObject = null; S.recordHistoryOffset = 0;
+      S.discarding = false; S.discardError = null; S.pendingDiscard = null;
+      S.pendingSave = null; S.afterSave = null; S.exportFromEdit = false; S.internalRoute = null; S.lastSavedId = null; S.lastSavedValues = {}; S.missingRevision = null; S.expectedMachine = null; S.expectedStandard = null; S.detail = null; S.selected = null; S.releaseId = null; S.revisions = []; S.draft = null; S.edits = {}; S.editErrors = {}; S.explicitModes.clear(); S.dirty = false; S.savingValues = false; S.valueError = null;
+      S.paramOffset = 0; S.paramTotal = 0; S.paramPage = null; S.allParams = null; S.workbenchQuery = null; S.selectedParam = null; S.folderActive = false; S.dirData = null; S.dirParent = ""; S.dirOffset = 0; S.dirError = null;
       S.overview = null; S.overviewOffset = 0; S.overviewQ = ""; S.overviewDirectory = ""; S.overviewOnly = false; S.overviewCompare = ""; S.overviewMachine = ""; S.overviewColumns = {};
       S.historyEvents = null; S.historyLoading = false; S.historyError = null; S.historyQ = ""; S.historyOffset = 0; S.historyTotal = 0;
       S.exportFiles = null; S.exportFileId = ""; S.exportRevisionId = ""; S.exportPlan = null; S.exportArtifact = null; S.exportMappings = {}; S.exportError = null; S.exportBusy = false; S.exportDirty = false;
@@ -201,13 +273,20 @@
           S.branch = rows[1];
           S.machines = rows[2].items || [];
           buildRevisions();
-          var parameterContext = scope + "|" + S.releaseId;
+          if (S.missingRevision) return;
+          var parameterContext = scope + "|" + S.releaseId + "|" + S.selected;
           if (S.parameterContext !== parameterContext) { S.paramOffset = 0; S.dirParent = ""; S.dirOffset = 0; S.folderActive = false; S.overviewColumns = {}; }
           S.parameterContext = parameterContext;
-          return Promise.all([loadSelected(), api.getV3(cfgPath("/parameters") + "?offset=" + S.paramOffset + "&limit=" + S.paramLimit + "&release_id=" + enc(S.releaseId || "")).then(function (page) {
+          return loadSelected().then(function () {
+          if (!current()) return;
+          var parameters = S.workbenchQuery ? api.requestV3("POST", scope + "/parameter-query", { body: Object.assign({}, S.workbenchQuery, { revision_id: S.selected,
+            directory: S.folderActive ? S.dirParent : "", changed_ids: editedParameterIds(), edits: S.edits, offset: S.paramOffset, limit: S.paramLimit }) })
+            : api.getV3(cfgPath("/parameters") + "?offset=" + S.paramOffset + "&limit=" + S.paramLimit + "&release_id=" + enc(S.releaseId || "") + parameterRecordQuery(S.releaseId));
+          return Promise.all([parameters.then(function (page) {
             if (!current()) return;
-            S.paramPage = page; S.params = page; S.paramTotal = page.total == null ? (page.items || []).length : page.total; S.paramOffset = page.offset || 0;
+            S.paramPage = page; S.params = page; S.paramTotal = page.total == null ? (page.items || []).length : page.total; S.definitionTotal = S.workbenchQuery ? page.parameter_total : S.paramTotal; S.paramOffset = page.offset || 0;
           }), loadOverview(), S.folderActive ? loadDir(S.dirParent, S.dirOffset) : Promise.resolve()]);
+          });
         });
       });
     }
@@ -221,12 +300,27 @@
     function render() {
       if (S.paramTree) { S.paramTree.destroy(); S.paramTree = null; }
       util.clear(el);
-      el.appendChild(MC.configWorkspaceNav(app, surface));
+      if (surface === "records") el.appendChild(MC.configWorkspaceNav(app, surface));
       if (surface !== "configs") { renderCatalogPage(); return; }
-      if (S.opened && S.detail) el.appendChild(h("div.cv-breadcrumb", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { confirmDiscard(function () { S.opened = false; S.cid = null; S.detail = null; S.edits = {}; app.go({ kind: "configv3", arg: "configs", query: {} }); render(); }); } }, "固定配置"), h("span.muted", "/"), h("strong", S.detail.name), h("span.mono.small.muted", S.detail.code)));
-      else el.appendChild(h("div.cv-page-heading", h("h1", "固定配置")));
+      if (S.opened && S.detail && S.detail.file_id) {
+        var file = S.detail.file || {};
+        el.appendChild(h("nav.cv-breadcrumb", { "aria-label": "面包屑" },
+          h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置管理"),
+          icon("chevron-right"), objectPage() ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { changeTab("versions"); } }, file.name || "文件已移除") : h("span", file.name || "文件已移除"),
+          objectPage() ? h("span.small.muted", "/ " + (revision() && revision().machine_no || "软件 " + labelOf(S.releaseId))) : null));
+        if (!objectPage()) el.appendChild(h("div.view-header", h("div.cv-file-label", h("span.cv-file-type", icon("file"), (file.format || "").toUpperCase()),
+          h("div.col", h("h1", file.name || S.detail.name), h("span.small.muted", S.detail.name)))));
+      } else if (S.opened && S.detail) {
+        el.appendChild(h("div.cv-breadcrumb", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () {
+          confirmDiscard(function () { S.opened = false; S.cid = null; S.detail = null; S.edits = {}; app.go({ kind: "configv3", arg: "configs", query: {} }); render(); });
+        } }, "其他配置"), h("span.muted", "/"), objectPage() ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { changeTab("versions"); } }, S.detail.name) : h("strong", S.detail.name),
+          h("details.cv-help", h("summary", "技术详情"), h("span.mono.small", S.detail.code))));
+      } else el.appendChild(h("div.cv-page-heading", h("h1", "其他配置")));
       if (S.loading) { el.appendChild(MC.stateBlock({ kind: "loading", title: "加载配置…" })); return; }
       if (S.error) { el.appendChild(MC.errorBlock(S.error, load)); return; }
+      if (S.missingRevision || S.tab === "initial" && release() && release().initial_revision_id && S.selected !== release().initial_revision_id || S.objectRole === "historical" && revision() && revision().status !== "published") {
+        el.appendChild(MC.stateBlock({ kind: "empty", title: "此配置记录不可用", desc: "记录不存在，或不属于当前配置与对象。", actions: [h("button.btn", { type: "button", onclick: function () { S.missingRevision = null; S.expectedMachine = null; S.expectedStandard = null; S.selected = null; S.objectRole = null; S.tab = "versions"; load(S.cid); routeSelection(true); } }, "返回版本演进")] })); return;
+      }
       if (S.missingConfig) {
         el.appendChild(MC.stateBlock({ kind: "empty", title: "该配置已不存在", desc: "可能已被删除，或不属于当前工作区与机型。", actions: [h("button.btn", { type: "button", onclick: function () { S.cid = null; S.opened = false; S.missingConfig = null; app.go({ kind: "configv3", arg: "configs", query: {} }); load(); } }, "查看配置列表")] }));
         return;
@@ -234,9 +328,19 @@
       if (!canWrite()) {
         el.appendChild(h("div.banner.banner-warning", icon("info"), h("div.banner-body", "只读模式，编辑需要管理员权限。")));
       }
+      if (S.basisMissing && objectPage()) el.appendChild(h("div.banner.banner-warning", { role: "alert" }, h("div.banner-body", "原来采用的标准不可用。参数仍可查看，继续编辑前请明确选择原来的标准和目标标准。"),
+        canWrite() && !historicalRecord(revision()) ? h("button.btn.btn-sm", { type: "button", onclick: upgradeDialog }, "核对参照标准") : null));
+      if (S.discardError) el.appendChild(h("div.banner.banner-warning", { role: "alert" }, h("div.banner-body", "放弃草稿尚未确认，输入已保留。", MC.errorText(S.discardError)),
+        h("button.btn.btn-sm", { type: "button", disabled: !canWrite() || S.discarding, onclick: function () {
+          if (S.discardError.status === 409) recheckDiscard(); else if (S.pendingDiscard) performDiscard(S.pendingDiscard, true);
+        } }, S.discardError.status === 409 ? "重新核对草稿" : "重试确认")));
       if (!S.opened) { el.appendChild(configsPanel()); return; }
       el.appendChild(mainPanel());
-      if (S.focusRevision) { S.focusRevision = false; var selectedNode = el.querySelector('.cv-graph-node[aria-pressed="true"]'); if (selectedNode) selectedNode.focus(); }
+      if (S.tab === "versions") {
+        var evoScroll = el.querySelector(".cv32-evo-scroll"), evoPosition = S.evoPositions[S.evoView];
+        if (evoScroll) evoScroll.scrollTo(evoPosition.left, evoPosition.top);
+      }
+      if (S.focusRevision) { S.focusRevision = false; var selectedNode = el.querySelector('.cv-graph-node[aria-pressed="true"]'); if (selectedNode) selectedNode.focus({ preventScroll: true }); }
       if (S.focusTab) { S.focusTab = false; var activeTab = el.querySelector('.cv-tabs [aria-selected="true"]'); if (activeTab) activeTab.focus(); }
     }
 
@@ -245,7 +349,7 @@
       if (reset) catalogPage.offset = 0;
       var seq = ++catalogPage.seq;
       catalogPage.loading = true; catalogPage.error = null; catalogPage.loaded = target; render();
-      api.getV3(root(target === "files" ? "/file-selector" : "/events"), {
+      api.getV3(root(target === "files" ? "/config-files" : "/events"), {
         q: catalogPage.query, offset: catalogPage.offset, limit: 50,
       }).then(function (res) {
         if (disposed || seq !== catalogPage.seq || target !== surface || wid !== MC.workspaces.scopeId()) return;
@@ -259,7 +363,10 @@
       var query = h("input.input", { type: "search", "aria-label": files ? "搜索配置文件" : "搜索配置记录", placeholder: files ? "搜索文件名" : "搜索事件、参数或操作人", value: P.query });
       function search() { P.query = query.value.trim(); loadCatalogPage(true); }
       query.addEventListener("keydown", function (event) { if (event.key === "Enter") search(); });
-      el.appendChild(h("div.view-header", h("h1", files ? "配置文件" : "配置记录")));
+      if (files) el.appendChild(h("nav.cv-breadcrumb", { "aria-label": "面包屑" }, h("span", "配置管理"), icon("chevron-right"), h("span", "配置文件")));
+      el.appendChild(h("div.view-header", h("h1", files ? "配置文件" : "操作记录"),
+        files && app.can("tasks_run") ? h("button.btn.btn-sm.btn-primary", { type: "button", onclick: function () { app.go({ kind: "updates", arg: "sources", query: { action: "preview_all", request: util.uid("preview") } }); } }, icon("refresh"), "工作区全量更新") : null,
+        files ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs" }); } }, "其他配置") : null));
       var card = h("div.config-resource-surface", h("div.row.config-resource-toolbar", query,
         h("button.btn.btn-sm", { type: "button", onclick: search }, "搜索"),
         h("button.btn.btn-sm", { type: "button", onclick: function () { loadCatalogPage(false); } }, "刷新"),
@@ -271,25 +378,65 @@
       if (!P.items.length) { card.appendChild(MC.stateBlock({ kind: "empty", title: P.query ? "没有匹配结果" : (files ? "还没有配置文件" : "还没有配置记录"), desc: files ? "从左侧配置文件列表导入文件后，即可在这里查看。" : "配置的修改、导入、导出与恢复会记录在这里。" })); return; }
       var visible = P.items;
       var rows = visible.map(function (item) {
-        if (files) return h("tr", h("td", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.openFile(item.name); } }, item.name)),
-          h("td", (item.format || "").toUpperCase()), h("td.mono.xsmall", item.version_id), h("td.xsmall", util.formatTime(item.updated_at)));
-        return h("tr", h("td.xsmall", item.at), h("td", item.type), h("td", item.principal || "—"),
-          h("td", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs", query: { config: item.config_id } }); } }, item.config_id || "配置")));
+        if (files) {
+          var config = item.configuration;
+          return h("tr", h("td", h("div.cv-file-label", h("span.cv-file-type", icon("file"), (item.format || "").toUpperCase()),
+            h("div.col", h("button.btn.btn-ghost.cv-object-link", { type: "button", onclick: function () { openManagedFile(item); } }, item.name),
+              config ? h("span.small.muted", config.name) : null))),
+            h("td", config && config.latest_release ? h("div.row", { style: "gap:4px;flex-wrap:wrap" }, (config.recent_versions || [config.latest_release.version]).map(function (v) { return h("span.badge", v); }), config.release_count > 3 ? h("span.small.muted", "+" + (config.release_count - 3)) : null) : h("span.muted", "—")),
+            h("td", config ? config.machine_count + " 台" : "—"),
+            h("td", config && (config.draft_count || config.pending_updates) ? h("div.col", config.draft_count ? h("span.badge.badge-warning", config.draft_count + " 份草稿") : null,
+              config.pending_updates ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "updates", arg: "candidates", query: { config: config.config_id } }); } }, config.pending_updates + " 项更新待核对") : null) : h("span.muted", "—")),
+            h("td.small", util.formatTime(config ? config.updated_at : item.updated_at)),
+            h("td", h("button.btn.btn-ghost.btn-icon", { type: "button", "aria-label": "管理 " + item.name, onclick: function () { openManagedFile(item); } }, icon("chevron-right"))));
+        }
+        var owner = S.configs.filter(function (c) { return c.config_id === item.config_id; })[0];
+        return h("tr", h("td.xsmall", item.at), h("td", eventLabels[item.type] || "配置操作"), h("td", item.principal || "—"),
+          h("td", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs", query: { config: item.config_id } }); } }, owner ? owner.name : "查看配置")));
       });
-      card.appendChild(h("div.config-resource-scroll", h("table.table", h("thead", h("tr", (files ? ["文件名", "格式", "文件版本", "更新时间"] : ["时间", "事件", "操作人", "配置"]).map(function (label) { return h("th", label); }))), h("tbody", rows))));
+      card.appendChild(h("div.config-resource-scroll", h("table.table", h("thead", h("tr", (files ? ["文件名", "软件版本", "机台", "待处理", "最近保存", "操作"] : ["时间", "事件", "操作人", "配置"]).map(function (label) { return h("th", label); }))), h("tbody", rows))));
       card.appendChild(h("div.row.config-resource-toolbar", h("span.small.muted", "第 " + (P.offset + 1) + "–" + Math.min(P.offset + visible.length, P.total) + " 项"), h("span.spacer"),
         h("button.btn.btn-sm", { type: "button", disabled: P.offset === 0, onclick: function () { P.offset = Math.max(0, P.offset - 50); loadCatalogPage(false); } }, "上一页"),
         h("button.btn.btn-sm", { type: "button", disabled: P.offset + 50 >= P.total, onclick: function () { P.offset += 50; loadCatalogPage(false); } }, "下一页")));
     }
 
+    function openManagedFile(file) {
+      if (file.configuration) { openConfig(file.configuration.config_id); return; }
+      if (!canWrite()) {
+        viewModal({ title: file.name, body: h("p", "此文件尚未设置版本配置，请联系管理员完成设置。") });
+        return;
+      }
+      var choices = h("select.select", { "aria-label": "配置关联方式" }, h("option", { value: "" }, "为此文件建立配置"),
+        S.configs.filter(function (config) { return !config.file_id; }).map(function (config) { return h("option", { value: config.config_id }, "关联已有配置 · " + config.name); }));
+      var name = h("input.input", { type: "text", value: file.name.slice(0, 100), maxlength: 100 });
+      var field = MC.field({ label: "配置名称", required: true, control: name });
+      var error = h("div.small", { role: "alert" });
+      choices.addEventListener("change", function () { field.hidden = !!choices.value; error.textContent = ""; });
+      var code = util.uid("cfg");
+      configFormModal({ title: "设置 " + file.name, body: h("div.col", { style: "gap:12px" },
+        MC.field({ label: "配置关联方式", control: choices }), field, error), footer: function (close) {
+        var save = h("button.btn.btn-primary", { type: "button", onclick: function () {
+          MC.withBusy(save, function () {
+            var path = choices.value ? root("/configs/" + enc(choices.value) + "/file") : root("/configs");
+            var payload = choices.value ? { file_id: file.file_id } : { file_id: file.file_id, code: code, name: name.value.trim() };
+            return api.requestV3(choices.value ? "PUT" : "POST", path, { body: payload }).then(function (res) {
+              if (close(true) === false) return;
+              MC.toast.success("已设置文件配置"); openConfig(res.config.config_id);
+            }, function (err) { error.textContent = MC.errorText(err); });
+          });
+        } }, "进入配置管理");
+        return [h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"), save];
+      } });
+    }
+
     function configsPanel() {
-      var search = h("input.input", { type: "search", "aria-label": "搜索固定配置", placeholder: "搜索配置名称或标识", value: S.filter });
+      var search = h("input.input", { type: "search", "aria-label": "搜索配置分组", placeholder: "搜索配置名称或标识", value: S.filter });
       var results = h("div.cv-catalog-results");
       function draw() {
         var items = S.configs.filter(function (c) { return !S.filter || (c.name + " " + c.code).toLowerCase().indexOf(S.filter.toLowerCase()) >= 0; });
         util.clear(results);
         if (!items.length) {
-          results.appendChild(MC.stateBlock({ kind: "empty", title: S.configs.length ? "没有匹配的配置" : "创建第一组固定配置", desc: S.configs.length ? "调整搜索条件后重试。" : "为需要长期维护的一组参数命名，再添加软件版本。",
+          results.appendChild(MC.stateBlock({ kind: "empty", title: S.configs.length ? "没有匹配的配置" : "创建第一组配置", desc: S.configs.length ? "调整搜索条件后重试。" : "为需要长期维护的一组参数命名，再添加软件版本。",
             actions: S.configs.length ? [h("button.btn", { type: "button", onclick: function () { S.filter = ""; search.value = ""; draw(); } }, "清除搜索")] : null })); return;
         }
         var rows = items.map(function (c) {
@@ -305,50 +452,148 @@
       }
       search.addEventListener("input", function () { S.filter = search.value; draw(); }); draw();
       return h("div.cv-catalog", h("div.cv-toolbar", search, h("span.small.muted", S.configs.length + " 组配置"), h("span.spacer"),
-        h("button.btn.btn-primary", { type: "button", disabled: !canWrite(), onclick: createConfigDialog }, icon("plus"), "新建固定配置")), results);
+        h("button.btn.btn-primary", { type: "button", disabled: !canWrite(), onclick: createConfigDialog }, icon("plus"), "新建配置分组")), results);
     }
 
     function changeTab(value) {
       if (S.tab === value) return;
-      confirmDiscard(function () { S.tab = value; S.focusTab = true; render(); });
+      if (S.tab === "export" && S.exportFromEdit && value === "workbench") { S.tab = value; S.exportFromEdit = false; render(); routeSelection(false); return; }
+      confirmDiscard(function () { rememberEvolution(); S.tab = value; S.focusTab = true; render(); routeSelection(false); });
     }
 
-    function confirmDiscard(then) {
-      if (!S.dirty && !S.exportDirty) { then(); return; }
-      viewConfirm({ title: S.exportDirty ? "有未确认的导出映射" : "有未保存的值", message: "离开会丢失当前尚未保存或确认的修改。", confirmText: "放弃修改", cancelText: "继续编辑" }).then(function (ok) {
-        if (!ok) return;
-        S.dirty = false; S.edits = {}; S.exportDirty = false; then();
+    function confirmDiscard(then, cancelled) {
+      cancelled = cancelled || function () {};
+      if (S.discarding) { MC.toast.info("正在放弃草稿，请等待结果"); cancelled(); return; }
+      if (S.savingValues) { MC.toast.info("正在保存，请等待结果"); cancelled(); return; }
+      var formDirty = formDrafts.some(function (form) { return form.dirty; });
+      if (!S.dirty && !S.exportDirty && !formDirty) { then(); return; }
+      if (S.dirty && !S.exportDirty && !formDirty && editable()) {
+        var context = operationContext();
+        viewModal({ title: "有未暂存的修改", body: h("p", "暂存后可以稍后继续编辑；放弃本次修改不会删除已暂存草稿。"), onClose: function (result) { if (result !== "proceed" && result !== "saving") cancelled(); }, footer: function (close) {
+          return [h("button.btn", { type: "button", onclick: close }, "继续编辑"),
+            h("button.btn", { type: "button", onclick: function () { close("proceed"); S.dirty = false; S.edits = {}; S.editErrors = {}; S.explicitModes.clear(); then(); } }, "放弃修改"),
+            h("button.btn.btn-primary", { type: "button", onclick: function () { if (!context.current()) return; close("saving"); stashValues().then(function (ok) { if (ok && context.current()) then(); else cancelled(); }); } }, "暂存并离开")];
+        } }); return;
+      }
+      viewConfirm({ title: formDirty ? "有未完成的表单" : S.exportDirty ? "有未确认的导出字段" : "有未保存的值", message: "离开会丢失当前尚未保存或确认的修改。", confirmText: "放弃修改", cancelText: "继续编辑", danger: true }).then(function (ok) {
+        if (!ok) { cancelled(); return; }
+        S.dirty = false; S.edits = {}; S.editErrors = {}; S.explicitModes.clear(); S.exportDirty = false; then();
       });
     }
 
-    function revisionPicker() {
-      var item = revision();
-      return h("button.cv-revision-picker", { type: "button", title: revisionLabel(item), "aria-label": "按主线或机台、版本、类型和修订选择配置", onclick: function () {
-        var selected = item, owner = item && item.machine_id || "main", rid = S.releaseId, kind = item && item.kind || "default";
-        var host = h("div.cv-picker-grid");
-        function list(title, options, active, onChoose) { return h("section", h("strong.small", title), h("div.col", options.map(function (o) { return h("button.btn" + (o.value === active ? ".btn-primary" : ".btn-ghost"), { type: "button", "aria-pressed": o.value === active ? "true" : "false", onclick: function () { onChoose(o.value); draw(); } }, o.label); }))); }
-        function draw() {
-          var focused = document.activeElement && document.activeElement.closest("section"), sectionIndex = focused ? Array.prototype.indexOf.call(host.children, focused) : -1;
-          util.clear(host);
-          host.appendChild(list("分支", [{ value: "main", label: "主线" }].concat(S.machines.map(function (m) { return { value: m.machine_id, label: m.machine_no }; })), owner, function (value) { owner = value; kind = value === "main" ? "default" : "machine"; }));
-          host.appendChild(list("软件版本", (S.detail.releases || []).map(function (r) { return { value: r.release_id, label: r.version }; }), rid, function (value) { rid = value; }));
-          host.appendChild(list("类型", owner === "main" ? [{ value: "default", label: "版本默认" }, { value: "baseline", label: "版本基线" }] : [{ value: "machine", label: "机台配置" }], kind, function (value) { kind = value; }));
-          var options = S.revisions.filter(function (r) { return (r.machine_id || "main") === owner && r.release_id === rid && r.kind === kind; });
-          if (!options.some(function (r) { return selected && r.id === selected.id; })) selected = options[options.length - 1];
-          host.appendChild(list("修订", options.map(function (r) { return { value: r.id, label: r.label + (r.status === "draft" ? " · 草稿" : " · 已固化") }; }), selected && selected.id, function (value) { selected = options.filter(function (r) { return r.id === value; })[0]; }));
-          if (!options.length) host.lastChild.appendChild(h("p.small.muted", "此范围尚无修订"));
-          if (sectionIndex >= 0 && host.children[sectionIndex]) { var activeChoice = host.children[sectionIndex].querySelector('[aria-pressed="true"]'); if (activeChoice) activeChoice.focus(); }
-        }
-        draw(); viewModal({ title: "选择配置修订", body: host, size: "wide", footer: function (close) { return [h("button.btn", { type: "button", onclick: close }, "取消"), h("button.btn.btn-primary", { type: "button", onclick: function () { if (!selected) { MC.toast.warning("请选择已有修订"); return; } close(); chooseRevision(selected); } }, "使用此修订")]; } });
-      } }, h("span.row", { style: "gap:8px;min-width:0;flex:1" }, h("strong.small", revisionLabel(item)), h("span.badge", item ? item.status === "draft" ? S.savingValues ? "保存中…" : canWrite() ? "草稿" : "草稿 · 只读" : "历史值只读" : "尚无修订")), h("span.small", "更换 ›"));
+    function objectPage() { return ["versions", "history"].indexOf(S.tab) < 0; }
+    function routeSelection(replace) {
+      if (!S.cid) return;
+      var query = { config: S.cid };
+      if (S.tab !== "versions") query.tab = S.tab;
+      if (objectPage() && S.selected) { query.revision = S.selected; query.release = S.releaseId; if (S.objectRole) query.role = S.objectRole; }
+      if (objectPage() && revision()) { if (revision().kind === "machine") query.machine = revision().machine_id; else query.standard = revision().release_id; }
+      S.internalRoute = { tab: S.tab, selected: objectPage() ? S.selected : null, scope: cfgPath("") };
+      app.go({ kind: "configv3", arg: "configs", query: query }, !!replace);
     }
-
+    function objectHeader() {
+      var item = revision(), rel = release(); if (!item || !rel) return null;
+      var machine = item.kind === "machine" && S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0];
+      var history = historicalRecord(item);
+      var status = S.tab === "initial" ? "初始参数 · 只读" : history ? "历史快照 · 只读" : item.status === "draft" ? "编辑中" : "已保存";
+      var draft = S.revisions.filter(function (r) { return r.status === "draft" && (machine ? r.machine_id === machine.machine_id : r.release_id === rel.release_id && r.kind !== "machine"); })[0];
+      return h("div.cv32-object-heading", h("div.col", h("div.row", icon(machine ? "machine" : "compare"), h("h1", { tabindex: -1, "data-object-title": "1" }, machine ? machine.machine_no : "软件 " + rel.version),
+        h("span.badge" + (item.status === "draft" ? ".badge-warning" : ""), status)),
+        h("div.small.muted", machine ? "软件 " + rel.version + " · " : "标准参数 · ", item.at ? util.formatTime(item.at) : "尚未保存")),
+        h("div.row.cv32-object-actions", h("button.btn.btn-sm", { type: "button", disabled: !!S.savingValues, onclick: startExport }, icon("download"), "导出文件"),
+          item.status !== "draft" && canWrite() && S.tab !== "initial" && !history ? h("button.btn.btn-sm.btn-primary", { type: "button", onclick: createEditingDraft }, icon("edit"), draft ? "继续编辑草稿" : "编辑参数") : null,
+          h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "当前配置的更多操作", disabled: !!S.savingValues, onclick: function (event) { viewMenu(event.currentTarget, [
+            { label: "对比参数", disabled: S.tab === "initial" && !rel.initial_revision_id, onClick: compareParameters },
+            { label: "管理参数", disabled: history || S.tab === "initial", onClick: function () { changeTab("overview"); } },
+            { label: "从文件提取参数", disabled: !canWrite() || history || S.tab === "initial", onClick: extractDialog },
+            { label: machine ? "更新到其他标准" : "合并配置", disabled: !canWrite() || history || S.tab === "initial", onClick: machine ? upgradeDialog : mergeDialog },
+            draft ? { label: "放弃已暂存草稿", danger: true, disabled: !canWrite() || history || S.tab === "initial" || !!(S.pendingSave && S.pendingSave.attempted), onClick: function () { discardStoredDraft(draft); } } : null,
+            { label: "版本关系", onClick: function () { changeTab("versions"); } },
+            { label: "技术详情", onClick: function () { viewModal({ title: "配置技术详情", body: h("pre.small.mono", JSON.stringify({ revision_id: item.id, release_id: item.release_id, machine_id: item.machine_id, source_revision_id: item.source, previous_id: item.parent }, null, 2)) }); } }
+          ].filter(Boolean)); } }, icon("more"))));
+    }
+    function discardStoredDraft(item, latest) {
+      if (!item || !canWrite() || S.savingValues || S.discarding) return;
+      var rel = (S.detail.releases || []).filter(function (r) { return r.release_id === item.release_id; })[0];
+      var machine = item.machine_id && S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0];
+      var stored = latest || (item.kind === "machine" ? machine && machine.draft : item.kind === "baseline" ? rel && rel.baseline_draft : rel && rel.d0);
+      if (!stored) return;
+      var pending = { context: operationContext(), body: { draft_id: item.id, expected_revision: stored.revision, request_id: util.uid("discard") } };
+      viewConfirm({ title: "放弃已暂存草稿？", message: "已暂存内容和本次未暂存的修改都会清除。已保存配置及其历史保持不变。尚未保存过的新机台或软件版本会一并移除。", confirmText: "放弃草稿", cancelText: "保留草稿", danger: true }).then(function (ok) {
+        if (ok && pending.context.current()) performDiscard(pending, false);
+      });
+    }
+    function recheckDiscard() {
+      var pending = S.pendingDiscard, item = pending && S.revisions.filter(function (r) { return r.id === pending.body.draft_id; })[0];
+      if (!item || !pending.context.current()) return;
+      readEditingDraft(pending.context, item).then(function (latest) {
+        if (!pending.context.current()) return;
+        if (!latest || latest.frozen || latest.status === "published" || latest.draft_id && latest.draft_id !== item.id) { MC.toast.warning("该草稿已保存或被替换，请返回版本演进核对。"); return; }
+        discardStoredDraft(item, latest);
+      }, function (err) { MC.toastError("读取最新草稿失败", err); });
+    }
+    function performDiscard(pending, retry) {
+      var context = pending.context;
+      if (!context.current() || S.discarding) return;
+      S.discarding = true; S.pendingDiscard = pending; S.discardError = null; render();
+      var read = retry ? api.getV3(context.path) : Promise.resolve();
+      read.then(function () {
+        if (!context.current()) throw { code: "CONTEXT_CHANGED" };
+        return api.requestV3("POST", context.path + "/discard-draft", { body: pending.body });
+      }).then(function (res) {
+        if (!context.readCurrent()) return;
+        S.discarding = false; S.pendingDiscard = null; S.pendingSave = null; S.afterSave = null; S.edits = {}; S.editErrors = {}; S.explicitModes.clear(); S.dirty = false;
+        S.selected = res.return_revision_id || null; S.expectedMachine = null; S.expectedStandard = null; S.objectRole = null; S.historyEvents = null; S.releaseId = null;
+        S.tab = res.removed_object ? "versions" : "workbench";
+        MC.toast.success("草稿已放弃"); reloadDetail().then(function () { if (!disposed && context.path === cfgPath("")) routeSelection(true); });
+      }, function (err) { if (context.readCurrent()) { S.discarding = false; S.discardError = err; render(); } });
+    }
+    function objectHistoryView() {
+      var current = revision();
+      if (!current) return MC.stateBlock({ kind: "empty", title: "没有保存记录" });
+      var records = S.revisions.filter(function (r) { return r.status === "published" && (current.kind === "machine" ? r.machine_id === current.machine_id : r.kind !== "machine" && r.release_id === current.release_id); });
+      var machine = current.kind === "machine" && S.machines.filter(function (m) { return m.machine_id === current.machine_id; })[0];
+      var latest = machine ? machine.head_id : (latestStandard(current.release_id) || {}).id;
+      records.sort(function (a, b) { return a.id === latest ? -1 : b.id === latest ? 1 : String(b.at || "").localeCompare(String(a.at || "")) || (parseInt(b.label.slice(1), 10) || 0) - (parseInt(a.label.slice(1), 10) || 0); });
+      if (!records.length) return MC.stateBlock({ kind: "empty", title: "还没有保存记录" });
+      var key = current.machine_id || current.release_id;
+      if (S.recordHistoryObject !== key) { S.recordHistoryObject = key; S.recordHistoryOffset = 0; }
+      var offset = S.recordHistoryOffset || 0;
+      return h("section.cv32-object-records", h("div.cv-toolbar", h("span.small.muted", records.length + " 条保存记录"), h("span.spacer"), h("span.small.muted", "历史快照只读")),
+        h("div.cv32-snapshot-list", records.slice(offset, offset + 30).map(function (record) {
+          return h("article.cv32-history-entry", h("span.cv32-record-dot"), h("div.col.grow", h("div.row", { style: "gap:8px;flex-wrap:wrap" }, h("strong", "软件 " + labelOf(record.release_id)), record.id === latest ? h("span.badge", "当前记录") : null),
+            h("p.small", record.note || "保存配置"), h("span.small.muted", util.formatTime(record.at) + " · " + ((S.detail.saved_authors || {})[record.id] || "操作人未记录")),
+            h("details.cv-help", h("summary", "记录详情"), h("code.small.mono", record.id))),
+            h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { S.objectRole = "historical"; chooseRevision(record, "workbench"); } }, "查看快照"));
+        })), h("div.cv-toolbar", pagerRow(records.length, offset, 30, function (start) { S.recordHistoryOffset = start; render(); })));
+    }
+    function versionMachinesView() {
+      var rows = S.machines.filter(function (machine) { var head = S.revisions.filter(function (r) { return r.id === machine.head_id; })[0]; return head && head.release_id === S.releaseId; });
+      if (!rows.length) return MC.stateBlock({ kind: "empty", title: "还没有使用此版本的机台" });
+      return h("div.table-wrap.cv32-object-records", h("table.table", h("thead", h("tr", ["机台编号", "保存时间", "草稿", "操作"].map(function (name) { return h("th", name); }))), h("tbody", rows.map(function (machine) {
+        var head = S.revisions.filter(function (r) { return r.id === machine.head_id; })[0], draft = machine.draft && machine.draft.status === "draft";
+        return h("tr", h("td", h("strong", machine.machine_no)), h("td", util.formatTime(head.at)),
+          h("td", draft ? h("span.badge.badge-warning", "有草稿" + (machine.release_id !== head.release_id ? " · 目标 " + labelOf(machine.release_id) : "")) : "—"),
+          h("td", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { S.objectRole = "machine"; chooseRevision(head, "workbench"); } }, "查看参数")));
+      }))));
+    }
     function mainPanel() {
-      if (!S.detail) return MC.stateBlock({ kind: "empty", title: "先选择固定配置" });
-      var tabs = MC.segmented([
-        { value: "versions", label: "版本演进" }, { value: "workbench", label: "参数工作台" },
-        { value: "overview", label: "参数总览" }, { value: "export", label: "模板导出" }, { value: "history", label: "配置历史" },
-      ], S.tab, changeTab, "配置管理视图");
+      if (!S.detail) return MC.stateBlock({ kind: "empty", title: "先选择配置文件" });
+      var object = objectPage(), item = revision(), options;
+      if (object) options = [{ value: "workbench", label: item && item.kind === "machine" ? "参数" : "标准参数" }]
+        .concat(item && item.kind === "machine" ? [] : [{ value: "initial", label: "初始参数" }, { value: "machines", label: "使用此版本的机台" }])
+        .concat([{ value: "object-history", label: "修改记录" }]);
+      else options = [{ value: "versions", label: "版本演进" }, { value: "updates", label: "更新管理" }, { value: "history", label: "操作记录" }];
+      var tabs = MC.segmented(options, S.tab, function (value) {
+        if (value === "updates") { confirmDiscard(function () { app.go({ kind: "updates", arg: "sources", query: { config: S.cid } }); }); return; }
+        if (value === "initial") {
+          var initial = release() && release().initial_revision_id, target = S.revisions.filter(function (r) { return r.id === initial; })[0];
+          if (target) { S.objectRole = "initial"; chooseRevision(target, "initial"); } else changeTab(value);
+        } else if (value === "workbench" && S.tab === "initial") {
+          var standard = latestStandard(S.releaseId) || S.revisions.filter(function (r) { return r.release_id === S.releaseId && r.kind === "default"; })[0];
+          S.objectRole = "standard"; if (standard) chooseRevision(standard, "workbench");
+        } else changeTab(value);
+      }, object ? "当前配置页面" : "配置文件页面");
       tabs.classList.add("cv-tabs");
       var panelId = util.uid("config-panel"), tabButtons = Array.prototype.slice.call(tabs.querySelectorAll('[role="tab"]'));
       tabButtons.forEach(function (button, index) {
@@ -359,86 +604,107 @@
         });
       });
       var rel = release(), body;
-      if (!(S.detail.releases || []).length && S.tab !== "history") body = MC.stateBlock({ kind: "empty", title: "添加第一个软件版本", desc: S.detail.name + "尚无版本。创建后可手工填写默认参数，或从文件导入。", actions: [h("button.btn.btn-primary", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本")] });
+      if (!(S.detail.releases || []).length && S.tab !== "history") body = MC.stateBlock({ kind: "empty", title: "添加第一个软件版本", desc: "创建软件版本后，可填写参数或从文件导入。", actions: [h("button.btn.btn-primary", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本")] });
       else if (S.tab === "versions") body = versionsView(rel);
-      else if (S.tab === "workbench") body = workbenchView(rel);
-      else if (S.tab === "overview") body = overviewView(rel);
+      else if (S.tab === "workbench" || S.tab === "initial") body = S.tab === "initial" && !rel.initial_revision_id ? MC.stateBlock({ kind: "empty", title: "初始参数尚未导入", desc: "新建软件版本不会复制其他版本的初始参数。" }) : workbenchView(rel);
+      else if (S.tab === "machines") body = versionMachinesView();
+      else if (S.tab === "object-history") body = objectHistoryView();
+      else if (S.tab === "overview") body = historicalRecord(item) || S.objectRole === "initial" ? MC.stateBlock({ kind: "empty", title: "历史参数只读", actions: [h("button.btn", { type: "button", onclick: function () { changeTab("workbench"); } }, "查看参数")] }) : overviewView(rel);
       else if (S.tab === "export") body = exportView(rel);
       else if (S.tab === "history") body = historyView();
+      else body = MC.stateBlock({ kind: "empty", title: "页面不存在" });
       var active = tabs.querySelector('[aria-selected="true"]');
-      var panel = h("section.cv-workspace", tabs, h("div.cv-tab-content", { id: panelId, role: "tabpanel", "aria-labelledby": active && active.id }, body));
-      return panel;
+      return h("section.cv-workspace", object ? objectHeader() : null, tabs, h("div.cv-tab-content", { id: panelId, role: "tabpanel", "aria-labelledby": active && active.id, "aria-label": active ? null : S.tab === "export" ? "导出文件" : "管理参数" }, body));
     }
 
-    function versionsView(rel) {
-      var releases = (S.detail.releases || []).slice().sort(function (a, b) { return a.order - b.order; });
-      var item = revision(), width = 126 + releases.length * 226, height = Math.max(334, 358 + S.machines.length * 112 - 42);
-      var canvas = h("div.cv-graph-canvas", { style: "width:" + width + "px;height:" + height + "px" });
-      var locations = {};
-      function node(row, x, y) {
-        var source = S.revisions.filter(function (r) { return r.id === row.source; })[0];
-        var title = row.kind === "default" ? "版本默认" : row.kind === "baseline" ? "版本基线" : "机台配置";
-        locations[row.id] = { x: x, y: y };
-        return h("button.cv-graph-node" + (row.id === S.selected ? ".is-selected" : "") + (row.status === "draft" ? ".is-draft" : ""), {
-          type: "button", style: "left:" + x + "px;top:" + y + "px", "aria-pressed": row.id === S.selected ? "true" : "false", "aria-label": "查看 " + revisionLabel(row), "data-config-revision": row.id,
-          onclick: function () { chooseRevision(row); },
-        }, h("span.cv-node-line", h("strong", title), h("span.mono.small", row.label)), h("span.small.muted", icon(row.status === "draft" ? "edit" : "lock"), row.status === "draft" ? "草稿 · 待确认" : source ? "基于 " + labelOf(source.release_id) + " · " + source.label : "软件版本默认值"));
+    function rememberEvolution() {
+      var scroll = el.querySelector(".cv32-evo-scroll");
+      if (scroll) S.evoPositions[S.evoView] = { left: scroll.scrollLeft, top: scroll.scrollTop };
+    }
+
+    function refreshEvolution(focusSelector) {
+      rememberEvolution();
+      render();
+      var scroll = el.querySelector(".cv32-evo-scroll"), position = S.evoPositions[S.evoView];
+      if (scroll) scroll.scrollTo(position.left, position.top);
+      var control = focusSelector && el.querySelector(focusSelector);
+      if (control) control.focus({ preventScroll: true });
+    }
+
+    function versionsView() {
+      var groups = MC.configEvolution.project(S.detail.releases || [], S.revisions, S.machines, S.evoQuery, S.evoFilter);
+      var collapsed = S.evoQuery ? S.evoSearchCollapsed : S.evoCollapsed;
+      function open(record, role) {
+        if (!record) return;
+        rememberEvolution();
+        S.objectRole = role;
+        chooseRevision(record, role === "initial" ? "initial" : "workbench");
       }
-      releases.forEach(function (r, index) {
-        var x = 126 + index * 226 + 113;
-        canvas.appendChild(h("div.cv-graph-column", { style: "left:" + (126 + index * 226) + "px;width:226px" }));
-        canvas.appendChild(h("div.cv-release-band", { style: "left:" + (126 + index * 226) + "px;width:226px" }, h("div.row", h("strong", r.version), h("span.spacer"), h("span.badge" + (r.default_revision_id ? "" : ".badge-warning"), r.default_revision_id ? "已确认" : "准备中")), h("span.small.muted", r.parameter_count == null ? "定义修订 " + r.definition_revision : r.parameter_count + " 项参数")));
-        var def = S.revisions.filter(function (n) { return n.release_id === r.release_id && n.kind === "default"; })[0];
-        if (def) canvas.appendChild(node(def, x, 132));
-        var bases = S.revisions.filter(function (n) { return n.release_id === r.release_id && n.kind === "baseline"; });
-        var base = bases.filter(function (n) { return n.id === S.selected; })[0] || bases[bases.length - 1];
-        if (base) canvas.appendChild(node(base, x, 242));
-        else canvas.appendChild(h("button.cv-graph-node.is-planned", { type: "button", style: "left:" + x + "px;top:242px", disabled: !canWrite(), onclick: function () {
-          if (r.default_revision_id) { S.releaseId = r.release_id; publishNextBaseline(); } else if (def) chooseRevision(def, "workbench");
-        } }, h("strong.small", r.default_revision_id ? "建立版本基线" : "先确认版本默认"), h("span.small.muted", r.default_revision_id ? "创建变更草稿" : "尚有默认值草稿")));
-        S.machines.forEach(function (m, j) {
-          var candidates = S.revisions.filter(function (n) { return n.kind === "machine" && n.machine_id === m.machine_id && n.release_id === r.release_id; });
-          var selected = candidates.filter(function (n) { return n.id === S.selected; })[0] || candidates[candidates.length - 1];
-          if (selected) canvas.appendChild(node(selected, x, 358 + j * 112));
-        });
-      });
-      [{ y: 132, name: "版本默认", desc: "软件原始默认值" }, { y: 242, name: "主线基线", desc: "调试后的标准值" }].concat(S.machines.map(function (m, i) { return { y: 358 + i * 112, name: m.machine_no, desc: "机台配置" }; })).forEach(function (lane) {
-        canvas.appendChild(h("div.cv-lane-label", { style: "top:" + (lane.y - 20) + "px" }, h("strong", lane.name), h("span.small.muted", lane.desc)));
-      });
-      var svg = document.createElementNS(MC.SVG_NS, "svg");
-      svg.setAttribute("class", "cv-connections"); svg.setAttribute("width", width); svg.setAttribute("height", height); svg.setAttribute("aria-hidden", "true");
-      S.revisions.forEach(function (n) {
-        var target = locations[n.id]; if (!target) return;
-        [n.parent, n.source].forEach(function (source, i) {
-          var from = locations[source]; if (!from || source === n.id) return;
-          var line = document.createElementNS(svg.namespaceURI, "path");
-          line.setAttribute("d", from.y === target.y ? "M" + (from.x + 84) + " " + from.y + "H" + (target.x - 84) : "M" + from.x + " " + (from.y + 32) + "V" + (target.y - 32) + "H" + target.x);
-          line.setAttribute("fill", "none"); line.setAttribute("stroke", "currentColor"); line.setAttribute("stroke-width", "1.5"); if (i) line.setAttribute("stroke-dasharray", "3 4"); svg.appendChild(line);
-        });
-      }); canvas.appendChild(svg);
-      var graph = h("section.cv-graph-panel", { "aria-label": "配置版本演进图" }, h("div.cv-graph-scroll", { tabindex: "0", "aria-label": "版本图，可左右滚动" }, canvas),
-        h("div.cv-graph-caption", h("span", "— 修订演进"), h("span", "┄ 采用关系"), h("span.spacer"), h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { viewModal({ title: "读图说明", body: h("p", "每列为一个软件版本。实线表示真实前序修订，虚线表示采用的精确基准；空白表示尚无修订。点击节点查看详情或进入参数工作台。") }); } }, "读图说明")));
-      var detail = h("aside.cv-node-detail", { "aria-label": "所选修订详情" }, h("div.cv-detail-head", h("h2", "修订详情"), h("span.badge", item && item.status === "draft" ? "草稿" : "已固化")));
-      if (item) {
-        var src = S.revisions.filter(function (r) { return r.id === item.source; })[0];
-        detail.appendChild(h("div.cv-detail-body", h("span.small.muted", item.kind === "machine" ? "机台分支" : item.kind === "baseline" ? "版本基线" : "版本默认"), h("h3", (item.machine_no || "主线") + " / " + labelOf(item.release_id)), h("span.mono", item.label),
-          h("dl.cv-facts", h("dt", "参数身份"), h("dd", S.paramTotal + " 项"), h("dt", "精确基准"), h("dd", src ? labelOf(src.release_id) + " · " + src.label : item.source || "无上游"), h("dt", "前序修订"), h("dd", item.parent ? revisionName(item.parent) : "初始修订"), h("dt", "创建时间"), h("dd", util.formatTime(item.at))),
-          h("div.cv-detail-actions", h("button.btn.btn-primary", { type: "button", onclick: function () { changeTab("workbench"); } }, item.status === "draft" ? "继续编辑草稿" : "查看参数"),
-            item.status === "published" ? h("button.btn", { type: "button", disabled: !canWrite(), onclick: createEditingDraft }, "创建编辑草稿") : null,
-            item.status === "published" ? h("button.btn", { type: "button", onclick: function () { S.exportRevisionId = item.id; changeTab("export"); } }, "按模板导出") : null,
-            item.status === "draft" ? h("button.btn", { type: "button", disabled: !canWrite(), onclick: publishSelected }, item.kind === "default" ? "确认版本默认" : "发布修订") : null),
-          h("details.cv-help", h("summary", "发布范围"), h("p.small.muted", "发布只更新管理系统中的配置修订，不表示已下发或核验真实机台。"))));
+      function edit(record) {
+        if (!record || !canWrite()) return;
+        rememberEvolution();
+        S.objectRole = record.kind === "machine" ? "machine" : "standard";
+        if (record.status === "draft") { chooseRevision(record, "workbench"); return; }
+        var scope = cfgPath("");
+        chooseRevision(record, "workbench").then(function () { if (!disposed && cfgPath("") === scope && S.selected === record.id && !S.error) createEditingDraft(); });
       }
-      var machineRows = S.machines.map(function (m) { var current = S.revisions.filter(function (r) { return r.id === m.head_id; })[0]; var draft = S.revisions.filter(function (r) { return r.machine_id === m.machine_id && r.status === "draft"; })[0]; return h("tr", h("td", m.machine_no), h("td", current ? revisionLabel(current) : "尚未发布"), h("td", current ? revisionName(current.source) : "—"), h("td", draft ? "草稿待完成" : "已固化"), h("td", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { if (draft || current) chooseRevision(draft || current, "workbench"); } }, draft ? "继续编辑" : "查看参数"))); });
-      return h("div.cv-version-view", h("div.cv-toolbar", h("span.small.muted", releases.length + " 个软件版本"), h("span.small.muted", S.machines.length + " 台机台"), h("span.spacer"),
-        h("button.btn.btn-sm", { type: "button", disabled: !canWrite() || !S.revisions.some(function (r) { return r.status === "published" && r.kind !== "machine"; }), onclick: machineDialog }, icon("compare"), "新建机台分支"), h("button.btn.btn-sm.btn-primary", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本")),
-        h("div.cv-overview-layout", graph, detail), h("details.cv-machine-table", h("summary", "机台当前修订 · " + S.machines.length + " 台"), h("div.table-wrap", h("table.table", h("thead", h("tr", ["机台", "当前已发布修订", "采用基准", "状态", "操作"].map(function (t) { return h("th", t); }))), h("tbody", machineRows.length ? machineRows : h("tr", h("td", { colspan: 5 }, "还没有机台分支")))))));
+      var options = {
+        releases: S.detail.releases || [], records: S.revisions, machines: S.machines,
+        selected: S.selected, selectedRole: S.objectRole, collapsed: collapsed, canWrite: canWrite(), zoom: S.evoZoom,
+        open: open, edit: edit, versionName: labelOf,
+        toggle: function (id) {
+          if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+          refreshEvolution('[data-version-toggle="' + id + '"]');
+        }
+      };
+      var search = h("input.input", { type: "search", value: S.evoQuery, "aria-label": "搜索版本或机台", placeholder: "搜索软件版本或机台" });
+      function applySearch() { S.evoQuery = search.value.trim(); S.evoSearchCollapsed.clear(); refreshEvolution('[aria-label="搜索版本或机台"]'); }
+      search.addEventListener("keydown", function (event) { if (event.key === "Enter") applySearch(); });
+      var filter = h("select.select", { "aria-label": "筛选配置状态", onchange: function () { S.evoFilter = filter.value; refreshEvolution('[aria-label="筛选配置状态"]'); } },
+        h("option", { value: "all", selected: S.evoFilter === "all" }, "全部状态"), h("option", { value: "draft", selected: S.evoFilter === "draft" }, "有草稿的配置"));
+      var toggle = h("div.segmented", { role: "group", "aria-label": "版本显示方式" }, [
+        { value: "graph", label: "关系图" }, { value: "list", label: "层级列表" }
+      ].map(function (choice) {
+        return h("button.btn.btn-sm" + (S.evoView === choice.value ? ".is-active" : ""), {
+          type: "button", "aria-pressed": String(S.evoView === choice.value), onclick: function () {
+            rememberEvolution(); S.evoView = choice.value; render();
+            var scroll = el.querySelector(".cv32-evo-scroll"), position = S.evoPositions[S.evoView];
+            if (scroll) scroll.scrollTo(position.left, position.top);
+          }
+        }, choice.label);
+      }));
+      var body = !groups.length ? MC.stateBlock({ kind: "empty", title: "没有匹配的版本或机台", desc: "调整搜索或状态筛选后重试。" })
+        : S.evoView === "list" ? MC.configEvolution.hierarchy(groups, options) : MC.configEvolution.graph(groups, options);
+      var footer = h("div.cv32-evo-footer");
+      if (S.evoView === "graph") {
+        footer.appendChild(h("div.row.small.muted", h("span", "— 保存演进"), h("span", "┄ 参数来源"), h("span", "草稿以虚线标记")));
+        footer.appendChild(h("div.row",
+          h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", disabled: S.evoZoom <= 0.75, "aria-label": "缩小关系图", onclick: function () { S.evoZoom = Math.max(0.75, S.evoZoom - 0.1); refreshEvolution(); } }, MC.icon("minus")),
+          h("span.small.mono", Math.round(S.evoZoom * 100) + "%"),
+          h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", disabled: S.evoZoom >= 1.25, "aria-label": "放大关系图", onclick: function () { S.evoZoom = Math.min(1.25, S.evoZoom + 0.1); refreshEvolution(); } }, MC.icon("plus")),
+          h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { viewModal({ title: "读图说明", body: h("p", "每列是一个软件版本，每行为标准参数或机台。实线表示已记录的保存演进，虚线表示参数来源。来源标准快照表示机台实际采用的历史标准。点击版本号或节点打开完整参数页面。") }); } }, "读图说明")));
+      } else {
+        footer.appendChild(h("span.small.muted", groups.length + " 个软件版本 · " + groups.reduce(function (total, group) { return total + group.machines.length; }, 0) + " 台机台"));
+        footer.appendChild(h("div.row", [true, false].map(function (expand) {
+          return h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () {
+            groups.forEach(function (group) { if (expand) collapsed.delete(group.release.release_id); else collapsed.add(group.release.release_id); });
+            refreshEvolution();
+          } }, expand ? "展开全部" : "收起全部");
+        })));
+      }
+      var toolbar = h("div.cv-toolbar.cv32-evo-toolbar", search, h("button.btn.btn-sm", { type: "button", onclick: applySearch }, "搜索"), filter, h("span.spacer"), toggle);
+      var actions = h("div.cv32-version-actions", h("span.spacer"),
+        h("button.btn.btn-sm", { type: "button", disabled: !canWrite() || !S.revisions.some(function (record) { return record.status === "published" && record.kind !== "machine"; }), onclick: machineDialog }, MC.icon("plus"), "新建机台"),
+        h("button.btn.btn-primary.btn-sm", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, MC.icon("plus"), "新建软件版本"));
+      return h("div.cv-version-view.cv32-version-view", actions,
+        h("section.cv32-evo-surface", toolbar, h("div.cv32-evo-scroll.cv-graph-scroll", { tabindex: 0, "aria-label": S.evoView === "graph" ? "版本关系图，可横向和纵向滚动" : "软件版本与机台层级列表" }, body), footer));
     }
 
     function revisionName(id) { var r = S.revisions.filter(function (n) { return n.id === id; })[0]; return r ? labelOf(r.release_id) + " · " + r.label : id || "—"; }
     function operationContext() {
       var epoch = S.contextEpoch, scope = cfgPath(""), selected = S.selected;
-      return { path: scope, current: function () { return !disposed && canWrite() && epoch === S.contextEpoch && scope === cfgPath("") && selected === S.selected; } };
+      function readCurrent() { return !disposed && epoch === S.contextEpoch && scope === cfgPath("") && selected === S.selected; }
+      return { path: scope, readCurrent: readCurrent, current: function () { return canWrite() && readCurrent(); } };
     }
     function createEditingDraft() {
       var current = revision(), context = operationContext(); if (!current || !canWrite()) return;
@@ -446,22 +712,130 @@
       if (existing) { chooseRevision(existing, "workbench"); return; }
       api.requestV3("POST", context.path + "/restore-plans", { body: { revision_id: current.id, request_id: util.uid("draft") } }).then(function (res) {
         if (!context.current()) return;
-        S.selected = res.draft.draft_id; S.tab = "workbench"; reloadDetail(); MC.toast.success("已从所选修订创建编辑草稿");
+        S.selected = res.draft.draft_id; S.tab = "workbench"; reloadDetail().then(function () { if (!disposed && context.path === cfgPath("")) routeSelection(false); }); MC.toast.success("已进入编辑，可修改参数后保存配置");
       }, function (err) { MC.toastError("创建草稿失败", err); });
     }
-    function publishSelected() {
-      var item = revision(), context = operationContext(), expected = S.draft && S.draft.revision;
-      if (!item || !editable()) return;
-      if (S.dirty) { MC.toast.warning("请先保存当前修改"); return; }
-      if (item.kind === "default") { freezeD0(); return; }
-      viewConfirm({ title: "发布" + item.label, message: "将固化当前草稿并更新管理系统的修订；不会下发真实机台。", confirmText: "发布" }).then(function (ok) {
-        if (!ok || !context.current() || S.dirty || S.savingValues) return;
-        var path = item.kind === "machine" ? "/machines/" + enc(item.machine_id) + "/publish" : "/baseline-drafts/" + enc(item.id) + "/publish";
-        api.requestV3("POST", context.path + path, { body: { request_id: util.uid("publish"), expected_revision: expected } }).then(function (res) {
-          if (!context.current()) return;
-          S.historyEvents = null; S.selected = item.kind === "machine" ? res.machine.head_id : res.baseline.baseline_id;
-          MC.toast.success("修订已发布"); reloadDetail();
-        }, function (err) { MC.toastError("发布失败", err); });
+    function draftPaths(item) {
+      var path = item.kind === "machine" ? "/machines/" + enc(item.machine_id)
+        : item.kind === "baseline" ? "/baseline-drafts/" + enc(item.id) : "/drafts/" + enc(item.id);
+      return { read: path, values: path + (item.kind === "machine" ? "/draft/values" : "/values"),
+        publish: path + (item.kind === "default" ? "/freeze" : "/publish") };
+    }
+    function readEditingDraft(context, item) {
+      return api.getV3(context.path + draftPaths(item).read).then(function (res) { return res.machine ? res.machine.draft : res; });
+    }
+    function cancelEditing() {
+      if (S.savingValues) return;
+      confirmDiscard(function () {
+        var item = revision(), target;
+        if (!item) return;
+        if (item.kind === "machine") {
+          var machine = S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0];
+          target = machine && S.revisions.filter(function (r) { return r.id === machine.head_id; })[0];
+        } else target = S.revisions.filter(function (r) { return r.id === item.source; })[0];
+        if (target) chooseRevision(target, "workbench"); else changeTab("versions");
+      });
+    }
+    function validValues() {
+      if (!Object.keys(S.editErrors).length) return true;
+      MC.toast.warning("请先修正参数值"); var invalid = el.querySelector('[aria-invalid="true"]'); if (invalid) invalid.focus(); return false;
+    }
+    function persistValues(context, item) {
+      var submitted = Object.assign({}, S.edits), paths = draftPaths(item);
+      return MC.configEditor.persist({ edits: submitted, draft: S.draft, branch: item.kind !== "default", current: context.current,
+        write: function (items, expected) {
+          return api.requestV3("PATCH", context.path + paths.values, { body: { request_id: util.uid("values"), expected_revision: expected,
+            expected_draft_id: item.id, items: items } }).then(function (res) { return res.draft || res; });
+        }, read: function () { return readEditingDraft(context, item); }, saved: function (ids, draft) {
+          if (!context.readCurrent()) return;
+          S.draft = draft;
+          ids.forEach(function (id) { if (S.edits[id] === submitted[id]) { delete S.edits[id]; S.explicitModes.delete(id); } });
+          S.dirty = Object.keys(S.edits).length > 0;
+        } });
+    }
+    function stashValues() {
+      if (S.savingValues || !editable() || !validValues()) return Promise.resolve(false);
+      var context = operationContext(), item = revision();
+      if (!S.dirty) { MC.toast.info("草稿已经暂存"); return Promise.resolve(true); }
+      S.savingValues = true; S.valueError = null; render();
+      return persistValues(context, item).then(function () {
+        if (!context.readCurrent()) return false;
+        MC.toast.success("草稿已暂存"); return true;
+      }, function (err) { if (context.readCurrent()) S.valueError = err; return false; }).then(function (ok) {
+        if (context.readCurrent()) { S.savingValues = false; render(); } return ok;
+      });
+    }
+    function reviewSave(afterSave) {
+      if (S.savingValues || !editable() || !validValues()) return;
+      var context = operationContext(), item = revision(), captured = JSON.stringify(S.edits);
+      var pending = S.pendingSave && S.pendingSave.selected === item.id ? S.pendingSave : null;
+      var note = h("textarea.input", { rows: 2, maxlength: 1000, "aria-label": "修改说明", placeholder: "选填，说明本次修改", value: pending ? pending.note : "", disabled: !!(pending && pending.attempted) });
+      var values = Object.assign({}, S.draft.values || {}, S.edits), saved = S.lastSavedValues || {}, branch = item.kind !== "default";
+      var ids = editedParameterIds();
+      var table = h("div"), reviewOffset = 0, reviewSeq = 0, loading = false, confirm;
+      var modes = { inherit: "使用标准值", override: "单独设置", pin: "保持此值" };
+      var body = h("div.col", { style: "gap:12px" }, h("p.small.muted", "保存为新的独立记录，仅保存在系统中，不下发机台。"),
+        h("p.small", "软件 " + labelOf(item.release_id) + " · " + ids.length + " 项变化（包括已暂存的修改）"), table, MC.field({ label: "修改说明", control: note }));
+      function loadReview(offset) {
+        reviewOffset = offset; var seq = ++reviewSeq; loading = true; if (confirm) confirm.disabled = true;
+        util.clear(table); table.appendChild(MC.stateBlock({ kind: "loading", title: "正在核对变化…" }));
+        api.requestV3("POST", context.path + "/parameter-query", { body: { revision_id: item.id, filter: "modified", changed_ids: ids, edits: S.edits, offset: offset, limit: 30 } }).then(function (res) {
+          if (!context.current() || seq !== reviewSeq || !table.isConnected) return;
+          loading = false; if (confirm) confirm.disabled = false; util.clear(table);
+          table.appendChild(h("div.table-wrap.cv32-review-table", h("table.table", h("thead", h("tr", ["参数", "上次保存", "本次配置", "取值方式"].map(function (name) { return h("th", name); }))),
+            h("tbody", (res.items || []).map(function (p) { var id = p.parameter_id;
+              return h("tr", h("td", p.name), h("td.mono", memberText(saved[id])), h("td.mono", memberText(values[id])),
+                h("td", branch ? (modes[(saved[id] || {}).intent || "inherit"] + " → " + modes[(values[id] || {}).intent || "inherit"]) : "标准参数"));
+            })))));
+          if (!ids.length) table.appendChild(h("p.small.muted", "参数值没有变化，将保存当前配置与来源。"));
+          table.appendChild(pagerRow(ids.length, reviewOffset, 30, loadReview));
+        }, function (err) {
+          if (!context.current() || seq !== reviewSeq || !table.isConnected) return;
+          loading = false; util.clear(table); table.appendChild(MC.errorBlock(err, function () { loadReview(reviewOffset); }));
+        });
+      }
+      var modal = viewModal({ title: "核对并保存配置", size: "wide", focusTitle: true, body: body, footer: function (close) {
+        confirm = h("button.btn.btn-primary", { type: "button", onclick: function () {
+          if (loading) return;
+          if (!context.current() || S.savingValues || captured !== JSON.stringify(S.edits)) { MC.toast.warning("配置已变化，请重新核对"); return; }
+          close(); S.afterSave = typeof afterSave === "function" ? afterSave : null; saveConfiguration(context, item, note.value);
+        } }, pending ? "重试保存配置" : "保存配置");
+        return [h("button.btn", { type: "button", onclick: close }, "取消"), confirm];
+      } });
+      loadReview(0);
+    }
+    function saveConfiguration(context, item, note) {
+      S.savingValues = true; S.valueError = null;
+      var pending = S.pendingSave && S.pendingSave.selected === item.id ? S.pendingSave : null;
+      S.pendingSave = pending || { selected: item.id, requestId: util.uid("save"), note: note };
+      pending = S.pendingSave; if (!pending.attempted) pending.note = note;
+      render();
+      // Re-read first on retries. Every formal write reuses its original receipt key.
+      var prepare = pending.attempted ? readEditingDraft(context, item).catch(function (err) {
+        if (err.status !== 404) throw err;
+        // A newer standard draft may have replaced this one. The server can
+        // still return its original immutable save receipt; it cannot save a
+        // replacement draft through this ID.
+      }) : Promise.resolve();
+      prepare.then(function () { return pending.attempted ? { revision: pending.expectedRevision } : persistValues(context, item); }).then(function (draft) {
+        if (!context.current()) throw { code: "CONTEXT_CHANGED" };
+        pending.expectedRevision = draft.revision;
+        pending.attempted = true;
+        return api.requestV3("POST", context.path + draftPaths(item).publish, { body: { request_id: pending.requestId,
+          expected_revision: draft.revision, expected_draft_id: item.id, note: pending.note } });
+      }).then(function (res) {
+        if (!context.readCurrent()) return;
+        S.pendingSave = null; S.historyEvents = null;
+        S.parameterFilter = "all"; if (S.workbenchQuery) S.workbenchQuery.filter = "all";
+        S.selected = item.kind === "machine" ? res.machine.published_revision_id || res.machine.head_id : item.kind === "baseline" ? res.baseline.baseline_id : item.id;
+        MC.toast.success("配置已保存");
+        S.savingValues = false; reloadDetail().then(function () {
+          if (disposed || context.path !== cfgPath("")) return;
+          var after = S.afterSave; S.afterSave = null; if (after) after(); else routeSelection(true);
+        });
+      }, function (err) {
+        if (!context.readCurrent()) return;
+        S.savingValues = false; S.valueError = err; render();
       });
     }
 
@@ -483,10 +857,15 @@
       var scope = cfgPath(""), selected = S.selected, seq = ++parameterSeq;
       function current() { return !disposed && seq === parameterSeq && scope === cfgPath("") && selected === S.selected; }
       S.paramLoading = true;
-      api.getV3(scope + "/parameters?offset=" + Math.max(0, offset) + "&limit=" + S.paramLimit + "&release_id=" + enc(S.releaseId || "")).then(function (res) {
+      var request = S.workbenchQuery ? api.requestV3("POST", scope + "/parameter-query", { body: Object.assign({}, S.workbenchQuery, {
+        revision_id: S.selected, directory: S.folderActive ? S.dirParent : "", changed_ids: editedParameterIds(), edits: S.edits, offset: Math.max(0, offset), limit: S.paramLimit
+      }) }) : api.getV3(scope + "/parameters?offset=" + Math.max(0, offset) + "&limit=" + S.paramLimit + "&release_id=" + enc(S.releaseId || "") + parameterRecordQuery(S.releaseId));
+      request.then(function (res) {
         if (!current()) return;
         S.paramPage = res;
+        if (S.folderActive && S.workbenchQuery) { S.dirData = Object.assign({}, res, { parameter_total: res.total }); S.dirOffset = res.offset || 0; }
         S.paramTotal = res.total == null ? (res.items || []).length : res.total;
+        S.definitionTotal = S.workbenchQuery ? res.parameter_total || S.definitionTotal : S.paramTotal;
         S.paramOffset = res.offset || 0;
         S.params = res;
         S.paramLoading = false;
@@ -497,9 +876,9 @@
     function loadAllParams() {
       if (S.allLoading) return;
       S.allLoading = true;
-      var scope = cfgPath(""), rid = S.releaseId;
-      api.getV3(scope + "/parameters?release_id=" + enc(rid || "")).then(function (res) {
-        if (disposed || scope !== cfgPath("") || rid !== S.releaseId) return;
+      var scope = cfgPath(""), rid = S.releaseId, selected = S.selected;
+      api.getV3(scope + "/parameters?release_id=" + enc(rid || "") + parameterRecordQuery(rid)).then(function (res) {
+        if (disposed || scope !== cfgPath("") || rid !== S.releaseId || selected !== S.selected) return;
         S.allParams = res.items || [];
         S.allLoading = false;
         S.paramTotal = res.total == null ? S.allParams.length : res.total;
@@ -508,19 +887,20 @@
     }
 
     function loadDir(parent, offset) {
+      if (S.workbenchQuery) { S.folderActive = !!parent; S.dirParent = parent || ""; S.dirOffset = offset || 0; return loadParamPage(offset || 0); }
       var scope = cfgPath(""), rid = S.releaseId, seq = ++directorySeq;
       function current() { return !disposed && seq === directorySeq && scope === cfgPath("") && rid === S.releaseId; }
       S.dirLoading = true;
       S.dirError = null;
       var request;
-      if (S.paramTotal <= 1000) {
-        request = (S.allParams ? Promise.resolve({ items: S.allParams }) : api.getV3(scope + "/parameters?release_id=" + enc(rid || ""))).then(function (res) {
+      if (S.definitionTotal <= 1000) {
+        request = (S.allParams ? Promise.resolve({ items: S.allParams }) : api.getV3(scope + "/parameters?release_id=" + enc(rid || "") + parameterRecordQuery(rid))).then(function (res) {
           var parts = (parent || "").split("/").filter(Boolean), all = res.items || [], items = all.filter(function (p) { return parts.every(function (part, i) { return (p.directory || [])[i] === part; }); });
           if (current()) S.allParams = all;
           return { items: items.slice(offset || 0, (offset || 0) + S.paramLimit), parameter_total: items.length, offset: offset || 0 };
         });
       } else request = api.getV3(scope + "/parameter-tree?parent=" + enc(parent || "")
-        + "&recursive=true&offset=" + Math.max(0, offset || 0) + "&limit=" + S.paramLimit + "&release_id=" + enc(rid || ""));
+        + "&recursive=true&offset=" + Math.max(0, offset || 0) + "&limit=" + S.paramLimit + "&release_id=" + enc(rid || "") + parameterRecordQuery(rid));
       return request.then(function (res) {
         if (!current()) return;
         S.dirParent = parent || "";
@@ -542,7 +922,7 @@
 
     function folderBrowser(releaseId, activePath, total, onSelect) {
       var scope = cfgPath(""), version = releaseId ? release() && release().definition_revision : S.overview && S.overview.catalog_revision;
-      var key = scope + "|" + releaseId + "|" + version;
+      var key = scope + "|" + releaseId + "|" + version + (releaseId ? "|" + S.selected : "");
       if (!S.folderCaches) S.folderCaches = Object.create(null);
       var cache = S.folderCaches[key];
       if (!cache) {
@@ -555,10 +935,10 @@
       function fetch(path) {
         var node = cache.nodes[path]; if (node && (node.loading || node.items)) return;
         node = cache.nodes[path] = { loading: true };
-        api.getV3(scope + "/parameter-tree?parent=" + enc(path) + "&offset=0&limit=1&release_id=" + enc(releaseId || "")).then(function (res) {
+        api.getV3(scope + "/parameter-tree?parent=" + enc(path) + "&offset=0&limit=1&release_id=" + enc(releaseId || "") + parameterRecordQuery(releaseId)).then(function (res) {
           if (disposed || scope !== cfgPath("")) return;
-          node.loading = false; node.items = res.directories || []; draw();
-        }, function (err) { if (disposed || scope !== cfgPath("")) return; node.loading = false; node.error = err; draw(); });
+          node.loading = false; node.items = res.directories || []; if (cache.draw) cache.draw();
+        }, function (err) { if (disposed || scope !== cfgPath("")) return; node.loading = false; node.error = err; if (cache.draw) cache.draw(); });
       }
       function draw() {
         if (!host.isConnected && host.childNodes.length) return;
@@ -589,11 +969,12 @@
       var actions = h("div.row", { style: "gap:4px" });
       if (!releaseId && canWrite()) {
         actions.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { directoryDialog("create"); } }, "新增目录"));
-        if (activePath) actions.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", "aria-label": "当前目录操作", onclick: function (event) { MC.menu(event.currentTarget, [
+        if (activePath) actions.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", "aria-label": "当前目录操作", onclick: function (event) { viewMenu(event.currentTarget, [
           { label: "重命名 / 移动目录", onClick: function () { directoryDialog("move"); } },
           { label: "删除空目录", danger: true, onClick: function () { directoryDialog("delete"); } }
         ]); } }, icon("more")));
       }
+      cache.draw = draw;
       draw(); return h("aside.cv-param-folders", { "aria-label": "参数目录" }, h("div.cv-folder-header", h("strong.small", "参数目录"), h("span.badge", total)), actions, host);
     }
 
@@ -619,79 +1000,119 @@
       } });
     }
 
+    function editedParameterIds() {
+      var values = Object.assign({}, S.draft && S.draft.values || {}, S.edits), saved = S.lastSavedValues || {}, branch = revision() && revision().kind !== "default";
+      return Array.from(new Set(Object.keys(values).concat(Object.keys(saved)))).filter(function (id) { return MC.configEditor.key(values[id], branch) !== MC.configEditor.key(saved[id], branch); });
+    }
+
     function workbenchView(rel) {
       if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
-      var current = revision(), values = (S.draft && S.draft.values) || {}, canEdit = editable();
-      var save = h("button.btn.btn-sm", { type: "button", disabled: !canEdit, onclick: function () {
-        if (S.savingValues) return;
-        var submitted = Object.assign({}, S.edits), scope = cfgPath(""), selected = S.selected, epoch = S.contextEpoch;
-        var items = Object.keys(S.edits).map(function (id) { return Object.assign({ parameter_id: id }, S.edits[id]); });
-        if (!items.length) { MC.toast.warning("没有未保存的修改"); return; }
-        if (items.length > 100) { MC.toast.warning("单次最多保存 100 项，请先保存当前修改"); return; }
-        var path = current && current.kind === "machine" ? "/machines/" + enc(current.machine_id) + "/draft/values"
-          : current && current.kind === "baseline" ? "/baseline-drafts/" + enc(current.id) + "/values" : "/drafts/" + enc(draftId()) + "/values";
-        S.savingValues = true; S.valueError = null;
-        MC.withBusy(save, function () {
-          return api.requestV3("PATCH", cfgPath(path), { body: { request_id: util.uid("values"), expected_revision: S.draft ? S.draft.revision : 0, items: items } }).then(function () {
-            if (disposed || epoch !== S.contextEpoch || scope !== cfgPath("") || selected !== S.selected) return;
-            S.savingValues = false;
-            Object.keys(submitted).forEach(function (id) { if (S.edits[id] === submitted[id]) delete S.edits[id]; });
-            S.dirty = Object.keys(S.edits).length > 0; MC.toast.success("草稿已保存"); reloadDetail();
-          }, function (err) { if (disposed || epoch !== S.contextEpoch || scope !== cfgPath("") || selected !== S.selected) return; S.savingValues = false; S.valueError = err; render(); });
-        });
-      } }, "保存值");
-      save.disabled = !canEdit || !!S.savingValues;
-      var search = h("input.input", { type: "search", "aria-label": "搜索当前页参数", placeholder: "搜索当前页的参数名称、身份或实际名" });
+      var current = revision(), values = (S.draft && S.draft.values) || {}, canEdit = editable() && !S.savingValues && !(S.pendingSave && S.pendingSave.attempted);
+      var save = h("button.btn.btn-primary.btn-sm", { type: "button", disabled: !editable() || !!S.savingValues, onclick: reviewSave }, "核对并保存");
+      var search = h("input.input", { type: "search", "aria-label": "搜索参数", placeholder: "搜索参数名称或文件字段", value: S.workbenchQuery && S.workbenchQuery.q || "" });
       var body = h("tbody");
       var defaultValues = (rel.d0 && (rel.d0.frozen_snapshot || rel.d0.values)) || {};
+      var editing = current && current.status === "draft" && canWrite();
+      function parameterDetails(p, binding) {
+        var facts = h("dl.cv32-parameter-facts");
+        [["数据类型", p.type || "文本"], ["单位", p.unit || "—"], ["目录", (p.directory || []).join(" / ") || "未分组"],
+          ["文件字段", binding && binding.locator || "尚未对应文件字段"]].forEach(function (pair) { facts.appendChild(h("dt", pair[0])); facts.appendChild(h("dd", pair[1])); });
+        viewModal({ title: p.name, body: h("div.col", { style: "gap:12px" }, facts,
+          h("details", h("summary.small.muted", "技术详情"), h("pre.small.mono", JSON.stringify({ parameter_id: p.parameter_id, attrs: p.attrs || {}, source: p.source || {} }, null, 2)))) });
+      }
       function makeRow(p) {
         var original = values[p.parameter_id] || { membership: "not_introduced", enabled: true, value_state: "unset" };
         var row = S.edits[p.parameter_id] || original;
-        var control = h("input.input.input-sm", { value: row.value == null ? "" : String(row.value), disabled: !canEdit || row.value_state !== "present", "aria-label": p.name + "的配置值" });
+        var boolean = ["bool", "boolean"].indexOf(String(p.type).toLowerCase()) >= 0;
+        var control = boolean ? h("select.select", { "aria-label": p.name + "的配置值" },
+          h("option", { value: "", selected: row.value == null }, "请选择"),
+          h("option", { value: "true", selected: String(row.value) === "true" }, "true"),
+          h("option", { value: "false", selected: String(row.value) === "false" }, "false"))
+          : h("input.input.input-sm", { type: "text", inputmode: /^(number|decimal|float|int|integer)$/.test(p.type) ? "decimal" : "text",
+            value: row.value == null ? "" : String(row.value), "aria-label": p.name + "的配置值" });
+        control.disabled = !canEdit || row.value_state !== "present";
         var state = h("select.select", { "aria-label": p.name + "的值状态", disabled: !canEdit },
           [["present", "有值"], ["unset", "未设"], ["null", "null"]].map(function (o) { return h("option", { value: o[0], selected: (row.value_state || "unset") === o[0] }, o[1]); }));
-        var basis = (S.basis || {})[p.parameter_id];
-        var intent = h("select.select", { "aria-label": p.name + "的继承方式", disabled: !canEdit }, [["inherit", "跟随基准"], ["override", "独立覆盖"], ["pin", "固定值"]].map(function (o) { return h("option", { value: o[0], selected: (row.intent || (memberKey(row) === memberKey(basis) ? "inherit" : "override")) === o[0], disabled: o[0] === "pin" && state.value !== "present" }, o[1]); }));
+        var basis = (S.basis || {})[p.parameter_id], branch = current && current.kind !== "default";
+        var intent = h("select.select", { "aria-label": p.name + "的取值方式", disabled: !canEdit },
+          [["inherit", "使用标准值"], ["override", "单独设置"], ["pin", "保持此值"]].map(function (o) {
+            return h("option", { value: o[0], selected: (row.intent || "inherit") === o[0], disabled: o[0] === "pin" && state.value !== "present" }, o[1]);
+          }));
+        var errorId = util.uid("parameter-error"), validation = h("div.small.cv-value-error", { id: errorId, role: "alert" });
+        control.setAttribute("aria-describedby", errorId);
+        function validate(update) {
+          var message = MC.configEditor.error(p, update);
+          control.setAttribute("aria-invalid", message ? "true" : "false");
+          validation.textContent = message;
+          if (message) S.editErrors[p.parameter_id] = message; else delete S.editErrors[p.parameter_id];
+        }
         function remember(intentChanged) {
           var update = { membership: "included", enabled: row.enabled !== false, value_state: state.value };
           if (state.value === "present") update.value = control.value;
-          if (current && current.kind !== "default") {
-            if (!intentChanged && intent.value !== "pin") intent.value = "override";
-            if (intent.value === "pin" && state.value !== "present") intent.value = "override";
+          if (branch) {
+            if (intentChanged) S.explicitModes.add(p.parameter_id);
             update.intent = intent.value;
             if (intentChanged && intent.value === "inherit") {
               update = Object.assign({ membership: "not_introduced", enabled: true, value_state: "unset" }, basis || {}, { intent: "inherit" });
               state.value = update.value_state; control.value = update.value == null ? "" : String(update.value);
             }
+            if (update.intent === "pin" && state.value !== "present") update.intent = "override";
           }
+          var changed = MC.configEditor.change(original, update, branch, S.explicitModes.has(p.parameter_id));
+          if (changed) S.edits[p.parameter_id] = changed; else delete S.edits[p.parameter_id];
+          if (branch) intent.value = (changed || original).intent || "inherit";
           intent.options[2].disabled = state.value !== "present";
-          S.edits[p.parameter_id] = update;
-          S.dirty = true; control.disabled = !canEdit || state.value !== "present";
+          S.dirty = Object.keys(S.edits).length > 0;
+          control.disabled = !canEdit || state.value !== "present";
+          validate(changed || original);
+          var status = el.querySelector("[data-edit-count]");
+          if (status) status.textContent = Object.keys(S.edits).length + " 项修改尚未暂存";
+          var tableRow = control.closest("tr"); if (tableRow) tableRow.classList.toggle("cv32-changed", !!changed);
         }
-        control.addEventListener("input", function () { remember(false); }); state.addEventListener("change", function () { remember(false); }); intent.addEventListener("change", function () { remember(true); });
+        control.addEventListener("input", function () {
+          if (branch && intent.value === "inherit") S.explicitModes.delete(p.parameter_id);
+          remember(false);
+        });
+        state.addEventListener("change", function () { remember(false); }); intent.addEventListener("change", function () { remember(true); });
+        if (S.edits[p.parameter_id]) validate(S.edits[p.parameter_id]);
         var binding = (S.bindings || []).filter(function (b) { return b.parameter_id === p.parameter_id; })[0];
         var different = memberKey(row) !== memberKey(basis);
-        return h("tr", { "data-different": different ? "true" : "false" }, h("td", h("strong", p.name), h("div.mono.xsmall.muted", p.parameter_id)),
-          h("td.small", binding ? binding.locator : "待绑定", h("div.muted.xsmall", (p.directory || []).join(" / "))),
-          h("td.mono.small", memberText(defaultValues[p.parameter_id])), h("td.mono.small", memberText(S.basis && S.basis[p.parameter_id])),
-          h("td", canEdit ? h("div.col", { style: "gap:4px" }, control, state) : h("strong.mono", memberText(row))), h("td.muted", p.unit || "—"),
-          h("td.small", current && current.kind === "default" ? "版本默认" : canEdit ? intent : ({ pin: "固定值", override: "独立覆盖", inherit: "跟随基准" }[row.intent] || (different ? "独立覆盖" : "跟随基准"))));
+        return h("tr", { "data-parameter-id": p.parameter_id, "data-different": different ? "true" : "false", class: S.edits[p.parameter_id] ? "cv32-changed" : "" },
+          h("td", h("button.btn.btn-ghost.cv32-parameter-name", { type: "button", onclick: function () { parameterDetails(p, binding); } }, p.name), h("div.muted.xsmall", (p.directory || []).join(" / "))),
+          editing ? h("td.mono.small.cv32-old-value", memberText((S.lastSavedValues || {})[p.parameter_id])) : null,
+          h("td", canEdit ? h("div.col", { style: "gap:4px" }, control, state, validation) : h("strong.mono", memberText(row))), h("td.muted", p.unit || "—"),
+          h("td.small", current && current.kind !== "machine" ? "版本设置" : canEdit ? intent : ({ pin: "保持此值", override: "单独设置", inherit: "使用标准值" }[row.intent || "inherit"])),
+          S.showFileField ? h("td.small.mono.cv32-file-field", binding ? binding.locator : "尚未对应") : null);
       }
       var page = S.folderActive ? S.dirData : S.paramPage || S.params;
       var rows = S.paramMode === "tree" && S.selectedParam ? [S.selectedParam] : page && page.items || [];
       rows.forEach(function (p) { body.appendChild(makeRow(p)); });
       if (!rows.length) body.appendChild(h("tr", h("td", { colspan: 7 }, S.paramLoading || S.dirLoading ? "正在读取参数…" : "没有匹配的参数")));
-      function filterRows() { var term = search.value.toLowerCase(); Array.prototype.forEach.call(body.children, function (row) { row.hidden = row.textContent.toLowerCase().indexOf(term) < 0 || S.onlyDiff && row.getAttribute("data-different") !== "true"; }); }
-      search.addEventListener("input", filterRows);
-      var onlyDiff = h("input", { type: "checkbox", checked: S.onlyDiff, onchange: function () { S.onlyDiff = onlyDiff.checked; filterRows(); } });
-      filterRows();
-      var folders = folderBrowser(S.releaseId, S.folderActive ? S.dirParent : "", S.paramTotal, function (path) {
+      function searchParameters() {
+        directorySeq++; S.dirLoading = false;
+        S.workbenchQuery = { q: search.value.trim(), filter: S.parameterFilter, reference_id: parameterReference(current) };
+        S.selectedParam = null; S.paramMode = "list"; loadParamPage(0);
+      }
+      search.addEventListener("keydown", function (event) { if (event.key === "Enter") searchParameters(); });
+      var parameterFilter = h("select.select", { "aria-label": "筛选参数", onchange: function () { S.parameterFilter = parameterFilter.value; searchParameters(); } },
+        h("option", { value: "all", selected: S.parameterFilter === "all" }, "全部参数"),
+        parameterReference(current) ? h("option", { value: "different", selected: S.parameterFilter === "different" }, current.kind === "machine" ? "与标准值不同" : "与初始值不同") : null,
+        editing ? h("option", { value: "modified", selected: S.parameterFilter === "modified" }, "本次修改") : null);
+      var display = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "参数表显示设置", title: "显示列与行密度", onclick: function () {
+        var fields = h("input", { type: "checkbox", checked: S.showFileField });
+        var density = h("select.select", { "aria-label": "行密度" }, ["comfortable", "compact"].map(function (value) { return h("option", { value: value, selected: S.parameterDensity === value }, value === "compact" ? "紧凑" : "标准"); }));
+        var mode = MC.segmented([{ value: "list", label: "列表" }, { value: "tree", label: "参数树" }], S.paramMode, function (value) { S.paramMode = value; render(); }, "参数视图");
+        fields.addEventListener("change", function () { S.showFileField = fields.checked; render(); });
+        density.addEventListener("change", function () { S.parameterDensity = density.value; render(); });
+        viewModal({ title: "参数表显示设置", body: h("div.col", { style: "gap:16px" }, h("label.row", fields, "显示文件字段"), MC.field({ label: "行密度", control: density }), h("div.col", h("strong.small", "参数视图"), mode)) });
+      } }, icon("settings"));
+      var pageSize = h("select.select", { "aria-label": "每页参数数", onchange: function () { S.paramLimit = Number(pageSize.value); if (S.folderActive) loadDir(S.dirParent, 0); else loadParamPage(0); } },
+        [30, 50, 100].map(function (size) { return h("option", { value: String(size), selected: size === S.paramLimit }, size + " 项 / 页"); }));
+      var folders = folderBrowser(S.releaseId, S.folderActive ? S.dirParent : "", S.definitionTotal, function (path) {
         S.selectedParam = null; S.folderActive = !!path; S.dirOffset = 0;
         if (path) loadDir(path, 0); else loadParamPage(0);
       });
-      var mode = MC.segmented([{ value: "list", label: "列表" }, { value: "tree", label: "参数树" }], S.paramMode, function (value) { S.paramMode = value; render(); }, "参数视图");
-      folders.insertBefore(mode, folders.firstChild);
-      if (S.paramMode === "tree" && S.paramTotal <= 1000) {
+      if (S.paramMode === "tree" && S.definitionTotal <= 1000) {
         var directoryTree = folders.querySelector(".cv-folder-tree"); if (directoryTree) directoryTree.hidden = true;
         if (S.allParams === null) loadAllParams();
         else {
@@ -705,36 +1126,57 @@
           });
         }
       }
-      var tools = h("div.cv-toolbar", revisionPicker(), h("span.spacer"),
-        h("button.btn.btn-sm", { type: "button", "data-sync-config-now": "1", onclick: function () { app.go({ kind: "updates", arg: "plan" }); } }, "立即更新"),
-        h("button.btn.btn-sm", { type: "button", "data-sync-config-settings": "1", onclick: function () { app.go({ kind: "updates", arg: "sources" }); } }, "更新设置"),
-        h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: extractDialog }, "从文件提取参数"),
-        h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: mergeDialog }, "合并配置"), save,
-        current && current.status === "draft" ? h("button.btn.btn-sm.btn-primary", { type: "button", disabled: !canWrite(), onclick: publishSelected }, current.kind === "default" ? "确认版本默认" : "发布修订")
-          : h("button.btn.btn-sm.btn-primary", { type: "button", disabled: !canWrite(), onclick: createEditingDraft }, "创建编辑草稿"));
-      return h("div.cv-workbench", tools,
-        S.valueError ? h("div.banner.banner-warning", { role: "alert" }, h("div.banner-body", "保存失败，修改已保留。", MC.errorText(S.valueError)), S.valueError.code === "REVISION_CONFLICT" ? h("button.btn.btn-sm", { type: "button", onclick: recoverValues }, "核对最新草稿") : null) : null,
+      var editbar = current && current.status === "draft" && canWrite() ? h("div.cv32-editbar",
+        h("span.small", { role: "status", "data-edit-count": "1" }, S.savingValues ? "正在保存…" : Object.keys(S.edits).length + " 项修改尚未暂存"), h("span.spacer"),
+        h("button.btn.btn-sm", { type: "button", disabled: !!S.savingValues, onclick: cancelEditing }, "取消编辑"),
+        h("button.btn.btn-sm", { type: "button", disabled: !!S.savingValues || !!(S.pendingSave && S.pendingSave.attempted), onclick: stashValues }, "暂存草稿"), save) : null;
+      return h("div.cv-workbench.cv32-workbench" + (S.parameterDensity === "compact" ? ".is-compact" : ""),
+        S.valueError ? h("div.banner.banner-warning", { role: "alert" }, h("div.banner-body", "保存未完成，已暂存的内容和本次输入均已保留。", MC.errorText(S.valueError)), S.valueError.code === "REVISION_CONFLICT" ? h("button.btn.btn-sm", { type: "button", onclick: recoverValues }, "核对最新草稿") : null) : null,
 
-        h("div.cv-param-browser", folders, h("section.cv-param-data", h("div.cv-toolbar", search, h("span.spacer"), h("label.row.small", { style: "gap:6px" }, onlyDiff, "仅看与基准的差异")), h("div.cv-folder-trail.small", S.paramMode === "tree" && S.selectedParam ? S.selectedParam.name : S.folderActive ? "/" + S.dirParent : "全部参数"),
-          h("div.table-wrap", h("table.table", h("thead", h("tr", ["参数 / 稳定身份", "本版实际名", "版本默认", "采用基准", "当前值", "单位", "继承方式"].map(function (t) { return h("th", t); }))), body)),
-          h("div.cv-param-footer", pagerRow(S.paramMode === "tree" && S.selectedParam ? 1 : S.folderActive ? (page && page.parameter_total || 0) : S.paramTotal, S.paramMode === "tree" && S.selectedParam ? 0 : S.folderActive ? S.dirOffset : S.paramOffset, S.paramLimit, function (offset) { if (S.folderActive) { S.dirOffset = offset; loadDir(S.dirParent, offset); } else loadParamPage(offset); })))),
-        h("details.cv-help", h("summary", "来源与历史修订"), h("div.cv-toolbar", S.revisions.filter(function (r) { return current && r.kind === current.kind && r.machine_id === current.machine_id; }).map(function (r) { return h("button.btn.btn-sm", { type: "button", onclick: function () { chooseRevision(r, "workbench"); } }, revisionName(r.id)); }))));
+        h("div.cv-param-browser", folders, h("section.cv-param-data", h("div.cv-toolbar", search, h("button.btn.btn-sm", { type: "button", onclick: searchParameters }, "搜索"), h("span.spacer"), pageSize,
+          parameterFilter, current && current.kind !== "machine" && !historicalRecord(current) && S.tab !== "initial" ? h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: importParameters }, icon("upload"), "导入") : null,
+          display), h("div.cv-folder-trail.small", S.paramMode === "tree" && S.selectedParam ? S.selectedParam.name : S.folderActive ? "/" + S.dirParent : "全部参数"),
+          h("div.table-wrap", { tabindex: 0, "aria-label": "参数表滚动区域" }, h("table.table.cv32-parameter-table", h("thead", h("tr", h("th", "参数名称"), editing ? h("th", "上次保存") : null,
+            h("th", editing ? "编辑值" : "当前值"), h("th", "单位"), h("th", current && current.kind === "machine" ? "取值方式" : "值状态"), S.showFileField ? h("th", "文件字段") : null)), body)),
+          h("div.cv-param-footer", pagerRow(S.paramMode === "tree" && S.selectedParam ? 1 : S.folderActive ? (page && page.parameter_total || 0) : S.paramTotal, S.paramMode === "tree" && S.selectedParam ? 0 : S.folderActive ? S.dirOffset : S.paramOffset, S.paramLimit, function (offset) { if (S.folderActive) { S.dirOffset = offset; loadDir(S.dirParent, offset); } else loadParamPage(offset); })))), editbar);
     }
 
     function recoverValues() {
       var item = revision(); if (!item) return;
-      var scope = cfgPath(""), selected = S.selected, edits = JSON.stringify(S.edits);
+      var scope = cfgPath(""), selected = S.selected, edits = JSON.stringify(S.edits), before = S.draft;
       var path = item.kind === "machine" ? "/machines/" + enc(item.machine_id) : item.kind === "baseline" ? "/baseline-drafts/" + enc(item.id) : "/drafts/" + enc(item.id);
       api.getV3(scope + path).then(function (response) {
         if (disposed || scope !== cfgPath("") || selected !== S.selected) return;
         var latest = response.machine ? response.machine.draft : response;
-        if (!latest || latest.frozen || latest.status === "published") { MC.toast.warning("该修订已固化，请保留修改并创建新的编辑草稿"); return; }
-        var detail = h("div.table-wrap", h("table.table", h("thead", h("tr", h("th", "参数"), h("th", "服务器最新值"), h("th", "您的修改"))), h("tbody", Object.keys(S.edits).map(function (id) { return h("tr", h("td.mono.small", id), h("td", memberText((latest.values || {})[id])), h("td", memberText(S.edits[id]))); }))));
-        viewConfirm({ title: "核对最新草稿", message: "确认后保留您的修改，并以此服务器修订再次保存。", detail: detail, confirmText: "保留修改，采用此修订" }).then(function (ok) {
-          if (!ok || disposed || scope !== cfgPath("") || selected !== S.selected) return;
-          if (JSON.stringify(S.edits) !== edits) { MC.toast.warning("修改已变化，请重新核对"); return; }
-          S.draft = latest; S.valueError = null; render();
-        });
+        if (!latest || latest.frozen || latest.status === "published" || latest.draft_id && latest.draft_id !== item.id) { MC.toast.warning("该草稿已保存或被替换，本次输入仍保留。请返回版本演进核对。"); return; }
+        var sourceChanged = ["base_revision_id", "source_revision_id", "definition_revision"].some(function (key) { return before[key] !== latest[key]; }) || response.machine && response.machine.release_id !== item.release_id;
+        var recovery = MC.configEditor.rebase(before.values || {}, S.edits, latest.values || {}, item.kind !== "default", sourceChanged);
+        var choices = {}, offset = 0, body = h("div.col", { style: "gap:12px" }), confirm;
+        var modal = viewModal({ title: "配置已被其他人修改", size: "wide", focusTitle: true, body: body, footer: function (close) {
+          confirm = h("button.btn.btn-primary", { type: "button", onclick: function () {
+            if (disposed || scope !== cfgPath("") || selected !== S.selected || !canWrite()) return;
+            if (JSON.stringify(S.edits) !== edits) { MC.toast.warning("修改已变化，请重新核对"); return; }
+            var next = Object.assign({}, recovery.edits);
+            recovery.conflicts.forEach(function (r) { if (choices[r.parameter_id] === "mine") next[r.parameter_id] = r.mine; });
+            S.pendingSave = null; S.draft = latest; S.edits = next; S.dirty = Object.keys(next).length > 0; S.valueError = null; S.editErrors = {}; S.explicitModes = new Set(Object.keys(next));
+            close(); reloadDetail();
+          } }, "继续编辑");
+          return [h("button.btn", { type: "button", onclick: close }, "取消"), confirm];
+        } });
+        function draw() {
+          util.clear(body);
+          body.appendChild(h("p.small", sourceChanged ? "草稿的参照配置或目标版本已变化，请逐项选择要保留的修改。" : "未冲突的修改自动保留；双方都修改的参数需要选择。此步不会保存或覆盖服务器。"));
+          body.appendChild(h("div.table-wrap.cv32-review-table", h("table.table", h("thead", h("tr", ["参数", "编辑前", "服务器最新", "您的修改", "保留哪份"].map(function (label) { return h("th", label); }))),
+            h("tbody", recovery.conflicts.slice(offset, offset + 30).map(function (row) {
+              var select = h("select.select", { "aria-label": row.parameter_id + "的冲突处理", onchange: function () { choices[row.parameter_id] = select.value; update(); } },
+                h("option", { value: "" }, "请选择"), h("option", { value: "mine", selected: choices[row.parameter_id] === "mine" }, "我的修改"), h("option", { value: "server", selected: choices[row.parameter_id] === "server" }, "服务器最新"));
+              return h("tr", h("td", row.parameter_id), h("td.mono", memberText(row.before)), h("td.mono", memberText(row.latest)), h("td.mono", memberText(row.mine)), h("td", select));
+            })))));
+          if (!recovery.conflicts.length) body.appendChild(h("p", "没有同时修改的参数，可以继续编辑。"));
+          body.appendChild(pagerRow(recovery.conflicts.length, offset, 30, function (v) { offset = v; draw(); })); update();
+        }
+        function update() { confirm.disabled = recovery.conflicts.some(function (r) { return !choices[r.parameter_id]; }); }
+        draw();
       }, function (err) { MC.toastError("读取最新草稿失败", err); });
     }
 
@@ -796,8 +1238,116 @@
 
     function isExtractConflict(status) { return EXTRACT_CONFLICT.indexOf(status) >= 0; }
 
-    function extractDialog() {
+    function importParameters() {
+      if (!canWrite() || S.savingValues || !revision() || revision().kind === "machine" || historicalRecord(revision()) || S.tab === "initial") return;
+      var context = operationContext(), releaseId = S.releaseId, selectedId = S.selected;
+      var state = { files: [], file: "", namesOnly: false, plan: null, choices: {}, offset: 0, busy: true, error: null, requestId: null, attempted: false };
+      var body = h("div"), modal, closeButton, nextButton;
+      function alive() { return !disposed && context.path === cfgPath("") && selectedId === S.selected && modal && modal.el.isConnected; }
+      function selectedFile() { return state.files.filter(function (file) { return file.version_id === state.file; })[0]; }
+      function draw() {
+        if (!alive()) return;
+        util.clear(body);
+        closeButton.disabled = state.busy; nextButton.disabled = state.busy;
+        var dismiss = modal.el.querySelector('.modal-header [aria-label="关闭"]'); if (dismiss) dismiss.disabled = state.busy;
+        nextButton.textContent = state.plan ? state.namesOnly ? "完成核对" : state.attempted ? "确认导入结果" : "导入到草稿" : "下一步";
+        if (state.error) body.appendChild(h("div.banner.banner-warning", { role: "alert" }, h("div.banner-body", MC.errorText(state.error)),
+          !state.attempted || state.error.status === 409 ? h("button.btn.btn-sm", { type: "button", disabled: state.busy, onclick: function () { if (selectedFile()) preview(); else loadFiles(); } }, "重试") : null));
+        if (state.busy) { body.appendChild(MC.stateBlock({ kind: "loading", title: state.plan ? "正在导入…" : "正在读取文件…" })); return; }
+        if (!state.plan) {
+          var select = h("select.select", { "aria-label": "导入文件", onchange: function () { state.file = select.value; } }, state.files.map(function (file) { return h("option", { value: file.version_id, selected: file.version_id === state.file }, file.name); }));
+          var namesOnly = h("input", { type: "checkbox", checked: state.namesOnly, onchange: function () { state.namesOnly = namesOnly.checked; } });
+          body.appendChild(h("div.col", { style: "gap:16px" }, MC.field({ label: "配置文件", control: select }), h("label.row.small", namesOnly, "仅导入参数名称（不修改值）")));
+          if (!state.files.length) { body.appendChild(MC.stateBlock({ kind: "empty", title: "还没有 XML / JSON 配置文件", desc: "从左侧配置文件入口导入文件后，再回来选择。" })); nextButton.disabled = true; }
+          return;
+        }
+        var rows = state.plan.items || [], unresolved = rows.filter(function (row) { return row.status === "unbound" && !state.choices[row.row_id]; });
+        body.appendChild(h("p.small", state.plan.source.name + " · " + rows.length + " 个字段 · 软件 " + labelOf(releaseId)));
+        body.appendChild(h("p.small.muted", state.namesOnly ? "本次仅核对已有参数名称和字段，参数值保持原样。" : "已确认的文件字段将读取名称和数值；未找到对应参数的字段须选择已有参数或明确忽略。"));
+        function rowError(row) {
+          if (state.namesOnly) return "";
+          var choice = state.choices[row.row_id] || (row.status === "bound" ? "import" : "skip");
+          if (choice === "skip") return "";
+          var candidate = (row.candidates || []).filter(function (p) { return choice === "link:" + p.parameter_id; })[0];
+          return MC.configEditor.error({ type: candidate ? candidate.type : row.data_type }, { membership: "included", enabled: true, value_state: row.value === null ? "null" : "present", value: row.value });
+        }
+        var invalid = rows.filter(function (row) { return !!rowError(row); });
+        body.appendChild(h("div.table-wrap.cv32-import-table", h("table.table", h("thead", h("tr", (state.namesOnly ? ["文件字段", "数据类型", "对应参数 / 处理方式"] : ["文件字段", "文件值", "数据类型", "对应参数 / 处理方式"]).map(function (label) { return h("th", label); }))),
+          h("tbody", rows.slice(state.offset, state.offset + 30).map(function (row) {
+            var choice = state.choices[row.row_id] || (row.status === "bound" ? "import" : ""), select = h("select.select", { "aria-label": row.leaf_name + "的导入处理", "data-import-decision": row.row_id, disabled: state.attempted,
+              onchange: function () { state.choices[row.row_id] = select.value; draw(); } },
+              row.status === "bound" ? h("option", { value: "import", selected: choice === "import" }, "导入到已对应参数") : h("option", { value: "", selected: !choice }, "请选择处理方式"),
+              (row.candidates || []).map(function (candidate) { return h("option", { value: "link:" + candidate.parameter_id, selected: choice === "link:" + candidate.parameter_id }, candidate.name + " · " + candidate.directory.join(" / ")); }),
+              h("option", { value: "skip", selected: choice === "skip" }, "忽略此字段"));
+            return h("tr", h("td.mono.small", row.display_path || row.canonical_locator), state.namesOnly ? null : h("td.mono.small", row.value === null ? "null" : typeof row.value === "string" ? JSON.stringify(row.value) : String(row.value)),
+              h("td.small", { decimal: "数值", bool: "布尔值", string: "文本", null: "空值" }[row.value_kind] || row.value_kind), h("td", select, rowError(row) ? h("div.small.cv-value-error", { role: "alert" }, rowError(row)) : null));
+          })))));
+        if (rows.some(function (row) { return row.status === "unbound"; })) body.appendChild(h("p.small.muted", "新增参数请在「管理参数」中处理。"));
+        var applying = rows.filter(function (row) { return (state.choices[row.row_id] || (row.status === "bound" ? "import" : "skip")) !== "skip"; }).length;
+        body.appendChild(h("div.row.small", { role: "status" }, invalid.length ? invalid.length + " 个字段的值不符合参数类型，可忽略或更正来源文件。" : unresolved.length ? "还有 " + unresolved.length + " 个字段需要处理" : state.namesOnly ? "已核对 " + applying + " 个字段，数值保持原样。" : "将导入 " + applying + " 个字段，不会正式保存或下发机台。"));
+        body.appendChild(pagerRow(rows.length, state.offset, 30, function (offset) { state.offset = offset; draw(); }));
+        nextButton.disabled = !canWrite() || unresolved.length > 0 || applying === 0 || invalid.length > 0;
+        if (!state.attempted) body.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { state.plan = null; state.error = null; draw(); } }, "返回选择文件"));
+      }
+      function preview() {
+        if (!alive() || state.busy || !selectedFile()) return;
+        if (!state.namesOnly && S.dirty) {
+          viewConfirm({ title: "先暂存当前编辑？", message: "暂存后继续核对文件，当前输入将保留在草稿中。", confirmText: "暂存并继续", cancelText: "继续编辑" }).then(function (ok) {
+            if (ok && alive()) stashValues().then(function (saved) { if (saved && alive()) preview(); });
+          }); return;
+        }
+        state.busy = true; state.error = null; state.plan = null; state.attempted = false; draw();
+        api.requestV3("POST", context.path + "/value-import-plans", { body: { release_id: releaseId, version_id: state.file } }).then(function (res) {
+          if (!alive()) return; state.plan = res.plan; state.offset = 0; state.requestId = util.uid("import"); state.busy = false; draw();
+        }, function (err) { if (alive()) { state.error = err; state.busy = false; draw(); } });
+      }
+      function commit() {
+        if (!alive() || state.busy || !state.plan || nextButton.disabled) return;
+        if (state.namesOnly) { modal.close(); MC.toast.success("参数名称和字段已核对", "参数值保持原样。"); return; }
+        var plan = state.plan, path = context.path + "/value-import-plans/" + enc(plan.plan_id), groups = {};
+        (plan.items || []).forEach(function (row) {
+          var choice = state.choices[row.row_id]; if (!choice) return;
+          if (!groups[choice]) groups[choice] = []; groups[choice].push(row.row_id);
+        });
+        state.busy = true; state.error = null; draw();
+        var chain = Promise.resolve();
+        Object.keys(groups).forEach(function (choice) { chain = chain.then(function () {
+          if (!alive()) throw { code: "CONTEXT_CHANGED", message: "已离开当前配置" };
+          if (!canWrite()) throw { status: 403, code: "FORBIDDEN", message: "管理员权限已撤回，导入选择已保留。" };
+          return api.requestV3("PATCH", path + "/decisions", { body: { scope: "rows", row_ids: groups[choice], decision: choice.indexOf("link:") === 0 ? "link" : choice, parameter_id: choice.indexOf("link:") === 0 ? choice.slice(5) : undefined } });
+        }); });
+        chain.then(function () {
+          if (!alive()) throw { code: "CONTEXT_CHANGED" };
+          if (!canWrite()) throw { status: 403, code: "FORBIDDEN", message: "管理员权限已撤回，导入选择已保留。" };
+          state.attempted = true;
+          return api.requestV3("POST", path + "/commit", { body: { request_id: state.requestId, expected_draft_id: plan.target.draft_id, expected_revision: plan.target.revision } });
+        }).then(function (res) {
+          if (!alive()) return;
+          modal.close(); S.selected = res.draft_id; S.expectedMachine = null; S.expectedStandard = releaseId; S.releaseId = releaseId; S.objectRole = "standard"; S.tab = "workbench";
+          S.edits = {}; S.editErrors = {}; S.explicitModes.clear(); S.dirty = false; S.valueError = null;
+          MC.toast.success("已导入草稿", "核对参数后可保存配置。"); reloadDetail().then(function () { if (!disposed && context.path === cfgPath("")) routeSelection(false); });
+        }, function (err) { if (alive()) { state.error = err; if (err.status && err.status < 500) state.attempted = false; state.busy = false; draw(); } });
+      }
+      modal = viewModal({ title: "导入参数", size: "wide", body: body, onDismiss: function () { if (!state.busy) modal.close(); }, footer: function (close) {
+        closeButton = h("button.btn", { type: "button", onclick: function () { if (!state.busy) close(); } }, "取消");
+        nextButton = h("button.btn.btn-primary", { type: "button", onclick: function () { if (state.plan) commit(); else preview(); } }, "下一步");
+        return [closeButton, nextButton];
+      } });
+      function loadFiles() {
+        state.busy = true; state.error = null; draw();
+        return api.getV3(root("/file-selector")).then(function (res) {
+        if (!alive()) return;
+        state.files = (res.items || []).filter(function (file) { return /\.(json|xml)$/i.test(file.name); });
+        var associated = state.files.filter(function (file) { return file.file_id === S.detail.file_id; })[0];
+        state.file = (associated || state.files[0] || {}).version_id || ""; state.busy = false; draw();
+        }, function (err) { if (alive()) { state.error = err; state.busy = false; draw(); } });
+      }
+      loadFiles();
+    }
+
+    function extractDialog(options) {
       if (!S.cid) return;
+      options = options && options.file ? options : {};
       var state = {
         files: [], fileId: "", plan: null, page: null, filter: "all", q: "",
         size: 50, offset: 0, loading: false, error: null, types: {},
@@ -854,9 +1404,13 @@
             var ext = String(f.name || "").split(".").pop().toLowerCase();
             return ext === "json" || ext === "xml";
           });
-          if (state.files.length) state.fileId = state.files[0].file_id;
+          if (options.file && !state.files.some(function (file) { return file.file_id === options.file.file_id && file.version_id === options.file.version_id; })) {
+            options = {}; state.error = { message: "所选文件已变化，请重新选择文件。" }; state.loading = false; renderDialog(); return;
+          }
+          if (state.files.length) state.fileId = options.file ? options.file.file_id : state.files[0].file_id;
           state.loading = false;
           renderDialog();
+          if (options.file) { options = {}; createPlan(); }
         }, function (err) {
           state.loading = false;
           state.error = err;
@@ -1097,8 +1651,8 @@
           h("span.xsmall.muted", "定义修订 r" + (page.revision || 0))));
         if (page.stale) {
           body.appendChild(h("div.banner.banner-warning", icon("info"),
-            h("div.banner-body", "来源或目录修订已变化；旧决议仍保留。重算后按 row_id 合并仍合法的决议。",
-              h("button.btn.btn-sm", { type: "button", style: "margin-left:10px", onclick: recomputePlan }, "重算并保留决议"))));
+            h("div.banner-body", "文件或参数目录已变化。请重新核对，仍适用的处理方式会保留。",
+              h("button.btn.btn-sm", { type: "button", style: "margin-left:10px", onclick: recomputePlan }, "重新核对"))));
         }
         var filter = MC.segmented([
           { value: "all", label: "全部" }, { value: "new", label: "新增" },
@@ -1162,9 +1716,135 @@
 
 
     var MERGE_DECISIONS = [
-      ["keep_local", "保留本地"], ["adopt_target", "采用目标"], ["custom", "自定义值"],
-      ["deactivate", "停用"], ["remove", "移除"], ["pin", "钉住本地"], ["pending", "待决议"],
+      ["keep_local", "保留当前配置"], ["adopt_target", "使用新的标准"], ["custom", "自定义值"],
+      ["deactivate", "停用"], ["remove", "移除"], ["pin", "保持此值"], ["pending", "请选择"],
     ];
+
+    function compareParameters() {
+      var item = revision(); if (!item) return;
+      var context = operationContext(), seq = 0, offset = 0, size = 30, data = null, error = null, busy = false;
+      var edits = Object.assign({}, S.edits), choices = S.revisions.filter(function (r) { return r.status === "published" && r.id !== item.id; });
+      var initial = parameterReference(item);
+      var reference = h("select.select", { "aria-label": "对比参照配置" }, h("option", { value: "" }, "选择已保存的配置"), choices.map(function (r) {
+        return h("option", { value: r.id, selected: r.id === initial }, revisionLabel(r) + (r.kind === "default" ? " · 首次标准" : r.kind === "baseline" ? " · 标准记录 " + r.label.slice(1) : " · 机台记录 " + r.label.slice(1)));
+      }));
+      var only = h("input", { type: "checkbox", checked: true }), keyword = h("input.input", { type: "search", "aria-label": "搜索对比参数", placeholder: "参数名称或文件字段" });
+      var body = h("div.col", { style: "gap:12px" });
+      var modal = viewModal({ title: "对比参数", size: "xwide", focusTitle: true, body: body });
+      function alive() { return context.readCurrent() && body.isConnected; }
+      function load(start) {
+        if (!reference.value) { data = null; error = null; draw(); return; }
+        offset = start || 0; var request = ++seq; busy = true; error = null; draw();
+        api.requestV3("POST", context.path + "/parameter-query", { body: { revision_id: item.id, reference_id: reference.value,
+          edits: edits, q: keyword.value, filter: only.checked ? "different" : "all", offset: offset, limit: size } }).then(function (result) {
+          if (!alive() || request !== seq) return; data = result; busy = false; draw();
+        }, function (err) { if (alive() && request === seq) { error = err; busy = false; draw(); } });
+      }
+      reference.addEventListener("change", function () { seq++; load(0); });
+      only.addEventListener("change", function () { load(0); });
+      keyword.addEventListener("keydown", function (event) { if (event.key === "Enter") load(0); });
+      function draw() {
+        util.clear(body);
+        body.appendChild(MC.field({ label: "参照配置", control: reference }));
+        body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" }, keyword, h("button.btn.btn-sm", { type: "button", onclick: function () { load(0); } }, "搜索"), h("label.row.small", { style: "gap:6px" }, only, "只看不同")));
+        if (busy) body.appendChild(MC.stateBlock({ kind: "loading", title: "正在对比参数…" }));
+        else if (error) body.appendChild(MC.errorBlock(error, function () { load(offset); }));
+        else if (!reference.value) body.appendChild(MC.stateBlock({ kind: "empty", title: choices.length ? "选择参照配置后查看差异" : "还没有其他已保存的配置" }));
+        else if (data) {
+          body.appendChild(h("div.table-wrap.cv32-review-table", h("table.table", h("thead", h("tr", ["参数", "参照值", item.status === "draft" ? "当前草稿及编辑值" : "当前配置", "取值方式"].map(function (label) { return h("th", label); }))),
+            h("tbody", (data.items || []).map(function (p) { return h("tr", h("td", p.name), h("td.mono", memberText(p.reference)), h("td.mono", memberText(p.member)),
+              h("td", item.kind === "machine" ? { inherit: "使用标准值", override: "单独设置", pin: "保持此值" }[(p.member || {}).intent || "inherit"] : "版本标准")); })))));
+          if (!data.total) body.appendChild(h("p.small.muted", only.checked ? "没有不同的参数" : "没有匹配的参数"));
+          body.appendChild(pagerRow(data.total, offset, size, load));
+        }
+      }
+      draw(); if (reference.value) load(0);
+    }
+
+    function upgradeDialog(ready) {
+      var item = revision(); if (!item || item.kind !== "machine" || !canWrite() || S.savingValues) return;
+      if (S.dirty && ready !== true) {
+        viewConfirm({ title: "先暂存当前修改？", message: "比较将使用当前草稿，包括已修改的值和取值方式。", confirmText: "暂存并继续", cancelText: "继续编辑" }).then(function (ok) {
+          if (ok) stashValues().then(function (saved) { if (saved) upgradeDialog(true); });
+        }); return;
+      }
+      var stored = S.revisions.filter(function (r) { return r.machine_id === item.machine_id && r.status === "draft"; })[0];
+      if (stored && stored.id !== item.id) {
+        viewConfirm({ title: "此机台已有编辑草稿", message: "更新将继续此草稿，保留其中的参数修改。", confirmText: "继续草稿", cancelText: "取消" }).then(function (ok) {
+          if (ok) chooseRevision(stored, "workbench").then(function () { upgradeDialog(true); });
+        }); return;
+      }
+      var context = operationContext(), state = { plan: null, page: null, offset: 0, filter: "all", busy: false, error: null, requestId: null };
+      var standards = (S.detail.releases || []).map(function (r) { return latestStandard(r.release_id); }).filter(Boolean);
+      var machine = S.machines.filter(function (m) { return m.machine_id === item.machine_id; })[0];
+      var saved = machine && S.revisions.filter(function (r) { return r.id === machine.head_id; })[0];
+      var originalRelease = saved ? saved.release_id : item.release_id;
+      var target = h("select.select", { "aria-label": "新的版本标准" }, standards.map(function (r) { return h("option", { value: r.id, selected: r.release_id === item.release_id }, "软件 " + labelOf(r.release_id) + " · " + (r.at ? util.formatTime(r.at) : "已保存")); }));
+      var original = h("select.select", { "aria-label": "原来的版本标准" }, h("option", { value: "" }, "请选择原来采用的标准"), S.revisions.filter(function (r) { return r.kind !== "machine" && r.status === "published" && r.release_id === originalRelease; }).map(function (r) { return h("option", { value: r.id }, "软件 " + labelOf(r.release_id) + " · " + util.formatTime(r.at)); }));
+      var body = h("div.col", { style: "gap:12px" }), footerText = h("span.small.muted", { role: "status", "aria-live": "polite" });
+      var apply = h("button.btn.btn-primary", { type: "button", disabled: true, onclick: commit }, "继续编辑");
+      var modal = viewModal({ title: "更新到其他标准 · " + item.machine_no, size: "xwide", focusTitle: true, body: body, footer: function (close) {
+        return [footerText, h("span.spacer"), h("button.btn", { type: "button", onclick: close }, "取消"), apply];
+      } });
+      function alive() { return context.readCurrent() && body.isConnected; }
+      function path(rest) { return context.path + "/merge-plans" + (rest || ""); }
+      function rows() {
+        state.busy = true; draw();
+        return api.getV3(path("/" + enc(state.plan.plan_id) + "/rows?limit=30&offset=" + state.offset + "&filter=" + state.filter)).then(function (res) {
+          if (!alive()) return; state.page = res; state.busy = false; draw();
+        }, failed);
+      }
+      function failed(err) { if (alive()) { state.error = err; state.busy = false; draw(); } }
+      function preview() {
+        if (!alive() || !canWrite() || state.busy || !target.value) return;
+        state.busy = true; state.error = null; state.page = null; state.requestId = null; state.offset = 0; draw();
+        var payload = { machine_id: item.machine_id, ours_revision_id: item.id, theirs_revision_id: target.value };
+        if (original.value) payload.base_revision_id = original.value;
+        api.requestV3("POST", path(), { body: payload }).then(function (res) {
+          if (!alive()) return; state.plan = res.plan; return rows();
+        }, failed);
+      }
+      function decide(row, value) {
+        if (!alive() || !canWrite()) return;
+        state.busy = true; state.error = null; draw();
+        api.requestV3("PATCH", path("/" + enc(state.plan.plan_id) + "/decisions"), { body: { row_ids: [row.parameter_id], decision: value } }).then(function () { if (alive()) rows(); }, failed);
+      }
+      function commit() {
+        if (apply.disabled || !alive() || !canWrite()) return;
+        state.busy = true; state.error = null; state.requestId = state.requestId || util.uid("upgrade"); draw();
+        api.requestV3("POST", path("/" + enc(state.plan.plan_id) + "/commit"), { body: { request_id: state.requestId } }).then(function (res) {
+          if (!context.readCurrent() || !body.isConnected) return;
+          S.edits = {}; S.dirty = false; S.pendingSave = null; S.historyEvents = null; S.expectedMachine = item.machine_id; S.expectedStandard = null;
+          S.selected = res.draft.draft_id; S.releaseId = res.draft.release_id; S.tab = "workbench"; modal.close();
+          reloadDetail().then(function () { if (!disposed && context.path === cfgPath("")) routeSelection(true); });
+          MC.toast.success("已更新草稿，请核对后保存配置");
+        }, failed);
+      }
+      target.addEventListener("change", function () { state.plan = null; state.page = null; state.error = null; state.requestId = null; draw(); });
+      function draw() {
+        util.clear(body); target.disabled = state.busy || !!state.requestId; original.disabled = state.busy || !!state.requestId;
+        body.appendChild(h("div.cv32-upgrade-source", MC.field({ label: "新的版本标准", control: target }), h("button.btn", { type: "button", disabled: !canWrite() || state.busy || !target.value || !!state.requestId, onclick: preview }, "比较变化")));
+        if (state.error && state.error.detail && state.error.detail.field === "base_revision_id") body.appendChild(MC.field({ label: "原来的版本标准", control: original }));
+        if (state.error) body.appendChild(MC.errorBlock(state.error, state.requestId ? commit : preview));
+        if (state.busy) body.appendChild(MC.stateBlock({ kind: "loading", title: "正在核对配置…" }));
+        else if (state.page) {
+          body.appendChild(h("div.row", MC.segmented([{ value: "all", label: "全部参数" }, { value: "conflict", label: "需要处理" }], state.filter, function (v) { state.filter = v; state.offset = 0; rows(); }, "升级比较筛选"),
+            h("span.small.muted", "原标准：软件 " + state.page.base.release_version + " · 当前" + (item.status === "draft" ? "草稿" : "配置"))));
+          if (state.page.stale) body.appendChild(h("div.banner.banner-warning", "配置已被其他人修改，请重新比较。"));
+          body.appendChild(h("div.table-wrap.cv32-review-table", h("table.table", h("thead", h("tr", ["参数", "原来的标准", "当前配置", "新的标准", "处理方式"].map(function (label) { return h("th", label); }))),
+            h("tbody", (state.page.items || []).map(function (r) {
+              var select = h("select.select", { "aria-label": r.name + "的处理方式", disabled: state.page.stale || !!state.requestId, onchange: function () { decide(r, select.value); } },
+                r.decision === "pending" ? h("option", { value: "pending" }, "请选择") : null,
+                r.allowed_decisions.map(function (value) { return h("option", { value: value, selected: value === r.decision }, value === "keep_local" ? "保留当前配置" : "使用新的标准"); }));
+              return h("tr", h("td", r.name, r.definition_changed ? h("div.small.cv-warning", "参数定义有变化") : null), h("td.mono", memberText(r.base_member)), h("td.mono", memberText(r.ours_member)), h("td.mono", memberText(r.theirs_member)), h("td", select));
+            })))));
+          body.appendChild(pagerRow(state.page.total, state.offset, 30, function (offset) { state.offset = offset; rows(); }));
+        }
+        footerText.textContent = state.page ? state.page.pending ? state.page.pending + " 项需要选择处理方式" : "确认后更新草稿，不会自动保存配置" : "保留机台单独设置的值，冲突项目由您选择";
+        apply.disabled = !canWrite() || state.busy || !state.page || state.page.stale || state.page.pending > 0;
+      }
+      draw();
+    }
 
     function mergeDialog() {
       if (!S.cid) return;
@@ -1175,8 +1855,8 @@
       var pendingText = h("span.xsmall.muted", { role: "status", "aria-live": "polite" }, "尚未预览");
       var commitBtn = h("button.btn.btn-primary", { type: "button", disabled: true }, "生成新草稿");
       var modal = viewModal({
-        title: "预览合并（O / L / N）", size: "xwide", body: body,
-        subtitle: "核对三方差异并处理冲突，确认后生成编辑草稿，不自动发布。",
+        title: "比较并合并配置", size: "xwide", body: body,
+        subtitle: "核对变化后生成编辑草稿，再通过保存配置完成。",
         footer: function (close) {
           return [pendingText, h("span.spacer"),
             h("button.btn", { type: "button", onclick: function () { close(); } }, "关闭"), commitBtn];
@@ -1223,7 +1903,7 @@
           return api.requestV3("POST", cfgMerge("/" + enc(state.plan.plan_id) + "/commit"), { body: { custom_values: custom } }).then(function (res) {
             if (!context.current()) return;
             MC.toast.success("已生成新草稿", res.draft ? res.draft.draft_id : "");
-            S.selected = res.draft ? res.draft.draft_id : S.selected; S.tab = "workbench"; modal.close(); reloadDetail();
+            S.expectedMachine = null; S.expectedStandard = null; S.selected = res.draft ? res.draft.draft_id : S.selected; S.tab = "workbench"; modal.close(); reloadDetail();
           }, function (err) {
             MC.toastError("生成草稿失败", err, err.code === "PLAN_STALE" ? { action: { label: "刷新", onClick: loadRows } } : null);
           });
@@ -1231,18 +1911,18 @@
       });
       var choices = S.revisions.filter(function (r) { return r.status === "published"; });
       function revisionSelect(name, label, value, optional) {
-        return h("select.select", { name: name, "aria-label": label }, optional ? h("option", { value: "" }, "未指定共同基准") : null, choices.map(function (r) { return h("option", { value: r.id, selected: r.id === value }, revisionLabel(r)); }));
+        return h("select.select", { name: name, "aria-label": label }, optional ? h("option", { value: "" }, "未指定原来的标准") : null, choices.map(function (r) { return h("option", { value: r.id, selected: r.id === value }, revisionLabel(r)); }));
       }
-      var baseInput = revisionSelect("base_revision_id", "共同基准 O", revision() && revision().source || (branch.baselines && branch.baselines[0] || {}).baseline_id || "", true);
-      var oursInput = revisionSelect("ours_revision_id", "当前配置 L", revision() && revision().status === "published" ? S.selected : branch.head_id || d0);
-      var theirsInput = revisionSelect("theirs_revision_id", "目标配置 N", d0);
+      var baseInput = revisionSelect("base_revision_id", "原来的标准", revision() && revision().source || (branch.baselines && branch.baselines[0] || {}).baseline_id || "", true);
+      var oursInput = revisionSelect("ours_revision_id", "当前配置", revision() && revision().status === "published" ? S.selected : branch.head_id || d0);
+      var theirsInput = revisionSelect("theirs_revision_id", "新的标准", d0);
       [baseInput, oursInput, theirsInput].forEach(function (select) { select.addEventListener("change", function () { state.plan = null; state.page = null; state.custom = {}; refreshFooter(); }); });
       function render() {
         var hadFocus = document.activeElement && document.activeElement !== document.body;
         util.clear(body);
         body.appendChild(h("div.cv-merge-sources",
-          MC.field({ label: "共同基准 O", control: baseInput }), MC.field({ label: "当前配置 L", control: oursInput }),
-          MC.field({ label: "目标配置 N", control: theirsInput }),
+          MC.field({ label: "原来的标准", control: baseInput }), MC.field({ label: "当前配置", control: oursInput }),
+          MC.field({ label: "新的标准", control: theirsInput }),
           h("button.btn.btn-primary", { type: "button", onclick: preview }, "预览合并")));
         if (state.loading) { body.appendChild(MC.stateBlock({ kind: "loading", title: "读取合并计划…" })); refreshFooter(); return; }
         if (state.error) { body.appendChild(MC.stateBlock({ kind: "error", title: "合并预览失败", desc: MC.errorText(state.error) })); refreshFooter(); return; }
@@ -1261,7 +1941,7 @@
         body.appendChild(h("div.row", { style: "gap:8px;flex-wrap:wrap" },
           filter, h("span.xsmall.muted", "模式 " + state.page.mode + " · " + (state.page.total || 0) + " 行")));
         if (state.page.stale) {
-          body.appendChild(h("div.banner.banner-warning", icon("info"), h("div.banner-body", "O/L/N 来源已变化，旧决议仍保留；请重新预览后再提交。")));
+          body.appendChild(h("div.banner.banner-warning", icon("info"), h("div.banner-body", "参照的配置已变化，已选处理方式仍保留。请重新比较后继续。")));
         }
         var rows = (state.page.items || []).map(function (row) {
           var sel = h("select.select", { "aria-label": "合并决议", name: "merge_decision", disabled: state.page.stale },
@@ -1284,7 +1964,7 @@
             h("td", h("div.col", { style: "gap:4px" }, sel, customInput)));
         });
         body.appendChild(h("div.table-wrap", h("table.table",
-          h("thead", h("tr", h("th", "参数"), h("th", "O 基准"), h("th", "L 本地"), h("th", "N 目标"), h("th", "决议"))),
+          h("thead", h("tr", h("th", "参数"), h("th", "原来的标准"), h("th", "当前配置"), h("th", "新的标准"), h("th", "决议"))),
           h("tbody", rows))));
         refreshFooter();
         if (!hadFocus) {
@@ -1356,7 +2036,7 @@
       var targetRelease = release(), expectedDraft = S.draft && S.draft.revision, expectedDefinition = S.overview && S.overview.catalog_revision;
       var adopt = h("input", { type: "checkbox", checked: !!targetRelease && !targetRelease.default_revision_id, disabled: !targetRelease || !!targetRelease.default_revision_id });
       var fields = { name: MC.field({ label: "参数名称", required: true, control: name }), directory: MC.field({ label: "来源层级", control: path, help: "使用 / 分隔目录层级" }), type: MC.field({ label: "类型", control: type }), unit: MC.field({ label: "单位", control: unit }), description: MC.field({ label: "说明", control: desc }) };
-      configFormModal({ title: parameter ? "参数身份属性" : "手动新增参数", body: h("div.col", { style: "gap:12px" }, fields.name, fields.directory, fields.type, fields.unit, fields.description, h("label.row.small", { style: "gap:6px" }, adopt, "同步到当前准备版本的定义"), h("p.small.muted", "不改变已有参数值；已固化版本保留原定义快照。")), footer: function (close) {
+      configFormModal({ title: parameter ? "参数属性" : "手动新增参数", body: h("div.col", { style: "gap:12px" }, fields.name, fields.directory, fields.type, fields.unit, fields.description, h("label.row.small", { style: "gap:6px" }, adopt, "同步到当前准备版本的定义"), h("p.small.muted", "不改变已有参数值；已固化版本保留原定义快照。")), footer: function (close) {
         var save = h("button.btn.btn-primary", { type: "button", onclick: function () {
           var payload = { name: name.value, directory: path.value.split("/").filter(Boolean), type: type.value, unit: unit.value, description: desc.value };
           if (adopt.checked && targetRelease && !targetRelease.default_revision_id) { payload.release_id = targetRelease.release_id; payload.expected_draft_revision = expectedDraft; payload.expected_definition_revision = expectedDefinition; }
@@ -1398,7 +2078,7 @@
       var files = [], select = h("select.select", { "aria-label": "绑定来源文件", disabled: true }, h("option", { value: "" }, "读取配置文件…"));
       var picker = h("button.btn", { type: "button", disabled: true, onclick: function () { var f = files.filter(function (row) { return row.version_id === select.value; })[0]; if (f) sourceFieldPicker(f, function (path) { locator.value = path; locator.dispatchEvent(new Event("input", { bubbles: true })); field.setError(""); }); } }, "从文件选择字段");
       var body = h("div.col", { style: "gap:12px" }, h("strong", parameter.name + " · " + rel.version), readonly ? null : MC.field({ label: "来源配置文件", control: select }), readonly ? null : picker, field,
-        readonly ? h("p.small.muted", "版本已固化，绑定只读。新版本可建立自己的绑定。") : h("p.small.muted", "选择对应字段后确认，不会读取或覆盖草稿值。INI 可填写 section/key 精确位置。"));
+        readonly ? h("p.small.muted", "此版本的文件字段已保存，只能查看。可在新软件版本中设置新的对应字段。") : h("p.small.muted", "选择对应字段后确认，不会读取或覆盖草稿值。INI 可填写 section/key 精确位置。"));
       var expected = S.bindingRevision;
       configFormModal({ title: "版本绑定", body: body, footer: function (close) {
         var save = h("button.btn.btn-primary", { type: "button", disabled: readonly, onclick: function () { var f = files.filter(function (row) { return row.version_id === select.value; })[0];
@@ -1424,7 +2104,7 @@
             r.categories.join(" / "),
             h("span.xsmall.muted", "  " + (r.before && r.before.status || "—") + " → " + (r.after && r.after.status || "—")));
         });
-        viewModal({ title: "与前一修订对比", body: rows.length ? h("ul.mini-list", rows) : h("div.muted", "前一版本无差异或没有前一版本。") });
+        viewModal({ title: "与上一次保存对比", body: rows.length ? h("ul.mini-list", rows) : h("div.muted", "前一版本无差异或没有前一版本。") });
       }, function (err) { MC.toastError("读取差异失败", err); });
     }
 
@@ -1432,7 +2112,7 @@
       api.getV3(cfgPath("/parameters/" + enc(r.parameter_id) + "/history")).then(function (res) {
         var rows = (res.items || []).map(function (it) {
           return h("li", h("div.col", { style: "gap:4px" }, h("strong", it.label), h("span.mono.xsmall.muted", it.revision_id),
-            it.previous_id ? h("span.xsmall.muted", "前序修订：" + it.previous_id) : null),
+            it.previous_id ? h("span.xsmall.muted", "上一份配置：" + it.previous_id) : null),
             h("div.col", { style: "gap:4px" }, h("span.small.muted", { ok: "有值", unset: "未设", null: "null", removed: "已移除", disabled: "已停用", not_introduced: "未纳入" }[it.value.status] || it.value.status), h("strong.mono", memberText(it.value))));
         });
         viewModal({ title: "参数历程 · " + r.name, body: rows.length ? h("ul.cv-param-history", rows) : h("div.muted", "没有历史。") });
@@ -1441,49 +2121,56 @@
 
 
     function exportRevisions(rel) {
-      var options = [{ id: "d0-" + S.releaseId, label: "D0 " + rel.version }];
-      ((S.branch && S.branch.baselines) || []).forEach(function (row) {
-        if (!row.release_id || row.release_id === S.releaseId) {
-          options.push({ id: row.baseline_id, label: row.label + " · " + (row.published_at || "") });
-        }
-      });
-      (S.machines || []).forEach(function (m) {
-        if (m.release_id && m.release_id !== S.releaseId) return;
-        (m.revisions || []).forEach(function (row) {
-          options.push({ id: row.revision_id, label: "机台 " + m.machine_no + " · " + row.label });
-        });
-      });
-      return options;
+      var current = revision(), saved = S.revisions.filter(function (r) { return r.id === (current && current.status === "published" ? current.id : S.lastSavedId); })[0];
+      return saved ? [{ id: saved.id, label: (saved.machine_no || "软件 " + labelOf(saved.release_id)) + " · " + (saved.at ? util.formatTime(saved.at) : "已保存") }] : [];
+    }
+
+    function startExport() {
+      var item = revision(); if (!item || S.savingValues) return;
+      if (item.status === "published" && !S.dirty) { S.exportRevisionId = item.id; changeTab("export"); return; }
+      var context = operationContext(), saved = S.lastSavedId;
+      viewModal({ title: "选择要导出的配置", body: h("p", "当前有编辑草稿。请选择保存后导出，或使用上次保存的配置。"), footer: function (close) {
+        return [h("button.btn", { type: "button", onclick: close }, "取消"),
+          h("button.btn", { type: "button", disabled: !saved, onclick: function () {
+            if (disposed || context.path !== cfgPath("") || S.selected !== item.id) return;
+            close(); S.exportRevisionId = saved; S.exportPlan = null; S.exportArtifact = null; S.exportFromEdit = true; S.tab = "export"; render(); routeSelection(false);
+          } }, "导出上次保存的配置"),
+          h("button.btn.btn-primary", { type: "button", disabled: !editable(), onclick: function () {
+            if (!context.current()) return; close(); reviewSave(function () { S.exportRevisionId = S.selected; S.exportFromEdit = false; changeTab("export"); });
+          } }, "保存并继续导出")];
+      } });
     }
 
     function exportView(rel) {
       if (!rel) return MC.stateBlock({ kind: "empty", title: "先创建软件版本" });
       var revisions = exportRevisions(rel);
-      if (!S.exportRevisionId || !revisions.some(function (r) { return r.id === S.exportRevisionId; })) S.exportRevisionId = S.selected || revisions[0] && revisions[0].id;
+      if (!S.exportRevisionId || !revisions.some(function (r) { return r.id === S.exportRevisionId; })) S.exportRevisionId = revisions[0] && revisions[0].id || "";
       if (S.exportFiles === null) {
         S.exportFiles = [];
         api.getV3(root("/file-selector")).then(function (res) { if (disposed) return; S.exportFiles = (res.items || []).filter(function (f) { return ["json", "xml", "ini"].indexOf(String(f.name || "").split(".").pop().toLowerCase()) >= 0; }); render(); }, function (err) { if (!disposed) { S.exportError = err; render(); } });
       }
       if (!S.exportFileId && S.exportFiles.length) S.exportFileId = S.exportFiles[0].version_id;
-      var revSel = h("select.select", { "aria-label": "导出修订", disabled: S.exportBusy }, revisions.map(function (r) { return h("option", { value: r.id, selected: r.id === S.exportRevisionId }, r.label); }));
+      var revSel = h("select.select", { "aria-label": "导出配置", disabled: S.exportBusy }, revisions.map(function (r) { return h("option", { value: r.id, selected: r.id === S.exportRevisionId }, r.label); }));
       revSel.addEventListener("change", function () { S.exportRevisionId = revSel.value; S.exportPlan = null; S.exportArtifact = null; var target = S.revisions.filter(function (r) { return r.id === revSel.value; })[0]; if (target) chooseRevision(target, "export"); else render(); });
       var fileSel = h("select.select", { "aria-label": "模板文件", name: "version_id", disabled: S.exportBusy }, h("option", { value: "" }, "请选择文件"), S.exportFiles.map(function (f) { return h("option", { value: f.version_id, selected: f.version_id === S.exportFileId }, f.name); }));
       fileSel.addEventListener("change", function () { S.exportFileId = fileSel.value; S.exportMappings = {}; S.exportPlan = null; S.exportArtifact = null; render(); });
       var confirm = h("input", { type: "checkbox", checked: S.exportConfirm, disabled: S.exportBusy, onchange: function () { S.exportConfirm = confirm.checked; invalidate(); } });
       var message = h("p.small.cv-warning", { role: "status" });
       function invalidate() { S.exportDirty = true; S.exportPlan = null; S.exportArtifact = null; message.textContent = "设置已修改，请重新预览。"; Array.prototype.forEach.call(el.querySelectorAll("[data-export-commit], [data-export-download]"), function (b) { b.disabled = true; }); }
-      var exportReady = revision() && revision().status === "published";
-      var preview = h("button.btn.btn-primary", { type: "button", disabled: !canWrite() || !exportReady || !S.exportFileId || S.exportBusy, onclick: function () {
+      var exportRecord = S.revisions.filter(function (r) { return r.id === S.exportRevisionId; })[0];
+      var exportReady = exportRecord && exportRecord.status === "published";
+      var preview = h("button.btn.btn-primary", { type: "button", disabled: !exportReady || !S.exportFileId || S.exportBusy, onclick: function () {
         var scope = cfgPath(""), rev = S.exportRevisionId, version = S.exportFileId;
         S.exportBusy = true; S.exportPlan = null; S.exportArtifact = null; S.exportError = null; render();
-        api.requestV3("POST", scope + "/export-plans", { body: { release_id: S.releaseId, revision_id: rev, version_id: version, confirm_removed: !!S.exportConfirm, mappings: S.exportMappings || {} } }).then(function (res) {
+        api.requestV3("POST", scope + "/export-plans", { body: { release_id: exportRecord.release_id, revision_id: rev, version_id: version, confirm_removed: !!S.exportConfirm, mappings: S.exportMappings || {} } }).then(function (res) {
           if (disposed || scope !== cfgPath("") || rev !== S.exportRevisionId || version !== S.exportFileId) return;
           S.exportPlan = res.plan; S.exportBusy = false; S.exportDirty = false; render();
         }, function (err) { if (!disposed && scope === cfgPath("")) { S.exportBusy = false; S.exportError = err; render(); } });
       } }, S.exportBusy ? "正在生成预览…" : "预览导出");
       var source = h("section.cv-export-source", h("div.cv-detail-head", h("h2", "导出来源")), h("div.cv-detail-body.col", { style: "gap:16px" },
-        MC.field({ label: "配置修订", control: revSel }), MC.field({ label: "配置文件中的模板", control: fileSel }), h("button.btn", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "查看配置文件"),
-        h("label.row.small", { style: "gap:6px" }, confirm, "确认停用 / 移除字段保持原样"), !exportReady ? h("p.small.cv-warning", "此修订尚未固化，请先确认修订再导出。") : null, preview, h("details.cv-help", h("summary", "文件保留规则"), h("p.small.muted", "仅写入已确认的精确落点；未匹配字段保持原样。XML / INI 保留注释，JSON 会重新排版；生成新文件，不覆盖原文件。"))));
+        MC.field({ label: "已保存的配置", control: revSel }), MC.field({ label: "配置文件中的模板", control: fileSel }), h("button.btn", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "查看配置文件"),
+        S.exportFromEdit ? h("p.small", "正在导出上次保存的配置，编辑内容仍保留。") : null,
+        h("label.row.small", { style: "gap:6px" }, confirm, "保留模板中已停用或移除的字段"), !exportReady ? h("p.small.cv-warning", "尚未保存配置，请先保存后导出。") : null, preview, h("details.cv-help", h("summary", "文件保留规则"), h("p.small.muted", "仅写入已确认的文件字段；未匹配字段保持原样。XML / INI 保留注释，JSON 会重新排版；生成新文件，不覆盖原文件。"))));
       var main = h("section.cv-export-preview", h("div.cv-detail-head", h("h2", S.exportPlan ? "字段映射与预览" : "核对模板映射")));
       var content = h("div.cv-detail-body.col", { style: "gap:14px" }); main.appendChild(content);
       if (S.exportError) content.appendChild(MC.errorBlock(S.exportError, function () { S.exportError = null; S.exportFiles = null; render(); }));
@@ -1491,7 +2178,7 @@
       var plan = S.exportPlan, mapping = plan && plan.mapping || [];
       var parameters = mapping.length ? mapping : (S.paramPage && S.paramPage.items || []).slice(0, 50).map(function (p) { var binding = (S.bindings || []).filter(function (b) { return b.parameter_id === p.parameter_id; })[0]; return { parameter_id: p.parameter_id, name: p.name, locator: binding && binding.locator || "", value: S.draft && S.draft.values && S.draft.values[p.parameter_id] && S.draft.values[p.parameter_id].value }; });
       if (parameters.length) content.appendChild(h("div.table-wrap", h("table.table.cv-export-mapping", h("thead", h("tr", h("th", "参数"), h("th", "本次模板落点"), h("th", "输出值"))), h("tbody", parameters.map(function (p) {
-        var input = h("input.input.input-sm.input-mono", { "aria-label": p.name + "的模板落点", placeholder: "填写精确路径；留空则不输出", disabled: !canWrite() || S.exportBusy, value: S.exportMappings && Object.prototype.hasOwnProperty.call(S.exportMappings, p.parameter_id) ? S.exportMappings[p.parameter_id] : p.locator || "", oninput: function () { if (!S.exportMappings) S.exportMappings = {}; S.exportMappings[p.parameter_id] = input.value; invalidate(); } });
+        var input = h("input.input.input-sm.input-mono", { "aria-label": p.name + "的文件字段", placeholder: "填写精确路径；留空则不输出", disabled: !canWrite() || S.exportBusy, value: S.exportMappings && Object.prototype.hasOwnProperty.call(S.exportMappings, p.parameter_id) ? S.exportMappings[p.parameter_id] : p.locator || "", oninput: function () { if (!S.exportMappings) S.exportMappings = {}; S.exportMappings[p.parameter_id] = input.value; invalidate(); } });
         return h("tr", h("td", h("strong", p.name), h("div.mono.xsmall.muted", p.parameter_id)), h("td", h("div.row", { style: "gap:6px" }, input, h("button.btn.btn-sm", { type: "button", disabled: !canWrite() || S.exportBusy || !/\.(json|xml)$/i.test((S.exportFiles.filter(function (f) { return f.version_id === S.exportFileId; })[0] || {}).name || ""), onclick: function () { var f = S.exportFiles.filter(function (row) { return row.version_id === S.exportFileId; })[0]; if (f) sourceFieldPicker(f, function (path) { input.value = path; input.dispatchEvent(new Event("input")); }); } }, "选字段"))), h("td.mono", p.value_state === "null" ? "null" : p.value === "" ? '""' : p.value == null ? "未设" : String(p.value)));
       })))));
       content.appendChild(message);
@@ -1500,15 +2187,20 @@
         if (plan.mapping_total > 50) content.appendChild(pagerRow(plan.mapping_total, plan.mapping_offset || 0, 50, function (offset) { api.getV3(cfgPath("/export-plans/" + enc(plan.plan_id)), { offset: offset, limit: 50 }).then(function (res) { if (S.exportPlan === plan) { S.exportPlan = res.plan; render(); } }, function (err) { MC.toastError("读取映射失败", err); }); }));
         content.appendChild(h("pre.cv-export-code.mono", plan.preview || ""));
         content.appendChild(h("span.small.muted", "文本预览最多显示 4000 字符；生成和下载使用完整文件。"));
-        var commit = h("button.btn.btn-primary", { type: "button", "data-export-commit": "1", disabled: !canWrite() || S.exportBusy || !plan.applied, onclick: function () {
-          MC.withBusy(commit, function () { return api.requestV3("POST", cfgPath("/export-plans/" + enc(plan.plan_id) + "/commit"), { body: { preview_token: plan.preview_token } }).then(function (res) { if (S.exportPlan !== plan || disposed) return; S.exportArtifact = res.artifact; render(); }, function (err) { MC.toastError("生成文件失败", err); }); });
-        } }, "生成不可变文件"); content.appendChild(commit);
+        var commit = h("button.btn.btn-primary", { type: "button", "data-export-commit": "1", disabled: S.exportBusy || !plan.applied, onclick: function () {
+          var scope = cfgPath(""); S.exportBusy = true; render();
+          api.requestV3("POST", scope + "/export-plans/" + enc(plan.plan_id) + "/commit", { body: { preview_token: plan.preview_token } }).then(function (res) {
+            if (disposed || scope !== cfgPath("") || S.exportPlan !== plan) return;
+            S.exportArtifact = res.artifact;
+            return api.download(root("/exports/" + enc(res.artifact.artifact_id) + "/download")).catch(function (err) { MC.toastError("下载失败，文件已生成，可重试下载", err); });
+          }, function (err) { if (scope === cfgPath("") && !disposed) { S.exportError = err; MC.toastError("导出失败", err); } }).then(function () { if (!disposed && scope === cfgPath("")) { S.exportBusy = false; render(); } });
+        } }, "下载文件"); if (!S.exportArtifact) content.appendChild(commit);
       }
       if (S.exportArtifact) {
         var art = S.exportArtifact;
-        content.appendChild(h("button.btn.btn-primary", { type: "button", "data-export-download": "1", onclick: function () { api.download(root("/exports/" + enc(art.artifact_id) + "/download")); } }, icon("download"), "下载 " + art.filename));
+        content.appendChild(h("button.btn.btn-primary", { type: "button", "data-export-download": "1", onclick: function () { api.download(root("/exports/" + enc(art.artifact_id) + "/download")).catch(function (err) { MC.toastError("下载失败，请重试", err); }); } }, icon("download"), "再次下载文件"));
       }
-      return h("div.cv-export", h("div.cv-export-progress", h("span", "1 配置修订"), icon("chevron-right"), h("span", "2 选择模板"), icon("chevron-right"), h("span", "3 核对映射"), icon("chevron-right"), h("strong", "4 预览并下载")), h("div.cv-export-workflow", source, main));
+      return h("div.cv-export", h("div.cv-export-progress", h("span", "1 选择配置"), icon("chevron-right"), h("span", "2 选择模板"), icon("chevron-right"), h("span", "3 核对字段"), icon("chevron-right"), h("strong", "4 预览并下载")), h("div.cv-export-workflow", source, main));
     }
 
     function historyView() {
@@ -1524,21 +2216,21 @@
       var search = h("input.input", { type: "search", "aria-label": "搜索配置历史", placeholder: "搜索操作、参数、操作人或 IP", value: S.historyQ });
       var button = h("button.btn.btn-sm", { type: "button", onclick: function () { historySeq++; S.historyLoading = false; S.historyQ = search.value.trim(); S.historyOffset = 0; S.historyEvents = null; S.historyError = null; render(); } }, "搜索");
       search.addEventListener("keydown", function (e) { if (e.key === "Enter") button.click(); });
-      var labels = { restore: "从历史修订恢复草稿", export: "生成导出文件", extract: "提取参数", merge: "合并配置", import: "导入参数值", freeze: "确认版本默认", baseline: "发布版本基线", machine: "发布机台修订", create_config: "创建固定配置", create_release: "创建软件版本" };
+      var labels = eventLabels;
       var events = (S.historyEvents || []).map(function (ev) {
         var source = ev.source || {}, actions = h("div.cv-toolbar", { style: "padding-bottom:0" });
         if (source.revision_id) {
           var r = S.revisions.filter(function (item) { return item.id === source.revision_id; })[0];
-          if (r) actions.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { chooseRevision(r, "workbench"); } }, "查看修订"));
+          if (r) actions.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { chooseRevision(r, "workbench"); } }, "查看配置"));
           if (canWrite()) actions.appendChild(h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () {
             var context = operationContext();
             api.requestV3("POST", context.path + "/restore-plans", { body: { revision_id: source.revision_id, request_id: util.uid("restore") } }).then(function (res) {
               if (!context.current()) return;
-              S.selected = res.draft.draft_id; S.tab = "workbench"; S.historyEvents = null; reloadDetail(); MC.toast.success("已生成恢复草稿");
+              S.expectedMachine = null; S.expectedStandard = null; S.selected = res.draft.draft_id; S.tab = "workbench"; S.historyEvents = null; reloadDetail(); MC.toast.success("已生成恢复草稿");
             }, function (err) { MC.toastError("恢复失败", err); });
-          } }, "从该修订恢复"));
+          } }, "从此配置继续编辑"));
         }
-        return h("article.cv-history-event", h("time", util.formatTime(ev.at)), h("div", h("h3", labels[ev.type] || ev.type), h("span.mono.xsmall.muted", ev.event_id || ""),
+        return h("article.cv-history-event", h("time", util.formatTime(ev.at)), h("div", h("h3", labels[ev.type] || "配置操作"),
           h("details.cv-help", h("summary", "操作详情"), h("pre.mono.small", JSON.stringify({ before: ev.before, after: ev.after, source: ev.source, request_id: ev.request_id, undo_of: ev.undo_of }, null, 2))), actions),
           h("div.col.small", h("strong", ev.principal || "—"), h("span.mono.muted", ev.ip || "—")));
       });
@@ -1569,7 +2261,7 @@
       var code = h("input.input.input-mono", { type: "text", placeholder: "MC-001" });
       var name = h("input.input", { type: "text", placeholder: "例如 一号机配置" });
       var F = { code: MC.field({ label: "配置标识", required: true, control: code }), name: MC.field({ label: "配置名称", required: true, control: name }) };
-      configFormModal({ title: "新建固定配置", body: h("div.col", { style: "gap:12px" }, F.code, F.name), footer: function (close) {
+      configFormModal({ title: "新建配置分组", body: h("div.col", { style: "gap:12px" }, F.code, F.name), footer: function (close) {
         var save = h("button.btn.btn-primary", { type: "button" }, "创建");
         save.addEventListener("click", function () {
           MC.withBusy(save, function () {
@@ -1582,58 +2274,35 @@
 
     function createReleaseDialog() {
       var version = h("input.input.input-mono", { type: "text", placeholder: "例如 690" });
-      var predecessor = h("select.select", h("option", { value: "" }, "无前驱版本"), (S.detail.releases || []).map(function (r) { return h("option", { value: r.release_id, selected: r.release_id === S.releaseId }, r.version); }));
+      var predecessor = h("select.select", h("option", { value: "" }, "不指定"), (S.detail.releases || []).map(function (r) { return h("option", { value: r.release_id }, r.version); }));
       var F = { version: MC.field({ label: "软件版本号", required: true, control: version }) };
-      configFormModal({ title: "新建软件版本", body: h("div.col", { style: "gap:12px" }, F.version, MC.field({ label: "前驱软件版本", control: predecessor, help: "只记录版本关系；新版本默认值从空草稿开始。" })), footer: function (close) {
+      configFormModal({ title: "新建软件版本", body: h("div.col", { style: "gap:12px" }, F.version, h("details.cv-help", h("summary", "可选设置"), MC.field({ label: "上一个软件版本", control: predecessor, help: "用于版本关系图，不会自动复制参数。" }))), footer: function (close) {
         var save = h("button.btn.btn-primary", { type: "button" }, "创建");
         save.addEventListener("click", function () {
           MC.withBusy(save, function () {
-            return api.requestV3("POST", cfgPath("/releases"), { body: { version: version.value.trim(), predecessor_id: predecessor.value || null } }).then(function (res) { if (close(true) === false) return; MC.toast.success("已创建版本 " + res.release.version); S.releaseId = res.release.release_id; S.selected = "d0-" + S.releaseId; reloadDetail(); }, function (err) { F.version.setError(MC.errorText(err)); });
+            return api.requestV3("POST", cfgPath("/releases"), { body: { version: version.value.trim(), predecessor_id: predecessor.value || null, initial_mode: "separate" } }).then(function (res) { if (close(true) === false) return; MC.toast.success("已创建版本 " + res.release.version); S.expectedMachine = null; S.expectedStandard = res.release.release_id; S.releaseId = res.release.release_id; S.selected = "d0-" + S.releaseId; S.tab = "workbench"; S.objectRole = "standard"; reloadDetail().then(function () { if (!disposed && S.releaseId === res.release.release_id) routeSelection(true); }); }, function (err) { F.version.setError(MC.errorText(err)); });
           });
         });
         return [h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"), save];
       } });
-    }
-
-    function freezeD0() {
-      var context = operationContext(), did = draftId(), expected = S.draft && S.draft.revision;
-      viewConfirm({ title: "确认版本默认", message: "确认后该版本的 D0 默认值将固化，不可再修改；此操作不下发真实机台。", confirmText: "确认并固化", danger: true }).then(function (ok) {
-        if (!ok || !context.current() || S.dirty || S.savingValues) return;
-        api.requestV3("POST", context.path + "/drafts/" + enc(did) + "/freeze", { body: { request_id: util.uid("freeze"), expected_revision: expected } }).then(function () { if (!context.current()) return; S.historyEvents = null; MC.toast.success("版本默认已固化"); reloadDetail(); }, function (err) { MC.toastError("冻结失败", err); });
-      });
-    }
-
-    function publishNextBaseline() {
-      if (!canWrite()) return;
-      var context = operationContext(), rid = S.releaseId;
-      var existing = release() && release().baseline_draft;
-      if (existing && existing.status === "draft") { S.selected = existing.draft_id; S.tab = "workbench"; reloadDetail(); return; }
-      api.requestV3("POST", context.path + "/releases/" + enc(rid) + "/baseline-drafts", { body: {} }).then(function (res) {
-        if (!context.current()) return;
-        S.selected = res.draft.draft_id; S.tab = "workbench";
-        MC.toast.success("已创建基线草稿"); reloadDetail(); }, function (err) { MC.toastError("创建基线草稿失败", err); });
     }
 
     function machineDialog() {
       var no = h("input.input", { type: "text", placeholder: "例如 MC-001" });
-      var bases = S.revisions.filter(function (r) { return r.status === "published" && r.kind !== "machine"; });
-      var basis = h("select.select", { "aria-label": "机台采用基准" }, bases.map(function (r) { return h("option", { value: r.id, selected: r.id === S.selected }, labelOf(r.release_id) + " · " + r.label); }));
-      var F = { no: MC.field({ label: "机台编号", required: true, control: no }), basis: MC.field({ label: "采用基准", required: true, control: basis }) };
-      configFormModal({ title: "新建机台分支", body: h("div.col", { style: "gap:12px" }, F.no, F.basis), footer: function (close) {
+      var bases = (S.detail.releases || []).map(function (r) { return latestStandard(r.release_id); }).filter(Boolean);
+      var basis = h("select.select", { "aria-label": "机台的软件版本" }, bases.map(function (r) { return h("option", { value: r.id, selected: r.release_id === S.releaseId }, "软件 " + labelOf(r.release_id) + (r.at ? " · " + util.formatTime(r.at) : " · 已保存标准")); }));
+      var F = { no: MC.field({ label: "机台编号", required: true, control: no }), basis: MC.field({ label: "软件版本", required: true, control: basis, help: "采用所选版本最新保存的标准参数。" }) };
+      configFormModal({ title: "新建机台", body: h("div.col", { style: "gap:12px" }, F.no, F.basis), footer: function (close) {
         var save = h("button.btn.btn-primary", { type: "button" }, "创建");
         save.addEventListener("click", function () {
           MC.withBusy(save, function () {
             var source = bases.filter(function (r) { return r.id === basis.value; })[0];
-            if (!source) { F.basis.setError("请先确认一个版本默认或基线"); return; }
-            return api.requestV3("POST", cfgPath("/machine-branches"), { body: { machine_no: no.value.trim(), release_id: source.release_id, base_kind: source.kind === "default" ? "default" : "baseline", base_revision_id: source.id } }).then(function (res) { if (close(true) === false) return; S.selected = res.machine.draft.draft_id; S.releaseId = source.release_id; S.tab = "workbench"; MC.toast.success("机台草稿已创建，发布后才会得到 r1"); reloadDetail(); }, function (err) { (err.detail && err.detail.field === "base_revision_id" ? F.basis : F.no).setError(MC.errorText(err)); });
+            if (!source) { F.basis.setError("请先保存该软件版本的标准参数"); return; }
+            return api.requestV3("POST", cfgPath("/machine-branches"), { body: { machine_no: no.value.trim(), release_id: source.release_id, base_kind: source.kind === "default" ? "default" : "baseline", base_revision_id: source.id } }).then(function (res) { if (close(true) === false) return; S.expectedMachine = res.machine.machine_id; S.expectedStandard = null; S.selected = res.machine.draft.draft_id; S.releaseId = source.release_id; S.tab = "workbench"; MC.toast.success("机台已创建，可以编辑并保存配置"); reloadDetail(); }, function (err) { (err.detail && err.detail.field === "base_revision_id" ? F.basis : F.no).setError(MC.errorText(err)); });
           });
         });
         return [h("button.btn", { type: "button", onclick: function () { close(); } }, "取消"), save];
       } });
-    }
-
-    function publishMachine(m) {
-      api.requestV3("POST", cfgPath("/machines/" + enc(m.machine_id) + "/publish"), { body: { expected_revision: 0 } }).then(function () { MC.toast.success("机台已发布"); reloadDetail(); }, function (err) { MC.toastError("机台发布失败", err); });
     }
 
     var unsub = [MC.bus.on("changed:settings", function () { load(S.cid); })];
@@ -1641,21 +2310,32 @@
     return {
       el: el, title: "配置管理", icon: "list",
       update: function (next) {
-        var nextSurface = next && (next.arg || (next.query || {}).surface) || "configs";
+        var nextSurface = next && (next.arg || (next.query || {}).surface) || (next && next.query && next.query.config ? "configs" : "files");
         if (["configs", "files", "records"].indexOf(nextSurface) < 0) nextSurface = "configs";
-        confirmDiscard(function () {
+        var queryNow = next && next.query || {}, sync = S.internalRoute;
+        S.internalRoute = null;
+        var ownNavigation = sync && nextSurface === "configs" && queryNow.config === S.cid && sync.scope === cfgPath("") &&
+          (queryNow.tab || "versions") === sync.tab && (queryNow.revision || queryNow.draft || null) === sync.selected;
+        function applyRoute() {
+          if (!ownNavigation) dialogs.slice().forEach(function (dialog) { dialog.close(); });
           if (nextSurface !== surface) { surface = nextSurface; catalogPage.seq++; catalogPage.loaded = ""; catalogPage.items = []; catalogPage.total = 0; catalogPage.query = ""; catalogPage.offset = 0; }
           var query = next && next.query || {}, changed = query.config && query.config !== S.cid;
           S.opened = !!query.config;
-          if (changed) { S.contextEpoch++; clearConfigData(); S.cid = query.config; S.selected = query.revision || query.draft || null; S.releaseId = query.release || null; S.tab = query.tab || "versions"; load(S.cid); }
+          if (changed) { S.contextEpoch++; clearConfigData(); S.cid = query.config; S.expectedMachine = query.machine || null; S.expectedStandard = query.standard || null; S.objectRole = query.role || null; S.selected = query.revision || query.draft || null; S.releaseId = query.release || query.standard || null; S.tab = query.tab || (query.machine || query.standard ? "workbench" : "versions"); load(S.cid); }
           else if (query.revision || query.draft || query.release) {
             var id = query.revision || query.draft || ("d0-" + query.release), target = S.revisions.filter(function (r) { return r.id === id; })[0];
-            if (target && target.id !== S.selected) chooseRevision(target, query.tab); else render();
-          } else render();
-        });
+            S.expectedMachine = query.machine || null; S.expectedStandard = query.standard || null;
+            if (!validRecord(target)) { S.missingRevision = id; render(); return; }
+            S.missingRevision = null;
+            S.objectRole = query.role || null;
+            if (target && target.id !== S.selected) chooseRevision(target, query.tab || "workbench"); else { S.tab = query.tab || "workbench"; render(); }
+          } else { S.missingRevision = null; S.tab = query.tab || "versions"; render(); }
+        }
+        if (ownNavigation) applyRoute(); else confirmDiscard(applyRoute);
       },
-      isDirty: function () { return S.dirty || S.exportDirty || formDrafts.some(function (form) { return form.dirty; }); },
-      destroy: function () { disposed = true; dialogs.slice().forEach(function (modal) { modal.close(); }); formDrafts = []; catalogPage.seq++; if (S.paramTree) S.paramTree.destroy(); unsub.forEach(function (f) { f(); }); },
+      confirmLeave: function () { return new Promise(function (resolve) { confirmDiscard(function () { resolve(true); }, function () { resolve(false); }); }); },
+      isDirty: function () { return S.dirty || S.savingValues || S.discarding || S.exportDirty || formDrafts.some(function (form) { return form.dirty; }); },
+      destroy: function () { disposed = true; if (activeMenu && activeMenu.el.isConnected) MC.closePopover(); dialogs.slice().forEach(function (modal) { modal.close(); }); formDrafts = []; catalogPage.seq++; if (S.paramTree) S.paramTree.destroy(); unsub.forEach(function (f) { f(); }); },
     };
   };
 })(window);

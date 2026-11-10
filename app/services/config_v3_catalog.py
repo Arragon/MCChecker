@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import fsutil, locks, storage
 from ..core.errors import FILE_EXISTS, INVALID_INPUT, LIFECYCLE_BLOCKED, NOT_FOUND, REVISION_CONFLICT, AppError
+from . import file_versions
 
 SCHEMA_VERSION = 1
 _CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -72,9 +73,11 @@ def _public_config(config: Dict[str, Any], detail: bool = False) -> Dict[str, An
         "code": config["code"],
         "name": config["name"],
         "description": config.get("description", ""),
+        "file_id": config.get("file_id"),
         "created_at": config["created_at"],
         "updated_at": config.get("updated_at", config["created_at"]),
         "release_count": len(releases),
+        "recent_versions": [r["version"] for r in sorted(releases, key=lambda r: r["order"], reverse=True)[:3]],
         "parameter_count": len((config.get("definition", {}).get("current") or {}).get("parameters") or {}),
         "machine_count": len(config.get("machines") or {}),
         "latest_release": ({"version": latest["version"], "frozen": bool(latest.get("default_revision_id"))}
@@ -102,6 +105,7 @@ def _public_release(release: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": release["created_at"],
         "definition_revision": int(release.get("definition_revision", 0)),
         "default_revision_id": release.get("default_revision_id"),
+        "initial_revision_id": initial_revision_id(release),
         "default_frozen_at": release.get("default_frozen_at"),
         "d0": copy.deepcopy(release["d0"]),
         "baseline_ids": list(release.get("baseline_ids") or []),
@@ -109,6 +113,14 @@ def _public_release(release: Dict[str, Any]) -> Dict[str, Any]:
         "baseline_draft": {key: value for key, value in (release.get("baseline_draft") or {}).items()
                            if key in {"draft_id", "status", "revision", "source_revision_id", "created_at"}},
     }
+
+
+def initial_revision_id(release: Dict[str, Any]) -> Optional[str]:
+    # Legacy D0 was explicitly the software default. V3.2 manual standards have
+    # no software-provided initial snapshot unless one is explicitly recorded.
+    if release.get("initial_mode") == "separate":
+        return release.get("initial_revision_id")
+    return release.get("default_revision_id")
 
 
 def list_configs(profile_id: str) -> List[Dict[str, Any]]:
@@ -123,7 +135,13 @@ def get_config(profile_id: str, config_id: str) -> Dict[str, Any]:
     row = doc["configs"].get(str(config_id))
     if row is None:
         raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
-    return _public_config(row, detail=True)
+    result = _public_config(row, detail=True)
+    if row.get("file_id"):
+        with storage.use_profile(profile_id):
+            resource = file_versions.find_resource(profile_id, row["file_id"])
+        result["file"] = ({key: resource[key] for key in ("file_id", "name", "format", "version_id")}
+                          if resource else {"file_id": row["file_id"], "missing": True})
+    return result
 
 
 def create_config(profile_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,6 +152,9 @@ def create_config(profile_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         doc = _load(profile_id)
         if any(str(row.get("code")) == code for row in doc["configs"].values()):
             raise AppError(FILE_EXISTS, "同一工作区/机型已存在相同配置标识", field="code")
+        file_id = payload.get("file_id")
+        if file_id is not None:
+            _validate_file_link(profile_id, doc, file_id)
         cid = "cfg-" + uuid.uuid4().hex[:12]
         now = _now()
         doc["configs"][cid] = {
@@ -145,8 +166,39 @@ def create_config(profile_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "updated_at": now,
             "releases": {},
         }
+        if file_id is not None:
+            doc["configs"][cid]["file_id"] = file_id
         _save(profile_id, doc)
         return _public_config(doc["configs"][cid], detail=True)
+
+
+def _validate_file_link(profile_id: str, doc: Dict[str, Any], file_id: str) -> None:
+    if not isinstance(file_id, str) or not file_id.strip():
+        raise AppError(INVALID_INPUT, "请选择配置文件", field="file_id")
+    if file_versions.find_resource(profile_id, file_id) is None:
+        raise AppError(NOT_FOUND, "配置文件不存在或不属于当前工作区和机型", field="file_id")
+    if any(row.get("file_id") == file_id for row in doc["configs"].values()):
+        raise AppError(REVISION_CONFLICT, "此文件已有配置管理记录", field="file_id")
+
+
+def associate_file(profile_id: str, config_id: str, file_id: str) -> Tuple[Dict[str, Any], bool]:
+    """Attach a legacy configuration without changing any saved record identity."""
+    if not isinstance(file_id, str) or not file_id.strip():
+        raise AppError(INVALID_INPUT, "请选择配置文件", field="file_id")
+    with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
+        doc = _load(profile_id)
+        config = doc["configs"].get(config_id)
+        if config is None:
+            raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
+        if config.get("file_id") == file_id:
+            return _public_config(config, detail=True), False
+        if config.get("file_id"):
+            raise AppError(REVISION_CONFLICT, "此配置已属于其他文件，请从该文件进入", field="file_id")
+        _validate_file_link(profile_id, doc, file_id)
+        config["file_id"] = file_id
+        config["updated_at"] = _now()
+        _save(profile_id, doc)
+        return _public_config(config, detail=True), True
 
 
 def list_releases(profile_id: str, config_id: str) -> List[Dict[str, Any]]:
@@ -159,6 +211,9 @@ def create_release(profile_id: str, config_id: str, payload: Dict[str, Any]) -> 
     if not version or len(version) > 64 or _CONTROL_RE.search(version):
         raise AppError(INVALID_INPUT, "版本号需为 1-64 个字符", field="version")
     predecessor = str(payload.get("predecessor_id") or "").strip() or None
+    initial_mode = payload.get("initial_mode", "legacy")
+    if initial_mode not in ("legacy", "separate"):
+        raise AppError(INVALID_INPUT, "不支持的初始参数来源方式", field="initial_mode")
     order_raw = payload.get("order")
     with locks.write_gate.write(), storage.use_profile(profile_id), storage.profile_write(profile_id):
         doc = _load(profile_id)
@@ -192,6 +247,8 @@ def create_release(profile_id: str, config_id: str, payload: Dict[str, Any]) -> 
             "baseline_ids": [],
             "merge_parent_ids": [],
         }
+        if initial_mode == "separate":
+            releases[rid]["initial_mode"] = "separate"
         config["updated_at"] = now
         _save(profile_id, doc)
         return _public_release(releases[rid])
@@ -271,7 +328,36 @@ def _find_parameter(config: Dict[str, Any], parameter_id: str) -> Optional[Dict[
     return (_definition(config)["current"].get("parameters") or {}).get(str(parameter_id))
 
 
-def _parameter_definition(config: Dict[str, Any], release_id: str = "") -> Dict[str, Any]:
+def configuration_record(config: Dict[str, Any], record_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    releases = config.get("releases") or {}
+    for release in releases.values():
+        if record_id == "d0-" + release["release_id"]:
+            d0 = release["d0"]
+            return release, {"values": d0.get("frozen_snapshot") if d0.get("frozen") else d0.get("values"),
+                             "definition_revision": release["definition_revision"]}
+        draft = release.get("baseline_draft") or {}
+        if draft.get("draft_id") == record_id and draft.get("status") == "draft":
+            return release, draft
+    baseline = ((config.get("main_branch") or {}).get("baselines") or {}).get(record_id)
+    if baseline:
+        return releases[baseline["release_id"]], baseline
+    for machine in (config.get("machines") or {}).values():
+        saved = (machine.get("revisions") or {}).get(record_id)
+        if saved:
+            return releases[saved["release_id"]], saved
+        draft = machine.get("draft") or {}
+        if draft.get("draft_id") == record_id and draft.get("status") == "draft":
+            return releases[machine["release_id"]], dict(draft, definition_revision=draft.get("definition_revision", releases[machine["release_id"]]["definition_revision"]))
+    raise AppError(NOT_FOUND, "配置记录不存在或不属于当前配置", revision_id=record_id)
+
+
+def _parameter_definition(config: Dict[str, Any], release_id: str = "", revision_id: str = "") -> Dict[str, Any]:
+    if revision_id:
+        release, record = configuration_record(config, revision_id)
+        if release_id and release["release_id"] != release_id:
+            raise AppError(INVALID_INPUT, "配置记录不属于所选软件版本", field="revision_id")
+        revision = int(record.get("definition_revision", release.get("definition_revision", 0)))
+        return next((snap for snap in _definition(config).get("history", []) if snap["revision"] == revision), {"revision": revision, "parameters": {}})
     if not release_id:
         definition = _definition(config)
         return dict(definition["current"], revision=definition["revision"])
@@ -283,14 +369,14 @@ def _parameter_definition(config: Dict[str, Any], release_id: str = "") -> Dict[
 
 
 def list_parameters(
-    profile_id: str, config_id: str, offset: int = 0, limit: Optional[int] = None, release_id: str = ""
+    profile_id: str, config_id: str, offset: int = 0, limit: Optional[int] = None, release_id: str = "", revision_id: str = ""
 ) -> Dict[str, Any]:
     with storage.use_profile(profile_id):
         doc = _load(profile_id)
     config = doc["configs"].get(config_id)
     if config is None:
         raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
-    definition = _parameter_definition(config, release_id)
+    definition = _parameter_definition(config, release_id, revision_id)
     rows = list((definition.get("parameters") or {}).values())
     start = max(0, int(offset))
     size = None if limit is None else max(1, min(int(limit), 500))
@@ -305,7 +391,7 @@ def list_parameters(
 
 
 def parameter_tree(
-    profile_id: str, config_id: str, parent: str = "", offset: int = 0, limit: int = 50, release_id: str = "", recursive: bool = False
+    profile_id: str, config_id: str, parent: str = "", offset: int = 0, limit: int = 50, release_id: str = "", recursive: bool = False, revision_id: str = ""
 ) -> Dict[str, Any]:
     """目录分组树：只返回 `parent` 的直接子目录与当前目录参数页（不建全量树）。"""
     raw_parent = str(parent or "").strip().strip("/")
@@ -320,7 +406,7 @@ def parameter_tree(
     config = doc["configs"].get(config_id)
     if config is None:
         raise AppError(NOT_FOUND, "配置不存在", config_id=config_id)
-    definition = _parameter_definition(config, release_id)
+    definition = _parameter_definition(config, release_id, revision_id)
     depth = len(parent_parts)
     children: Dict[tuple, int] = {}
     children_with_children = set()

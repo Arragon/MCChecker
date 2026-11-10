@@ -169,6 +169,8 @@ def list_runs(
             cursor=cursor,
             query=(query.get("q") or [""])[-1],
             failed_only=failed_only in ("true", "1"),
+            configuration_id=(query.get("configuration_id") or [None])[-1],
+            profile_id=(query.get("profile_id") or [None])[-1],
         )
     )
 

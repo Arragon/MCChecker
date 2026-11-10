@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-11-09T20:27:45Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-65640-56062/data",
+  "server": "http://127.0.0.1:53985",
+  "summary": {
+    "interactive_pass": 1,
+    "interactive_fail": 0,
+    "reachable_pass": 0,
+    "reachable_fail": 0,
+    "api_pass": 0,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "candidate-real-apply",
+      "title": "隔离文件候选真实服务写入草稿",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "合成文件候选经真实 API 预览；并发修改触发 409，重新预览后写入草稿，主分支 head 不变",
+        "V3.2 真实文件内候选：正式2/已有草稿5/来源4同时展示；二次编辑7触发409，核对后写同一草稿；正式保存前仍待处理，保存后移除，D0历史不变"
+      ],
+      "screenshot": null
+    }
+  ]
+}

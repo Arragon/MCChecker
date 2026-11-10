@@ -84,6 +84,9 @@ SPEC_CSP = (
 
 #: (方法, 路由模板) → 该接口的权限档（`authz.ACTIONS` 的键）；`None` = 所有角色可用（§4.2）。
 WRITE_ROUTE_ACTIONS = {
+    ("PUT", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/file"): "config_registry_write",
+    # POST is used for the read-only query body, never to patch parameter values.
+    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/parameter-query"): None,
     ("POST", "/api/v1/p/{pid}/temp"): None,
     ("POST", "/api/v1/p/{pid}/favorites"): None,
     ("PATCH", "/api/v1/p/{pid}/favorites"): None,
@@ -258,11 +261,12 @@ WRITE_ROUTE_ACTIONS = {
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/merge-plans/{plan_id}/commit",
     ): "config_registry_write",
-    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans"): "config_registry_write",
+    # V3.2 visitors can export saved snapshots. Configuration writes stay privileged.
+    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans"): None,
     (
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/export-plans/{plan_id}/commit",
-    ): "config_registry_write",
+    ): None,
     (
         "POST",
         "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/restore-plans",
@@ -334,6 +338,8 @@ WRITE_ROUTE_ACTIONS = {
     # M7-09/M7-10：交付登记与回读核验属于"交付这个动作"，与生成产物同一个键
     ("POST", "/api/v1/p/{pid}/config/deliveries"): "config_artifact_generate",
     ("POST", "/api/v1/p/{pid}/config/artifacts/{aid}/verifications"): "config_artifact_generate",
+    ("POST", "/api/v3/workspaces/{wid}/profiles/{pid}/configs/{cid}/discard-draft"): "config_registry_write",
+
 }
 
 ROUTE_VALUES = {

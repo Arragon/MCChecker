@@ -32,7 +32,7 @@ from app.core.sync_models import (
 )
 from app.services import sync_connections, workspace_context
 
-from . import config_v3_catalog, sync_candidates, sync_catalog, sync_store, sync_status
+from . import config_v3_catalog, sync_candidates, sync_catalog, sync_store, sync_status, sync_config_scope
 
 FILE = "sources.json"
 DEFAULT_DOC: Dict[str, Any] = {"revision": 0, "items": []}
@@ -205,13 +205,14 @@ def list_sources(
     pending = set()
     candidate_cursor = "0"
     while candidate_cursor is not None:
-        candidates = sync_candidates.list_candidates(wid, profile_id=profile_id, state="pending", limit=200, cursor=candidate_cursor)
+        candidates = sync_candidates.list_candidates(wid, profile_id=profile_id, pending_only=True, limit=200, cursor=candidate_cursor)
         pending.update((row["profile_id"], row["source_id"]) for row in candidates["items"])
         candidate_cursor = candidates["next_cursor"]
     needle = str(query or "").strip().casefold()
     rows: List[Dict[str, Any]] = []
     configuration_ids = set()
     release_ids = set()
+    owned_files = {}
     for item in doc["items"]:
         if not isinstance(item, dict):
             raise AppError(INVALID_INPUT, "sources.json 条目损坏", field="sources")
@@ -222,10 +223,14 @@ def list_sources(
         if not deleted:
             if target.get("configuration_id"):
                 configuration_ids.add(target["configuration_id"])
-            if target.get("release_id"):
-                release_ids.add(target["release_id"])
-        if configuration_id and target.get("configuration_id") != configuration_id:
-            continue
+        if configuration_id:
+            pid = item["profile_id"]
+            if pid not in owned_files:
+                owned_files[pid] = sync_config_scope.file_id(wid, pid, configuration_id)
+            if not sync_config_scope.matches(target, configuration_id, owned_files[pid]):
+                continue
+        if not deleted and target.get("release_id"):
+            release_ids.add(target["release_id"])
         if release_id and target.get("release_id") != release_id:
             continue
         if kind and item.get("kind") != kind:

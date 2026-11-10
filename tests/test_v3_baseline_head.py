@@ -165,3 +165,35 @@ def test_concurrent_publish_has_one_winner():
         with ThreadPoolExecutor(max_workers=2) as pool:
             statuses = sorted(pool.map(fire, ["a", "b"]))
         assert statuses == [200, 409], statuses
+
+
+def test_standard_draft_uses_latest_saved_standard_of_its_own_release():
+    seed_roles("release-standard")
+    with make_server() as server:
+        wid = _create(server, "Standards")
+        cid = _config(server, wid)
+        pid = _param(server, wid, cid, "Pulse")
+        releases = [_release(server, wid, cid, version) for version in ("690", "691", "692")]
+        for rid, value in zip(releases, ("10", "20", "30")):
+            assert _d0_patch(server, wid, cid, "d0-" + rid, pid, value)[0] == 200
+            assert _freeze(server, wid, cid, "d0-" + rid)[0] == 200
+
+        # Publish 690, then 691, so the global head belongs to another release.
+        saved = []
+        for rid, value in zip(releases, ("11", "21")):
+            draft = _new_baseline(server, wid, cid, rid)[2]["draft"]
+            assert _patch_baseline(server, wid, cid, draft["draft_id"], pid, value)[0] == 200
+            status, _, result = _publish(server, wid, cid, draft["draft_id"], "save-" + rid)
+            assert status == 200, result
+            saved.append(result["baseline"]["baseline_id"])
+
+        status, _, result = _new_baseline(server, wid, cid, releases[0])
+        assert status == 201, result
+        assert result["draft"]["source_revision_id"] == saved[0]
+        assert result["draft"]["values"][pid]["value"] == "11"
+
+        # A release without a saved standard starts at its own initial snapshot.
+        status, _, result = _new_baseline(server, wid, cid, releases[2])
+        assert status == 201, result
+        assert result["draft"]["values"][pid]["value"] == "30"
+        assert result["draft"]["source_revision_id"] not in saved

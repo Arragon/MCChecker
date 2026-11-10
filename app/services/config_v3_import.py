@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import threading
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ..core import config_mapping, locks, storage
-from ..core.errors import INVALID_INPUT, NOT_FOUND, PLAN_STALE, SOURCE_CHANGED, AppError
+from ..core import config_mapping, config_values, locks, storage
+from ..core.errors import IDEMPOTENCY_MISMATCH, INVALID_INPUT, NOT_FOUND, PLAN_STALE, REVISION_CONFLICT, SOURCE_CHANGED, AppError
 from . import (
     config_v3_catalog,
+    config_v3_baselines,
     config_v3_extract,
     config_v3_parse,
     config_v3_provenance,
@@ -57,6 +59,25 @@ def _binding_index(release: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 def _definition_map(config: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
     from . import config_v3_drafts
     return (config_v3_drafts._definition_for(release, config).get("parameters") or {})
+
+
+def _target(release: Dict[str, Any]) -> Dict[str, Any]:
+    d0 = release.get("d0") or {}
+    if not d0.get("frozen"):
+        return {"draft_id": "d0-" + release["release_id"], "revision": int(d0.get("revision", 0))}
+    draft = release.get("baseline_draft") or {}
+    return {"draft_id": draft.get("draft_id"), "revision": int(draft.get("revision", 0))} if draft.get("status") == "draft" else {"draft_id": None, "revision": 0}
+
+
+def _value_error(row: Dict[str, Any], definition: Dict[str, Any]) -> str:
+    try:
+        patch = {"membership": "included", "enabled": True, "value_state": "null" if row["value_kind"] == "null" else "present"}
+        if row["value_kind"] != "null":
+            patch["value"] = row["value"]
+        config_values.apply_member_patch(None, patch, definition.get("type", ""))
+        return ""
+    except AppError as err:
+        return str(err.message)
 
 
 def create(wid: str, pid: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -106,7 +127,7 @@ def create(wid: str, pid: str, cid: str, payload: Dict[str, Any]) -> Dict[str, A
         if not parameter_id:
             candidate = by_name_dir.get((leaf, tuple(directory)))
             if candidate:
-                candidates.append({"parameter_id": candidate, "name": leaf, "directory": directory})
+                candidates.append({"parameter_id": candidate, "name": leaf, "directory": directory, "type": definitions[candidate].get("type", "")})
         items.append({
             "row_id": "vi-" + hashlib.sha256(canonical.encode()).hexdigest()[:16],
             "parameter_id": parameter_id,
@@ -119,6 +140,8 @@ def create(wid: str, pid: str, cid: str, payload: Dict[str, Any]) -> Dict[str, A
             "status": "bound" if parameter_id else "unbound",
             "candidates": candidates,
             "decision": "import" if parameter_id else "skip",
+            "data_type": definitions.get(parameter_id, {}).get("type", ""),
+            "error": _value_error({"value_kind": _value_kind(row), "value": row.get("value")}, definitions[parameter_id]) if parameter_id else "",
         })
     plan = {
         "plan_id": "vp-" + uuid.uuid4().hex[:16],
@@ -126,6 +149,7 @@ def create(wid: str, pid: str, cid: str, payload: Dict[str, Any]) -> Dict[str, A
         "profile_id": pid,
         "config_id": cid,
         "release_id": release_id,
+        "target": _target(release),
         "source": {
             "name": name, "file_id": identified["file_id"], "version_id": identified["version_id"],
             "blob_sha256": identified["blob_sha256"], "version_label": identified.get("version_label"),
@@ -149,6 +173,7 @@ def _public(plan: Dict[str, Any], items: Optional[List[Dict[str, Any]]] = None) 
         "plan_id": plan["plan_id"],
         "config_id": plan["config_id"],
         "release_id": plan["release_id"],
+        "target": copy.deepcopy(plan.get("target")),
         "source": copy.deepcopy(plan["source"]),
         "total": len(plan["items"]),
         "bound": sum(1 for row in plan["items"] if row["status"] == "bound"),
@@ -207,7 +232,16 @@ def decisions(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any
 
 def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     plan = _get(wid, pid, cid, plan_id)
+    request_id = payload.get("request_id")
+    if request_id is not None and (not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 100):
+        raise AppError(INVALID_INPUT, "request_id 需为 1-100 个字符", field="request_id")
     with _LOCK:
+        fingerprint = hashlib.sha256(json.dumps({"payload": payload, "decisions": plan["decisions"]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        receipt = plan.setdefault("commit_receipts", {}).get(request_id) if request_id else None
+        if receipt:
+            if receipt["fingerprint"] != fingerprint:
+                raise AppError(IDEMPOTENCY_MISMATCH, "同一次导入的内容已变化，请重新核对", field="request_id")
+            return dict(copy.deepcopy(receipt["result"]), replayed=True)
         with storage.use_profile(pid):
             state = config_v3_extract.current_state(pid, cid, plan["source"])
         if (state["missing"] or state["version_id"] != plan["source"]["version_id"]
@@ -229,6 +263,13 @@ def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) 
             release = (config.get("releases") or {}).get(plan["release_id"])
             if release is None:
                 raise AppError(NOT_FOUND, "软件版本不存在")
+            if "expected_revision" in payload or "expected_draft_id" in payload:
+                expected = payload.get("expected_revision")
+                if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0 or "expected_draft_id" not in payload:
+                    raise AppError(INVALID_INPUT, "请提供核对时的草稿与版本", field="expected_revision")
+                reviewed = {"draft_id": payload["expected_draft_id"], "revision": expected}
+                if reviewed != plan.get("target") or reviewed != _target(release):
+                    raise AppError(REVISION_CONFLICT, "配置草稿已变化，请重新预览后导入", current=_target(release))
             definitions = _definition_map(config, release)
             applied = 0
             created = 0
@@ -242,6 +283,9 @@ def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) 
                     created += 1
                 if parameter_id not in definitions and decision != "create":
                     continue
+                error = _value_error(row, definitions.get(parameter_id) or {})
+                if error:
+                    raise AppError(INVALID_INPUT, "文件值不符合参数类型：" + error, row_id=row["row_id"], parameter_id=parameter_id)
                 target = row
                 if not _apply_value(release, config, pid, parameter_id, target):
                     continue
@@ -251,13 +295,18 @@ def commit(wid: str, pid: str, cid: str, plan_id: str, payload: Dict[str, Any]) 
             if created:
                 _snapshot(config)
             config_v3_catalog._save(pid, doc)
-            return {
+            target = _target(release)
+            result = {
                 "plan_id": plan_id,
                 "applied": applied,
                 "created": created,
                 "release_id": plan["release_id"],
                 "d0_frozen": bool((release.get("d0") or {}).get("frozen")),
+                "draft_id": target["draft_id"], "draft_revision": target["revision"],
             }
+            if request_id:
+                plan["commit_receipts"][request_id] = {"fingerprint": fingerprint, "result": copy.deepcopy(result)}
+            return result
 
 
 def _create_parameter(config: Dict[str, Any], definition: Dict[str, Any]) -> str:
@@ -288,20 +337,7 @@ def _apply_value(release: Dict[str, Any], config: Dict[str, Any], pid: str,
         return True
     draft = release.get("baseline_draft")
     if not isinstance(draft, dict) or draft.get("status") != "draft":
-        source = config.get("main_branch", {}).get("head_id")
-        base_values = {}
-        branch = config.get("main_branch") or {}
-        if source and source in (branch.get("baselines") or {}):
-            base_values = copy.deepcopy(branch["baselines"][source].get("values") or {})
-        else:
-            base_values = copy.deepcopy(d0.get("frozen_snapshot") or d0.get("values") or {})
-        draft = {
-            "draft_id": "bd-" + uuid.uuid4().hex[:12], "release_id": release["release_id"],
-            "status": "draft", "revision": 0, "values": base_values,
-            "source_revision_id": source or release.get("default_revision_id"),
-            "definition_revision": int(release.get("definition_revision", 0)),
-            "created_at": _now(), "receipts": {},
-        }
+        draft = config_v3_baselines.draft_from_standard(config, release)
         release["baseline_draft"] = draft
     draft.setdefault("values", {})[parameter_id] = {
         "membership": "included", "enabled": True,

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from app.core.errors import INVALID_INPUT, NOT_FOUND, PLAN_STALE, REVISION_CONFLICT, SOURCE_CHANGED, AppError
 from app.core.sync_models import validate_enum, validate_id, validate_workspace_id
 
-from . import sync_bindings, sync_connections, sync_policy, sync_sources, sync_store
+from . import sync_bindings, sync_connections, sync_policy, sync_sources, sync_store, sync_config_scope
 
 FILE = "previews.json"
 DEFAULT_DOC: Dict[str, Any] = {"revision": 0, "items": {}}
@@ -102,6 +102,7 @@ def _scope_sources(payload: Dict[str, Any], workspace_id: str) -> List[Dict[str,
 
     selected_set = set(selected)
     failed_set = set(failed)
+    owned_file = sync_config_scope.file_id(workspace_id, profile_id, configuration_id) if scope == "current_configuration" else None
     result = []
     for source in sources:
         if source.get("deleted"):
@@ -114,7 +115,7 @@ def _scope_sources(payload: Dict[str, Any], workspace_id: str) -> List[Dict[str,
             target = source.get("target") or {}
             if source.get("profile_id") != profile_id:
                 continue
-            if configuration_id and target.get("configuration_id") != configuration_id:
+            if configuration_id and not sync_config_scope.matches(target, configuration_id, owned_file):
                 continue
         if scope == "selected_sources" and source["source_id"] not in selected_set:
             continue

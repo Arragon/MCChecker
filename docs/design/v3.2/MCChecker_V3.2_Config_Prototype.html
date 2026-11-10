@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="description" content="MCChecker V3.2 配置管理交互原型：版本演进、参数编辑、草稿、更新比较与导出。所有数据为示例。">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>配置管理 · MCChecker V3.2</title>
+<style>:root{color-scheme:light;--bg:#f5f7fa;--surface:#fff;--subtle:#f8fafc;--line:#e3e8ef;--line-strong:#cdd5df;--text:#182230;--muted:#596779;--faint:#697586;--blue:#225ce0;--blue-hover:#194ac0;--blue-soft:#edf3ff;--green:#15704a;--green-soft:#edf8f1;--amber:#995a10;--amber-soft:#fff7e8;--red:#b42318;--red-soft:#fff1f0;--r:8px;--shadow:0 18px 64px rgb(16 24 40 / .17);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}body{margin:0;color:var(--text);background:var(--bg)}button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.48}button,a{touch-action:manipulation}button{color:inherit}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:3px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--blue);outline-offset:3px}::selection{background:#cfe0ff;color:#132d65}input,textarea{caret-color:var(--blue)}input::placeholder,textarea::placeholder{color:var(--faint)}[hidden]{display:none!important}.icon{width:18px;height:18px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:middle}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.small{font-size:12px}.strong{font-weight:600}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.row{display:flex;align-items:center;gap:8px}.wrap{flex-wrap:wrap}.spread{justify-content:space-between}.grow{flex:1;min-width:0}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sep{width:1px;height:18px;background:var(--line);flex:none}.nowrap{white-space:nowrap}.num{font-variant-numeric:tabular-nums}
+#app{height:100dvh;display:grid;grid-template-rows:56px minmax(0,1fr);overflow:hidden}.topbar{display:flex;align-items:center;gap:22px;padding:0 22px 0 20px;background:var(--surface);border-bottom:1px solid var(--line);z-index:4}.brand{display:flex;align-items:center;gap:10px;font-weight:680;font-size:17px;letter-spacing:-.35px;min-width:182px}.brand-mark{background:#214fc5;color:white;width:28px;height:28px;display:grid;place-items:center;border-radius:7px;font-size:10px;font-weight:750;letter-spacing:-.2px}.context-control{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted)}.context-control select{border:0;font-size:13px;max-width:160px;padding:6px 22px 6px 4px;background:transparent;font-weight:550;color:var(--text);min-height:34px}.user{display:flex;align-items:center;gap:9px;font-size:12px}.avatar{width:28px;height:28px;display:grid;place-items:center;border:1px solid #d9e2f0;border-radius:50%;color:#486182;background:#f1f5fa;font-size:11px}.preview-button{padding:3px 8px;min-height:26px;background:var(--subtle);border:1px solid var(--line);border-radius:5px;font-size:11px;color:var(--muted)}.shell{display:grid;grid-template-columns:208px minmax(0,1fr);min-height:0}.sidebar{display:flex;flex-direction:column;gap:3px;background:#f8fafc;border-right:1px solid var(--line);padding:18px 12px 12px;overflow:auto}.navitem{width:100%;border:0;background:transparent;border-radius:6px;display:flex;align-items:center;gap:10px;padding:10px 12px;text-align:left;font-size:13px;color:#536174;min-height:39px}.navitem.active{background:#eaf0fd;color:#2256cc;font-weight:600}.navitem:not(:disabled):hover{background:#edf1f7}.navitem.active:hover{background:#e4edff}.navitem:disabled{opacity:.75;cursor:default}.side-heading{display:flex;justify-content:space-between;align-items:center;padding:26px 12px 8px;font-size:11px;color:var(--muted)}.sidefile{display:flex;align-items:center;gap:9px;text-align:left;border:0;border-radius:6px;background:transparent;padding:10px 9px;font-size:12px;min-width:0}.sidefile .icon{width:16px;height:16px;color:#6b7c94}.sidefile.selected{background:#fff;box-shadow:0 1px 3px rgb(16 24 40 / .04);font-weight:600;color:#294f99}.sidefile:hover{background:#eef2f6}.sidefoot{margin-top:auto;padding:20px 10px 2px;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}.sidefoot button{border:0;background:transparent;padding:4px;color:var(--muted);font-size:11px}.sidebar .count{font-size:10px;color:var(--muted)}main{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}.breadcrumbs{height:42px;padding:0 28px;display:flex;align-items:center;gap:9px;color:var(--muted);font-size:12px;flex:none;border-bottom:1px solid var(--line);background:#fcfdfe}.breadcrumbs .icon{height:14px;width:14px;color:#7a899c}.breadcrumbs a{color:var(--muted)}.breadcrumbs .current{color:var(--text);font-weight:500}.page{padding:23px 28px 20px;display:flex;flex-direction:column;gap:18px;flex:1;min-height:0;overflow:hidden}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex:none}.page-heading h1{font-size:22px;line-height:1.4;letter-spacing:-.4px;margin:0;font-weight:650;overflow-wrap:anywhere}.page-heading p{margin:5px 0 0;font-size:12px;color:var(--muted)}.heading-with-icon{display:flex;align-items:center;gap:12px;min-width:0}.filetype{height:40px;width:36px;border:1px solid #dce5ef;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;color:#576c8b;background:white;flex:none}.filetype .icon{width:17px;height:17px}.filetype span{font-size:7px;font-weight:750;letter-spacing:.4px}.filetype.xml{color:#875611;border-color:#eaddc7;background:#fffbf4}.filetype.json{color:#3e658d;border-color:#d8e5f0;background:#f7fbff}.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:#364152;min-height:34px;padding:6px 12px;font-size:12px;font-weight:550;line-height:1.5;white-space:nowrap}.btn:hover:not(:disabled){background:#f3f6fa;border-color:#aebacc}.btn:active:not(:disabled){background:#eaf0f8}.btn.primary{background:var(--blue);border-color:var(--blue);color:white}.btn.primary:hover:not(:disabled){background:var(--blue-hover);border-color:var(--blue-hover)}.btn.danger{background:#fff;color:var(--red);border-color:#f0c4be}.btn.text{border:0;background:transparent;color:var(--blue);padding:5px 6px;min-height:28px}.btn.text:hover{background:var(--blue-soft)}.btn.quiet{border-color:transparent;background:transparent;color:var(--muted)}.btn.icon-only{width:32px;padding:6px;min-height:32px}.btn.icon-only .icon{width:16px;height:16px}.btn.small{font-size:11px;min-height:28px;padding:4px 8px}.pill{display:inline-flex;align-items:center;gap:5px;border:1px solid transparent;border-radius:5px;padding:2px 7px;font-size:11px;line-height:1.6;white-space:nowrap;color:#596779;background:#f0f3f7;font-weight:500}.pill .dot{width:5px;height:5px;border-radius:50%;background:currentColor}.pill.blue{background:var(--blue-soft);color:#2357c4}.pill.amber{background:var(--amber-soft);color:var(--amber)}.pill.green{background:var(--green-soft);color:var(--green)}.pill.red{background:var(--red-soft);color:var(--red)}.tabs{display:flex;gap:25px;border-bottom:1px solid var(--line);flex:none;min-height:39px;overflow:auto;scrollbar-width:thin}.tabs button{padding:0 0 12px;border:0;border-bottom:2px solid transparent;color:var(--muted);background:transparent;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap}.tabs button.active{border-bottom-color:var(--blue);font-weight:600;color:var(--blue)}.tabs .tabnum{font-size:10px;line-height:1.2;padding:2px 5px;background:#e8edf3;color:#58687a;border-radius:4px}.tabs .active .tabnum{background:#dce8ff;color:#2256cc}.tabs .tabnum.attention{background:#ffedc9;color:#94580b}.workspace{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}.toolbar{padding:12px 16px;display:flex;align-items:center;gap:10px;flex:none;border-bottom:1px solid var(--line);min-height:57px}.toolbar.clean{border-bottom:0;padding:0}.toolbar .right{margin-left:auto;display:flex;align-items:center;gap:8px}.searchbox{display:flex;align-items:center;gap:8px;border:1px solid var(--line-strong);border-radius:6px;background:#fff;padding:0 10px;min-height:34px;width:262px;min-width:0}.searchbox .icon{color:var(--faint);width:16px;height:16px}.searchbox:focus-within{outline:2px solid #b4ccff;outline-offset:1px;border-color:#739bed}.searchbox input{border:0;background:transparent;padding:6px 0;outline:none;min-height:32px;width:100%;font-size:12px}.searchbox input:focus-visible{outline:none}.searchbox .key{font-size:10px;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--faint)}input,select,textarea{min-height:34px;background:white;border:1px solid var(--line-strong);border-radius:5px;padding:6px 9px;color:var(--text);max-width:100%;min-width:0;font-size:13px}input[type=checkbox]{width:15px;height:15px;min-height:0;accent-color:var(--blue)}select{cursor:pointer}textarea{resize:vertical;min-height:72px;line-height:1.6}.filterselect{font-size:12px;min-height:34px}.segmented{display:flex;gap:2px;padding:3px;border:1px solid var(--line);background:#f6f8fb;border-radius:6px}.segmented button{border:0;background:transparent;color:var(--muted);border-radius:4px;font-size:11px;display:flex;align-items:center;justify-content:center;gap:5px;padding:4px 9px;min-height:26px;white-space:nowrap}.segmented button.active{background:white;color:#244c94;box-shadow:0 1px 4px rgb(16 24 40 / .09);font-weight:600}.segmented .icon{width:14px;height:14px}.scroll{overflow:auto;flex:1;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c5ced9 transparent}.table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;text-align:left}.table th{font-size:11px;font-weight:550;color:var(--muted);background:#f8fafc;border-bottom:1px solid var(--line);padding:11px 16px;position:sticky;top:0;z-index:2;white-space:nowrap}.table td{padding:13px 16px;border-bottom:1px solid #edf0f4;vertical-align:middle}.table tbody:last-child tr:last-child td{border-bottom:0}.table tbody tr:hover td{background:#fafcfe}.table td.maincell{font-size:13px;font-weight:550}.cell-sub{display:block;color:var(--muted);font-size:11px;font-weight:400;margin-top:3px}.table td .link{font-size:inherit;font-weight:inherit;background:none;border:0;padding:0;color:#294d86;text-align:left}.table td .link:hover{text-decoration:underline;text-underline-offset:3px}.filetable{min-width:700px}.filetable td{padding-top:17px;padding-bottom:17px}.filetable .filetype{width:29px;height:34px;margin-right:4px}.filetable .row{gap:10px}.filetable .versions{display:flex;gap:5px}.tablefoot{min-height:43px;padding:9px 15px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex:none;font-size:11px;color:var(--muted)}.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:235px;padding:35px;text-align:center;color:var(--muted);font-size:12px;flex:1}.empty .icon{width:30px;height:30px;color:#8998ab}.empty strong{color:#364152;font-size:14px;font-weight:550}.empty p{margin:0;max-width:350px}.empty.compact{min-height:150px}.notice{display:flex;align-items:flex-start;gap:9px;background:#f0f5ff;border:1px solid #dce8ff;color:#2a4f93;font-size:12px;padding:10px 12px;border-radius:6px;flex:none}.notice .icon{width:16px;height:16px;margin-top:1px}.notice.amber{background:#fffaef;border-color:#f1dfb7;color:#855515}.notice.red{background:var(--red-soft);border-color:#f0c9c4;color:#94271c}.notice .btn.text{font-size:11px;min-height:22px;padding:0 3px;color:inherit}.notice p{margin:0}.notice .grow{min-width:0}.notice .row{gap:15px}.inline-status{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}
+/* Version graph and hierarchy share the file and object context. */
+.graph-scroll{position:relative;background:#fcfdff}.graph-canvas{position:relative;min-width:100%;background:#fff;isolation:isolate;transform-origin:0 0}.graph-column{position:absolute;top:0;bottom:0;border-left:1px solid #eaf0f6;background:#fcfdff;z-index:-1}.graph-column:nth-child(even){background:white}.graph-vhead{position:absolute;top:0;height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--line)}.graph-vhead button{font:600 15px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:#2d4c7e;background:transparent;border:0;padding:5px 0}.graph-vhead button:hover{text-decoration:underline;text-underline-offset:4px}.graph-label{position:absolute;left:0;width:120px;display:flex;flex-direction:column;gap:3px;padding:0 18px;font-size:12px;font-weight:550;line-height:1.5;overflow-wrap:anywhere}.graph-label span{color:var(--muted);font-size:10px;font-weight:400}.graph-rule{position:absolute;left:0;right:0;border-bottom:1px solid #f0f3f7;pointer-events:none}.graph-line{fill:none;stroke:#a7b6cc;stroke-width:1.2}.graph-line.source{stroke-dasharray:4 4;stroke:#a8b6c6}.graph-line.saved{stroke:#7293c5;stroke-width:1.5}.graph-node{position:absolute;width:164px;height:53px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:4px;border:1px solid #d7e0eb;background:white;border-radius:6px;padding:8px 11px;text-align:left;z-index:1;box-shadow:0 1px 2px rgb(16 24 40 / .025)}.graph-node strong{font-size:11px;font-weight:600}.graph-node span{font-size:10px;color:var(--muted)}.graph-node:hover{border-color:#8eafe7;background:#f9fbff}.graph-node.current{border-color:#9fbced}.graph-node.initial{background:#f8fafc}.graph-node.draft{background:#fffaf0;border:1px dashed #d5a144}.graph-node.draft strong{color:#8f5b10}.graph-node.historical{background:#f6f8fb}.graph-node .dot{position:absolute;right:10px;top:12px;width:5px;height:5px;border-radius:50%;background:#7c95b7}.graph-node.draft .dot{background:#c28a23}.graph-node:focus-visible{outline-offset:2px}.graphlegend{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.line-sample{display:inline-block;width:18px;border-top:1px solid #7293c5;margin-right:5px;vertical-align:middle}.line-sample.source{border-top-style:dashed;border-color:#8c9fb9}.box-sample{display:inline-block;width:11px;height:8px;border:1px dashed #d5a144;background:#fffaf0;margin-right:5px}.evo-table{min-width:640px;table-layout:fixed}.evo-table th:nth-child(1){width:35%}.evo-table th:nth-child(2){width:25%}.evo-table th:nth-child(3){width:19%}.evo-table td{padding:10px 16px}.evo-table .versionrow td{background:#f7f9fc;border-bottom:1px solid #e5ebf2}.tree-name{display:flex;align-items:center;gap:8px;min-height:26px}.tree-name .disclosure{border:0;background:transparent;width:24px;height:26px;display:grid;place-items:center;padding:0;color:var(--muted);flex:none}.tree-name .disclosure .icon{height:14px;width:14px}.tree-name .vername{font-weight:600!important}.tree-child{padding-left:32px;position:relative}.tree-child::before{content:'';position:absolute;left:10px;top:0;height:14px;width:13px;border-left:1px solid #cfd8e6;border-bottom:1px solid #cfd8e6}.evo-table .tree-child .icon{color:#889ab2;width:15px;height:15px}.evo-table .actions{display:flex;gap:12px;align-items:center}.evo-table .actions button{font-size:11px}.evo-table .count{font-size:10px;color:var(--muted);font-weight:400}
+/* Parameter workbench. */
+.object-heading{align-items:center}.object-heading .identity{display:flex;gap:10px;align-items:center}.object-heading .identity .icon{width:23px;height:23px;color:#7186a2}.object-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-top:5px;flex-wrap:wrap}.object-actions{display:flex;gap:8px;align-items:center;flex:none}.editor{display:grid;grid-template-columns:172px minmax(0,1fr);gap:16px;flex:1;min-height:0;min-width:0}.directory{display:flex;flex-direction:column;gap:4px;overflow:auto;padding:5px 0}.directory-label{font-size:11px;font-weight:550;color:var(--muted);padding:4px 11px 12px}.directory button{border:0;background:transparent;border-radius:6px;padding:9px 11px;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;font-size:12px;color:#536174;min-height:35px}.directory button:hover{background:#edf1f7}.directory button.active{color:#2256cc;background:#eaf0fd;font-weight:550}.directory .dir-name{display:flex;align-items:center;gap:8px}.directory .icon{width:15px;height:15px}.directory .count{font-size:10px;font-weight:400}.directory .dir-note{margin-top:auto;padding:20px 10px 0;color:var(--faint);font-size:11px;display:flex;align-items:center;gap:6px}.parameter-work{gap:0}.parameter-work .toolbar{padding:10px 14px;min-height:54px}.parameter-work .searchbox{width:240px}.filterbar{display:flex;align-items:center;gap:4px;padding:7px 13px;background:white;border-bottom:1px solid var(--line);min-height:40px;flex:none}.filterbar button{border:0;background:transparent;border-radius:5px;padding:4px 9px;color:var(--muted);font-size:11px;white-space:nowrap;min-height:25px}.filterbar button.active{background:#edf3ff;color:#2256cc;font-weight:550}.filterbar button span{margin-left:5px;font-size:10px;color:inherit}.paramtable{min-width:690px;table-layout:fixed}.paramtable th.name-col{width:26%}.paramtable th.value-col{width:17%}.paramtable th.old-col{width:12%}.paramtable th.unit-col{width:8%}.paramtable th.mode-col{width:17%}.paramtable th.field-col{width:24%}.paramtable.editing-table{min-width:830px}.paramtable.editing-table th.name-col{width:24%}.paramtable.editing-table th.field-col{width:20%}.paramtable td{padding:10px 14px;min-height:45px;overflow-wrap:anywhere}.paramtable th{padding:10px 14px}.paramtable tr.changed td{background:#f6f9ff}.paramtable tr.changed td:first-child{box-shadow:inset 2px 0 #8dace9}.paramtable tr.error td{background:#fff7f5}.param-name{display:block;color:#34486a;border:0;background:transparent;font-family:inherit;font-size:12px;font-weight:550;line-height:1.5;padding:0;text-align:left}.param-name:hover{text-decoration:underline;text-underline-offset:3px}.paramtable .field-path{font-size:10px;color:#66758a;word-break:break-word}.paramtable .value-display{font-weight:550;font-size:12px;color:#22304a}.paramtable .old-value{font-size:11px;color:#758195}.paramtable .value-input{width:100%;font-size:12px;min-height:31px;padding:5px 7px;border-color:#d1dcec;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.paramtable .value-input[aria-invalid=true]{border-color:#d6685d}.paramtable .mode-select{width:100%;font-size:11px;min-height:30px;padding:4px 5px}.paramtable .mode-text{font-size:11px;color:#5f6d80}.paramtable .mode-text.custom{color:#376397}.field-error{font-size:10px;color:var(--red);margin-top:4px}.compact .paramtable td{padding-top:7px;padding-bottom:7px}.compact .paramtable .cell-sub{margin-top:1px}.pager{display:flex;align-items:center;gap:6px}.pager .btn{min-height:25px;width:25px;padding:4px}.editbar{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #dce5f3;border-radius:var(--r);padding:11px 15px;flex:none;box-shadow:0 -2px 12px rgb(30 65 110 / .025)}.editbar .icon{color:var(--blue);width:17px;height:17px}.editbar .status{font-size:12px;font-weight:550}.editbar .edit-actions{display:flex;gap:8px;margin-left:auto}.readonly-note{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px}.readonly-note .icon{width:14px;height:14px}.error-banner{flex:none}.loading-row td{padding:16px!important}.skeleton{height:12px;background:#e9eef5;border-radius:3px;max-width:85%;animation:pulse 1.25s ease-in-out infinite}.skeleton.short{max-width:45%}@keyframes pulse{50%{opacity:.5}}.historytable{min-width:720px}.historytable td{vertical-align:top}.historytable .eventicon{width:28px;height:28px;display:grid;place-items:center;color:#6e86a7;background:#f1f5fb;border-radius:6px}.historytable .eventicon .icon{height:14px;width:14px}.historytable .eventtext{font-weight:550;font-size:12px}.historytable .row{align-items:flex-start}.history-snapshot{display:flex;align-items:flex-start;gap:14px;padding:18px 20px;border-bottom:1px solid var(--line)}.history-snapshot:last-child{border-bottom:0}.history-snapshot .record-dot{width:9px;height:9px;border-radius:50%;background:#89a8d3;flex:none;margin-top:5px}.history-snapshot h3{font-size:13px;font-weight:550;margin:0}.history-snapshot p{font-size:12px;color:var(--muted);margin:5px 0 0}.history-snapshot .meta{font-size:11px;color:var(--muted);margin-top:6px}.history-snapshot .btn{margin-left:auto}.sourcecell{display:flex;align-items:flex-start;gap:10px}.sourcecell>.icon{margin-top:3px;color:#6e86a7}.run-state{display:flex;align-items:center;gap:6px}.run-state.running{color:var(--blue)}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.schedule-info{margin-top:5px;font-size:10px;color:var(--muted)}.export-layout{display:grid;grid-template-columns:258px minmax(0,1fr);gap:18px;flex:1;min-height:0}.export-config{display:flex;flex-direction:column;gap:20px;padding:18px;background:white;border:1px solid var(--line);border-radius:8px;align-self:start}.export-config h2{font-size:13px;font-weight:600;margin:0}.export-config .meta{font-size:12px;color:var(--muted)}.code-preview{margin:0;padding:22px;font-size:12px;line-height:1.85;white-space:pre;tab-size:2;color:#34506d;min-width:max-content}.export-head{min-height:48px;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);font-size:12px}.checkbox-label{display:flex;align-items:center;gap:8px;font-size:12px}.content-note{font-size:11px;color:var(--muted)}
+/* Focused dialogs: creation, comparison and save review. */
+dialog{border:0;padding:0;border-radius:12px;box-shadow:var(--shadow);background:white;color:var(--text);width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow:hidden;margin:auto}dialog[open]{display:flex;flex-direction:column}dialog::backdrop{background:rgb(20 32 52 / .36)}dialog.wide{width:min(960px,calc(100vw - 32px))}dialog.medium{width:min(720px,calc(100vw - 32px))}dialog .dialog-head{display:flex;align-items:flex-start;gap:12px;justify-content:space-between;border-bottom:1px solid var(--line);padding:20px 22px 16px;flex:none}dialog h2{font-size:17px;font-weight:650;line-height:1.5;margin:0;letter-spacing:-.2px}dialog .dialog-subtitle{font-size:11px;color:var(--muted);margin:5px 0 0}dialog .dialog-body{padding:20px 22px;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:17px}dialog .dialog-body>*{flex-shrink:0}dialog .dialog-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;flex:none;background:#fcfdfe;flex-wrap:wrap}dialog .dialog-foot:empty{display:none}dialog .dialog-head>.btn{margin-top:-3px;margin-right:-7px}dialog .table-wrap{border:1px solid var(--line);border-radius:6px;overflow:auto;max-height:44dvh}dialog .table{font-size:12px}dialog .table td,dialog .table th{padding:11px 13px}dialog .dialog-body p{margin:0;font-size:13px;line-height:1.75}dialog .fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{display:flex;flex-direction:column;gap:7px;min-width:0}.field>label,.field>.fieldlabel{font-size:12px;font-weight:550;color:#344054}.field .hint{font-size:11px;color:var(--muted);line-height:1.6}.field input,.field select{width:100%}.field .error{color:var(--red);font-size:11px}.field.required>label::after{content:' *';color:var(--red)}.form-error{color:var(--red);font-size:12px;margin:0}.dialog-summary{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.dialog-summary strong{font-size:16px;color:var(--text);margin-right:3px}.dialog-summary .warn strong{color:var(--amber)}.diff-new{color:#176342;background:#eef9f2;padding:2px 5px;border-radius:3px}.diff-old{color:#80615c;background:#faf2ef;padding:2px 5px;border-radius:3px}.diff-choice{min-width:140px;font-size:11px;width:100%;padding:5px 7px}.dialog-steps{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--muted)}.dialog-steps .active{color:var(--blue);font-weight:600}.dialog-steps .icon{width:12px;height:12px}.upload-area{border:1px dashed #b8c9e3;border-radius:8px;background:#f9fbff;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:25px 20px;color:#4a6288}.upload-area>.icon{width:26px;height:26px}.upload-area .file-input{font-size:11px;max-width:300px;background:white}.data-grid{display:grid;grid-template-columns:115px 1fr;gap:12px;font-size:12px;margin:0}.data-grid dt{color:var(--muted)}.data-grid dd{margin:0;overflow-wrap:anywhere}.popover-menu{display:flex;flex-direction:column;gap:4px}.popover-menu button{display:flex;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border:0;border-radius:5px;background:white;text-align:left;font-size:13px}.popover-menu button:hover{background:var(--subtle)}.popover-menu .icon{color:#6f84a0}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:11px 18px;background:#24344d;color:white;border-radius:8px;box-shadow:0 8px 24px rgb(16 24 40 / .18);z-index:50;max-width:calc(100vw - 32px);font-size:12px}.toast .icon{width:16px;height:16px;color:#b9ddca}.kbd{display:inline-block;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:10px;color:var(--muted);background:white}details{font-size:12px}summary{cursor:pointer;color:#526884}details>div{margin-top:12px}.inline-link{color:var(--blue);border:0;padding:0;background:transparent;font-size:inherit}.inline-link:hover{text-decoration:underline}.nothing{padding:32px;color:var(--muted);font-size:12px}
+@media(min-width:1600px){.shell{grid-template-columns:224px minmax(0,1fr)}.brand{min-width:198px}.page{padding:26px 34px}.breadcrumbs{padding:0 34px}.editor{grid-template-columns:188px minmax(0,1fr)}.paramtable td{padding-top:12px;padding-bottom:12px}.compact .paramtable td{padding-top:9px;padding-bottom:9px}}
+@media(max-width:1150px){.shell{grid-template-columns:184px minmax(0,1fr)}.brand{min-width:158px;font-size:15px}.topbar{gap:12px;padding-left:14px;padding-right:14px}.page{padding:20px;gap:15px}.breadcrumbs{padding:0 20px}.sidebar{padding-left:8px;padding-right:8px}.sidefile{font-size:11px;gap:6px;padding:9px 6px}.editor{grid-template-columns:148px minmax(0,1fr);gap:12px}.directory button{font-size:11px;padding:9px 8px}.toolbar{padding:11px 12px}.toolbar .searchbox{width:215px}.toolbar .right{gap:6px}.export-layout{grid-template-columns:225px minmax(0,1fr)}.context-control>span{display:none}}
+@media(max-width:900px){.shell{grid-template-columns:166px minmax(0,1fr)}.brand{min-width:140px}.sidefile{white-space:normal;overflow-wrap:anywhere}.page-heading{flex-wrap:wrap}.page-heading h1{font-size:20px}.page{padding:17px;gap:14px}.breadcrumbs{padding:0 17px}.object-actions{margin-left:auto}.toolbar{flex-wrap:wrap}.toolbar .right{margin-left:auto}.context-control.machine{display:none}.editor{grid-template-columns:128px minmax(0,1fr);gap:10px}.directory .icon{display:none}.directory button{padding:8px}.segmented .icon{display:none}.editbar{padding:10px 12px}.editbar .content-note{display:none}.filetable{min-width:650px}}
+@media(max-width:760px){#app{grid-template-rows:54px minmax(0,1fr)}.shell{grid-template-columns:minmax(0,1fr)}.sidebar{display:none}.topbar{gap:9px;padding:0 13px}.brand{min-width:0;font-size:15px;gap:7px}.brand-mark{width:26px;height:26px}.context-control{margin-left:auto}.context-control select{font-size:11px;max-width:112px}.topbar>.grow,.user,.topbar>.sep{display:none}.preview-button{font-size:10px;white-space:nowrap}.breadcrumbs{height:38px;padding:0 14px;white-space:nowrap;overflow:auto}.page{padding:16px 14px 14px;gap:13px;overflow:auto}.page-heading{gap:10px}.page-heading h1{font-size:19px}.page-heading .object-actions,.page-heading>.row{margin-left:0}.heading-with-icon{gap:10px}.filetype{height:36px;width:31px}.page-heading p{font-size:11px}.tabs{min-height:40px;gap:23px}.tabs button{font-size:12px;padding-bottom:10px;min-height:40px}.btn{min-height:39px;font-size:12px;padding:8px 11px}.btn.icon-only{min-height:38px;width:38px}.btn.text{min-height:34px}.btn.small{min-height:36px}.toolbar{gap:8px;padding:10px}.toolbar .searchbox{flex:1;width:auto;min-width:145px;min-height:39px}.toolbar .filterselect{min-height:39px;max-width:126px}.toolbar .right{gap:6px}.toolbar .segmented{height:37px}.segmented button{min-height:29px;padding:5px 8px}.evolution-tools>.right{width:100%;justify-content:flex-end}.evolution-tools>.right>.segmented{margin-right:auto}.workspace{min-height:280px}.graph-scroll{min-height:270px}.graph-node{min-height:53px}.graphlegend{gap:10px;font-size:10px}.tablefoot{flex-wrap:wrap;gap:7px;padding:8px 10px;min-height:42px}.table td,.table th{padding:11px 12px}.evo-table{min-width:620px}.evo-table .tree-name .disclosure{width:34px;height:34px}.evo-table .count{font-size:10px}.object-heading .identity .icon{width:20px}.object-meta{font-size:10px;gap:6px}.object-actions{flex-wrap:wrap;width:100%}.object-actions .primary{margin-left:auto}.editor{display:flex;flex-direction:column;min-height:310px;flex:1}.directory{flex-direction:row;overflow-x:auto;overflow-y:hidden;flex:none;gap:4px;padding:0 0 2px}.directory-label,.directory .dir-note{display:none}.directory button{white-space:nowrap;gap:7px;min-height:36px;font-size:11px;padding:7px 10px}.directory .count{font-size:9px}.parameter-work{min-height:250px}.parameter-work .toolbar{padding:9px}.parameter-work .searchbox{min-width:140px;flex:1}.parameter-work .toolbar .right{margin-left:0}.filterbar{padding:7px;gap:1px;overflow:auto;flex-shrink:0}.filterbar button{font-size:10px;padding:5px 7px;min-height:30px}.paramtable td{padding:11px 12px}.compact .paramtable td{padding-top:8px;padding-bottom:8px}.paramtable{min-width:660px}.paramtable.editing-table{min-width:810px}.paramtable .value-input,.paramtable .mode-select{min-height:38px}.editbar{flex-wrap:wrap;gap:9px;padding:11px}.editbar>.row{width:100%}.editbar .status{font-size:11px}.editbar .edit-actions{width:100%;margin:0;gap:7px}.editbar .edit-actions .primary{margin-left:auto}.notice{font-size:11px;padding:9px 10px}.notice .row{gap:6px;flex-wrap:wrap}.notice>.btn{flex:none}.export-layout{display:flex;flex-direction:column;min-height:420px}.export-config{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px;align-self:stretch}.export-config h2,.export-config .content-note{grid-column:1/-1}.export-config .btn.primary{align-self:end}.export-layout .workspace{min-height:260px}.code-preview{font-size:11px;padding:15px}.export-head{font-size:11px}.history-snapshot{padding:16px 14px}.history-snapshot .btn{font-size:11px;padding:6px 8px}.filetable{min-width:680px}dialog{max-height:calc(100dvh - 24px);width:calc(100vw - 24px)}dialog.wide,dialog.medium{width:calc(100vw - 24px)}dialog .dialog-head{padding:17px 16px 14px}dialog .dialog-body{padding:17px 16px;gap:15px}dialog .dialog-foot{padding:12px 16px}dialog h2{font-size:16px}dialog .fields{grid-template-columns:1fr}dialog .table-wrap{max-height:45dvh}dialog input,dialog select{min-height:40px}.dialog-summary{gap:10px;font-size:11px}.dialog-summary strong{font-size:14px}.toast{bottom:16px;width:max-content;max-width:calc(100vw - 28px)}.data-grid{grid-template-columns:90px 1fr;gap:11px}.filetable .row .filetype{display:none}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+.graph-node strong,.graph-node>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:480px){.brand>span:last-child{display:none}.brand{min-height:44px}.context-control{margin-left:0}.topbar .preview-button{margin-left:auto}}
+@media(max-width:760px),(pointer:coarse){
+ .btn,.btn.small,.btn.text,.btn.icon-only,.tabs button,.directory button,.filterbar button,.segmented button,.tree-name .disclosure,.evo-table .tree-name .disclosure,.param-name,.preview-button,.context-control select,.checkbox-label{min-height:44px}
+ .btn.icon-only,.evo-table .tree-name .disclosure,.pager .btn{min-width:44px;min-height:44px}
+ .paramtable .value-input,.paramtable .mode-select,.searchbox,.filterselect{min-height:44px}
+ .toolbar .segmented{height:auto}.directory{max-height:none}.param-name{display:flex;align-items:center}.table td .link{display:inline-flex;align-items:center;min-height:44px}.graph-vhead button{min-height:44px;min-width:44px}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<noscript><p style="padding:24px">此交互原型需要启用 JavaScript。数据仅在浏览器本地处理。</p></noscript>
+<script>'use strict';
+
+/*
+ * In-memory configuration domain for the standalone MCChecker prototype.
+ * Public reads are detached copies. A draft is a complete editor session, while
+ * current and history always refer to saved revisions. No operation sends data
+ * to a machine, and creating a version never copies its predecessor's values.
+ */
+class ConfigModel {
+  constructor() {
+    this.files = [
+      { id: 0, name: 'MachineConfig.xml', group: '整机运行配置', format: 'XML' },
+      { id: 1, name: '标准参数.json', group: '检测参数', format: 'JSON' }
+    ];
+    this._parameters = new Map();
+    this._versions = new Map([[0, []], [1, []]]);
+    this._machines = new Map([[0, []], [1, []]]);
+    this._history = new Map();
+    this._revisions = new Map();
+    this._revisionOwners = new Map();
+    this._events = new Map([[0, []], [1, []]]);
+    this._revisionSequence = 0;
+    this._eventSequence = 0;
+    this._versionSequence = 104;
+    this._machineSequence = 4;
+    this._demoSequences = new Map([[0, 0], [1, 0]]);
+    this._seed();
+  }
+
+  _copy(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
+  _key(fileId, kind, id) { return `${Number(fileId)}:${kind}:${Number(id)}`; }
+  _file(fileId) {
+    const file = this.files.find(item => item.id === Number(fileId));
+    if (!file) throw new Error('找不到此配置文件。');
+    return file;
+  }
+  _rawObject(fileId, kind, id) {
+    if (kind !== 'standard' && kind !== 'machine') return null;
+    const collection = kind === 'standard' ? this._versions : this._machines;
+    return (collection.get(Number(fileId)) || []).find(item => item.id === Number(id)) || null;
+  }
+  _requireObject(fileId, kind, id) {
+    this._file(fileId);
+    const object = this._rawObject(fileId, kind, id);
+    if (!object) throw new Error('此对象不属于当前配置文件。');
+    return object;
+  }
+  _requireSession(session) {
+    if (!session || typeof session !== 'object') throw new Error('编辑会话不存在。');
+    return this._requireObject(session.fileId, session.kind, session.id);
+  }
+  _map(fileId, property = 'initial', fallback = '') {
+    return Object.fromEntries((this._parameters.get(Number(fileId)) || []).map(param => [param.id, param[property] ?? fallback]));
+  }
+  _modes(fileId, mode) { return Object.fromEntries(this._parameters.get(Number(fileId)).map(param => [param.id, mode])); }
+  _values(fileId, values) {
+    return Object.fromEntries(this._parameters.get(Number(fileId)).map(param => [param.id, String(values?.[param.id] ?? '')]));
+  }
+  _sessionCopy(session) {
+    return {
+      fileId: Number(session.fileId), kind: session.kind, id: Number(session.id),
+      baseRevisionId: session.baseRevisionId ?? null,
+      values: this._values(session.fileId, session.values),
+      modes: Object.fromEntries(this._parameters.get(Number(session.fileId)).map(param => [param.id, session.modes?.[param.id] ?? (session.kind === 'standard' ? 'fixed' : 'standard')])),
+      targetVersion: String(session.targetVersion ?? ''),
+      sourceRevisionId: session.sourceRevisionId ?? null
+    };
+  }
+  _baseline(session) {
+    const object = this._requireSession(session);
+    if (session.baseRevisionId != null) {
+      const owner = this._revisionOwners.get(session.baseRevisionId);
+      if (owner === this._key(session.fileId, session.kind, session.id)) return this._revisions.get(session.baseRevisionId);
+    }
+    return {
+      values: object.current?.values || (session.kind === 'standard' ? object.initialValues : null) || this._map(session.fileId, '_blank'),
+      modes: object.current?.modes || this._modes(session.fileId, session.kind === 'standard' ? 'fixed' : 'standard'),
+      version: object.version,
+      sourceRevisionId: object.current?.sourceRevisionId ?? null
+    };
+  }
+  _revision(fileId, kind, object, values, modes, options = {}) {
+    const revision = {
+      id: `rev-${String(++this._revisionSequence).padStart(5, '0')}`,
+      values: this._values(fileId, values),
+      modes: this._copy(modes),
+      time: options.time || new Date().toISOString(),
+      author: options.author || '陈工',
+      version: String(options.version ?? object.version),
+      sourceRevisionId: options.sourceRevisionId ?? null,
+      note: String(options.note || '')
+    };
+    const key = this._key(fileId, kind, object.id);
+    this._revisions.set(revision.id, revision);
+    this._revisionOwners.set(revision.id, key);
+    if (!this._history.has(key)) this._history.set(key, []);
+    this._history.get(key).unshift(revision);
+    object.current = revision;
+    object.version = revision.version;
+    return revision;
+  }
+  _event(fileId, kind, object, action, detail, time, author = '陈工') {
+    const event = {
+      id: `event-${String(++this._eventSequence).padStart(5, '0')}`,
+      objectKind: kind, objectId: object.id,
+      objectName: kind === 'standard' ? `软件 ${object.version}` : object.name,
+      action, detail, time: time || new Date().toISOString(), author, ip: '192.168.10.42'
+    };
+    this._events.get(Number(fileId)).unshift(event);
+    return event;
+  }
+  _savedStandard(fileId, version) {
+    const standard = (this._versions.get(Number(fileId)) || []).find(item => item.version === String(version));
+    if (!standard?.current) throw new Error('请先保存所选软件版本的标准参数。');
+    return standard;
+  }
+  _checkSource(session) {
+    const object = this._requireSession(session);
+    if (session.kind === 'standard') {
+      if (String(session.targetVersion) !== object.version) throw new Error('标准参数必须保存在所属软件版本中。');
+      if (session.sourceRevisionId != null) throw new Error('标准参数不能引用机台的来源记录。');
+      return;
+    }
+    const standard = this._savedStandard(session.fileId, session.targetVersion);
+    const source = this._revisions.get(session.sourceRevisionId);
+    const owner = this._revisionOwners.get(session.sourceRevisionId);
+    if (!source || owner !== this._key(session.fileId, 'standard', standard.id) || source.version !== String(session.targetVersion)) {
+      throw new Error('机台配置缺少与目标版本对应的标准来源，请重新核对更新。');
+    }
+  }
+
+  parameters(fileId) { this._file(fileId); return this._copy(this._parameters.get(Number(fileId))); }
+  versions(fileId) { this._file(fileId); return this._copy(this._versions.get(Number(fileId))); }
+  machines(fileId) { this._file(fileId); return this._copy(this._machines.get(Number(fileId))); }
+  object(fileId, kind, id) { return this._copy(this._rawObject(fileId, kind, id)); }
+  history(fileId, kind, id) { return this._copy(this._history.get(this._key(fileId, kind, id)) || []); }
+  events(fileId) { this._file(fileId); return this._copy(this._events.get(Number(fileId))); }
+  revision(id) { return this._copy(this._revisions.get(id) || null); }
+  standardFor(fileId, version) {
+    return this._copy((this._versions.get(Number(fileId)) || []).find(item => item.version === String(version)) || null);
+  }
+
+  begin(fileId, kind, id) {
+    const object = this._requireObject(fileId, kind, id);
+    if (object.draft) return this._copy(object.draft);
+    const saved = object.current;
+    return {
+      fileId: Number(fileId), kind, id: object.id,
+      baseRevisionId: saved?.id ?? null,
+      values: this._copy(saved?.values || (kind === 'standard' ? object.initialValues : null) || this._map(fileId, '_blank')),
+      modes: this._copy(saved?.modes || this._modes(fileId, kind === 'standard' ? 'fixed' : 'standard')),
+      targetVersion: object.version,
+      sourceRevisionId: saved?.sourceRevisionId ?? null
+    };
+  }
+
+  changes(session) {
+    const baseline = this._baseline(session);
+    return this._parameters.get(Number(session.fileId)).flatMap(param => {
+      const oldValue = String(baseline.values[param.id] ?? '');
+      const newValue = String(session.values?.[param.id] ?? '');
+      const oldMode = baseline.modes[param.id];
+      const newMode = session.modes?.[param.id];
+      return oldValue === newValue && oldMode === newMode ? [] : [{ param: this._copy(param), oldValue, newValue, oldMode, newMode }];
+    });
+  }
+
+  validate(session) {
+    this._requireSession(session);
+    const errors = {};
+    for (const param of this._parameters.get(Number(session.fileId))) {
+      const rawValue = session.values?.[param.id];
+      const value = rawValue == null ? '' : String(rawValue);
+      if (param.type === 'number') {
+        const numeric = Number(value);
+        if (!value.trim() || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()) || !Number.isFinite(numeric)) {
+          errors[param.id] = '请输入有效数字。';
+        } else if (param.min != null && numeric < param.min) {
+          errors[param.id] = `不得小于 ${param.min}${param.unit === '—' ? '' : ` ${param.unit}`}。`;
+        } else if (param.max != null && numeric > param.max) {
+          errors[param.id] = `不得大于 ${param.max}${param.unit === '—' ? '' : ` ${param.unit}`}。`;
+        }
+      } else if (param.type === 'boolean' && value !== 'true' && value !== 'false') {
+        errors[param.id] = '请选择 true 或 false。';
+      } else if (param.type === 'text' && rawValue != null && typeof rawValue === 'object') {
+        errors[param.id] = '请输入文本。';
+      }
+      if (!['standard', 'custom', 'fixed'].includes(session.modes?.[param.id]) && !errors[param.id]) {
+        errors[param.id] = '请选择有效的取值方式。';
+      }
+    }
+    return errors;
+  }
+
+  isDirty(session) {
+    const object = this._requireSession(session);
+    if (!object.current) return true;
+    const saved = object.current;
+    return this._parameters.get(Number(session.fileId)).some(param =>
+      String(session.values?.[param.id] ?? '') !== String(saved.values[param.id] ?? '')
+      || session.modes?.[param.id] !== saved.modes[param.id])
+      || String(session.targetVersion) !== saved.version
+      || (session.sourceRevisionId ?? null) !== saved.sourceRevisionId;
+  }
+
+  stash(session) {
+    const object = this._requireSession(session);
+    object.draft = this._sessionCopy(session);
+    this._event(session.fileId, session.kind, object, '暂存草稿', `${this.changes(session).length} 项参数变化${session.targetVersion !== object.version ? `，目标版本 ${session.targetVersion}` : ''}`);
+    return this._copy(object.draft);
+  }
+
+  discardDraft(fileId, kind, id) {
+    const object = this._requireObject(fileId, kind, id);
+    if (!object.current) {
+      const collection = kind === 'standard' ? this._versions : this._machines;
+      collection.set(Number(fileId), collection.get(Number(fileId)).filter(item => item.id !== object.id));
+      this._history.delete(this._key(fileId, kind, id));
+      // A provisional version can be selected as another version's predecessor.
+      // Removing it also removes that now-invalid relation, without changing
+      // any saved parameter revision or inventing a replacement predecessor.
+      if (kind === 'standard') {
+        for (const version of this._versions.get(Number(fileId))) {
+          if (version.previousId === object.id) version.previousId = null;
+        }
+      }
+      return { removed: true };
+    }
+    object.draft = null;
+    return { removed: false };
+  }
+
+  save(session, note = '') {
+    const object = this._requireSession(session);
+    if ((session.baseRevisionId ?? null) !== (object.current?.id ?? null)) {
+      const error = new Error('此配置已被其他编辑保存。你的修改仍然保留，请先核对最新记录。');
+      error.code = 'CONFLICT';
+      throw error;
+    }
+    const errors = this.validate(session);
+    if (Object.keys(errors).length) {
+      const error = new Error('请先修正标记的参数，再保存配置。');
+      error.code = 'VALIDATION';
+      error.errors = errors;
+      throw error;
+    }
+    this._checkSource(session);
+    const changeCount = this.changes(session).length;
+    const previousVersion = object.version;
+    const savedSession = this._sessionCopy(session);
+    const revision = this._revision(session.fileId, session.kind, object, savedSession.values, savedSession.modes, {
+      version: savedSession.targetVersion, sourceRevisionId: savedSession.sourceRevisionId, note
+    });
+    object.draft = null;
+    this._event(session.fileId, session.kind, object,
+      session.kind === 'standard' ? '保存标准参数' : '保存机台配置',
+      `${changeCount} 项参数变化${previousVersion !== revision.version ? `，软件 ${previousVersion} → ${revision.version}` : ''}${note ? `；${note}` : ''}`,
+      revision.time, revision.author);
+    return this._copy(revision);
+  }
+
+  standardValues(session) {
+    const object = this._requireSession(session);
+    if (session.kind === 'standard') return this._copy(object.initialValues || this._map(session.fileId, '_blank'));
+    return this._copy(this._savedStandard(session.fileId, session.targetVersion).current.values);
+  }
+
+  _compareSession(session, targetVersion) {
+    if (session.kind !== 'machine') throw new Error('只有机台配置可以更新到其他标准。');
+    this._requireSession(session);
+    const target = this._savedStandard(session.fileId, targetVersion);
+    const source = this._revisions.get(session.sourceRevisionId);
+    const sourceOwner = this._revisionOwners.get(session.sourceRevisionId);
+    if (!source || !sourceOwner?.startsWith(`${Number(session.fileId)}:standard:`)) throw new Error('无法找到此机台采用的原标准记录。');
+    return this._parameters.get(Number(session.fileId)).map(param => {
+      const oldValue = String(source.values[param.id] ?? '');
+      const currentValue = String(session.values[param.id] ?? '');
+      const newValue = String(target.current.values[param.id] ?? '');
+      const mode = session.modes[param.id];
+      let status;
+      // Fixed is a deliberate lock. Custom is deliberate even when numerically
+      // equal to the old standard; equality never creates source inheritance.
+      if (mode === 'fixed') status = 'custom';
+      else if (mode === 'custom') status = oldValue !== newValue && currentValue !== newValue ? 'conflict' : 'custom';
+      // Standard mode is an explicit choice to adopt the target standard.
+      // A single-field reset may already use a newer standard than the machine's
+      // original whole-configuration baseline; it must not become an override
+      // solely because its numeric value differs from that older baseline.
+      else status = currentValue === newValue ? 'unchanged' : 'update';
+      return { param: this._copy(param), oldValue, currentValue, newValue, status };
+    });
+  }
+
+  compareUpgrade(fileId, machineId, targetVersion) {
+    const object = this._requireObject(fileId, 'machine', machineId);
+    // Comparing a saved machine must not quietly consume its stored draft.
+    const current = object.current;
+    const session = current ? {
+      fileId: Number(fileId), kind: 'machine', id: object.id,
+      baseRevisionId: current.id, values: current.values, modes: current.modes,
+      targetVersion: current.version, sourceRevisionId: current.sourceRevisionId
+    } : this.begin(fileId, 'machine', machineId);
+    return this._compareSession(session, targetVersion);
+  }
+
+  compareSessionUpgrade(session, targetVersion) {
+    return this._copy(this._compareSession(session, targetVersion));
+  }
+
+  applyUpgrade(session, targetVersion, decisions = {}) {
+    const rows = this._compareSession(session, targetVersion);
+    const unresolved = rows.filter(row => row.status === 'conflict' && !['current', 'new'].includes(decisions[row.param.id]));
+    if (unresolved.length) {
+      const error = new Error(`还有 ${unresolved.length} 项冲突需要选择处理方式。`);
+      error.code = 'UNRESOLVED_CONFLICT';
+      error.parameters = unresolved.map(row => row.param.id);
+      throw error;
+    }
+    const next = this._sessionCopy(session);
+    for (const row of rows) {
+      const id = row.param.id;
+      const choice = decisions[id];
+      if (choice === 'new' || (row.status === 'update' && choice !== 'current')) {
+        next.values[id] = row.newValue;
+        next.modes[id] = 'standard';
+      } else if (choice === 'current' && row.currentValue !== row.newValue && next.modes[id] !== 'fixed') {
+        next.modes[id] = 'custom';
+      }
+    }
+    const target = this._savedStandard(session.fileId, targetVersion);
+    next.targetVersion = target.version;
+    next.sourceRevisionId = target.current.id;
+    return next;
+  }
+
+  newVersion(fileId, version, previousId = null) {
+    this._file(fileId);
+    version = String(version ?? '').trim();
+    if (!version) throw new Error('请填写软件版本号。');
+    if (this.standardFor(fileId, version)) throw new Error('当前文件中已存在此软件版本。');
+    if (previousId != null) this._requireObject(fileId, 'standard', previousId);
+    const object = {
+      id: ++this._versionSequence, version, fileId: Number(fileId),
+      previousId: previousId == null ? null : Number(previousId),
+      initialValues: null, current: null, draft: null
+    };
+    this._versions.get(Number(fileId)).push(object);
+    object.draft = {
+      fileId: Number(fileId), kind: 'standard', id: object.id,
+      baseRevisionId: null, values: this._map(fileId, '_blank'), modes: this._modes(fileId, 'fixed'),
+      targetVersion: version, sourceRevisionId: null
+    };
+    this._event(fileId, 'standard', object, '创建软件版本', previousId == null ? '等待录入或导入参数' : '已记录上一版本关系，参数等待录入或导入');
+    return this._copy(object);
+  }
+
+  newMachine(fileId, name, version) {
+    this._file(fileId);
+    name = String(name ?? '').trim();
+    if (!name) throw new Error('请填写机台编号。');
+    if (this._machines.get(Number(fileId)).some(item => item.name === name)) throw new Error('当前文件中已存在此机台编号。');
+    const source = this._savedStandard(fileId, version);
+    const object = { id: ++this._machineSequence, name, fileId: Number(fileId), version: source.version, current: null, draft: null };
+    this._machines.get(Number(fileId)).push(object);
+    object.draft = {
+      fileId: Number(fileId), kind: 'machine', id: object.id, baseRevisionId: null,
+      values: this._copy(source.current.values), modes: this._modes(fileId, 'standard'),
+      targetVersion: source.version, sourceRevisionId: source.current.id
+    };
+    this._event(fileId, 'machine', object, '创建机台', `采用软件 ${source.version} 的已保存标准，等待首次保存`);
+    return this._copy(object);
+  }
+
+  importValues(session, values, namesOnly = false) {
+    this._requireSession(session);
+    const imported = this._sessionCopy(session);
+    if (namesOnly) return imported;
+    for (const param of this._parameters.get(Number(session.fileId))) {
+      if (Object.prototype.hasOwnProperty.call(values || {}, param.id)) {
+        imported.values[param.id] = String(values[param.id] ?? '');
+        // Importing a value is an explicit override, not a new source reference.
+        if (session.kind === 'machine' && imported.values[param.id] !== session.values[param.id] && imported.modes[param.id] !== 'fixed') imported.modes[param.id] = 'custom';
+      }
+    }
+    return imported;
+  }
+
+  exportText(fileId, values, format = 'XML') {
+    const file = this._file(fileId);
+    const parameters = this._parameters.get(Number(fileId));
+    const tree = Object.create(null);
+    for (const param of parameters) {
+      const path = param.field.split('/').filter(Boolean);
+      let branch = tree;
+      for (const segment of path.slice(0, -1)) branch = branch[segment] || (branch[segment] = Object.create(null));
+      let value = String(values?.[param.id] ?? '');
+      if (String(format).toUpperCase() === 'JSON') {
+        if (param.type === 'boolean' && (value === 'true' || value === 'false')) value = value === 'true';
+        if (param.type === 'number' && value.trim() && Number.isFinite(Number(value))) value = Number(value);
+      }
+      branch[path[path.length - 1]] = value;
+    }
+    if (String(format).toUpperCase() === 'JSON') return `${JSON.stringify(tree, null, 2)}\n`;
+    if (String(format).toUpperCase() !== 'XML') throw new Error('仅支持 XML 或 JSON 导出。');
+    const escape = value => String(value)
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
+      .replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[character]))
+      .replace(/\r/g, '&#13;');
+    const xml = (branch, depth) => Object.entries(branch).map(([name, value]) => {
+      const indent = '  '.repeat(depth);
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name)) throw new Error('文件字段包含无效的 XML 节点名称。');
+      return value && typeof value === 'object'
+        ? `${indent}<${name}>\n${xml(value, depth + 1)}\n${indent}</${name}>`
+        : `${indent}<${name}>${escape(value)}</${name}>`;
+    }).join('\n');
+    const root = file.id === 0 ? 'MachineConfig' : 'StandardParameters';
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<${root}>\n${xml(tree, 1)}\n</${root}>\n`;
+  }
+
+  addDemoParameters(fileId, count) {
+    this._file(fileId);
+    if (!Number.isInteger(count) || count < 0 || count > 10000) throw new Error('扩展参数数量必须是 0 到 10000 的整数。');
+    const added = [];
+    for (let index = 0; index < count; index++) {
+      const sequence = this._demoSequences.get(Number(fileId)) + 1;
+      this._demoSequences.set(Number(fileId), sequence);
+      const label = String(sequence).padStart(4, '0');
+      added.push({ id: `demo-${Number(fileId)}-${label}`, name: `诊断通道 ${label} 阈值`, field: `Diagnostics/Channel${label}/Threshold`, group: '扩展参数', type: 'number', unit: 'mm', min: 0, max: 10000, initial: String((sequence % 200) + 1) });
+    }
+    this._parameters.get(Number(fileId)).push(...added);
+    for (const [id, revision] of this._revisions) {
+      const owner = this._revisionOwners.get(id);
+      if (!owner.startsWith(`${Number(fileId)}:`)) continue;
+      const machine = owner.includes(':machine:');
+      for (const param of added) {
+        revision.values[param.id] = param.initial;
+        revision.modes[param.id] = machine ? 'standard' : 'fixed';
+      }
+    }
+    for (const kind of ['standard', 'machine']) {
+      const objects = (kind === 'standard' ? this._versions : this._machines).get(Number(fileId));
+      for (const object of objects) {
+        for (const param of added) {
+          if (object.initialValues) object.initialValues[param.id] = param.initial;
+          if (object.draft) {
+            object.draft.values[param.id] = kind === 'standard' && !object.current ? '' : param.initial;
+            object.draft.modes[param.id] = kind === 'standard' ? 'fixed' : 'standard';
+          }
+        }
+      }
+    }
+    return this._copy(added);
+  }
+
+  _seed() {
+    const number = (id, name, field, group, initial, unit, min, max) => ({ id, name, field, group, type: 'number', unit, min, max, initial: String(initial) });
+    const boolean = (id, name, field, group, initial) => ({ id, name, field, group, type: 'boolean', unit: '—', initial: String(initial) });
+    const text = (id, name, field, group, initial) => ({ id, name, field, group, type: 'text', unit: '—', initial });
+    const common = [
+      number('feed', '送料速度', 'Motion/FeedSpeed', '设备控制', 100, 'mm/s', 10, 1000),
+      number('acceleration', '运动加速度', 'Motion/Acceleration', '设备控制', 300, 'mm/s²', 10, 5000),
+      number('exposure', '相机曝光时间', 'Camera/Exposure', '检测与测量', 8, 'ms', 0.1, 1000),
+      number('gain', '相机增益', 'Camera/Gain', '检测与测量', 1, '×', 1, 24),
+      boolean('doorLock', '安全门联锁', 'Safety/DoorLock', '安全与联锁', true),
+      number('startDelay', '启动延时', 'System/Delay', '系统运行', 20, 'ms', 0, 60000),
+      text('description', '设备说明', 'System/Description', '系统运行', '')
+    ];
+    this._parameters.set(0, [
+      ...this._copy(common),
+      number('conveyorLength', '输送线长度', 'Motion/ConveyorLength', '设备控制', 1200, 'mm', 100, 10000),
+      number('deceleration', '运动减速度', 'Motion/Deceleration', '设备控制', 300, 'mm/s²', 10, 5000),
+      number('positionTolerance', '定位允许偏差', 'Motion/PositionTolerance', '设备控制', 0.05, 'mm', 0, 10),
+      number('jogSpeed', '点动速度', 'Motion/JogSpeed', '设备控制', 30, 'mm/s', 1, 200),
+      number('triggerDelay', '相机触发延时', 'Camera/TriggerDelay', '检测与测量', 5, 'ms', 0, 10000),
+      number('imageWidth', '图像宽度', 'Camera/Width', '检测与测量', 2448, 'px', 64, 10000),
+      number('imageHeight', '图像高度', 'Camera/Height', '检测与测量', 2048, 'px', 64, 10000),
+      number('frameRate', '采集帧率', 'Camera/FrameRate', '检测与测量', 60, 'fps', 1, 240),
+      number('lightIntensity', '光源亮度', 'Light/Intensity', '检测与测量', 65, '%', 0, 100),
+      text('lightMode', '光源工作模式', 'Light/Mode', '检测与测量', '常亮'),
+      number('rejectDelay', '剔除触发延时', 'Sorting/RejectDelay', '分选控制', 120, 'ms', 0, 10000),
+      number('rejectDuration', '剔除动作时长', 'Sorting/RejectDuration', '分选控制', 80, 'ms', 1, 5000),
+      boolean('rejectEnabled', '启用不良品剔除', 'Sorting/Enabled', '分选控制', true),
+      boolean('emergencyStop', '急停联锁', 'Safety/EmergencyStop', '安全与联锁', true),
+      number('maxTemperature', '温度报警阈值', 'Safety/MaxTemperature', '安全与联锁', 65, '°C', 0, 120),
+      number('alarmTimeout', '报警等待时间', 'Safety/AlarmTimeout', '安全与联锁', 3000, 'ms', 100, 60000),
+      number('heartbeat', '通信心跳间隔', 'System/HeartbeatInterval', '系统运行', 1000, 'ms', 100, 60000),
+      boolean('autoStart', '上电自动启动', 'System/AutoStart', '系统运行', false),
+      text('logLevel', '日志级别', 'System/LogLevel', '系统运行', 'Info'),
+      boolean('saveImages', '保存检测图像', 'Storage/SaveImages', '数据存储', true),
+      text('imageDirectory', '图像保存目录', 'Storage/ImageDirectory', '数据存储', 'D:\\MCChecker\\Images'),
+      text('operatorNote', '操作注意事项', 'System/OperatorNote', '系统运行', '班前检查相机与光源'),
+      text('stationName', '工位名称', 'System/StationName', '系统运行', '主检测工位')
+    ]);
+    this._parameters.set(1, [
+      ...this._copy(common),
+      number('inspectionThreshold', '灰度检测阈值', 'Vision/Threshold', '缺陷判定', 80, '%', 0, 100),
+      number('defectArea', '最小缺陷面积', 'Vision/MinDefectArea', '缺陷判定', 1.2, 'mm²', 0, 1000),
+      number('edgeTolerance', '边缘允许偏差', 'Vision/EdgeTolerance', '缺陷判定', 0.15, 'mm', 0, 10),
+      number('minimumConfidence', '最低识别置信度', 'Vision/MinConfidence', '缺陷判定', 0.95, '—', 0, 1),
+      boolean('recheckEnabled', '启用复检', 'Vision/RecheckEnabled', '检测与测量', true),
+      text('recipeName', '检测配方名称', 'Recipe/Name', '系统运行', '默认检测'),
+      text('resultPrefix', '结果文件前缀', 'Output/Prefix', '数据存储', 'MC')
+    ]);
+    const base = this._map(0);
+    const initial680 = { ...base, feed: '90', acceleration: '260', exposure: '6', startDelay: '30' };
+    const values680 = { ...base, exposure: '6', startDelay: '25' };
+    const initial690 = { ...base, feed: '95', acceleration: '280', startDelay: '25' };
+    const values690 = { ...base };
+    const initial691 = { ...base, exposure: '12', acceleration: '320', frameRate: '75', lightIntensity: '70' };
+    const values691 = { ...initial691, lightIntensity: '75' };
+    const v680 = { id: 103, fileId: 0, version: '680', previousId: null, initialValues: initial680, current: null, draft: null };
+    const v690 = { id: 101, fileId: 0, version: '690', previousId: 103, initialValues: initial690, current: null, draft: null };
+    const v691 = { id: 102, fileId: 0, version: '691', previousId: 101, initialValues: initial691, current: null, draft: null };
+    this._versions.set(0, [v690, v691, v680]);
+    const r680 = this._revision(0, 'standard', v680, values680, this._modes(0, 'fixed'), { time: '2026-11-05T10:00:00.000Z', author: '李工', note: '680 标准首次保存' });
+    const r690prior = this._revision(0, 'standard', v690, { ...values690, lightIntensity: '60' }, this._modes(0, 'fixed'), { time: '2026-11-07T08:15:00.000Z', author: '李工', note: '690 标准首次保存' });
+    const r690 = this._revision(0, 'standard', v690, values690, this._modes(0, 'fixed'), { time: '2026-11-09T08:15:00.000Z', author: '李工', note: '调整光源亮度' });
+    const r691 = this._revision(0, 'standard', v691, values691, this._modes(0, 'fixed'), { time: '2026-11-09T10:00:00.000Z', author: '李工', note: '691 标准首次保存' });
+    const m1 = { id: 1, fileId: 0, name: 'MC-001', version: '680', current: null, draft: null };
+    const m2 = { id: 2, fileId: 0, name: 'MC-002', version: '690', current: null, draft: null };
+    const m3 = { id: 3, fileId: 0, name: 'MC-003', version: '680', current: null, draft: null };
+    this._machines.set(0, [m1, m2, m3]);
+    const modes1 = { ...this._modes(0, 'standard'), feed: 'custom', exposure: 'custom', doorLock: 'fixed', logLevel: 'custom' };
+    this._revision(0, 'machine', m1, { ...values680, feed: '110', exposure: '7' }, modes1, { time: '2026-11-06T09:20:00.000Z', version: '680', sourceRevisionId: r680.id, note: '680 机台调试记录' });
+    const saved1 = this._revision(0, 'machine', m1, { ...values690, feed: '120', exposure: '10' }, modes1, { time: '2026-11-09T09:42:00.000Z', version: '690', sourceRevisionId: r690.id, note: '送料速度调整为 120，保留机台曝光设置' });
+    const saved2 = this._revision(0, 'machine', m2, { ...r690prior.values, exposure: '10' }, { ...this._modes(0, 'standard'), exposure: 'custom', doorLock: 'fixed' }, { time: '2026-11-08T16:20:00.000Z', sourceRevisionId: r690prior.id, note: '调整机台曝光设置' });
+    const saved3 = this._revision(0, 'machine', m3, values680, { ...this._modes(0, 'standard'), doorLock: 'fixed' }, { time: '2026-11-06T14:10:00.000Z', sourceRevisionId: r680.id, note: '采用 680 标准' });
+    m2.draft = this.applyUpgrade(this.begin(0, 'machine', 2), '691', { exposure: 'new' });
+    const base1 = { ...this._map(1), feed: '80', exposure: '6', gain: '1.2', description: '产品 A 检测' };
+    const v21 = { id: 104, fileId: 1, version: '2.1', previousId: null, initialValues: { ...base1, inspectionThreshold: '75' }, current: null, draft: null };
+    this._versions.set(1, [v21]);
+    const r21 = this._revision(1, 'standard', v21, base1, this._modes(1, 'fixed'), { time: '2026-11-04T11:30:00.000Z', author: '李工', note: '产品 A 检测标准' });
+    const m4 = { id: 4, fileId: 1, name: 'MC-001', version: '2.1', current: null, draft: null };
+    this._machines.set(1, [m4]);
+    const saved4 = this._revision(1, 'machine', m4, { ...base1, inspectionThreshold: '82' }, { ...this._modes(1, 'standard'), inspectionThreshold: 'custom' }, { time: '2026-11-09T08:30:00.000Z', sourceRevisionId: r21.id, note: '产品 A 现场阈值调整' });
+    this._event(0, 'standard', v680, '保存标准参数', '680 标准首次保存', r680.time, r680.author);
+    this._event(0, 'machine', m3, '保存机台配置', '采用软件 680 的标准', saved3.time);
+    this._event(0, 'machine', m2, '保存机台配置', '相机曝光时间：8 → 10', saved2.time);
+    this._event(0, 'standard', v690, '保存标准参数', '光源亮度：60 → 65', r690.time, r690.author);
+    this._event(0, 'machine', m1, '保存机台配置', '送料速度：110 → 120，已保存为软件 690', saved1.time);
+    this._event(0, 'standard', v691, '保存标准参数', '691 标准已保存，已有机台配置保持原值', r691.time, r691.author);
+    this._event(0, 'machine', m2, '暂存草稿', '目标版本 691，正式配置仍属于 690', '2026-11-09T10:12:00.000Z');
+    this._event(1, 'standard', v21, '保存标准参数', '检测标准 2.1 已保存', r21.time, r21.author);
+    this._event(1, 'machine', m4, '保存机台配置', '灰度检测阈值：80 → 82', saved4.time);
+  }
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { ConfigModel };
+</script>
+<script>'use strict';
+const E=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=s=>document.querySelector(s), clone=x=>JSON.parse(JSON.stringify(x));
+const T=v=>/^\d{4}-\d{2}-\d{2}T/.test(v||'')?new Date(v).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):String(v||'');
+const paths={grid:'M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z',search:'M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM16 16l5 5',check:'m5 12 4 4L19 6',review:'M9 5H5v16h14V5h-4M9 3h6v4H9zM8 13l2 2 5-5',calc:'M5 3h14v18H5zM8 6h8M8 11h1m6 0h1M8 15h1m6 0h1',settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1Z',file:'M5 3h9l5 5v13H5ZM14 3v6h5M8 13h8M8 17h6',folder:'M3 5h6l2 3h10v12H3Z',chevron:'m9 5 7 7-7 7',down:'m6 9 6 6 6-6',back:'m12 5-7 7 7 7M5 12h15',plus:'M12 4v16M4 12h16',graph:'M4 4h5v5H4zM15 15h5v5h-5zM4 15h5v5H4zM6.5 9v6M9 6.5h8.5V15',list:'M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1',machine:'M4 4h16v12H4zM8 20h8M12 16v4M7 8h5M7 12h10',branch:'M6 3v12a4 4 0 0 0 4 4h8M6 8h8a4 4 0 0 0 4-4M4 3h4M16 3h4M16 17h4v4h-4z',edit:'m14 4 6 6M3 21l5-1L21 7l-6-6L2 14l-1 7ZM3 14l5 6',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',upload:'M12 16V4m-5 5 5-5 5 5M4 17v4h16v-4',more:'M5 12h.01M12 12h.01M19 12h.01',history:'M3 11a9 9 0 1 1 3 8M3 4v7h7M12 7v6l4 2',lock:'M6 10h12v11H6zM8 10V7a4 4 0 0 1 8 0v3',info:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 10v7M12 6h.01',close:'m6 6 12 12M6 18 18 6',save:'M4 3h13l4 4v14H3V3h1ZM7 3v6h10V3M7 21v-8h10v8',compare:'M8 3v18m-4-4 4 4 4-4M16 21V3m-4 4 4-4 4 4',refresh:'M20 8a8 8 0 0 0-14-3L3 8M3 3v5h5M4 16a8 8 0 0 0 14 3l3-3M16 16h5v5',clock:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 6v6l4 2',alert:'M12 3 1 21h22ZM12 9v5M12 17h.01',arrow:'M4 12h16m-6-6 6 6-6 6',external:'M13 3h8v8M21 3l-11 11M9 3H3v18h18v-6',filter:'M3 4h18l-7 8v7l-4 2v-9Z',code:'m8 7-5 5 5 5m8-10 5 5-5 5M14 3l-4 18',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',cloud:'M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5.5 5.5 0 0 1 0 11H6Z',logout:'M9 3H3v18h6M9 12h12m-5-5 5 5-5 5',minus:'M5 12h14',density:'M4 4h16M4 9h16M4 14h16M4 19h16',help:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM9 8a3 3 0 0 1 6 0c0 2-3 2-3 5M12 17h.01'};
+function icon(name,cls=''){return `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.file}"/></svg>`}
+function btn(label,action,opts={}){return `<button class="btn ${opts.cls||''}" data-action="${action}" ${opts.data||''} ${opts.disabled?'disabled':''} ${opts.title?`title="${E(opts.title)}"`:''}>${opts.icon?icon(opts.icon):''}${E(label)}</button>`}
+function pill(label,color='',dot=false){return `<span class="pill ${color}">${dot?'<i class="dot"></i>':''}${E(label)}</span>`}
+function filetype(f){return `<span class="filetype ${f.format.toLowerCase()}">${icon('file')}<span>${E(f.format)}</span></span>`}
+function empty(title,description='',action=''){return `<div class="empty" role="status">${icon('search')}<strong>${E(title)}</strong>${description?`<p>${E(description)}</p>`:''}${action}</div>`}
+const models={default:new ConfigModel(),lab:new ConfigModel()};
+let model=models.default;
+const state={workspace:'default',route:{screen:'files',fileId:0},view:'graph',evoQuery:'',evoFilter:'all',collapsed:new Set(),searchCollapsed:new Set(),selection:null,zoom:1,query:'',group:'all',filter:'all',page:1,pageSize:30,showField:true,compact:true,session:null,baseline:null,errors:{},error:'',role:'admin',saveScenario:'success',updateScenario:'success',updatesTab:'sources',recordQuery:'',explicitModes:new Set(),exportFormat:'XML',exportText:null,fileQuery:'',currentHash:'',restorePosition:false,positions:{},lastFocus:null};
+const pendingByWorkspace={default:new Map([[0,{id:'candidate-1',targetId:101,values:{exposure:'9',startDelay:'25'},time:'今天 10:18',source:'SDA 标准参数'}]]),lab:new Map()};
+const updateByWorkspace={default:{enabled:true,path:'/simulation/MachineConfig.xml',frequency:'30',running:false,failed:false,last:'今天 10:18',runs:[{time:'今天 10:18',status:'pending',detail:'获取完成，2 项变化待核对',actor:'自动更新'},{time:'今天 09:48',status:'success',detail:'获取完成，内容无变化',actor:'自动更新'}]},lab:{enabled:false,path:'/simulation/MachineConfig.xml',frequency:'60',running:false,failed:false,last:'尚未更新',runs:[]}};
+let importGeneration=0;
+let modalState={},modalLastFocus=null,toastTimer=null,pendingNavigation=null;
+const f=()=>model.files.find(x=>x.id===state.route.fileId)||model.files[0];
+const currentObject=()=>model.object(state.route.fileId,state.route.kind,state.route.id);
+const isViewer=()=>state.role==='viewer';
+const viewedRevision=()=>state.route.record?model.history(state.route.fileId,state.route.kind,state.route.id).find(r=>r.id===state.route.record)||null:null;
+const isReadOnly=()=>state.route.tab==='initial'||!!state.route.record||isViewer();
+const pending=()=>pendingByWorkspace[state.workspace];
+const updatesState=()=>updateByWorkspace[state.workspace];
+const objectName=(o,kind=state.route.kind)=>kind==='standard'?'软件 '+o.version:o.name;
+const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+function meaningful(session){return !!session&&model.isDirty(session)}
+function unsaved(){return !!state.session&&!equal(state.session,state.baseline)}
+function routeHash(r=state.route){const q=new URLSearchParams();if(state.view==='list')q.set('view','list');if(state.workspace!=='default')q.set('workspace',state.workspace);if(r.record)q.set('record',r.record);const suffix=q.size?'?'+q.toString():'';return r.screen==='files'?'#/files'+suffix:'#/files/'+r.fileId+'/'+(r.screen==='object'?`${r.kind}/${r.id}/${r.tab||'parameters'}`:r.screen)+suffix}
+function parseRoute(hash){const [p,q]=hash.split('?'),v=new URLSearchParams(q);const m=/^#\/files(?:\/([01])\/(evolution|updates|records|standard|machine)(?:\/(\d+)\/(parameters|initial|machines|history|export))?)?$/.exec(p||'#/files');if(!m)return {screen:'files',fileId:0};if(v.get('workspace')==='lab'){state.workspace='lab';model=models.lab}else{state.workspace='default';model=models.default}state.view=v.get('view')==='list'?'list':'graph';let r={screen:m[2]||'files',fileId:Number(m[1]||0)};if(['standard','machine'].includes(m[2])){r={...r,screen:'object',kind:m[2],id:Number(m[3]),tab:m[4]||'parameters',record:v.get('record')};if(!model.object(r.fileId,r.kind,r.id))r={screen:'evolution',fileId:r.fileId};if(r.kind==='machine'&&r.tab==='initial')r.tab='parameters';if(r.record&&!model.history(r.fileId,r.kind,r.id).some(x=>x.id===r.record))r.record=null}return r}
+function remember(){const el=$('#evolutionScroll');if(el)state.positions[state.workspace+':'+state.route.fileId+':'+state.view]={x:el.scrollLeft,y:el.scrollTop}}
+function navigate(r,{replace=false,keepFilters=false}={}){guard(()=>{remember();state.route=r;state.session=null;state.baseline=null;state.error='';state.errors={};state.exportText=null;if(!keepFilters){state.query='';state.group='all';state.filter='all';state.page=1}commitRoute(replace);render();if(r.screen==='evolution')restorePosition()})}
+function commitRoute(replace=false){const hash=routeHash();if(hash!==location.hash)history[replace?'replaceState':'pushState'](null,'',hash);state.currentHash=hash}
+function restorePosition(){const el=$('#evolutionScroll'),pos=state.positions[state.workspace+':'+state.route.fileId+':'+state.view];if(el&&pos){el.scrollLeft=pos.x;el.scrollTop=pos.y}if(state.selection){const el=$(`[data-focus-key="${state.selection}"]`);el?.focus({preventScroll:true})}}
+function guard(next){if(!unsaved()){next();return}pendingNavigation=next;showModal('保留这次修改？',`<p>当前编辑内容还没有暂存。离开前可以保留为草稿，下次继续编辑。</p>`,[{label:'继续编辑',run:closeModal},{label:'放弃本次修改',run:()=>{state.session=null;state.baseline=null;closeModal();const n=pendingNavigation;pendingNavigation=null;n?.()}},{label:'暂存并离开',primary:true,run:()=>{model.stash(state.session);state.session=null;state.baseline=null;closeModal();const n=pendingNavigation;pendingNavigation=null;n?.();toast('草稿已暂存')}}],{subtitle:currentObject()?objectName(currentObject()):''})}
+function header(){return `<header class="topbar"><a class="brand" href="#/files" data-action="files" aria-label="MCChecker 配置文件首页"><span class="brand-mark">MC</span><span>MCChecker</span></a><span class="sep"></span><label class="context-control"><span>工作区</span><select id="workspaceSelect" aria-label="全局工作区"><option value="default" ${state.workspace==='default'?'selected':''}>默认工作区</option><option value="lab" ${state.workspace==='lab'?'selected':''}>试验工作区</option></select></label><span class="context-control machine"><span>机型</span><span style="color:var(--text);font-weight:550">MC-800</span></span><span class="grow"></span><button class="preview-button" data-action="prototype">交互原型 · V3.2</button><span class="user"><span class="avatar">${isViewer()?'访':'陈'}</span><span>${isViewer()?'访客 · 只读':'陈工 · 管理员'}</span></span></header>`}
+function sidebar(){return `<aside class="sidebar" aria-label="主导航">${[['grid','速览'],['search','全局搜索'],['review','审阅修改'],['calc','DL 计算']].map(([ic,n])=>`<button class="navitem" disabled title="宿主页面未包含在独立原型中">${icon(ic)}${n}</button>`).join('')}<button class="navitem active" data-action="files" aria-current="page">${icon('folder')}配置管理</button><button class="navitem" disabled title="宿主页面未包含在独立原型中">${icon('settings')}设置</button><div class="side-heading"><span>配置文件</span><span class="count">${model.files.length}</span></div>${model.files.map(x=>`<button class="sidefile ${state.route.screen!=='files'&&state.route.fileId===x.id?'selected':''}" data-action="file" data-id="${x.id}">${icon('file')}<span class="truncate">${E(x.name)}</span></button>`).join('')}<div class="sidefoot">${icon('help')}<button data-action="prototype">原型说明与演示设置</button></div></aside>`}
+function breadcrumbs(){const r=state.route,o=r.screen==='object'?currentObject():null;return `<nav class="breadcrumbs" aria-label="面包屑"><a href="#/files" data-action="files">配置管理</a>${r.screen!=='files'?`${icon('chevron')}<a href="#/files/${r.fileId}/evolution" data-action="file" data-id="${r.fileId}">${E(f().name)}</a>`:''}${o?`${icon('chevron')}<span class="current">${E(objectName(o))}</span>`:r.screen==='files'?`${icon('chevron')}<span class="current">配置文件</span>`:''}</nav>`}
+function render(){const focused=document.activeElement,focusId=focused?.id,focusData=focused?.dataset?.action?{...focused.dataset}:null;document.title=(state.route.screen==='files'?'配置文件':state.route.screen==='object'?objectName(currentObject()):f().name)+' · MCChecker';$('#app').innerHTML=header()+`<div class="shell">${sidebar()}<main>${breadcrumbs()}<div class="page ${state.compact?'compact':''}" id="page">${pageHTML()}</div></main></div>`;bindPageSpecific();if(state.route.screen==='object'&&state.route.tab==='parameters')updateEditStatus();const restore=focusId?document.getElementById(focusId):focusData?[...document.querySelectorAll('[data-action]')].find(el=>Object.entries(focusData).every(([k,v])=>el.dataset[k]===v)):null;const heading=$('main h1');if(heading)heading.tabIndex=-1;(restore||heading)?.focus({preventScroll:true});}
+function pageHTML(){if(state.route.screen==='files')return filesPage();if(state.route.screen==='evolution')return fileHeading()+fileTabs()+evolutionPage();if(state.route.screen==='updates')return fileHeading()+fileTabs()+updatesPage();if(state.route.screen==='records')return fileHeading()+fileTabs()+recordsPage();return objectPage()}
+function fileHeading(){const file=f(),vers=model.versions(file.id),ms=model.machines(file.id).filter(m=>m.current);return `<div class="page-heading"><div class="heading-with-icon">${filetype(file)}<div><h1>${E(file.name)}</h1><p>${E(file.group)}<span style="margin:0 8px;color:#bcc7d5">/</span>${vers.length} 个软件版本 · ${ms.length} 台机台</p></div></div><div class="row">${state.route.screen==='evolution'?btn('新建机台','new-machine',{icon:'plus',disabled:isViewer()})+btn('新建软件版本','new-version',{cls:'primary',icon:'plus',disabled:isViewer()}):state.route.screen==='updates'?btn('更新设置','update-settings',{icon:'settings',disabled:isViewer()||f().id!==0,title:f().id!==0?'此文件未配置示例来源':''})+btn(updatesState().running?'正在更新…':'立即更新','run-update',{cls:'primary',icon:'refresh',disabled:isViewer()||f().id!==0||updatesState().running}):''}</div></div>`}
+function fileTabs(){return `<div class="tabs" aria-label="配置文件页面">${[['evolution','版本演进'],['updates','更新管理'],['records','操作记录']].map(([id,label])=>`<button data-action="file-tab" data-tab="${id}" class="${state.route.screen===id?'active':''}" ${state.route.screen===id?'aria-current="page"':''}>${label}${id==='updates'&&pending().has(f().id)?'<span class="tabnum attention">1</span>':''}</button>`).join('')}</div>`}
+function filesPage(){const list=model.files.filter(x=>(x.name+x.group).toLowerCase().includes(state.fileQuery.toLowerCase()));return `<div class="page-heading"><div><h1>配置文件</h1><p>当前工作区 · MC-800</p></div>${btn('全部更新','update-all',{icon:'refresh',disabled:isViewer()||updatesState().running})}</div><section class="workspace" aria-label="配置文件列表"><div class="toolbar"><label class="searchbox">${icon('search')}<input type="search" id="fileSearch" aria-label="搜索配置文件" placeholder="搜索文件名或配置名称" value="${E(state.fileQuery)}"></label><span class="grow"></span><span class="small muted">${model.files.length} 个文件</span></div><div class="scroll" id="fileRows">${fileTable(list)}</div><div class="tablefoot"><span>所有版本、机台和记录均限定于当前工作区</span></div></section>`}
+function fileTable(list){if(!list.length)return empty('没有匹配的配置文件','试试文件名或配置名称。',btn('清除搜索','clear-file-search'));return `<table class="table filetable"><thead><tr><th>文件名</th><th>软件版本</th><th>机台</th><th>待处理</th><th>最近保存</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>${list.map(x=>{const vs=model.versions(x.id),ms=model.machines(x.id),latest=[...vs,...ms].map(o=>o.current).filter(Boolean).sort((a,b)=>new Date(b.time)-new Date(a.time))[0],drafts=[...vs,...ms].filter(x=>x.draft).length;return `<tr><td class="maincell"><div class="row">${filetype(x)}<div><button class="link" data-action="file" data-id="${x.id}">${E(x.name)}</button><span class="cell-sub">${E(x.group)}</span></div></div></td><td><div class="versions">${vs.slice().reverse().slice(0,3).map(v=>pill(v.version)).join('')}</div></td><td class="num">${ms.filter(x=>x.current).length} 台</td><td>${drafts?pill(drafts+' 份草稿','amber'):'<span class="muted">—</span>'}${pending().has(x.id)?'<div class="schedule-info">1 组更新待核对</div>':''}</td><td><span class="small">${E(T(latest?.time)||'尚未保存')}</span><span class="cell-sub">${E(latest?.author||'—')}</span></td><td>${btn('','file',{cls:'icon-only quiet',icon:'chevron',title:'管理 '+x.name,data:`data-id="${x.id}" aria-label="管理 ${E(x.name)}"`})}</td></tr>`}).join('')}</tbody></table>`}
+function filteredVersions(){const q=state.evoQuery.trim().toLowerCase(),ms=model.machines(f().id);return model.versions(f().id).map(v=>({v,children:ms.filter(m=>m.version===v.version&&(state.evoFilter!=='draft'||m.draft)&&(!q||(m.name+' '+v.version).toLowerCase().includes(q)))})).filter(({v,children})=>state.evoFilter==='draft'?!!v.draft||children.length:!q||(v.version.toLowerCase().includes(q)||children.length))}
+function evolutionPage(){return `<section class="workspace" aria-label="版本演进"><div class="toolbar evolution-tools"><label class="searchbox">${icon('search')}<input id="evoSearch" type="search" placeholder="搜索软件版本或机台" aria-label="搜索版本或机台" value="${E(state.evoQuery)}"></label><select class="filterselect" id="evoFilter" aria-label="筛选配置状态"><option value="all" ${state.evoFilter==='all'?'selected':''}>全部状态</option><option value="draft" ${state.evoFilter==='draft'?'selected':''}>有草稿的配置</option></select><div class="right"><div class="segmented" role="group" aria-label="版本显示方式"><button data-action="view" data-view="graph" class="${state.view==='graph'?'active':''}" aria-pressed="${state.view==='graph'}">${icon('graph')}关系图</button><button data-action="view" data-view="list" class="${state.view==='list'?'active':''}" aria-pressed="${state.view==='list'}">${icon('list')}层级列表</button></div></div></div><div id="evolutionScroll" class="scroll ${state.view==='graph'?'graph-scroll':''}" tabindex="0" aria-label="${state.view==='graph'?'版本关系图，可横向和纵向滚动':'软件版本与机台层级列表'}">${evolutionBody()}</div><div id="evoFooter">${evolutionFooter()}</div></section>`}
+function evolutionBody(){const groups=filteredVersions();if(!groups.length)return empty('没有匹配的版本或机台','清除搜索或切换状态筛选。',btn('清除筛选','clear-evo'));return state.view==='graph'?graphHTML(groups):hierarchyHTML(groups)}
+function evolutionFooter(){return `<div class="tablefoot">${state.view==='graph'?`<div class="graphlegend"><span><i class="line-sample"></i>保存演进</span><span><i class="line-sample source"></i>参数来源</span><span><i class="box-sample"></i>草稿</span></div><div class="row">${btn('','zoom-out',{cls:'icon-only quiet',icon:'minus',title:'缩小关系图',data:'aria-label="缩小关系图"',disabled:state.zoom<=.75})}<span class="num">${Math.round(state.zoom*100)}%</span>${btn('','zoom-in',{cls:'icon-only quiet',icon:'plus',title:'放大关系图',data:'aria-label="放大关系图"',disabled:state.zoom>=1.25})}${btn('读图说明','graph-help',{cls:'text'})}</div>`:`<span>${filteredVersions().length} 个软件版本 · ${filteredVersions().reduce((n,g)=>n+g.children.length,0)} 台机台</span><div class="row">${btn('展开全部','expand-all',{cls:'text'})}${btn('收起全部','collapse-all',{cls:'text'})}</div>`}</div>`}
+function graphHTML(groups){
+  const allVersions=model.versions(f().id),ms=[...new Map(groups.flatMap(g=>g.children).map(m=>[m.id,m])).values()],selectedIds=new Set(groups.map(g=>g.v.id));
+  const oldByMachine=new Map(ms.map(m=>[m.id,model.history(f().id,'machine',m.id).find(r=>r.version!==m.version)]));
+  const neededVersions=new Set(groups.map(g=>g.v.version));for(const m of ms){if(m.draft)neededVersions.add(m.draft.targetVersion);const h=oldByMachine.get(m.id);if(h)neededVersions.add(h.version)}
+  const vs=(!state.evoQuery&&state.evoFilter==='all'?allVersions:allVersions.filter(v=>neededVersions.has(v.version))).slice().sort((a,b)=>(a.id===103?-1:a.id)-(b.id===103?-1:b.id));
+  const sources=new Set();ms.forEach(m=>{if(m.current?.sourceRevisionId)sources.add(m.current.sourceRevisionId);const h=oldByMachine.get(m.id);if(h?.sourceRevisionId)sources.add(h.sourceRevisionId)});
+  const pastSources=new Map(vs.map(v=>[v.id,model.history(f().id,'standard',v.id).filter(r=>sources.has(r.id)&&r.id!==v.current?.id)]));
+  const cw=218,lw=120,rh=87,hh=62,nw=164,nh=53,extra=Math.max(0,...[...pastSources.values()].map(x=>x.length))*66,W=lw+vs.length*cw,H=hh+(ms.length+2)*rh+extra+18;
+  const rowY=row=>hh+row*rh+(row>1?extra:0),pos=(col,row)=>({x:lw+col*cw+(cw-nw)/2,y:rowY(row)+17});let nodes=[],edges=[],sourceKeys=new Map();
+  vs.forEach((v,col)=>{
+    if(v.initialValues)nodes.push({key:'i-'+v.id,...pos(col,0),title:'初始参数',sub:'只读快照',cls:'initial',kind:'standard',id:v.id,tab:'initial'});
+    if(v.current){nodes.push({key:'s-'+v.id,...pos(col,1),title:v.draft?'版本标准 · 有草稿':'版本标准',sub:T(v.current.time),cls:v.draft?'draft':'',kind:'standard',id:v.id,tab:'parameters',edit:!!v.draft});sourceKeys.set(v.current.id,'s-'+v.id)}
+    else if(v.draft)nodes.push({key:'s-'+v.id,...pos(col,1),title:'未保存标准',sub:'继续编辑草稿',cls:'draft',kind:'standard',id:v.id,tab:'parameters',edit:true});
+    pastSources.get(v.id).forEach((rev,i)=>{const p=pos(col,1),key='sr-'+rev.id;nodes.push({key,...p,y:p.y+(i+1)*66,title:'来源标准快照',sub:T(rev.time),cls:'historical',kind:'standard',id:v.id,tab:'parameters',record:rev.id});sourceKeys.set(rev.id,key)});
+    if(v.initialValues&&v.current)edges.push(['i-'+v.id,'s-'+v.id,'source']);if(v.previousId){edges.push(['i-'+v.previousId,'i-'+v.id,'saved']);if(v.current)edges.push(['s-'+v.previousId,'s-'+v.id,'saved'])}
+  });
+  ms.forEach((m,mi)=>{const col=vs.findIndex(v=>v.version===m.version),row=mi+2,old=oldByMachine.get(m.id),key='m-'+m.id;
+    if(m.current){nodes.push({key,...pos(col,row),title:'当前配置',sub:T(m.current.time),cls:'current',kind:'machine',id:m.id,tab:'parameters'});const source=sourceKeys.get(m.current.sourceRevisionId);if(source)edges.push([source,key,'source'])}
+    if(old){const oc=vs.findIndex(v=>v.version===old.version);if(oc>=0){nodes.push({key:'h-'+m.id,...pos(oc,row),title:'历史配置',sub:T(old.time),cls:'historical',kind:'machine',id:m.id,tab:'parameters',record:old.id});edges.push(['h-'+m.id,key,'saved']);const source=sourceKeys.get(old.sourceRevisionId);if(source)edges.push([source,'h-'+m.id,'source'])}}
+    if(m.draft){let dc=vs.findIndex(v=>v.version===m.draft.targetVersion);if(dc<0)dc=col;if(dc===col&&m.current){const n=nodes.find(n=>n.key===key);n.title='当前配置 · 有草稿';n.cls='draft';n.edit=true}else{nodes.push({key:'d-'+m.id,...pos(dc,row),title:'待保存草稿',sub:m.draft.targetVersion!==m.version?'更新到 '+m.draft.targetVersion:'尚未正式保存',cls:'draft',kind:'machine',id:m.id,tab:'parameters',edit:true});if(m.current)edges.push([key,'d-'+m.id,'saved'])}}
+  });
+  const lines=edges.map(([a,b,type])=>{const p=nodes.find(n=>n.key===a),q=nodes.find(n=>n.key===b);if(!p||!q)return '';const d=p.y===q.y?`M${p.x+nw},${p.y+nh/2} H${q.x}`:`M${p.x+nw/2},${p.y+nh} V${q.y-10} H${q.x+nw/2} V${q.y}`;return `<path d="${d}" class="graph-line ${type}"/>`}).join('');
+  return `<div style="width:${W*state.zoom}px;height:${H*state.zoom}px;min-width:100%"><div class="graph-canvas" style="width:${W}px;height:${H}px;transform:scale(${state.zoom})">${vs.map((v,i)=>`<div class="graph-column" style="left:${lw+i*cw}px;width:${cw}px"></div><div class="graph-vhead" style="left:${lw+i*cw}px;width:${cw}px"><button data-action="object" data-kind="standard" data-id="${v.id}" aria-label="打开软件 ${E(v.version)}">${E(v.version)}</button>${pill(!selectedIds.has(v.id)?'关联上下文':v.current?'已保存':'准备中',v.current?'':'amber')}</div>`).join('')}${['初始参数','版本标准',...ms.map(m=>m.name)].map((label,i)=>`<div class="graph-label" style="top:${rowY(i)+24}px">${E(label)}<span>${i===0?'软件初始值':i===1?'标准与来源快照':'机台配置'}</span></div><div class="graph-rule" style="top:${rowY(i+1)}px"></div>`).join('')}<svg width="${W}" height="${H}" style="position:absolute;inset:0;pointer-events:none" aria-hidden="true">${lines}</svg>${nodes.map(n=>`<button class="graph-node ${n.cls}" data-action="object" data-kind="${n.kind}" data-id="${n.id}" data-tab="${n.tab}" ${n.edit?'data-edit="true"':''} ${n.record?`data-record="${n.record}"`:''} data-focus-key="${n.key}" style="left:${n.x}px;top:${n.y}px" aria-label="${E((n.kind==='standard'?'软件 '+vs.find(v=>v.id===n.id)?.version:ms.find(m=>m.id===n.id)?.name)+'，'+n.title+'，'+n.sub)}"><i class="dot"></i><strong>${E(n.title)}</strong><span>${E(n.sub)}</span></button>`).join('')}</div></div>`;
+}
+function hierarchyHTML(groups){const collapsed=state.evoQuery?state.searchCollapsed:state.collapsed;return `<table class="table evo-table"><caption class="sr-only">软件版本及其正式归属的机台，草稿不会提前改变版本归属</caption><thead><tr><th>软件版本 / 机台</th><th>配置状态</th><th>最近保存</th><th>操作</th></tr></thead>${groups.slice().reverse().map(({v,children})=>{const open=!collapsed.has(v.id);return `<tbody><tr class="versionrow"><td><div class="tree-name"><button class="disclosure" data-action="toggle-version" data-id="${v.id}" aria-expanded="${open}" aria-controls="children-${v.id}" aria-label="${open?'收起':'展开'}软件 ${E(v.version)}">${icon(open?'down':'chevron')}</button><button class="link vername" data-action="object" data-id="${v.id}" data-kind="standard" data-focus-key="s-${v.id}">软件 ${E(v.version)}</button><span class="count">${children.length} 台机台</span></div></td><td><span class="small muted">标准参数</span> ${v.draft?pill('有草稿','amber'):v.current?'<span class="small muted">已保存</span>':pill('尚未保存','amber')}</td><td class="small muted">${E(T(v.current?.time)||'—')}</td><td>${btn(v.draft?'继续草稿':'编辑标准','object',{cls:'text',disabled:isViewer(),data:`data-kind="standard" data-id="${v.id}" data-edit="true"`})}</td></tr></tbody><tbody id="children-${v.id}" ${open?'':'hidden'}>${children.map(m=>`<tr><td><div class="tree-name tree-child">${icon('machine')}<button class="link" data-action="object" data-kind="machine" data-id="${m.id}" data-focus-key="m-${m.id}">${E(m.name)}</button></div></td><td>${m.draft?pill(m.current?'有草稿':'新建草稿','amber')+' '+(m.draft.targetVersion!==m.version?`<span class="small" style="color:var(--amber)">更新到 ${E(m.draft.targetVersion)}</span>`:''):'<span class="small muted">已保存</span>'}</td><td class="small muted">${E(T(m.current?.time)||'—')}</td><td>${btn(m.draft?'继续草稿':'编辑参数','object',{cls:'text',disabled:isViewer(),data:`data-kind="machine" data-id="${m.id}" data-edit="true"`})}</td></tr>`).join('')}</tbody>`}).join('')}</table>`}
+function openObject(id,kind='machine',tab='parameters',edit=false,record=null){guard(()=>{remember();if(!model.object(state.route.fileId,kind,Number(id))){toast('此配置在当前文件中已不存在');return}if(record&&!model.history(state.route.fileId,kind,Number(id)).some(r=>r.id===record))record=null;state.route={screen:'object',fileId:state.route.fileId,kind,id:Number(id),tab,record};state.query='';state.group='all';state.filter='all';state.page=1;state.error='';state.errors={};state.session=null;state.baseline=null;state.exportText=null;commitRoute();if(edit&&!isViewer())startEdit();else render();$('#objectTitle')?.focus({preventScroll:true})})}
+function currentValues(){const o=currentObject();if(state.route.record)return viewedRevision()?.values||{};if(state.route.tab==='initial')return o.initialValues||{};return state.session?.values||o.current?.values||{}}
+function referenceValues(){const o=currentObject();if(state.route.record&&state.route.kind==='machine'){const rev=viewedRevision();return model.revision(rev?.sourceRevisionId)?.values||{}}if(state.route.kind==='standard')return o.initialValues||{};const version=state.session?.targetVersion||o.version;return model.standardFor(f().id,version)?.current?.values||{}}
+function objectHeading(){const o=currentObject(),r=state.route,editing=!!state.session&&r.tab!=='export',readonly=isReadOnly(),version=state.session?.targetVersion||o.version,rev=r.record?viewedRevision():o.current;let status=editing?'编辑中':r.tab==='export'?'导出已保存快照':r.record?'历史快照':r.tab==='initial'?'初始参数 · 只读':o.current?'已保存':'尚未保存';let buttons=r.tab==='export'?'':readonly?btn('导出文件','export',{icon:'download',disabled:!Object.keys(currentValues()).length}):editing?btn('更多操作','more',{icon:'more'}):btn('导出文件','export',{icon:'download',disabled:!o.current})+btn(o.draft?'继续编辑草稿':'编辑参数','edit',{cls:'primary',icon:'edit'})+btn('','more',{cls:'icon-only',icon:'more',data:'aria-label="当前配置的更多操作"'});return `<div class="page-heading object-heading"><div><div class="identity">${icon(r.kind==='machine'?'machine':'branch')}<h1 id="objectTitle" tabindex="-1">${E(objectName(o))}</h1>${pill(status,editing?'blue':o.current&&!readonly?'green':'',!readonly)}</div><div class="object-meta">${r.kind==='machine'?`<span>软件 ${E(rev?.version||o.version)}</span>${!r.record&&version!==o.version?`<span style="color:var(--amber)">→ 草稿目标 ${E(version)}</span>`:''}<span>·</span>`:''}<span>${E(T(rev?.time)||'尚未保存')}</span>${rev?.author?`<span>· ${E(rev.author)}</span>`:''}</div></div><div class="object-actions">${buttons}</div></div>`}
+function objectTabs(){const r=state.route,o=currentObject();let tabs=[['parameters',r.kind==='standard'?'标准参数':'参数']];if(r.kind==='standard')tabs.push(['initial','初始参数'],['machines','使用此版本的机台']);tabs.push(['history','修改记录']);return `<div class="tabs" aria-label="当前配置页面">${tabs.map(([id,label])=>`<button data-action="object-tab" data-tab="${id}" class="${r.tab===id?'active':''}" ${r.tab===id?'aria-current="page"':''}>${label}${id==='machines'?`<span class="tabnum">${model.machines(f().id).filter(m=>m.current&&m.version===o.version).length}</span>`:''}</button>`).join('')}</div>`}
+function objectPage(){const o=currentObject();if(!o)return empty('配置不存在','返回配置文件重新选择。',btn('返回配置文件','files'));if(state.route.tab==='export')return objectHeading()+exportPage();let out=objectHeading()+objectTabs();if(state.route.tab==='machines')return out+versionMachines();if(state.route.tab==='history')return out+objectHistory();if(state.route.record)out+=`<div class="notice">${icon('history')}<span class="grow">正在查看历史快照，参数只读。</span>${btn('返回当前配置','latest',{cls:'text'})}</div>`;else if(state.route.tab==='initial')out+=`<div class="readonly-note">${icon('lock')}软件初始参数为独立快照，版本标准的修改不会覆盖此处。</div>`;else if(o.draft&&!state.session)out+=`<div class="notice amber">${icon('edit')}<span class="grow">${o.current?'当前显示上次保存的配置。':'此配置尚未正式保存。'}已有${o.draft.targetVersion!==o.version?'更新到 '+E(o.draft.targetVersion)+' 的':''}草稿。</span>${btn('继续编辑','edit',{cls:'text',disabled:isViewer()})}</div>`;if(state.error)out+=`<div class="notice red error-banner" role="alert">${icon('alert')}<span class="grow">${E(state.error)}</span>${btn('重新核对','save-review',{cls:'text'})}</div>`;out+=parameterWorkbench();if(state.session)out+=editBar();return out}
+function parameterWorkbench(){const ps=model.parameters(f().id),groups=[...new Set(ps.map(p=>p.group))];if(state.route.tab==='initial'&&!currentObject().initialValues)return `<section class="workspace">${empty('初始参数尚未导入','新建软件版本时不会复制其他版本的初始参数。')}</section>`;return `<div class="editor"><nav class="directory" aria-label="参数目录"><div class="directory-label">参数目录</div><button data-action="category" data-group="all" class="${state.group==='all'?'active':''}"><span class="dir-name">${icon('list')}全部参数</span><span class="count">${ps.length}</span></button>${groups.map(g=>`<button data-action="category" data-group="${E(g)}" class="${state.group===g?'active':''}"><span class="dir-name">${icon('folder')}${E(g)}</span><span class="count">${ps.filter(p=>p.group===g).length}</span></button>`).join('')}</nav><section class="workspace parameter-work" aria-label="参数表"><div class="toolbar"><label class="searchbox">${icon('search')}<input type="search" id="paramSearch" aria-label="搜索参数" placeholder="搜索参数名称或文件字段" value="${E(state.query)}"><span class="key">/</span></label><div class="right">${btn('对比','compare',{icon:'compare',cls:'quiet',disabled:!!state.route.record})}${state.route.kind==='standard'&&!isReadOnly()?btn('导入','import',{icon:'upload',disabled:isViewer()}):''}${btn('','columns',{cls:'icon-only quiet',icon:'settings',data:'aria-label="参数表显示设置"',title:'显示列与密度'})}</div></div><div class="filterbar" id="parameterFilters">${parameterFilters()}</div><div class="scroll" id="parameterScroll" tabindex="0" aria-label="参数表滚动区域"><div id="parameterRows">${parameterRows()}</div></div><div class="tablefoot" id="parameterFooter">${parameterFooter()}</div></section></div>`}
+function parameterFilters(){const ps=model.parameters(f().id),values=currentValues(),ref=referenceValues(),diff=ps.filter(p=>String(values[p.id]??'')!==String(ref[p.id]??'')).length,changes=state.session?model.changes(state.session).length:0;return [['all','全部',ps.length],...(state.route.kind==='machine'||currentObject().initialValues?[['different','与'+(state.route.kind==='standard'?'初始值':'标准值')+'不同',diff]]:[]),...(state.session?[['changed','本次修改',changes]]:[])].map(([id,label,count])=>`<button data-action="param-filter" data-filter="${id}" class="${state.filter===id?'active':''}">${label}<span>${count}</span></button>`).join('')}
+function visibleParameters(){const values=currentValues(),ref=referenceValues(),changed=new Set(state.session?model.changes(state.session).map(c=>c.param.id):[]),q=state.query.trim().toLowerCase();return model.parameters(f().id).filter(p=>(state.group==='all'||p.group===state.group)&&(!q||(p.name+' '+p.field).toLowerCase().includes(q))&&(state.filter!=='different'||String(values[p.id]??'')!==String(ref[p.id]??''))&&(state.filter!=='changed'||changed.has(p.id)))}
+function modeLabel(mode){return mode==='standard'?'使用标准值':mode==='fixed'?'保持此值':'单独设置'}
+function parameterRows(){const all=visibleParameters(),pages=Math.max(1,Math.ceil(all.length/state.pageSize));state.page=Math.min(state.page,pages);if(!all.length)return empty('没有匹配的参数','调整目录、搜索内容或差异筛选。',btn('清除筛选','clear-params'));const ps=all.slice((state.page-1)*state.pageSize,state.page*state.pageSize),objectSnapshot=currentObject(),editing=!!state.session,values=currentValues(),saved=objectSnapshot.current?.values||{},modes=state.session?.modes||viewedRevision()?.modes||currentObject().current?.modes||{},changeIds=new Set(editing?model.changes(state.session).map(c=>c.param.id):[]);return `<table class="table paramtable ${editing?'editing-table':''}"><caption class="sr-only">${E(objectName(currentObject()))}的${state.route.tab==='initial'?'初始':'当前'}参数</caption><thead><tr><th class="name-col">参数名称</th>${editing?'<th class="old-col">上次保存</th>':''}<th class="value-col">${editing?'编辑值':'当前值'}</th><th class="unit-col">单位</th><th class="mode-col">${state.route.kind==='machine'?'取值方式':'值状态'}</th>${state.showField?'<th class="field-col">文件字段</th>':''}</tr></thead><tbody>${ps.map(p=>{const val=String(values[p.id]??''),error=state.errors[p.id],changed=changeIds.has(p.id);return `<tr data-param-row="${p.id}" class="${changed?'changed':''} ${error?'error':''}"><td><button class="param-name" data-action="param-detail" data-id="${p.id}">${E(p.name)}</button><span class="cell-sub">${E(p.group)}</span></td>${editing?`<td class="mono old-value">${E(saved[p.id]??'—')}</td>`:''}<td>${editing?valueEditor(p,val,error):`<span class="mono value-display">${val===''?'<span class="muted">空字符串</span>':E(val)}</span>`}</td><td class="small muted">${E(p.unit||'—')}</td><td>${editing&&state.route.kind==='machine'?`<select class="mode-select" data-mode-id="${p.id}" aria-label="${E(p.name)}的取值方式">${[['custom','单独设置'],['standard','使用标准值'],['fixed','保持此值']].map(([v,l])=>`<option value="${v}" ${modes[p.id]===v?'selected':''}>${l}</option>`).join('')}</select>`:`<span class="mode-text ${modes[p.id]==='custom'?'custom':''}">${state.route.tab==='initial'?'初始快照':state.route.kind==='machine'?modeLabel(modes[p.id]):state.route.record?'历史快照':!objectSnapshot.initialValues?'未提供初始值':String(values[p.id]??'')===String(objectSnapshot.initialValues?.[p.id]??'')?'与初始值一致':'版本设置'}</span>`}</td>${state.showField?`<td class="mono field-path">${E(p.field)}</td>`:''}</tr>`}).join('')}</tbody></table>`}
+function valueEditor(p,value,error){return (p.type==='boolean'?`<select class="value-input" data-value-id="${p.id}" aria-label="${E(p.name)}的配置值" aria-invalid="${!!error}" aria-describedby="error-${p.id}"><option value="true" ${value==='true'?'selected':''}>true · 开启</option><option value="false" ${value==='false'?'selected':''}>false · 关闭</option>${!['true','false'].includes(value)?'<option value="" selected>请选择</option>':''}</select>`:`<input class="value-input" data-value-id="${p.id}" type="${p.type==='number'?'number':'text'}" ${p.type==='number'?`step="any" ${p.min!==undefined?`min="${p.min}"`:''} ${p.max!==undefined?`max="${p.max}"`:''}`:''} aria-label="${E(p.name)}的配置值" value="${E(value)}" aria-invalid="${!!error}" aria-describedby="error-${p.id}">`)+`<div class="field-error" id="error-${p.id}" ${error?'':'hidden'}>${E(error||'')}</div>`}
+function parameterFooter(){const count=visibleParameters().length,pages=Math.max(1,Math.ceil(count/state.pageSize)),from=count?(state.page-1)*state.pageSize+1:0,to=Math.min(count,state.page*state.pageSize);return `<span>${count>state.pageSize?`${from}–${to} / `:''}${count} 项参数</span><div class="pager">${count>state.pageSize?`${btn('','prev-page',{cls:'icon-only quiet',icon:'back',disabled:state.page<=1,data:'aria-label="上一页参数"'})}<span>${state.page} / ${pages}</span>${btn('','next-page',{cls:'icon-only quiet',icon:'arrow',disabled:state.page>=pages,data:'aria-label="下一页参数"'})}`:state.session?'<span id="tableEditCount">编辑内容尚未保存</span>':`<span>${state.route.tab==='initial'?'初始参数只读':isViewer()?'访客只读':state.route.record?'历史记录只读':'查看已保存配置'}</span>`}</div>`}
+function editBar(){return `<div class="editbar"><div class="row">${icon('edit')}<span class="status" id="editCount">编辑中</span><span class="content-note">保存前可核对所有变化</span></div><div class="edit-actions">${btn('取消编辑','cancel-edit')}${btn('暂存草稿','stash')}${btn('核对并保存','save-review',{cls:'primary',icon:'check'})}</div></div>`}
+function refreshParameters(){const active=document.activeElement,focusId=active?.dataset?.modeId,focusValue=active?.dataset?.valueId,focusData=active?.dataset?.action?{...active.dataset}:null;if($('#parameterRows'))$('#parameterRows').innerHTML=parameterRows();if($('#parameterFilters'))$('#parameterFilters').innerHTML=parameterFilters();if($('#parameterFooter'))$('#parameterFooter').innerHTML=parameterFooter();updateEditStatus();const target=focusId?$(`[data-mode-id="${focusId}"]`):focusValue?$(`[data-value-id="${focusValue}"]`):focusData?[...document.querySelectorAll('[data-action]')].find(el=>Object.entries(focusData).every(([k,v])=>el.dataset[k]===v)):null;if(target&&!target.disabled)target.focus({preventScroll:true});else if(focusData)$('#parameterScroll')?.focus({preventScroll:true})}
+function updateEditStatus(){if(!state.session)return;const count=model.changes(state.session).length,version=state.session.targetVersion!==currentObject().version,label=count+' 项参数修改'+(version?' · 软件版本待更新':'');if($('#editCount'))$('#editCount').textContent=label;if($('#tableEditCount'))$('#tableEditCount').textContent=count?'未保存':'暂无参数变化';if($('#parameterFilters'))$('#parameterFilters').innerHTML=parameterFilters();const changed=new Set(model.changes(state.session).map(c=>c.param.id));document.querySelectorAll('[data-param-row]').forEach(row=>row.classList.toggle('changed',changed.has(row.dataset.paramRow)))}
+function startEdit(){if(isViewer()||state.route.record||state.route.tab==='initial')return;state.route.tab='parameters';state.session=model.begin(f().id,state.route.kind,state.route.id);state.baseline=clone(state.session);state.explicitModes.clear();state.errors={};state.error='';commitRoute();render()}
+function versionMachines(){const o=currentObject(),ms=model.machines(f().id).filter(m=>m.current&&m.version===o.version),targeting=model.machines(f().id).filter(m=>m.current&&m.version!==o.version&&m.draft?.targetVersion===o.version);return `${targeting.length?`<div class="notice amber">${icon('info')}<span>${targeting.map(m=>E(m.name)).join('、')} 有更新到此版本的草稿，保存后才计入本版本机台。</span></div>`:''}<section class="workspace"><div class="toolbar"><span class="small muted">${ms.length} 台机台使用已保存的 ${E(o.version)} 配置</span><span class="grow"></span>${btn('新建机台','new-machine',{icon:'plus',disabled:isViewer()})}</div><div class="scroll">${ms.length?`<table class="table"><thead><tr><th>机台编号</th><th>最近保存</th><th>草稿</th><th>操作</th></tr></thead><tbody>${ms.map(m=>`<tr><td class="maincell"><button class="link" data-action="object" data-kind="machine" data-id="${m.id}">${E(m.name)}</button></td><td class="muted">${E(T(m.current.time))}</td><td>${m.draft?pill(m.draft.targetVersion!==m.version?'更新到 '+m.draft.targetVersion:'有草稿','amber'):'—'}</td><td>${btn(m.draft?'继续草稿':'编辑参数','object',{cls:'text',disabled:isViewer(),data:`data-kind="machine" data-id="${m.id}" data-edit="true"`})}</td></tr>`).join('')}</tbody></table>`:empty('此版本还没有机台配置','从版本标准创建机台后，可单独调整参数。',btn('新建机台','new-machine',{disabled:isViewer()}))}</div></section>`}
+function objectHistory(){const hs=model.history(f().id,state.route.kind,state.route.id);return `<section class="workspace"><div class="toolbar"><span class="small muted">${hs.length} 条保存记录</span><span class="grow"></span><span class="small muted">历史快照只读</span></div><div class="scroll">${hs.length?hs.map((r,i)=>`<article class="history-snapshot"><span class="record-dot"></span><div class="grow"><h3>软件 ${E(r.version)} ${i===0?pill('当前记录','blue'):''}</h3><p>${E(r.note||'保存配置')}</p><div class="meta">${E(T(r.time))} · ${E(r.author)} · <span class="mono">${E(r.id)}</span></div></div>${btn('查看快照','snapshot',{icon:'eye',data:`data-record="${E(r.id)}"`})}</article>`).join(''):empty('暂无保存记录','正式保存后将在这里保留独立的参数快照。')}</div></section>`}
+function recordsPage(){return `<section class="workspace"><div class="toolbar"><label class="searchbox">${icon('search')}<input type="search" id="recordSearch" placeholder="搜索操作、对象或操作人" aria-label="搜索操作记录" value="${E(state.recordQuery)}"></label><span class="grow"></span><span class="small muted">当前文件的全部操作</span></div><div class="scroll" id="recordRows">${recordRows()}</div><div class="tablefoot"><span>记录保留对象、操作人和来源 IP</span></div></section>`}
+function recordRows(){const q=state.recordQuery.toLowerCase(),rs=model.events(f().id).filter(r=>(r.action+' '+r.objectName+' '+r.detail+' '+r.author+' '+r.ip).toLowerCase().includes(q));return rs.length?`<table class="table historytable"><thead><tr><th>操作 / 对象</th><th>变更内容</th><th>操作人</th><th>时间</th><th><span class="sr-only">查看</span></th></tr></thead><tbody>${rs.map(r=>`<tr><td><div class="row"><span class="eventicon">${icon('history')}</span><div><div class="eventtext">${E(r.action)}</div><span class="cell-sub">${E(r.objectName)}</span></div></div></td><td><span>${E(r.detail)}</span></td><td>${E(r.author)}<span class="cell-sub mono">${E(r.ip)}</span></td><td class="nowrap muted">${E(T(r.time))}</td><td>${btn('查看','object',{cls:'text',data:`data-kind="${r.objectKind}" data-id="${r.objectId}" data-tab="history"`,disabled:!model.object(f().id,r.objectKind,r.objectId)})}</td></tr>`).join('')}</tbody></table>`:empty('没有匹配的操作记录',state.recordQuery?'尝试其他对象名称或操作人。':'保存配置后，操作记录将显示在这里。')}
+function updatesPage(){const u=updatesState(),p=pending().get(f().id);return `<section class="workspace"><div class="toolbar"><div class="tabs" style="border:0;min-height:33px;gap:22px"><button data-action="updates-tab" data-tab="sources" class="${state.updatesTab==='sources'?'active':''}">更新来源</button><button data-action="updates-tab" data-tab="pending" class="${state.updatesTab==='pending'?'active':''}">待处理变化${p?'<span class="tabnum attention">1</span>':''}</button><button data-action="updates-tab" data-tab="runs" class="${state.updatesTab==='runs'?'active':''}">运行记录</button></div></div><div class="scroll">${f().id!==0?empty('尚未配置更新来源','为此文件设置更新来源后，可以获取更新并逐项核对。',btn('查看接入范围','update-empty-help',{cls:'text'})):u.running?`<table class="table"><tbody>${[0,1,2].map(()=>'<tr class="loading-row"><td><div class="skeleton"></div></td><td><div class="skeleton short"></div></td><td><div class="skeleton short"></div></td></tr>').join('')}</tbody></table><div class="nothing" role="status">正在获取示例更新内容…</div>`:state.updatesTab==='sources'?updateSources():state.updatesTab==='pending'?updatePending():updateRuns()}</div><div class="tablefoot"><span>获取更新后先核对，再保存为版本标准</span><span>${u.enabled?'计划已启用':'计划已暂停'}</span></div></section>${u.failed?`<div class="notice red" role="alert">${icon('alert')}<span class="grow">更新失败：示例连接已过期。已有配置和待处理内容均已保留。</span>${btn('重试更新','run-update',{cls:'text',disabled:isViewer()})}</div>`:''}`}
+function updateSources(){const u=updatesState(),p=pending().get(f().id);return `<table class="table historytable"><thead><tr><th>来源</th><th>目标版本</th><th>更新计划</th><th>最近结果</th><th>操作</th></tr></thead><tbody><tr><td><div class="sourcecell">${icon('cloud')}<div><span class="strong">SDA 标准参数</span><span class="cell-sub mono">${E(u.path)}</span></div></div></td><td><button class="inline-link" data-action="object" data-kind="standard" data-id="101">软件 690</button></td><td>每 ${E(u.frequency)} 分钟<div class="schedule-info">${u.enabled?'已启用':'已暂停'}</div></td><td>${u.failed?pill('更新失败','red'):p?pill('待核对 '+Object.keys(p.values).length+' 项','amber'):pill('没有新变化','green')}<span class="cell-sub">${E(u.last)}</span></td><td>${p?btn('核对变化','review-update',{cls:'text',disabled:isViewer()}):btn('立即更新','run-update',{cls:'text',disabled:isViewer()})}</td></tr></tbody></table>`}
+function updatePending(){const p=pending().get(f().id);return p?`<table class="table"><thead><tr><th>更新内容</th><th>目标</th><th>获取时间</th><th>操作</th></tr></thead><tbody><tr><td><span class="strong">${E(p.source)}</span><span class="cell-sub">${Object.keys(p.values).length} 项参数变化</span></td><td>软件 ${E(model.object(f().id,'standard',p.targetId)?.version)}</td><td class="muted">${E(p.time)}</td><td>${btn('核对变化','review-update',{cls:'text',disabled:isViewer()})}</td></tr></tbody></table>`:empty('没有待处理的变化','获取更新后，有变化的参数会集中显示在这里。',btn('立即更新','run-update',{disabled:isViewer()}))}
+function updateRuns(){const rs=updatesState().runs;return rs.length?`<table class="table"><thead><tr><th>结果</th><th>说明</th><th>触发方式</th><th>运行时间</th></tr></thead><tbody>${rs.map(r=>`<tr><td>${pill(r.status==='error'?'失败':r.status==='pending'?'待核对':'成功',r.status==='error'?'red':r.status==='pending'?'amber':'green')}</td><td>${E(r.detail)}</td><td class="muted">${E(r.actor)}</td><td class="muted">${E(T(r.time))}</td></tr>`).join('')}</tbody></table>`:empty('还没有更新记录','手动或计划更新的结果会记录在这里。')}
+function exportPage(){const values=exportValues(),o=currentObject();return `<div class="row">${btn('返回参数','export-back',{cls:'text',icon:'back'})}<span class="grow"></span><span class="small muted">${state.route.record?'使用当前查看的历史快照':'使用上次正式保存的配置'}</span></div><div class="export-layout"><section class="export-config"><h2>导出设置</h2><div class="field"><label for="exportFormat">导出模板</label><select id="exportFormat"><option value="XML" ${state.exportFormat==='XML'?'selected':''}>XML 示例模板</option><option value="JSON" ${state.exportFormat==='JSON'?'selected':''}>JSON 示例模板</option></select></div><div class="field"><span class="fieldlabel">导出对象</span><span class="meta">${E(objectName(o))}<br>软件 ${E(state.route.record?viewedRevision()?.version:o.version)}</span></div><div class="field"><span class="fieldlabel">参数与字段</span><span class="meta">${Object.keys(values).length} 项参数${btn('查看对应字段','mapping',{cls:'text'})}</span></div>${btn('生成预览','preview-export',{cls:'primary',icon:'code'})}<div class="content-note">示例导出按文件字段生成新文件；生产模板保真由后端处理。</div></section><section class="workspace"><div class="export-head"><span class="row">${icon('code')}<span id="exportFilename">${E(exportFilename())}</span></span>${btn('下载文件','download',{cls:'primary',icon:'download',disabled:!state.exportText})}</div><div class="scroll">${state.exportText?`<pre class="code-preview mono">${E(state.exportText)}</pre>`:empty('生成预览后下载','核对文件格式、参数和字段层级。')}</div><div class="tablefoot"><span>${Object.keys(values).length} 项参数 · UTF-8</span><span>示例文件</span></div></section></div>`}
+function exportValues(){const o=currentObject();if(state.route.record)return viewedRevision()?.values||{};return o.current?.values||{}}
+function exportFilename(){const o=currentObject();return '交互预览-示例-'+(state.route.kind==='standard'?'软件'+o.version:o.name)+'.'+state.exportFormat.toLowerCase()}
+function beginExport(){const o=currentObject();if(state.route.tab==='initial'){modalState.exportInitial=clone(o.initialValues||{});showModal('导出初始参数',`<p>软件 ${E(o.version)} · 只读初始快照</p><div class="table-wrap"><pre class="code-preview mono">${E(model.exportText(f().id,modalState.exportInitial,f().format))}</pre></div>`,[{label:'取消',run:closeModal},{label:'下载示例文件',primary:true,run:()=>{downloadText(model.exportText(f().id,modalState.exportInitial,f().format),'交互预览-示例-初始参数-'+o.version+'.'+f().format.toLowerCase(),f().format);closeModal()}}]);return}if(isViewer()||state.route.record){state.exportFormat=f().format;state.route.tab='export';state.exportText=null;commitRoute();render();return}if(state.session||o.draft){showModal('选择要导出的配置',`<p>${E(objectName(o))} 有${state.session?'正在编辑的内容':'未完成的草稿'}。请选择本次导出的数据。</p>`,[{label:'取消',run:closeModal},{label:'导出上次保存的配置',disabled:!o.current,run:()=>{closeModal();state.route.tab='export';state.exportFormat=f().format;state.exportText=null;commitRoute();render()}},{label:'保存并继续导出',primary:true,run:()=>{closeModal();if(!state.session){state.session=model.begin(f().id,state.route.kind,state.route.id);state.baseline=clone(state.session)}reviewSave(()=>{state.route.tab='export';state.exportFormat=f().format;state.exportText=null;commitRoute();render()})}}]);return}state.exportFormat=f().format;state.route.tab='export';state.exportText=null;commitRoute();render()}
+function downloadText(text,name,format){const blob=new Blob([text],{type:format==='JSON'?'application/json;charset=utf-8':'application/xml;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);toast('已生成并触发示例文件下载')}
+function toast(message){clearTimeout(toastTimer);$('.toast')?.remove();const n=document.createElement('div');n.className='toast';n.setAttribute('role','status');n.innerHTML=icon('check')+`<span>${E(message)}</span>`;document.body.append(n);toastTimer=setTimeout(()=>n.remove(),3800)}
+function showModal(title,body,actions=[],options={}){const old=$('#modal');if(old){old.close();old.remove()}else modalLastFocus=document.activeElement;const d=document.createElement('dialog');d.id='modal';d.className=options.size||'';d.setAttribute('aria-labelledby','dialogTitle');d.setAttribute('aria-modal','true');d.innerHTML=`<div class="dialog-head"><div><h2 id="dialogTitle" tabindex="-1">${E(title)}</h2>${options.subtitle?`<p class="dialog-subtitle">${E(options.subtitle)}</p>`:''}</div>${btn('','close-modal',{cls:'icon-only quiet',icon:'close',data:'aria-label="关闭弹窗"'})}</div><div class="dialog-body">${body}</div><div class="dialog-foot"></div>`;actions.forEach(a=>{const b=document.createElement('button');b.className='btn'+(a.primary?' primary':'')+(a.danger?' danger':'');b.textContent=a.label;b.disabled=!!a.disabled;b.addEventListener('click',a.run);d.querySelector('.dialog-foot').append(b)});d.addEventListener('cancel',e=>{e.preventDefault();closeModal()});document.body.append(d);d.showModal();(body.includes('<table')?d.querySelector('#dialogTitle'):d.querySelector('input:not([type=file]),select,textarea')||d.querySelector('.dialog-head button')).focus({preventScroll:true});}
+function closeModal(){const d=$('#modal');if(d){d.close();d.remove()}if(modalLastFocus?.isConnected)modalLastFocus.focus({preventScroll:true});else $('main h1')?.focus({preventScroll:true})}
+function modalError(message){if(!$('#modal .dialog-body'))return;let n=$('#modalError');if(!n){n=document.createElement('p');n.id='modalError';n.className='form-error';n.setAttribute('role','alert');$('#modal .dialog-body').append(n)}n.textContent=message}
+function reviewSave(after){if(isViewer()||!state.session)return;state.errors=model.validate(state.session);if(Object.keys(state.errors).length){closeModal();state.route.tab='parameters';state.error='有 '+Object.keys(state.errors).length+' 项参数需要修正，请检查标红的字段。';render();$('[aria-invalid=true]')?.focus();return}const changes=model.changes(state.session),o=currentObject(),versionChange=state.session.targetVersion!==o.version;showModal('核对并保存配置',`<div class="dialog-summary"><span><strong>${changes.length}</strong> 项参数变化</span>${versionChange?`<span>${E(o.version)} ${icon('arrow')} <strong>${E(state.session.targetVersion)}</strong></span>`:''}</div><div class="table-wrap"><table class="table"><thead><tr><th>参数</th><th>上次保存</th><th>本次保存</th><th>取值方式</th></tr></thead><tbody>${changes.map(c=>`<tr><td>${E(c.param.name)}</td><td class="mono"><span class="diff-old">${E(c.oldValue??'—')}</span></td><td class="mono"><span class="diff-new">${E(c.newValue??'')}</span></td><td class="small muted">${c.oldMode!==c.newMode?E(modeLabel(c.oldMode))+' → '+E(modeLabel(c.newMode)):E(modeLabel(c.newMode))}</td></tr>`).join('')||`<tr><td colspan="4" class="muted">${versionChange?'参数值不变，仅更新版本及来源。':!o.current?'将保存此配置的第一条正式记录。':'参数值与上次保存一致。'}</td></tr>`}</tbody></table></div><div class="field"><label for="saveNote">修改说明 <span class="muted">（选填）</span></label><textarea id="saveNote" rows="2" placeholder="例如：调整相机曝光，匹配现场光源"></textarea></div><div class="notice">${icon('info')}<span>保存后生成历史记录。${state.route.kind==='standard'?'已有机台配置保持各自的当前值。':''}此操作不向真实机台下发配置。</span></div>`,[{label:'返回编辑',run:closeModal},{label:'保存配置',primary:true,disabled:!model.isDirty(state.session)&&!!o.current&&!o.draft,run:()=>performSave(after)}],{size:'medium',subtitle:objectName(o)+' · '+f().name})}
+function performSave(after){if(isViewer()||!state.session)return;const note=$('#saveNote')?.value||'';if(state.saveScenario==='failure'){state.saveScenario='success';closeModal();state.error='保存失败：示例请求未完成。编辑内容已保留，可以重新核对后重试。';state.route.tab='parameters';render();return}try{if(state.saveScenario==='conflict'){state.saveScenario='success';const remote=model.begin(f().id,state.route.kind,state.route.id);const p=model.parameters(f().id).find(p=>p.type==='number'),v=Number(remote.values[p.id]||0);remote.values[p.id]=String(v+1);remote.modes[p.id]='custom';model.save(remote,'其他用户的示例修改')}const saved=model.save(state.session,note||'保存配置');const candidate=pending().get(f().id);if(state.route.kind==='standard'&&candidate?.targetId===state.route.id){for(const key of Object.keys(candidate.values))if(String(saved.values[key])===String(candidate.values[key]))delete candidate.values[key];if(!Object.keys(candidate.values).length)pending().delete(f().id)}state.session=null;state.baseline=null;state.errors={};state.error='';state.route.tab='parameters';closeModal();commitRoute();render();toast('配置已保存，历史快照已保留');after?.()}catch(e){if(e.code==='CONFLICT')showConflict();else modalError(e.message)}}
+function showConflict(){
+  const session=state.session,o=currentObject(),baseRevision=model.revision(session.baseRevisionId),base=baseRevision?.values||{},baseModes=baseRevision?.modes||{},server=o.current.values,serverModes=o.current.modes,ps=model.parameters(f().id);
+  const localChanged=p=>String(session.values[p.id]??'')!==String(base[p.id]??'')||session.modes[p.id]!==baseModes[p.id];
+  const serverChanged=p=>String(server[p.id]??'')!==String(base[p.id]??'')||serverModes[p.id]!==baseModes[p.id];
+  const conflicts=ps.filter(p=>localChanged(p)&&serverChanged(p)&&(String(session.values[p.id])!==String(server[p.id])||session.modes[p.id]!==serverModes[p.id]));
+  const localTargetChanged=session.targetVersion!==baseRevision?.version||session.sourceRevisionId!==baseRevision?.sourceRevisionId;
+  const serverTargetChanged=o.current.version!==baseRevision?.version||o.current.sourceRevisionId!==baseRevision?.sourceRevisionId;
+  const targetConflict=localTargetChanged&&serverTargetChanged&&(session.targetVersion!==o.current.version||session.sourceRevisionId!==o.current.sourceRevisionId);
+  showModal('配置已被其他人修改',`<div class="notice amber">${icon('alert')}<span>你的编辑内容已保留。请合并最新记录，再核对保存。</span></div><div class="table-wrap"><table class="table"><thead><tr><th>参数</th><th>最新保存</th><th>你的编辑</th><th>保留内容</th></tr></thead><tbody>${conflicts.map(p=>`<tr><td>${E(p.name)}</td><td><span class="mono">${E(server[p.id])}</span><span class="cell-sub">${E(modeLabel(serverModes[p.id]))}</span></td><td><span class="mono">${E(session.values[p.id])}</span><span class="cell-sub">${E(modeLabel(session.modes[p.id]))}</span></td><td><select data-conflict="${p.id}" aria-label="${E(p.name)}的并发处理"><option value="">请选择</option><option value="local">保留我的编辑</option><option value="server">使用最新保存值</option></select></td></tr>`).join('')||'<tr><td colspan="4">双方没有修改同一参数，可以合并。</td></tr>'}</tbody></table></div>${targetConflict?`<div class="field"><label for="conflictTarget">目标版本及标准来源冲突</label><select id="conflictTarget"><option value="">请选择</option><option value="local">保留我的目标版本 ${E(session.targetVersion)}</option><option value="server">采用最新版本 ${E(o.current.version)}</option></select></div>`:serverTargetChanged&&!localTargetChanged?`<p class="small muted">采用其他用户已保存的软件版本 ${E(o.current.version)} 及其标准来源。</p>`:''}`,[{label:'返回编辑',run:closeModal},{label:'合并到编辑内容',primary:true,run:()=>{
+    const decisions={};for(const el of document.querySelectorAll('[data-conflict]')){if(!el.value){el.focus();modalError('请选择每项冲突的处理方式。');return}decisions[el.dataset.conflict]=el.value}
+    if(targetConflict&&!$('#conflictTarget').value){$('#conflictTarget').focus();modalError('请选择目标版本及来源。');return}
+    const merged={fileId:session.fileId,kind:session.kind,id:session.id,baseRevisionId:o.current.id,values:clone(server),modes:clone(serverModes),targetVersion:o.current.version,sourceRevisionId:o.current.sourceRevisionId};
+    for(const p of ps)if(localChanged(p)&&decisions[p.id]!=='server'){merged.values[p.id]=session.values[p.id];merged.modes[p.id]=session.modes[p.id]}
+    if(localTargetChanged&&(!targetConflict||$('#conflictTarget').value==='local')){merged.targetVersion=session.targetVersion;merged.sourceRevisionId=session.sourceRevisionId}
+    state.baseline={fileId:session.fileId,kind:session.kind,id:session.id,baseRevisionId:o.current.id,values:clone(server),modes:clone(serverModes),targetVersion:o.current.version,sourceRevisionId:o.current.sourceRevisionId};state.session=merged;closeModal();state.error='';state.errors=model.validate(merged);state.route.tab='parameters';render();toast('已合并，请核对后保存')
+  }}],{size:'wide'});
+}
+function stash(){if(isViewer()||!state.session)return;model.stash(state.session);state.session=null;state.baseline=null;state.errors={};state.error='';state.route.tab='parameters';closeModal();render();toast('草稿已暂存，正式配置保持原样')}
+function createVersion(){if(isViewer())return;showModal('新建软件版本',`<div class="field required"><label for="newVersion">软件版本号</label><input id="newVersion" placeholder="例如 692" maxlength="40"></div><div class="field"><label for="previousVersion">上一个软件版本</label><select id="previousVersion"><option value="">不指定</option>${model.versions(f().id).map(v=>`<option value="${v.id}">${E(v.version)}</option>`).join('')}</select><span class="hint">仅记录版本关系，参数需单独导入或编辑。</span></div>`,[{label:'取消',run:closeModal},{label:'创建并编辑',primary:true,run:()=>{try{const o=model.newVersion(f().id,$('#newVersion').value.trim(),Number($('#previousVersion').value)||null);closeModal();openObject(o.id,'standard','parameters',true)}catch(e){modalError(e.message)}}}],{subtitle:f().name})}
+function createMachine(){if(isViewer())return;const vs=model.versions(f().id).filter(v=>v.current);showModal('新建机台',`<div class="field required"><label for="newMachine">机台编号</label><input id="newMachine" placeholder="例如 MC-004" maxlength="60"></div><div class="field required"><label for="machineVersion">软件版本</label><select id="machineVersion">${vs.map(v=>`<option value="${E(v.version)}" ${state.route.kind==='standard'&&currentObject()?.version===v.version?'selected':''}>${E(v.version)}</option>`).join('')||'<option value="">暂无已保存标准</option>'}</select><span class="hint">采用此版本最新保存的标准配置，创建后可单独调整。</span></div>`,[{label:'取消',run:closeModal},{label:'创建并编辑',primary:true,disabled:!vs.length,run:()=>{try{const o=model.newMachine(f().id,$('#newMachine').value.trim(),$('#machineVersion').value);closeModal();openObject(o.id,'machine','parameters',true)}catch(e){modalError(e.message)}}}],{subtitle:f().name})}
+function moreMenu(){const o=currentObject();showModal('配置操作',`<div class="popover-menu">${state.route.kind==='machine'?`<button data-action="upgrade" ${isViewer()?'disabled':''}>${icon('branch')}更新到其他标准</button>`:`<button data-action="import" ${isViewer()?'disabled':''}>${icon('upload')}从文件导入</button>`}<button data-action="compare">${icon('compare')}对比参数</button><button data-action="export">${icon('download')}导出文件</button><button data-action="object-tab" data-tab="history">${icon('history')}修改记录</button><button data-action="mapping">${icon('code')}查看对应字段</button>${o.draft?`<button data-action="discard-draft" ${isViewer()?'disabled':''}>${icon('close')}放弃已暂存草稿</button>`:''}</div>`,[],{subtitle:objectName(o)})}
+function startUpgrade(){if(isViewer())return;const o=currentObject(),vs=model.versions(f().id).filter(v=>v.current&&v.version!==o.version);if(state.session&&unsaved()){closeModal();guard(()=>{state.session=null;state.baseline=null;startUpgrade()});return}showModal('更新到其他标准',`<div class="field"><label for="upgradeVersion">目标软件版本</label><select id="upgradeVersion">${vs.map(v=>`<option value="${E(v.version)}">${E(v.version)}</option>`).join('')||'<option value="">暂无其他已保存标准</option>'}</select></div><div class="notice">${icon('info')}<span>比较原标准、当前配置和新标准。机台单独修改的内容会保留，有冲突时由你选择。</span></div>`,[{label:'取消',run:closeModal},{label:'查看变化',primary:true,disabled:!vs.length,run:()=>upgradeReview($('#upgradeVersion').value)}],{subtitle:o.name+' · 当前软件 '+o.version})}
+function upgradeReview(version){const o=currentObject(),sourceSession=state.session||model.begin(f().id,'machine',o.id),diffs=model.compareSessionUpgrade(sourceSession,version),visible=diffs.filter(x=>x.status!=='unchanged'),counts={unchanged:0,update:0,custom:0,conflict:0};diffs.forEach(x=>counts[x.status]++);showModal('核对标准更新',`<div class="dialog-summary"><span>${E(o.name)} · ${E(o.version)} ${icon('arrow')} <strong>${E(version)}</strong></span><span>${counts.update} 项跟随新标准</span><span>${counts.custom} 项保留机台值</span><span class="warn"><strong>${counts.conflict}</strong> 项需要选择</span></div><div class="table-wrap"><table class="table" style="min-width:670px"><thead><tr><th>参数</th><th>原来的标准</th><th>${o.draft||state.session?'当前草稿 / 编辑值':'当前配置'}</th><th>新的标准</th><th>处理方式</th></tr></thead><tbody>${visible.map(d=>`<tr><td>${E(d.param.name)}</td><td class="mono muted">${E(d.oldValue)}</td><td class="mono">${E(d.currentValue)}</td><td class="mono">${E(d.newValue)}</td><td>${d.status==='conflict'?`<select class="diff-choice" data-upgrade-choice="${d.param.id}" aria-label="${E(d.param.name)}的更新处理"><option value="">请选择</option><option value="current">保留当前值 ${E(d.currentValue)}</option><option value="new">使用新标准 ${E(d.newValue)}</option></select>`:d.status==='update'?'<span class="small" style="color:var(--blue)">使用新标准</span>':'<span class="small muted">保留机台设置</span>'}</td></tr>`).join('')||'<tr><td colspan="5">参数值相同，将更新版本和标准来源。</td></tr>'}</tbody></table></div><div class="content-note">${counts.unchanged} 项保持不变。继续后进入编辑，正式保存后才改变机台的软件版本归属。</div>`,[{label:'返回',run:startUpgrade},{label:'继续编辑',primary:true,run:()=>{const choices={};for(const el of document.querySelectorAll('[data-upgrade-choice]')){if(!el.value){el.focus();modalError('请选择每项冲突的处理方式。');return}choices[el.dataset.upgradeChoice]=el.value}try{const original=clone(sourceSession);state.session=model.applyUpgrade(original,version,choices);state.baseline=clone(original);state.route.tab='parameters';state.route.record=null;state.errors={};closeModal();commitRoute();render()}catch(e){modalError(e.message)}}}],{size:'wide'})}
+function compareDialog(){const o=currentObject(),hs=model.history(f().id,state.route.kind,o.id);if(state.route.kind==='standard'&&!o.initialValues&&hs.length<2){showModal('暂无可用的对比记录',empty('尚无初始快照或上一条保存记录','保存更多修订后，可以比较历史参数。'),[{label:'关闭',run:closeModal}]);return}modalState.compareType='standard';const body=`<div class="field"><label for="compareTarget">对比对象</label><select id="compareTarget"><option value="standard" ${state.route.kind==='standard'&&!o.initialValues?'disabled':''}>${state.route.kind==='machine'?'当前软件版本的标准':'本版本初始参数'}</option><option value="previous" ${hs.length<2?'disabled':''} ${state.route.kind==='standard'&&!o.initialValues?'selected':''}>上一次保存的配置</option></select></div><label class="checkbox-label"><input type="checkbox" id="compareOnlyDiff" checked>仅显示不同项</label><div id="compareTable"></div>`;showModal('对比参数',body,[{label:'关闭',run:closeModal}],{size:'medium',subtitle:objectName(o)});updateCompare()}
+function updateCompare(){const o=currentObject(),hs=model.history(f().id,state.route.kind,o.id),target=$('#compareTarget').value==='previous'?hs[1]?.values||{}:referenceValues(),values=currentValues(),only=$('#compareOnlyDiff').checked,ps=model.parameters(f().id).filter(p=>!only||String(target[p.id]??'')!==String(values[p.id]??''));$('#compareTable').innerHTML=ps.length?`<div class="table-wrap"><table class="table"><thead><tr><th>参数</th><th>对比值</th><th>当前${state.session?'编辑':'配置'}值</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${E(p.name)}</td><td class="mono muted">${E(target[p.id]??'—')}</td><td class="mono">${E(values[p.id]??'—')}</td></tr>`).join('')}</tbody></table></div>`:empty('没有参数差异','当前配置与所选对象的参数值一致。')}
+function parameterDetail(id){const p=model.parameters(f().id).find(p=>p.id===id),values=currentValues(),ref=referenceValues();showModal(p.name,`<dl class="data-grid"><dt>参数目录</dt><dd>${E(p.group)}</dd><dt>当前值</dt><dd class="mono">${E(values[id]??'—')} ${E(p.unit||'')}</dd><dt>${state.route.kind==='machine'?'版本标准':'初始值'}</dt><dd class="mono">${E(ref[id]??'—')}</dd><dt>数据类型</dt><dd>${E({number:'数值',boolean:'布尔值',text:'文本'}[p.type])}</dd>${p.type==='number'?`<dt>取值范围</dt><dd>${p.min!==undefined?E(p.min):'不限'} ～ ${p.max!==undefined?E(p.max):'不限'}</dd>`:''}<dt>文件字段</dt><dd class="mono">${E(p.field)}</dd><dt>稳定标识</dt><dd class="mono">${E(p.id)}</dd></dl>`,[{label:'关闭',run:closeModal}])}
+function mappingDialog(){showModal('参数与文件字段',`<div class="table-wrap"><table class="table"><thead><tr><th>参数名称</th><th>字段路径</th><th>类型</th></tr></thead><tbody>${model.parameters(f().id).map(p=>`<tr><td>${E(p.name)}</td><td class="mono small">${E(p.field)}</td><td class="small muted">${E(p.type)}</td></tr>`).join('')}</tbody></table></div><div class="content-note">按完整字段路径匹配。修改映射与新增参数由宿主参数管理承载。</div>`,[{label:'关闭',run:closeModal}],{size:'medium',subtitle:f().name})}
+function importDialog(){if(isViewer())return;importGeneration++;modalState.importData=null;showModal('从文件导入',`<div class="dialog-steps"><span class="active">选择文件</span>${icon('chevron')}<span>核对参数</span>${icon('chevron')}<span>编辑草稿</span></div><div class="upload-area">${icon('upload')}<span class="strong">选择 XML 或 JSON 配置文件</span><input id="importFile" class="file-input" type="file" accept=".xml,.json,application/json,application/xml,text/xml" aria-label="选择要导入的配置文件"><span class="small muted">文件在浏览器本地读取</span></div><div class="row spread"><span id="importFileStatus" class="small muted">也可以使用示例文件体验流程</span>${btn('使用示例文件','import-sample',{cls:'text'})}</div><div class="field"><label for="importMode">导入方式</label><select id="importMode"><option value="values">参数名称与数值</option><option value="names">仅导入参数名称</option></select><span class="hint">仅名称模式核对已存在参数及字段，不覆盖数值。新增参数需在宿主参数管理中完成。</span></div>`,[{label:'取消',run:closeModal},{label:'核对导入内容',primary:true,run:()=>{if(!modalState.importData){modalError('请先选择文件或使用示例文件。');return}importReview($('#importMode').value==='names')}}],{subtitle:objectName(currentObject())+' · '+f().name})}
+function setImportSample(){importGeneration++;const ps=model.parameters(f().id),values={};ps.forEach(p=>{const current=currentValues()[p.id];values[p.id]=current===undefined||(current===''&&p.type!=='text')?p.initial:current});if(values.feed!==undefined)values.feed='150';if(values.exposure!==undefined)values.exposure='12';modalState.importData={name:'示例-'+f().name,values,unknown:[]};$('#importFileStatus').textContent='已选择：'+modalState.importData.name;toast('示例文件已准备')}
+async function readImportFile(file){const generation=++importGeneration,scopedFile=f().id,scopedModel=model;modalState.importData=null;if(!file)return;if(file.size>5*1024*1024){modalError('原型支持 5 MB 以内的 XML / JSON 文件。');return}try{const text=await file.text();if(generation!==importGeneration||!$('#importFileStatus')||model!==scopedModel||f().id!==scopedFile)return;const ps=scopedModel.parameters(scopedFile),values={},unknown=[];let raw={};function flatten(x,path=''){if(x&&typeof x==='object'&&!Array.isArray(x)){for(const [k,v] of Object.entries(x))flatten(v,path?path+'/'+k:k)}else raw[path]=x===null?'':String(x)}if(file.name.toLowerCase().endsWith('.json')){flatten(JSON.parse(text));}else if(file.name.toLowerCase().endsWith('.xml')){const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror'))throw Error('XML 格式不正确');const walk=(el,path)=>{const kids=[...el.children];if(!kids.length)raw[path]=el.textContent;else kids.forEach(child=>walk(child,path?path+'/'+child.tagName:child.tagName))};[...doc.documentElement.children].forEach(el=>walk(el,el.tagName))}else throw Error('请选择 .xml 或 .json 文件');for(const [field,value] of Object.entries(raw)){const p=ps.find(p=>p.field===field||p.id===field||p.name===field);if(p)values[p.id]=String(value);else unknown.push({field,value})}modalState.importData={name:file.name,values,unknown};$('#importFileStatus').textContent=file.name+' · '+Object.keys(values).length+' 项已匹配';$('#modalError')?.remove()}catch(e){if(generation!==importGeneration||!$('#importFileStatus'))return;modalState.importData=null;modalError('文件读取失败：'+e.message+'。请选择有效文件后重试。')}}
+function importReview(namesOnly=false){const data=modalState.importData,ps=model.parameters(f().id),known=ps.filter(p=>p.id in data.values);modalState.namesOnly=namesOnly;showModal('核对导入内容',`<div class="dialog-steps"><span>选择文件</span>${icon('chevron')}<span class="active">核对参数</span>${icon('chevron')}<span>编辑草稿</span></div><div class="dialog-summary"><span>${E(data.name)}</span><span>${known.length} 项已匹配</span>${data.unknown.length?`<span class="warn">${data.unknown.length} 个字段未匹配</span>`:''}</div><div class="table-wrap"><table class="table" style="min-width:550px"><thead><tr><th>参数 / 字段</th><th>类型</th>${namesOnly?'':'<th>文件中的值</th>'}<th>处理方式</th></tr></thead><tbody>${known.map(p=>`<tr><td>${E(p.name)}<span class="cell-sub mono">${E(p.field)}</span></td><td class="small muted">${E(p.type)}</td>${namesOnly?'':`<td class="mono">${E(data.values[p.id])}</td>`}<td><span class="small">${namesOnly?'名称已存在':'更新已有参数'}</span></td></tr>`).join('')}${data.unknown.map((x,i)=>`<tr><td class="mono">${E(x.field)}</td><td class="muted">未确认</td>${namesOnly?'':`<td class="mono">${E(x.value)}</td>`}<td><select data-unknown="${i}" aria-label="字段 ${E(x.field)}的处理方式"><option value="">请选择</option><option value="skip">本次忽略</option></select></td></tr>`).join('')}</tbody></table></div><div class="content-note">${namesOnly?'本次仅核对参数名称，不修改参数值。':'未出现在文件中的参数保持原样。字段未匹配时需明确忽略；新增定义由宿主参数管理处理。'}</div>`,[{label:'返回',run:importDialog},{label:namesOnly?'完成核对':'导入到编辑内容',primary:true,disabled:!known.length,run:()=>{for(const el of document.querySelectorAll('[data-unknown]'))if(!el.value){el.focus();modalError('请明确处理所有未匹配字段。');return}if(namesOnly){closeModal();toast('参数名称和字段已核对，数值保持原样');return}try{const base=state.session||model.begin(f().id,state.route.kind,state.route.id);if(!state.session)state.baseline=clone(base);state.session=model.importValues(base,data.values,false);state.route.tab='parameters';state.route.record=null;state.errors=model.validate(state.session);closeModal();commitRoute();render();toast('导入内容已进入编辑，尚未正式保存')}catch(e){modalError(e.message)}}}],{size:'wide'})}
+function updateSettings(){if(isViewer()||f().id!==0)return;const u=updatesState();showModal('更新设置',`<div class="field"><label for="sourcePath">来源路径</label><input id="sourcePath" value="${E(u.path)}" placeholder="/simulation/MachineConfig.xml"></div><div class="fields"><div class="field"><label for="updateFrequency">更新频率</label><select id="updateFrequency">${[['15','每 15 分钟'],['30','每 30 分钟'],['60','每小时'],['1440','每天']].map(([v,l])=>`<option value="${v}" ${u.frequency===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label for="updateEnabled">自动更新</label><select id="updateEnabled"><option value="on" ${u.enabled?'selected':''}>启用</option><option value="off" ${!u.enabled?'selected':''}>暂停</option></select></div></div><dl class="data-grid"><dt>更新目标</dt><dd>软件 690 的版本标准</dd><dt>连接状态</dt><dd>${pill('示例连接','blue')} <span class="small muted">原型不连接真实 SDA 服务</span></dd><dt>更新处理</dt><dd>获取后生成待核对内容，人工保存</dd></dl><div class="content-note">此设置仅用于演示来源与更新计划，不会发起真实网络请求。</div>`,[{label:'取消',run:closeModal},{label:'保存设置',primary:true,run:()=>{if(!$('#sourcePath').value.trim()){modalError('请填写来源路径。');return}u.path=$('#sourcePath').value.trim();u.frequency=$('#updateFrequency').value;u.enabled=$('#updateEnabled').value==='on';closeModal();render();toast('示例更新设置已保存')}}],{subtitle:f().name})}
+function runUpdate(){const u=updatesState();if(u.running||isViewer())return;u.running=true;u.failed=false;const scopedModel=model,scope=state.workspace;render();setTimeout(()=>{const target=model===scopedModel?model:models[scope],saved=target.object(0,'standard',101)?.current;u.running=false;u.last='刚刚';if(state.updateScenario==='failure'){state.updateScenario='success';u.failed=true;u.runs.unshift({time:'刚刚',status:'error',detail:'示例会话已过期；未改动正式配置',actor:'手动更新'})}else{const values={exposure:String(Number(saved?.values.exposure||8)+1),startDelay:String(Number(saved?.values.startDelay||20)+5)};pendingByWorkspace[scope].set(0,{id:'candidate-'+Date.now(),targetId:101,values,time:'刚刚',source:'SDA 标准参数'});u.runs.unshift({time:'刚刚',status:'pending',detail:'获取完成，2 项变化待核对',actor:'手动更新'})}if(state.workspace===scope){render();toast(u.failed?'更新失败，已有内容已保留':'已获取示例更新，等待核对')}},650)}
+function reviewUpdate(){
+ if(isViewer())return;const candidate=pending().get(f().id),o=candidate&&model.object(f().id,'standard',candidate.targetId);if(!candidate||!o)return;
+ const base=model.begin(f().id,'standard',o.id),ps=model.parameters(f().id).filter(p=>p.id in candidate.values),conflicts=new Set(ps.filter(p=>String(base.values[p.id])!==String(o.current.values[p.id])&&String(base.values[p.id])!==String(candidate.values[p.id])).map(p=>p.id));
+ showModal('核对来源更新',`<div class="dialog-summary"><span>${E(candidate.source)}</span><span>软件 ${E(o.version)}</span><span>${ps.length} 项来源变化</span>${conflicts.size?`<span class="warn">${conflicts.size} 项与已有草稿冲突</span>`:''}</div><div class="table-wrap"><table class="table" style="min-width:${o.draft?'640':'500'}px"><thead><tr><th>参数</th><th>已保存标准</th>${o.draft?'<th>已有草稿</th>':''}<th>来源新值</th><th>处理方式</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${E(p.name)}</td><td class="mono">${E(o.current.values[p.id])}</td>${o.draft?`<td class="mono">${E(base.values[p.id])}</td>`:''}<td class="mono"><span class="diff-new">${E(candidate.values[p.id])}</span></td><td>${conflicts.has(p.id)?`<select data-update-decision="${p.id}" aria-label="${E(p.name)}的草稿合并"><option value="">请选择</option><option value="keep">保留草稿值 ${E(base.values[p.id])}</option><option value="source">采用来源值 ${E(candidate.values[p.id])}</option></select>`:`<label class="checkbox-label"><input type="checkbox" data-update-check="${p.id}" aria-label="采用${E(p.name)}的更新" checked>采用</label>`}</td></tr>`).join('')}</tbody></table></div><div class="notice">${icon('info')}<span>采用的来源值会合并到已有草稿，其余草稿参数保留。正式保存后生效，机台配置保持原样。</span></div>`,[{label:'取消',run:closeModal},{label:'继续编辑',primary:true,run:()=>{
+   const values={};document.querySelectorAll('[data-update-check]:checked').forEach(el=>values[el.dataset.updateCheck]=candidate.values[el.dataset.updateCheck]);for(const el of document.querySelectorAll('[data-update-decision]')){if(!el.value){el.focus();modalError('请选择每项草稿冲突的处理方式。');return}if(el.value==='source')values[el.dataset.updateDecision]=candidate.values[el.dataset.updateDecision]}
+   if(!Object.keys(values).length){closeModal();toast('未采用来源变化，已有草稿已保留');return}
+   state.route={screen:'object',fileId:f().id,kind:'standard',id:o.id,tab:'parameters'};state.baseline=clone(base);state.session=model.importValues(base,values);state.explicitModes.clear();state.errors={};state.error='';state.group='all';state.query='';state.filter='changed';state.page=1;closeModal();commitRoute();render()
+ }}],{size:o.draft?'wide':'medium'});
+}
+function prototypeSettings(){showModal('原型说明与演示设置',`<p>所有内容均为示例。编辑、草稿和设置只保留到本次页面关闭或刷新，不连接真实服务，也不向机台下发配置。</p><div class="fields"><div class="field"><label for="demoRole">当前身份</label><select id="demoRole"><option value="admin" ${!isViewer()?'selected':''}>管理员</option><option value="viewer" ${isViewer()?'selected':''}>访客 · 只读</option></select></div><div class="field"><label for="demoSave">下一次保存</label><select id="demoSave"><option value="success">正常保存</option><option value="failure">模拟保存失败</option><option value="conflict">模拟并发修改</option></select></div><div class="field"><label for="demoUpdate">下一次来源更新</label><select id="demoUpdate"><option value="success">正常获取</option><option value="failure">模拟会话过期</option></select></div></div><details><summary>查看大数据与快捷键</summary><div class="row spread"><span class="small muted">将当前文件扩展为 3,248 项示例参数</span>${btn('加载长列表','stress-data',{cls:'small',disabled:!!state.session})}</div><div class="small muted" style="margin-top:10px"><span class="kbd">/</span> 聚焦参数搜索；<span class="kbd">Ctrl / ⌘ + S</span> 核对保存；<span class="kbd">Esc</span> 关闭弹窗。</div></details>`,[{label:'关闭',run:closeModal},{label:'应用设置',primary:true,run:()=>{const role=$('#demoRole').value,save=$('#demoSave').value,update=$('#demoUpdate').value;closeModal();guard(()=>{state.role=role;state.saveScenario=save;state.updateScenario=update;if(isViewer()){state.session=null;state.baseline=null}render();toast('演示设置已应用')})}}])}
+function displaySettings(){showModal('参数表显示',`<label class="checkbox-label"><input type="checkbox" id="showField" ${state.showField?'checked':''}>显示文件字段</label><label class="checkbox-label"><input type="checkbox" id="compactTable" ${state.compact?'checked':''}>紧凑行高</label><div class="field"><label for="pageSize">每页参数</label><select id="pageSize">${[30,50,100].map(n=>`<option value="${n}" ${state.pageSize===n?'selected':''}>${n} 项</option>`).join('')}</select></div>`,[{label:'取消',run:closeModal},{label:'应用',primary:true,run:()=>{state.showField=$('#showField').checked;state.compact=$('#compactTable').checked;state.pageSize=Number($('#pageSize').value);state.page=1;closeModal();render()}}])}
+function bindPageSpecific(){}
+document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||el.disabled)return;e.preventDefault();const a=el.dataset.action;if(isViewer()&&['new-version','new-machine','edit','stash','save-review','upgrade','import','review-update','update-settings','run-update','update-all','discard-draft'].includes(a))return;switch(a){
+case'files':navigate({screen:'files',fileId:0});break;case'file':if(Number(el.dataset.id)!==state.route.fileId){state.evoQuery='';state.evoFilter='all'}navigate({screen:'evolution',fileId:Number(el.dataset.id)});break;
+case'file-tab':navigate({screen:el.dataset.tab,fileId:state.route.fileId},{keepFilters:true});break;
+case'object':state.selection=el.dataset.focusKey||`${el.dataset.kind==='standard'?'s':'m'}-${el.dataset.id}`;closeModal();openObject(Number(el.dataset.id),el.dataset.kind||'machine',el.dataset.tab||'parameters',el.dataset.edit==='true',el.dataset.record||null);break;
+case'view':remember();state.view=el.dataset.view;commitRoute();render();restorePosition();break;
+case'toggle-version':{const set=state.evoQuery?state.searchCollapsed:state.collapsed,id=Number(el.dataset.id);set.has(id)?set.delete(id):set.add(id);const y=$('#evolutionScroll').scrollTop;$('#evolutionScroll').innerHTML=evolutionBody();$('#evolutionScroll').scrollTop=y;$(`[data-action="toggle-version"][data-id="${id}"]`)?.focus({preventScroll:true});break}
+case'expand-all':(state.evoQuery?state.searchCollapsed:state.collapsed).clear();$('#evolutionScroll').innerHTML=evolutionBody();break;case'collapse-all':filteredVersions().forEach(g=>(state.evoQuery?state.searchCollapsed:state.collapsed).add(g.v.id));$('#evolutionScroll').innerHTML=evolutionBody();break;
+case'zoom-in':case'zoom-out':state.zoom=Math.max(.75,Math.min(1.25,Math.round((state.zoom+(a==='zoom-in'?.1:-.1))*100)/100));$('#evolutionScroll').innerHTML=evolutionBody();$('#evoFooter').innerHTML=evolutionFooter();break;
+case'clear-evo':state.evoQuery='';state.evoFilter='all';render();break;case'clear-file-search':state.fileQuery='';render();break;
+case'graph-help':showModal('版本关系图',`<p>每列是一个软件版本，每行是初始参数、版本标准或一台机台。点击节点进入完整配置页面。</p><p>实线连接显式记录的演进关系；虚线连接参数来源。草稿用琥珀色虚线框表示，保存后才改变正式归属。</p><p>需要批量查找或编辑时，可切换到层级列表。</p>`,[{label:'知道了',run:closeModal}]);break;
+case'new-version':createVersion();break;case'new-machine':createMachine();break;
+case'edit':startEdit();break;case'cancel-edit':guard(()=>{state.session=null;state.baseline=null;state.errors={};state.error='';render()});break;case'stash':stash();break;case'save-review':reviewSave();break;
+case'object-tab':closeModal();navigate({...state.route,tab:el.dataset.tab,record:null});break;case'snapshot':navigate({...state.route,tab:'parameters',record:el.dataset.record});break;case'latest':navigate({...state.route,tab:'parameters',record:null});break;
+case'category':state.group=el.dataset.group;state.page=1;render();break;case'param-filter':state.filter=el.dataset.filter;state.page=1;refreshParameters();break;case'clear-params':state.query='';state.group='all';state.filter='all';state.page=1;render();break;
+case'prev-page':state.page--;refreshParameters();$('#parameterScroll').scrollTop=0;break;case'next-page':state.page++;refreshParameters();$('#parameterScroll').scrollTop=0;break;
+case'param-detail':parameterDetail(el.dataset.id);break;case'columns':displaySettings();break;case'compare':compareDialog();break;case'mapping':mappingDialog();break;case'more':moreMenu();break;
+case'upgrade':startUpgrade();break;case'discard-draft':showModal('放弃已暂存草稿？',`<p>正式配置和已保存历史不受影响，已暂存的草稿将被清除。</p>`,[{label:'保留草稿',run:closeModal},{label:'放弃草稿',danger:true,run:()=>{const result=model.discardDraft(f().id,state.route.kind,state.route.id);state.session=null;state.baseline=null;if(result?.removed)state.route={screen:'evolution',fileId:f().id};closeModal();commitRoute();render();toast('已放弃草稿')}}]);break;
+case'import':importDialog();break;case'import-sample':setImportSample();break;case'export':beginExport();break;case'export-back':state.route.tab='parameters';commitRoute();render();break;case'preview-export':state.exportText=model.exportText(f().id,exportValues(),state.exportFormat);render();break;case'download':if(state.exportText)downloadText(state.exportText,exportFilename(),state.exportFormat);break;
+case'updates-tab':state.updatesTab=el.dataset.tab;render();break;case'update-settings':updateSettings();break;case'run-update':runUpdate();break;
+case'update-all':showModal('更新当前工作区的全部来源',`<p>将获取 1 个已配置来源：MachineConfig.xml。标准参数.json 尚无更新来源。</p><p>获取结果进入待处理变化，保存版本标准前需要逐项核对。</p>`,[{label:'取消',run:closeModal},{label:'开始更新',primary:true,run:()=>{closeModal();state.route={screen:'updates',fileId:0};commitRoute();runUpdate()}}]);break;
+case'review-update':reviewUpdate();break;case'update-empty-help':showModal('更新来源接入',`<p>此文件用来展示未配置来源的空状态。正式应用在更新设置中选择来源、目标版本和更新计划；当前原型提供 MachineConfig.xml 的完整示例流程。</p>`,[{label:'关闭',run:closeModal}]);break;
+case'prototype':prototypeSettings();break;case'stress-data':if(typeof model.addDemoParameters==='function'){model.addDemoParameters(f().id,Math.max(0,3248-model.parameters(f().id).length));closeModal();render();toast('已加载 3,248 项示例参数，刷新页面可还原')}else modalError('当前模型未提供长列表数据扩展。');break;
+case'close-modal':closeModal();break;
+}});
+document.addEventListener('input',e=>{const el=e.target;if(el.id==='paramSearch'){state.query=el.value;state.page=1;refreshParameters()}else if(el.id==='evoSearch'){state.evoQuery=el.value;state.searchCollapsed.clear();$('#evolutionScroll').innerHTML=evolutionBody();$('#evoFooter').innerHTML=evolutionFooter()}else if(el.id==='fileSearch'){state.fileQuery=el.value;$('#fileRows').innerHTML=fileTable(model.files.filter(x=>(x.name+x.group).toLowerCase().includes(el.value.toLowerCase())))}else if(el.id==='recordSearch'){state.recordQuery=el.value;$('#recordRows').innerHTML=recordRows()}else if(el.dataset.valueId&&state.session){const id=el.dataset.valueId;state.session.values[id]=el.value;if(state.route.kind==='machine'){state.session.modes[id]=!state.explicitModes.has(id)&&String(el.value)===String(state.baseline?.values[id]??'')?state.baseline.modes[id]:'custom'}const sel=$(`[data-mode-id="${id}"]`);if(sel)sel.value=state.session.modes[id];const errors=model.validate(state.session),error=errors[id];if(error)state.errors[id]=error;else delete state.errors[id];el.setAttribute('aria-invalid',!!error);const note=$('#error-'+id);if(note){note.textContent=error||'';note.hidden=!error}el.closest('tr')?.classList.toggle('error',!!error);updateEditStatus()}});
+document.addEventListener('change',e=>{const el=e.target;if(el.id==='workspaceSelect'){const target=el.value;el.value=state.workspace;guard(()=>{state.workspace=target;model=models[target];state.route={screen:'files',fileId:0};state.session=null;state.baseline=null;state.evoQuery='';state.collapsed.clear();state.searchCollapsed.clear();state.query='';state.fileQuery='';state.recordQuery='';state.error='';state.errors={};state.selection=null;commitRoute();render();toast('已切换到'+(target==='default'?'默认工作区':'试验工作区'))})}else if(el.id==='evoFilter'){state.evoFilter=el.value;$('#evolutionScroll').innerHTML=evolutionBody();$('#evoFooter').innerHTML=evolutionFooter()}else if(el.dataset.modeId&&state.session){const id=el.dataset.modeId;state.explicitModes.add(id);state.session.modes[id]=el.value;if(el.value==='standard')state.session.values[id]=String(model.standardValues(state.session)[id]??'');state.errors=model.validate(state.session);refreshParameters()}else if(el.id==='compareTarget'||el.id==='compareOnlyDiff')updateCompare();else if(el.id==='exportFormat'){state.exportFormat=el.value;state.exportText=null;render()}else if(el.id==='importFile')readImportFile(el.files[0]);});
+document.addEventListener('keydown',e=>{const input=['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName);if(e.key==='/'&&!input&&!$('#modal')&&$('#paramSearch')){e.preventDefault();$('#paramSearch').focus()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&state.session&&!$('#modal')){e.preventDefault();reviewSave()}});
+window.addEventListener('beforeunload',e=>{if(unsaved()){e.preventDefault();e.returnValue=''}});
+window.addEventListener('popstate',()=>{const hash=location.hash;if(hash===state.currentHash)return;if(unsaved()){history.replaceState(null,'',state.currentHash);guard(()=>{state.route=parseRoute(hash);state.session=null;state.baseline=null;commitRoute();render()})}else{state.route=parseRoute(hash);state.session=null;state.baseline=null;state.error='';state.errors={};state.currentHash=hash;render();if(state.route.screen==='evolution')restorePosition()}});
+state.route=parseRoute(location.hash||'#/files');commitRoute(true);render();
+</script>
+</body>
+</html>

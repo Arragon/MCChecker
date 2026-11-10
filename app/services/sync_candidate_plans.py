@@ -26,7 +26,7 @@ from app.core import config_merge, config_values, storage
 from app.core.errors import INVALID_INPUT, NOT_FOUND, REVISION_CONFLICT, AppError
 from app.core.sync_models import validate_id, validate_workspace_id
 
-from . import config_v3_catalog, config_v3_drafts, sync_store, workspace_context
+from . import config_v3_catalog, config_v3_drafts, config_v3_baselines, sync_store, workspace_context
 
 FILE = "candidate_previews.json"
 DEFAULT_DOC: Dict[str, Any] = {"items": {}}
@@ -65,19 +65,29 @@ def _safe(preview: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _draft_snapshot(workspace_id: str, profile_id: str, config_id: str, draft_id: str) -> Dict[str, Any]:
-    with storage.use_workspace(workspace_id):
+    with storage.use_workspace(workspace_id), storage.use_profile(profile_id), storage.profile_write(profile_id):
         draft = config_v3_drafts.get_draft(profile_id, config_id, draft_id)
-        with storage.use_profile(profile_id):
-            doc = config_v3_catalog._load(profile_id)
+        doc = config_v3_catalog._load(profile_id)
     config, release = config_v3_drafts._find_release(doc, config_id, draft_id)
     definition = config_v3_drafts._definition_for(release, config)
     head_id = str((config.get("main_branch") or {}).get("head_id") or "")
+    saved = config_v3_baselines.latest_saved_baseline(config, release["release_id"]) if draft.get("frozen") else None
+    saved_values = saved["values"] if saved else draft["values"]
+    active = release.get("baseline_draft") or {}
+    active = active if active.get("status") == "draft" else None
+    comparison = active or {"values": saved_values}
+    guard = hashlib.sha256(json.dumps({"active": active, "saved": saved and saved["baseline_id"],
+        "values": saved_values}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     return {
         "draft": draft,
         "config": config,
         "release": release,
         "params": definition.get("parameters") or {},
         "head_id": head_id,
+        "comparison": comparison if draft.get("frozen") else draft,
+        "saved_values": saved_values,
+        "editing_draft_id": active and active["draft_id"],
+        "edit_guard": guard,
     }
 
 
@@ -113,11 +123,11 @@ def _current_entries(draft: Dict[str, Any], params: Dict[str, Any]) -> Dict[str,
             continue
         if row.get("membership", "not_introduced") != "included" or not row.get("enabled", True):
             continue
-        if row.get("value_state") != "present":
+        if row.get("value_state") not in ("present", "null"):
             continue
         kind = _KIND_BY_TYPE.get(str((params.get(pid) or {}).get("type") or "").lower(), "string")
         try:
-            typed = config_values.parse_typed(
+            typed = config_values.TypedValue.null() if row.get("value_state") == "null" else config_values.parse_typed(
                 row.get("value"), kind, (params.get(pid) or {}).get("unit") or None
             )
         except AppError:
@@ -214,7 +224,7 @@ def create_preview(
     params = snapshot["params"]
     base_entries = _entries(base, "base")
     candidate_entries = _entries(candidate, "candidate")
-    current_entries = _current_entries(draft, params)
+    current_entries = _current_entries(snapshot["comparison"], params)
     names = {pid: str((params.get(pid) or {}).get("name") or pid) for pid in params}
     merged = config_merge.merge(
         base=base_entries,
@@ -263,6 +273,7 @@ def create_preview(
         base_known,
         json.dumps(extra_blockers or [], sort_keys=True, ensure_ascii=False),
         json.dumps(source_guard or {}, sort_keys=True),
+        snapshot["edit_guard"],
     )
     preview = {
         "preview_id": preview_id,
@@ -278,6 +289,9 @@ def create_preview(
         "base_known": base_known,
         "source_guard": source_guard,
         "current": current_entries,
+        "saved": _current_entries({"values": snapshot["saved_values"]}, params),
+        "editing_draft_id": snapshot["editing_draft_id"],
+        "edit_guard": snapshot["edit_guard"],
         "candidate": candidate_entries,
         "items": items,
         "summary": summary,
@@ -297,12 +311,19 @@ def create_preview(
     return _safe(preview)
 
 
-def get_preview(workspace_id: str, preview_id: str) -> Dict[str, Any]:
+def stored_preview(workspace_id: str, preview_id: str) -> Dict[str, Any]:
+    """Route/ownership metadata only. A write must still validate in its lock."""
     wid = validate_workspace_id(workspace_id)
     pid = validate_id(preview_id, "preview_id")
     preview = _load_doc(wid)["items"].get(pid)
     if not isinstance(preview, dict):
         raise AppError(NOT_FOUND, "候选预览不存在", field="preview_id")
+    return _safe(preview)
+
+
+def get_preview(workspace_id: str, preview_id: str) -> Dict[str, Any]:
+    wid = validate_workspace_id(workspace_id)
+    preview = stored_preview(wid, preview_id)
     if preview.get("source_guard"):
         from . import sync_sources
         guard = preview["source_guard"]
@@ -317,6 +338,8 @@ def get_preview(workspace_id: str, preview_id: str) -> Dict[str, Any]:
     snapshot = _draft_snapshot(wid, preview["profile_id"], preview["config_id"], preview["draft_id"])
     draft = snapshot["draft"]
     changes = []
+    if snapshot["edit_guard"] != preview.get("edit_guard"):
+        changes.append("editing_session")
     if int(draft["revision"]) != int(preview["draft_revision"]):
         changes.append("draft_revision")
     if (snapshot["head_id"] or None) != preview.get("head_id"):
