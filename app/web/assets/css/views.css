@@ -2485,3 +2485,172 @@ a.tool-url:hover {
   .cv-menu .menu-item { min-height:44px; }
   .config-root.v32 .cv32-history-entry>.btn { min-height:44px; }
 }
+
+/* V3.2 prototype geometry; scoped to configuration pages and their shell. */
+.app.is-config-prototype { --header-h:56px; --sidebar-w:208px; --c-bg:#f5f7fa; --c-border:#e3e8ef; --c-text:#182230; --c-text-3:#596779; --c-primary:#225ce0; }
+.app.is-config-prototype>.app-main>.tabbar { display:none; }
+.app.is-config-prototype>.app-sidebar { background:#f8fafc; }
+.app.is-config-prototype .brand { font-size:17px; gap:10px; }
+.app.is-config-prototype .brand-mark { width:28px; height:28px; border-radius:7px; }
+.config-root.v32>.cv-breadcrumb { height:42px; min-height:42px; padding:0 28px; border-bottom:1px solid var(--c-border); background:#fcfdfe; font-size:12px; }
+.config-root.v32>.view-header { padding:23px 28px 18px; min-height:0; }
+.config-root.v32>.view-header h1 { font-size:22px; line-height:1.4; font-weight:650; letter-spacing:-.4px; }
+.config-root.v32>.cv-workspace { margin:0 28px 20px; gap:18px; }
+.config-root.v32>.config-resource-surface { margin:0 28px 20px; }
+.config-root.v32 .cv32-file-heading { align-items:center; gap:14px; }
+.config-root.v32 .cv-file-type { flex:none; width:36px; height:40px; border:1px solid var(--c-border); border-radius:6px; flex-direction:column; justify-content:center; background:var(--c-surface); font-size:7px; gap:1px; }
+.config-root.v32 .cv-file-type .icon { width:17px; height:17px; }
+.config-root.v32 .cv-tabs.segmented { min-height:39px; gap:25px; margin:0; }
+.config-root.v32 .cv-tabs.segmented button { padding:0 0 12px; font-size:13px; }
+.config-root.v32 .cv32-object-heading { padding:23px 0 0; }
+.config-root.v32 .cv32-object-heading h1 { font-size:22px; font-weight:650; }
+.config-root.v32 .cv32-version-view { gap:0; }
+.config-root.v32 .cv32-version-actions { gap:8px; padding:0; }
+.config-root.v32 .cv32-version-actions .btn { min-height:34px; padding:6px 12px; font-size:12px; }
+.config-root.v32 .cv32-evo-toolbar { padding:12px 16px; min-height:57px; }
+.config-root.v32 .cv32-workbench>.cv-param-browser { grid-template-columns:172px minmax(0,1fr); gap:16px; }
+.config-root.v32 .cv32-workbench .cv-param-folders { border:0; background:transparent; padding:5px 0; }
+.config-root.v32 .cv32-workbench .cv-folder-header { padding:4px 11px 12px; font-size:11px; color:var(--c-text-3); }
+.config-root.v32 .cv32-workbench .cv-param-folders>.segmented { display:none; }
+.config-root.v32 .cv32-workbench .cv-folder-tree { margin-top:0; }
+.config-root.v32 .cv32-workbench .cv-folder-row { min-height:35px; }
+.config-root.v32 .cv32-workbench .cv-param-data>.cv-toolbar { padding:10px 14px; min-height:54px; }
+.config-root.v32 .cv32-filterbar { display:flex; flex:none; align-items:center; gap:4px; padding:7px 13px; min-height:40px; border-bottom:1px solid var(--c-border); background:var(--c-surface); }
+.config-root.v32 .cv32-filterbar button { border:0; border-radius:5px; padding:4px 9px; min-height:25px; color:var(--c-text-3); background:transparent; font-size:11px; }
+.config-root.v32 .cv32-filterbar button[aria-pressed=true] { color:var(--c-primary); background:var(--c-primary-soft); }
+.config-root.v32 .cv-param-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.config-root.v32 .cv-param-footer>.select { width:auto; font-size:11px; }
+@media(min-width:1600px) { .app.is-config-prototype { --sidebar-w:224px; } }
+@media(max-width:1150px) and (min-width:901px) { .app.is-config-prototype { --sidebar-w:184px; } }
+@media(max-width:900px) and (min-width:761px) { .app.is-config-prototype { --sidebar-w:166px; } }
+@media(max-width:760px) {
+ .app.is-config-prototype { --header-h:54px; --sidebar-w:0px; }
+ .app.is-config-prototype>.app-sidebar { display:none; }
+ .config-root.v32>.cv-breadcrumb { padding:0 14px; }
+ .config-root.v32>.view-header { padding:18px 14px 14px; flex-wrap:wrap; }
+ .config-root.v32>.cv-workspace { margin:0 14px 14px; gap:14px; }
+ .config-root.v32>.config-resource-surface { margin:0 14px 14px; }
+ .config-root.v32 .cv32-workbench>.cv-param-browser { grid-template-columns:minmax(0,1fr); gap:10px; }
+ .config-root.v32 .cv32-filterbar { overflow-x:auto; }
+ .config-root.v32 .cv32-filterbar button { min-height:44px; white-space:nowrap; }
+}
+
+.config-root.v32 .cv32-searchbox { display:flex; align-items:center; gap:8px; width:240px; min-width:0; border:1px solid var(--c-border); border-radius:6px; background:var(--c-surface); padding:0 10px; }
+.config-root.v32 .cv32-searchbox>.input { flex:1; width:100%; min-width:0; border:0; background:transparent; padding:6px 0; box-shadow:none; }
+.config-root.v32 .cv32-searchbox>.icon { width:16px; height:16px; color:var(--c-text-3); }
+.config-root.v32 .cv32-searchbox:focus-within { outline:2px solid var(--c-primary-soft); border-color:var(--c-primary); }
+.config-root.v32 .cv32-evo-toolbar .cv32-searchbox { width:262px; }
+.app.is-config-prototype .app-header>.search-trigger { visibility:hidden; }
+@media(max-width:760px) {
+ .config-root.v32 .cv32-object-heading h1 { font-size:19px; }
+ .config-root.v32 .cv32-workbench>.cv-param-browser { min-height:310px; }
+ .config-root.v32 .cv32-workbench .cv-param-data { min-height:250px; }
+ .config-root.v32 .cv32-workbench .cv-param-data>.cv-toolbar { flex-wrap:nowrap; gap:6px; }
+ .config-root.v32 .cv32-searchbox { flex:1; min-width:140px; }
+ .config-root.v32 .cv32-workbench .cv-param-data>.cv-toolbar>.spacer { display:none; }
+ .config-root.v32 .cv32-workbench .cv-param-data>.cv-toolbar>.btn { padding:6px; gap:4px; }
+ .config-root.v32 .cv-param-footer { flex-wrap:wrap; }
+ .config-root.v32 .cv-param-footer>.select { flex:none; }
+}
+
+.config-root.v32 .cv32-history-table { min-width:720px; }
+.config-root.v32 .cv32-history-table .cv-history-event { display:table-row; }
+.config-root.v32 .cv32-history-table td { vertical-align:top; padding:13px 16px; }
+.config-root.v32 .cv32-history-table td:last-child .cv-toolbar { flex-wrap:wrap; padding:0; gap:8px; }
+.config-root.v32 .cv-export-workflow { grid-template-columns:258px minmax(0,1fr); gap:18px; }
+.config-root.v32 .cv-export-source { align-self:start; }
+.config-root.v32 .cv-export-preview { display:flex; flex-direction:column; min-height:0; }
+.config-root.v32 .cv-export-preview>.cv-detail-head { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:48px; }
+.config-root.v32 .cv-export-preview>.cv-detail-body { overflow:auto; flex:1; min-height:0; }
+.app.is-config-prototype>.app-header { padding-left:20px; }
+.app.is-config-prototype>.app-header>.btn-icon:first-child { display:none; }
+.app.is-config-prototype .nav-list { padding:18px 12px 0; gap:3px; }
+.app.is-config-prototype .nav-item { min-height:39px; padding:10px 12px; font-size:13px; }
+@media(max-width:760px) {
+ .config-root.v32 .cv-export-workflow { display:flex; flex-direction:column; min-height:420px; }
+ .config-root.v32 .cv-export-preview { min-height:260px; }
+ .app.is-config-prototype>.app-header { padding-left:13px; }
+}
+
+.sync-root.is-file-config .sync-page { padding:0 28px 20px; gap:18px; }
+.sync-root.is-file-config .sync-page>div:first-child { display:flex; flex-direction:column; gap:18px; flex:none; }
+.sync-root.is-file-config .cv-breadcrumb { margin:0 -28px; padding:0 28px; height:42px; min-height:42px; background:var(--c-surface); border-bottom:1px solid var(--c-border); }
+.sync-root.is-file-config .sync-file-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; padding-top:5px; }
+.sync-root.is-file-config .sync-file-heading h1 { margin:0; font-size:22px; font-weight:650; }
+.sync-root.is-file-config .sync-file-heading>.col { gap:5px; min-width:0; overflow-wrap:anywhere; }
+.sync-root.is-file-config .sync-head { justify-content:flex-end; padding:0; }
+.sync-root.is-file-config .sync-title { display:none; }
+.sync-root.is-file-config .cv-tabs.segmented { min-height:39px; gap:25px; background:transparent; border:0; border-bottom:1px solid var(--c-border); padding:0; border-radius:0; }
+.sync-root.is-file-config .cv-tabs button { padding:0 0 12px; border-radius:0; border:0; border-bottom:2px solid transparent; background:transparent; }
+.sync-root.is-file-config .cv-tabs button[aria-selected=true] { border-bottom-color:var(--c-primary); color:var(--c-primary); box-shadow:none; }
+@media(max-width:760px) {
+ .sync-root.is-file-config .sync-page { padding:0 14px 14px; gap:13px; }
+ .sync-root.is-file-config .cv-breadcrumb { margin:0 -14px; padding:0 14px; }
+ .sync-root.is-file-config .sync-file-heading { flex-wrap:wrap; }
+ .sync-root.is-file-config .sync-file-heading h1 { font-size:19px; }
+}
+
+.sync-root.is-file-config .sync-page>.sync-file-context { align-items:stretch; flex-wrap:nowrap; padding:0; border:0; }
+.app.is-config-prototype .brand { color:var(--c-primary); }
+
+.modal.cv-dialog { width:min(520px,calc(100vw - 32px)); max-height:calc(100dvh - 48px); border-radius:12px; }
+.modal.cv-dialog.is-wide { width:min(720px,calc(100vw - 32px)); }
+.modal.cv-dialog.is-xwide { width:min(960px,calc(100vw - 32px)); }
+.modal.cv-dialog .modal-header { padding:20px 22px 16px; border-bottom:1px solid var(--c-border); }
+.modal.cv-dialog .modal-header h2 { font-size:17px; font-weight:650; line-height:1.5; letter-spacing:-.2px; }
+.modal.cv-dialog .modal-body { padding:20px 22px; }
+.modal.cv-dialog .modal-footer { padding:14px 22px; background:var(--c-surface-2); }
+.modal.cv-dialog .table-wrap { border:1px solid var(--c-border); border-radius:6px; max-height:44dvh; }
+.modal.cv-dialog .table td,.modal.cv-dialog .table th { padding:11px 13px; }
+@media(max-width:760px) {
+ .modal.cv-dialog,.modal.cv-dialog.is-wide,.modal.cv-dialog.is-xwide { width:calc(100vw - 24px); max-height:calc(100dvh - 24px); }
+ .modal.cv-dialog .modal-header { padding:17px 16px 14px; }
+ .modal.cv-dialog .modal-header h2 { font-size:16px; }
+ .modal.cv-dialog .modal-body { padding:17px 16px; }
+ .modal.cv-dialog .modal-footer { padding:12px 16px; }
+}
+
+.config-root.v32 .config-resource-toolbar { min-height:57px; padding:12px 16px; }
+.config-root.v32 .cv32-library-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 28px 12px; margin-top:-14px; }
+@media(max-width:760px) { .config-root.v32 .cv32-library-foot { padding:0 14px 12px; flex-wrap:wrap; } }
+
+.app.is-config-prototype .side-filter,.app.is-config-prototype .file-meta { display:none; }
+.app.is-config-prototype .file-item { padding:10px 9px; min-height:36px; font-size:12px; }
+.app.is-config-prototype .file-item.is-active { background:var(--c-surface); color:var(--c-primary); }
+.app.is-config-prototype .side-section { margin-top:18px; }
+
+.sync-root.is-file-config .sync-head { display:none; }
+.sync-root.is-file-config .sync-subnav { min-height:57px; gap:20px; padding:0 16px; }
+.sync-root.is-file-config .sync-subnav .btn { min-height:45px; padding:12px 0; }
+.sync-root.is-file-config .sync-source-table { min-width:760px; }
+.sync-root.is-file-config .sync-source-table th:first-child { width:40%; }
+.sync-root.is-file-config .sync-source-table th:nth-child(2) { width:13%; }
+.sync-root.is-file-config .sync-source-table th:nth-child(3) { width:14%; }
+.sync-root.is-file-config .sync-source-table th:nth-child(4) { width:17%; }
+.sync-root.is-file-config .sync-source-table th:nth-child(5) { width:16%; }
+.sync-root.is-file-config .sync-source-table td { padding:13px 16px; vertical-align:top; }
+
+@media(min-width:761px) and (max-width:900px) {
+ .config-root.v32>.cv-breadcrumb { padding-left:17px; padding-right:17px; }
+ .config-root.v32>.view-header { padding:17px 17px 14px; flex-wrap:wrap; }
+ .config-root.v32>.cv-workspace { margin:0 17px 17px; gap:14px; }
+ .config-root.v32>.config-resource-surface { margin:0 17px 17px; }
+ .config-root.v32 .cv32-workbench>.cv-param-browser { grid-template-columns:128px minmax(0,1fr); gap:10px; }
+ .config-root.v32 .cv32-object-heading h1 { font-size:20px; }
+ .sync-root.is-file-config .sync-page { padding:0 17px 17px; gap:14px; }
+ .sync-root.is-file-config .cv-breadcrumb { margin:0 -17px; padding:0 17px; }
+}
+@media(max-width:760px) {
+ .config-root.v32>.cv-breadcrumb,.sync-root.is-file-config .cv-breadcrumb { height:38px; min-height:38px; }
+ .config-root.v32 .cv32-object-heading { padding-top:16px; }
+ .config-root.v32>.cv-workspace { gap:13px; }
+}
+
+@media(min-width:761px) and (max-width:960px) {
+ .app.is-config-prototype { grid-template-columns:var(--sidebar-w) minmax(0,1fr); }
+ .app.is-config-prototype>.app-sidebar { position:static; transform:none; visibility:visible; width:auto; box-shadow:none; transition:none; }
+}
+
+.config-root.v32 .cv32-parameter-actions { display:flex; flex:none; align-items:center; gap:8px; margin-left:auto; }
+@media(max-width:760px),(pointer:coarse) { .config-root.v32 .cv32-parameter-actions .btn { min-height:44px; padding:6px; gap:4px; } .config-root.v32 .cv32-filterbar button { min-height:44px; } }
+@media(max-width:760px) { .config-root.v32 .cv32-parameter-actions { margin-left:0; gap:6px; } }

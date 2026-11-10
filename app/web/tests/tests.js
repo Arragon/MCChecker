@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 166;  // V3.2 对象、导入、草稿、升级、范围、对比及历史回归
+  var EXPECTED_CASES = 168;  // V3.2 原型布局、文件切换、对象、草稿、升级及历史回归
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -6203,6 +6203,47 @@
     });
   });
 
+  test("V3.2原型：侧栏切换配置文件忽略较早点击的迟到结果", function () {
+    return productionRun().run(function (r) {
+      configPrototypeFixture(r, true);
+      var get = MC.api.getV3, deliver = {};
+      MC.api.getV3 = function (path, query) { if (/config-files$/.test(path)) return new Promise(function (resolve) { deliver[query.q] = resolve; }); return get(path, query); };
+      var app = settingsApp(false); app.can = function () { return false; };
+      var inst = r.mountView(MC.views.configv3(app, { query: { config: "cfg-one", tab: "workbench" } }));
+      return tick().then(tick).then(function () {
+        inst.openFile("Old.json"); inst.openFile("New.json");
+        deliver["Old.json"]({ items: [{ name: "Old.json", file_id: "old" }] }); return tick();
+      }).then(function () {
+        ok(!lastModal(), "旧点击不能打开文件或弹窗");
+        deliver["New.json"]({ items: Array.from({ length: 100 }, function (_, i) { return { name: "Prefix" + i + "-New.json" }; }), total: 101 }); return tick();
+      }).then(function () {
+        ok(!lastModal(), "精确文件未在首屏时继续查找，不误选相似名称");
+        deliver["New.json"]({ items: [{ name: "New.json", file_id: "new" }], total: 101 }); return tick();
+      }).then(function () { ok(lastModal()); ok(lastModal().textContent.indexOf("请联系管理员") >= 0); });
+    });
+  });
+
+  test("V3.2原型：参数分段筛选、直接对比及导出字段弹窗保持指定结构", function () {
+    return productionRun().run(function (r) {
+      configPrototypeFixture(r, true);
+      var app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.configv3(app, { query: { config: "cfg-one", tab: "workbench" } }));
+      return tick().then(tick).then(function () {
+        var filters = inst.el.querySelector('.cv32-filterbar[role=group]'); ok(filters); ok(filters.querySelector('button[aria-pressed=true]'));
+        ok(!inst.el.querySelector('select[aria-label="筛选参数"]'), "筛选按原型使用分段按钮");
+        ok(modalButton(inst.el.querySelector('.cv-param-data>.cv-toolbar'), "对比"));
+        ok(inst.el.querySelector('.cv-param-footer [aria-label="每页参数数"]'), "分页设置放在表格底部");
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
+        eq(document.activeElement, inst.el.querySelector('[aria-label="搜索参数"]'), "原型搜索快捷键实际可用");
+        modalButton(inst.el, "导出文件").click(); return tick().then(tick);
+      }).then(function () {
+        ok(inst.el.querySelector('.cv-export-workflow')); ok(!inst.el.querySelector('.cv-export-progress'));
+        ok(!inst.el.querySelector('.cv-export-mapping'), "字段对应不挤占文件预览");
+        modalButton(inst.el, "查看对应字段").click(); ok(lastModal().querySelector('.cv-export-mapping'));
+      });
+    });
+  });
+
   test("V3.2：只读对比包含未暂存编辑，零、false、空字符串和 null 不混淆", function () {
     return productionRun().run(function (r) {
       configPrototypeFixture(r, false);
@@ -6327,12 +6368,15 @@
       r.useApi({ requestV3: function (method, path, options) {
         calls.push({ method: method, path: path, options: options || {} });
         if (/\/configs\/cfg-file$/.test(path)) return Promise.resolve({ config: { config_id: "cfg-file", name: "配置", file_id: "file-one", file: { name: "A.json" } } });
+        if (/\/sync\/sources$/.test(path)) return Promise.resolve({ items: [{ source_id: "source-one", name: "文件来源", kind: "http_file", profile_id: "default", enabled: true, schedule_mode: "manual", target: { kind: "file_archive", file_id: "file-one" } }], total: 1 });
         return Promise.resolve({ items: [], total: 0 });
       } });
       var inst = r.mountView(MC.views.updates(app, { arg: "sources", query: { config: "cfg-file" } }));
       return tick().then(tick).then(function () {
         var sources = calls.find(function (c) { return /\/sync\/sources$/.test(c.path); }); eq(sources.options.query.configuration_id, "cfg-file"); eq(sources.options.query.profile_id, "default");
         ok(inst.el.querySelector('.sync-file-context').textContent.indexOf('A.json') >= 0); ok(!inst.el.querySelector('[aria-label="来源机型范围"]'));
+        eq(inst.el.querySelectorAll('.sync-source-table thead th').length, 5, "文件更新使用原型五列表格");
+        eq(Array.from(inst.el.querySelectorAll('.sync-subnav button')).map(function (b) { return b.textContent; }).join("/"), "更新来源/待处理变化/运行记录");
         inst.el.querySelector('[data-sync-all]').click(); return tick();
       }).then(function () {
         var preview = calls.find(function (c) { return /\/sync\/previews$/.test(c.path); }); eq(preview.options.body, { scope: "current_configuration", configuration_id: "cfg-file", profile_id: "default" });
@@ -6464,7 +6508,9 @@
       function button(text) { return Array.prototype.filter.call(inst.el.querySelectorAll("button"), function (b) { return b.textContent.trim() === text; })[0]; }
       return tick().then(tick).then(function () { button("预览导出").click(); return tick().then(tick); }).then(function () {
         var commit = inst.el.querySelector("[data-export-commit]"); ok(!commit.disabled);
-        var mapping = inst.el.querySelector('[aria-label="速度的文件字段"]'); mapping.value = "json:/Other"; mapping.dispatchEvent(new Event("input"));
+        modalButton(inst.el, "查看对应字段").click();
+        var mapping = lastModal().querySelector('[aria-label="速度的文件字段"]'); mapping.value = "json:/Other"; mapping.dispatchEvent(new Event("input"));
+        lastModal().querySelector('[aria-label="关闭"]').click();
         ok(commit.disabled, "修改后不能提交旧预览"); commit.click(); eq(fixture.requests.length, 1);
         button("预览导出").click(); return tick().then(tick);
       }).then(function () {

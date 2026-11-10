@@ -75,6 +75,8 @@ def run(runner, api, admin_ip, visitor_ip):
         request("PUT", "/api/v1/p/default/files/Managed.json", {"Speed": 1}, headers={"X-Workspace-Id": files_wid})
         files_route = "#/p/default/configv3?workspace=" + files_wid
         b.navigate(runner.url(files_route))
+        wait("document.querySelector('.config-resource-surface')?.innerText.includes('Managed.json')")
+        runner.shoot("v32-file-home")
         click("Managed.json")
         wait("!!document.querySelector('.modal')")
         label("配置名称", "文件管理验收")
@@ -89,20 +91,23 @@ def run(runner, api, admin_ip, visitor_ip):
         wait("document.querySelector('.config-root')?.innerText.includes('添加第一个软件版本')")
         assert len(request("GET", files_root + "/configs")["items"]) == 1
         assert managed_id in b.eval("location.hash")
+        b.eval("document.querySelector('.app-sidebar [aria-label=\"打开 Managed.json\"]').click()")
+        wait("location.hash.includes('config=' + %s) && !!document.querySelector('.config-root:not(.hidden)')" % json.dumps(managed_id))
         stage = "V3.2 file-scoped update management"
         sync_root = "/api/v3/workspaces/%s/sync" % files_wid
         request("POST", sync_root + "/sources", {"name": "Owned update", "profile_id": "default", "kind": "http_file", "resource_ref": "https://example.invalid/owned", "target": {"kind": "file_archive", "file_id": owned["file_id"]}})
         request("POST", sync_root + "/sources", {"name": "Other file update", "profile_id": "default", "kind": "http_file", "resource_ref": "https://example.invalid/other", "target": {"kind": "file_archive", "file_id": "file-other"}})
         b.navigate(runner.url("#/p/default/updates/sources?workspace=" + files_wid + "&config=" + managed_id))
         wait("document.querySelector('.sync-content')?.innerText.includes('Owned update')")
+        runner.shoot("v32-file-updates")
         assert not b.eval("document.querySelector('.sync-content').innerText.includes('Other file update')")
-        click("更新当前文件")
+        click("立即更新")
         wait("document.querySelector('.modal')?.innerText.includes('Owned update')")
         assert not b.eval("document.querySelector('.modal').innerText.includes('Other file update')")
         click("关闭", modal)
         click("运行记录", "document.querySelector('.sync-subnav')")
         assert "config=" + managed_id in b.eval("location.hash")
-        click("更新候选", "document.querySelector('.sync-subnav')")
+        click("待处理变化", "document.querySelector('.sync-subnav')")
         assert "config=" + managed_id in b.eval("location.hash")
         notes.append("文件内更新：真实归档来源按唯一文件身份筛选；当前文件预览排除其他文件，切换运行/候选保留文件上下文；没有执行外部下载")
         request("PUT", "/api/v1/p/default/files/ReadOnly.json", {"Speed": 2}, headers={"X-Workspace-Id": files_wid})
@@ -148,6 +153,7 @@ def run(runner, api, admin_ip, visitor_ip):
         stage = "file binding picker"
         request("PUT", "/api/v1/p/default/files/Parity.json", {"Speed": 1, "Other": 2, "Keep": "unchanged", "NullValue": None}, headers={"X-Workspace-Id": wid})
         file = request("GET", root + "/file-selector?q=Parity.json")["items"][0]
+        request("PUT", base + "/file", {"file_id": file["file_id"]})
         click("本版未绑定")
         wait("!document.querySelector('[aria-label=\"绑定来源文件\"]').disabled")
         control("绑定来源文件", file["version_id"])
@@ -272,7 +278,9 @@ def run(runner, api, admin_ip, visitor_ip):
         control("模板文件", file["version_id"])
         click("预览导出")
         wait("!!document.querySelector('[data-export-commit]')")
+        click("查看对应字段")
         control("送料速度的文件字段", "/Other", "input")
+        b.eval("document.querySelector('.modal-header [aria-label=关闭]').click()")
         assert b.eval("document.querySelector('[data-export-commit]').disabled")
         click("预览导出")
         wait("document.querySelector('.cv-export-code')?.innerText.includes('\"Other\": 11')")
@@ -366,6 +374,14 @@ def run(runner, api, admin_ip, visitor_ip):
                 wait("!document.querySelector('.cv-tab-content .state.is-loading')")
                 metrics = b.eval("""(()=>{let e=document.querySelector('.cv-tab-content'),t=e.querySelector('.table-wrap');return {page:document.documentElement.scrollWidth,viewport:innerWidth,height:e.clientHeight,footerBottom:e.querySelector(".cv-param-footer")?.getBoundingClientRect().bottom,table:t?{client:t.clientHeight,scroll:t.scrollHeight}:null}})()""")
                 assert metrics["page"] <= width + 2 and metrics["height"] > 100, metrics
+                if name == "参数工作台":
+                    parity = b.eval("(()=>{let directory=document.querySelector('.cv32-workbench .cv-param-folders'),data=document.querySelector('.cv32-workbench .cv-param-data'),crumb=document.querySelector('.cv-breadcrumb');return {directoryWidth:directory.getBoundingClientRect().width,dataX:data.getBoundingClientRect().x,breadcrumbHeight:crumb.getBoundingClientRect().height,tabbarHidden:getComputedStyle(document.querySelector('.tabbar')).display==='none'};})()")
+                    assert parity["tabbarHidden"], parity
+                    assert parity["breadcrumbHeight"] == (38 if width <= 760 else 42), parity
+                    if width > 760:
+                        expected = {1366: (172, 424), 1920: (172, 440), 768: (128, 321)}[width]
+                        assert abs(parity["directoryWidth"] - expected[0]) <= 1 and abs(parity["dataX"] - expected[1]) <= 1, parity
+                    notes.append("prototype geometry %s %s" % (width, json.dumps(parity)))
                 if width > 760 and name in ("参数工作台", "参数总览"):
                     assert metrics["footerBottom"] <= height + 2, metrics
                 if name == "版本演进":
@@ -373,9 +389,15 @@ def run(runner, api, admin_ip, visitor_ip):
                     assert graph_metrics["height"] >= 180 and graph_metrics["footer"] <= height + 2, graph_metrics
                     notes.append("V3.2 graph workspace %s %s" % (width, json.dumps(graph_metrics)))
                 if name == "模板导出":
-                    layout = b.eval("""(()=>{let s=document.querySelector('.cv-export-source .cv-detail-body'),a=s.querySelector('[aria-label="导出配置"]').getBoundingClientRect(),f=s.querySelector('[aria-label="模板文件"]').getBoundingClientRect(),p=document.querySelector('.cv-export-preview .cv-detail-body'),t=p.querySelector('.table-wrap');return {stacked:f.top>=a.bottom,fieldWidth:f.width,sourceWidth:s.clientWidth,mappingWidth:t?.clientWidth,previewWidth:p.clientWidth}})()""")
+                    layout = b.eval("""(()=>{let s=document.querySelector('.cv-export-source .cv-detail-body'),a=s.querySelector('[aria-label="导出配置"]').getBoundingClientRect(),f=s.querySelector('[aria-label="模板文件"]').getBoundingClientRect(),p=document.querySelector('.cv-export-preview .cv-detail-body'),t=p.querySelector('.table-wrap');return {stacked:a.top>=f.bottom,fieldWidth:f.width,sourceWidth:s.clientWidth,mappingWidth:t?.clientWidth,previewWidth:p.clientWidth}})()""")
                     assert layout["stacked"] and layout["fieldWidth"] >= layout["sourceWidth"] - 34, layout
-                    assert layout["mappingWidth"] >= layout["previewWidth"] - 34, layout
+                    assert layout["previewWidth"] > 100, layout
+                    assert not b.eval("!!document.querySelector('.cv-export-preview .cv-export-mapping')"), "mapping must use the prototype dialog"
+                    click("查看对应字段")
+                    mapping = b.eval("(()=>{let d=document.querySelector('.modal-body'),w=d.querySelector('.table-wrap');w.scrollLeft=w.scrollWidth;return {width:w.clientWidth,bodyWidth:d.clientWidth,end:w.scrollLeft+w.clientWidth>=w.scrollWidth-2};})()")
+                    assert mapping["width"] >= mapping["bodyWidth"] - 50 and mapping["end"], mapping
+                    runner.shoot("v32-export-fields-%s" % width)
+                    b.eval("document.querySelector('.modal-header [aria-label=关闭]').click()")
                     notes.append("export layout " + json.dumps(layout))
                 notes.append("%s %s %s" % (width, name, json.dumps(metrics)))
                 if name == "参数总览":

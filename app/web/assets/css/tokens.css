@@ -3,7 +3,7 @@
  * 所有颜色、间距、字号、圆角、阴影只允许在此定义；其他 CSS 只能引用变量。
  * 语义色约定（与历史版本一致）：绿=新增/成功，红=删除/危险，橙=修改/警告，紫=绑定变量。
  */
-.config-root.v32 {
+.config-root.v32, .modal.cv-dialog {
   --c-bg: #f5f7fa;
   --c-surface-2: #f8fafc;
   --c-border: #e3e8ef;

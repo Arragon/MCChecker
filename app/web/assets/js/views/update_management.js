@@ -174,7 +174,7 @@
     function viewModal(options) {
       var closed = options.onClose, modal;
       options.onClose = function (result) { dialogs = dialogs.filter(function (d) { return d !== modal; }); if (closed) closed(result); };
-      modal = MC.modal(options); dialogs.push(modal); return modal;
+      modal = MC.modal(options); if (fileConfig) modal.el.classList.add("cv-dialog"); dialogs.push(modal); return modal;
     }
     function captureOrigin() {
       var origin = captureWorkspace(), version = contextVersion;
@@ -203,11 +203,16 @@
     }
     function paintFileNav() {
       util.clear(fileNav);
+      fileNav.classList.toggle("sync-file-context", !!fileConfig);
+      el.classList.toggle("is-file-config", !!fileConfig);
       if (!fileConfig) { fileNav.appendChild(MC.configWorkspaceNav(app, "updates")); return; }
-      fileNav.appendChild(h("div.sync-file-context", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置文件"),
-        h("strong", fileDetail && (fileDetail.file && fileDetail.file.name || fileDetail.name) || "正在读取文件…"),
-        h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig } }); } }, "版本演进"),
-        h("span.small", "更新管理"), h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig, tab: "history" } }); } }, "操作记录")));
+      var filename = fileDetail && (fileDetail.file && fileDetail.file.name || fileDetail.name) || "正在读取文件…";
+      fileNav.appendChild(h("nav.cv-breadcrumb", { "aria-label": "面包屑" }, h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置管理"), MC.icon("chevron-right"), h("span", filename)));
+      fileNav.appendChild(h("div.sync-file-heading", h("div.col", h("h1", filename), h("span.small.muted", fileDetail ? fileDetail.name : "")), headActions));
+      var tabs = MC.segmented([{ value: "versions", label: "版本演进" }, { value: "updates", label: "更新管理" }, { value: "history", label: "操作记录" }], "updates", function (value) {
+        if (value !== "updates") app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig, tab: value } });
+      }, "配置文件页面");
+      tabs.classList.add("cv-tabs"); fileNav.appendChild(tabs);
     }
     function freshPlan() {
       return { loadedFor: "", loading: false, error: "", policy: null, draft: null, sources: [], preview: null,
@@ -286,7 +291,9 @@
 
     function renderTabs() {
       util.clear(tabbar);
-      TABS.forEach(function (tab) {
+      var tabs = fileConfig ? [tabById("sources"), tabById("candidates"), tabById("runs")] : TABS;
+      var fileLabels = { sources: "更新来源", candidates: "待处理变化", runs: "运行记录" };
+      tabs.forEach(function (tab) {
         var active = state.tab === tab.id;
         var button = h(
           "button.btn" + (active ? ".btn-primary" : ""),
@@ -299,7 +306,7 @@
             tabindex: active ? "0" : "-1",
             "data-sync-tab": tab.id,
           },
-          tab.label
+          fileConfig ? fileLabels[tab.id] : tab.label
         );
         button.addEventListener("click", function () {
           if (activeEditorDirty) {
@@ -326,15 +333,15 @@
           if (app && app.go) app.go({ kind: "updates", arg: tab.id, query: fileQuery() });
         });
         button.addEventListener("keydown", function (event) {
-          var index = TABS.indexOf(tab);
-          var target = event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1
-            : event.key === "ArrowRight" ? (index + 1) % TABS.length
-            : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : -1;
+          var index = tabs.indexOf(tab);
+          var target = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+            : event.key === "ArrowRight" ? (index + 1) % tabs.length
+            : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : -1;
           if (target < 0) return;
           event.preventDefault();
-          var next = tabbar.querySelector('[data-sync-tab="' + TABS[target].id + '"]');
+          var next = tabbar.querySelector('[data-sync-tab="' + tabs[target].id + '"]');
           next.click();
-          var focused = tabbar.querySelector('[data-sync-tab="' + TABS[target].id + '"]');
+          var focused = tabbar.querySelector('[data-sync-tab="' + tabs[target].id + '"]');
           if (focused) focused.focus();
         });
         if (active) body.setAttribute("aria-labelledby", button.id);
@@ -2602,8 +2609,8 @@
 
       if (!S.items.length) {
         body.appendChild(h("div.card",
-          h("div.card-b", toolbar,
-            emptyState(S.query || S.status || S.configuration_id || S.release_id ? "没有匹配的更新源" : (S.scope === "profile" ? "当前机型没有更新源" : "添加第一个更新源"), S.query || S.status || S.configuration_id || S.release_id ? "调整搜索或筛选条件后重试。" : (S.scope === "profile" ? "切换到全部机型查看，或从右上角新增更新源。" : "从右上角新增更新源，绑定来源与接收目标。")))
+          h("div.card-b", fileConfig ? null : toolbar,
+            emptyState(fileConfig ? "尚未配置更新来源" : S.query || S.status || S.configuration_id || S.release_id ? "没有匹配的更新源" : (S.scope === "profile" ? "当前机型没有更新源" : "添加第一个更新源"), fileConfig ? "在更新设置中添加此文件的来源。" : S.query || S.status || S.configuration_id || S.release_id ? "调整搜索或筛选条件后重试。" : (S.scope === "profile" ? "切换到全部机型查看，或从右上角新增更新源。" : "从右上角新增更新源，绑定来源与接收目标。")))
         ));
         return;
       }
@@ -2679,6 +2686,18 @@
         var reason = freshness && freshness.reason_code;
         var failed = reason && ["unknown", "validated", "unchanged", "disabled", "canceled"].indexOf(reason) < 0;
         var resultText = source.has_candidate ? "有更新候选" : reason === "source_changed" ? "需重新核验" : failed ? "更新失败" : reason === "unchanged" ? "内容一致" : freshness && freshness.last_verified_at ? "已核验" : freshness && freshness.last_attempt_at ? "尚未有效核验" : "尚未运行";
+        if (fileConfig) {
+          var display = source.target_display || {};
+          var version = display.software_version;
+          if (source.has_candidate) actions.insertBefore(h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { state.tab = "candidates"; renderTabs(); loadCandidates(true); if (app.go) app.go({ kind: "updates", arg: "candidates", query: fileQuery() }); } }, "核对变化"), actions.firstChild);
+          tbody.appendChild(h("tr", { "data-sync-source": source.source_id },
+            h("td", h("div.row", icon("cloud"), h("div", sourceText(source.name, "name"), sourceText(source.display_path || source.resource_ref, "path")))),
+            h("td", version ? "软件 " + version : target === "file_archive" ? "文件归档" : "尚未指定版本"),
+            h("td", h("div.small", scheduleText(source)), h("div.xsmall.muted", source.enabled === false ? "已停用" : source.schedule && source.schedule.automatic_enabled ? "已启用" : "自动更新已暂停")),
+            h("td", h("span.badge" + (source.has_candidate || failed ? ".badge-warning" : ".badge-muted"), source.has_candidate ? "待核对" : resultText), freshness && freshness.last_attempt_at ? h("div.xsmall.muted", util.formatTime(freshness.last_attempt_at)) : null),
+            h("td", actions)));
+          return;
+        }
         tbody.appendChild(h("tr", { "data-sync-source": source.source_id, class: source.enabled === false ? "sync-paused" : "" },
           checkbox,
           h("td",
@@ -2712,14 +2731,14 @@
       });
       body.appendChild(h("div.card",
         h("div.card-b",
-          toolbar,
-          batchBar,
+          fileConfig ? null : toolbar,
+          fileConfig ? null : batchBar,
           h("div.sync-table-wrap", h("table.table.sync-source-table", h("thead", h("tr",
-            h("th", headerBox), h("th", "配置 / 文件"), h("th", "更新来源 / 写入目标"),
-            h("th", "更新计划"), h("th", "最近有效核验"), h("th", "最近结果"), h("th", "操作")
+            fileConfig ? ["来源", "目标版本", "更新计划", "最近结果", "操作"].map(function (name) { return h("th", name); }) : [h("th", headerBox), h("th", "配置 / 文件"), h("th", "更新来源 / 写入目标"),
+            h("th", "更新计划"), h("th", "最近有效核验"), h("th", "最近结果"), h("th", "操作")]
           )), tbody)),
           h("div.sync-list-footer",
-            h("span.muted.xsmall", "全量更新不受当前筛选条件影响"),
+            h("span.muted.xsmall", fileConfig ? "获取更新后先核对，再保存为版本标准" : "全量更新不受当前筛选条件影响"),
             h("div.row", { style: "gap:8px;align-items:center" },
               h("span.muted.xsmall", "已加载 " + S.items.length + " / " + S.total),
               S.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null
@@ -3843,8 +3862,15 @@
           type: "button",
           "data-sync-new": "1",
           disabled: !!fileConfig && !fileDetail,
-          onclick: function () { openEditor(null); },
-        }, "新增更新源"));
+          onclick: function () {
+            if (!fileConfig) { openEditor(null); return; }
+            var modal = viewModal({ title: "更新设置", body: h("div.col", { style: "gap:10px" },
+              state.sources.items.map(function (source) { return h("button.btn", { type: "button", onclick: function () { modal.close(); openEditor(source); } }, source.name); }),
+              h("button.btn", { type: "button", onclick: function () { modal.close(); openEditor(null); } }, "添加更新来源"),
+              h("button.btn.btn-ghost", { type: "button", onclick: function () { modal.close(); showSheet("connections"); } }, "连接设置"),
+              h("button.btn.btn-ghost", { type: "button", onclick: function () { modal.close(); showSheet("plan"); } }, "工作区计划")) });
+          },
+        }, fileConfig ? "更新设置" : "新增更新源"));
       }
       if (canRun()) {
         headActions.appendChild(h("button.btn.btn-sm.btn-primary", {
@@ -3852,7 +3878,7 @@
           "data-sync-all": "1",
           disabled: !!fileConfig && !fileDetail,
           onclick: function () { previewSources(null); },
-        }, fileConfig ? "更新当前文件" : "工作区全量更新"));
+        }, fileConfig ? "立即更新" : "工作区全量更新"));
       }
     }
     function renderStrip() {
@@ -3876,7 +3902,7 @@
     function paintChrome() {
       renderHead();
       util.clear(stripHost);
-      stripHost.appendChild(renderStrip());
+      if (!fileConfig) stripHost.appendChild(renderStrip());
     }
     el.appendChild(h("div.view-body.sync-page",
       fileNav,
@@ -3917,6 +3943,7 @@
         if (nextConfig !== fileConfig) {
           contextVersion++; dialogs.slice().forEach(function (dialog) { dialog.close(); });
           fileConfig = nextConfig; state.sources.loadSeq++; state.runs.loadSeq++; state.candidates.loadSeq++;
+          if (fileConfig) { state.sources.query = ""; state.sources.status = ""; state.sources.failedOnly = false; state.sources.candidateOnly = false; state.sources.expanded = false; state.sources.scope = "profile"; }
           state.sources.selected = {}; state.sources.items = []; state.sources.loading = false; state.sources.configuration_id = ""; state.sources.release_id = "";
           state.runs.items = []; state.runs.loading = false; state.recentRun = null;
           state.candidates.items = []; state.candidates.loading = false; state.candidates.loadedFor = ""; state.candidates.selected = {};

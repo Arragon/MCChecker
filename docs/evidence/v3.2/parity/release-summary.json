@@ -1,0 +1,28 @@
+{
+  "branch": "codex/v32-prototype-parity-20261109",
+  "reference_sha256": "8efb5e9b0480900807c875b72147dd63debb5f8ccf9919f9f044281fbf1658d6",
+  "reference_screenshots": 36,
+  "package": "dist/MCChecker-3.2.0.zip",
+  "package_sha256": "fed039ae7304d160ecccc8c2747f3a6eb3baf8704b222f72fec1c956d561854b",
+  "package_bytes": 1018521,
+  "manifest_verified": true,
+  "all_packaged_sources_match": true,
+  "source_files": 224,
+  "frontend_browser_tests": 168,
+  "editor_evolution_tests": 15,
+  "real_browser_report": "acceptance.json",
+  "summary": {
+    "interactive_pass": 39,
+    "interactive_fail": 0,
+    "reachable_pass": 28,
+    "reachable_fail": 0,
+    "api_pass": 1,
+    "api_fail": 0
+  },
+  "api_and_persisted_formats_changed": false,
+  "external_device_acceptance": false,
+  "pushed": false,
+  "release_tests_passed": 170,
+  "live_preview_verified": true,
+  "live_preview_port": 50014
+}

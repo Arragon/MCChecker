@@ -611,7 +611,7 @@
   App.prototype.renderFileList = function () {
     var self = this;
     if (!this.fileListEl) return;
-    var kw = this.fileFilter.trim().toLowerCase();
+    var kw = this.shell && this.shell.classList.contains("is-config-prototype") ? "" : this.fileFilter.trim().toLowerCase();
     var list = this.files.filter(function (f) { return !kw || f.name.toLowerCase().indexOf(kw) >= 0; });
     this.fileCountEl.textContent = String(this.files.length);
     util.clear(this.fileListEl);
@@ -627,13 +627,15 @@
     }
     var activeRoute = MC.router.current();
     list.forEach(function (f) {
-      var isActive = activeRoute && activeRoute.kind === "f" && activeRoute.arg === f.name;
+      var activeInstance = self.instances[self.activeKey];
+      var managingFiles = activeRoute && activeRoute.kind === "configv3" && activeInstance && activeInstance.openFile;
+      var isActive = managingFiles ? activeInstance.el.dataset.managedFileName === f.name : activeRoute && activeRoute.kind === "f" && activeRoute.arg === f.name;
       var meta = [util.formatTime(f.updated_at)];
       if (f.archive_count) meta.push(f.archive_count + " 个历史版本");
       if (!f.mapped) meta.push("手动导入");
       var openBtn = h("button.file-open", { type: "button", "aria-label": "打开 " + f.name });
       openBtn.addEventListener("click", function () {
-        self.openFile(f.name);
+        if (managingFiles) activeInstance.openFile(f.name); else self.openFile(f.name);
         self.shell.classList.remove("is-sidebar-open");
       });
       var dl = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "下载 " + f.name, "data-tip": "下载当前版本" }, icon("download"));
@@ -659,7 +661,7 @@
         h(
           "li.file-item" + (isActive ? ".is-active" : ""),
           openBtn,
-          util.fmtTag(f.name),
+          managingFiles ? icon("file") : util.fmtTag(f.name),
           h("div.file-text", h("div.file-name", { title: f.name }, f.name), h("div.file-meta", meta.join(" · "))),
           f.pending_remarks ? h("span.file-flag.badge.badge-warning", { title: f.pending_remarks + " 条待审建议" }, icon("message"), String(f.pending_remarks)) : null,
           h("div.file-actions", dl, more)
@@ -876,6 +878,7 @@
     tab.title = inst.title || tab.title;
     tab.icon = inst.icon;
     this.activeKey = key;
+    this.shell.classList.toggle("is-config-prototype", r.kind === "configv3" || r.kind === "updates" && !!(r.query && r.query.config));
     this.saveTabs();
     this.renderTabbar();
     this.renderNav();

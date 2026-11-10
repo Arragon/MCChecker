@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-11-10T02:54:39Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-52614-79274/data",
+  "server": "http://127.0.0.1:62998",
+  "summary": {
+    "interactive_pass": 1,
+    "interactive_fail": 0,
+    "reachable_pass": 0,
+    "reachable_fail": 0,
+    "api_pass": 0,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "diagnostic-download",
+      "title": "运行诊断文件下载",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375px 运行详情页脚换行且可达：{'footerVisible': True, 'bodyHeight': 357, 'overflow': 0}",
+        "下载文件中的运行 ID 和事件列表与隔离任务一致"
+      ],
+      "screenshot": null
+    }
+  ]
+}

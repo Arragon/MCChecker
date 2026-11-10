@@ -133,7 +133,11 @@ def audit(runner, route, cid, revision_id, file, prepared_release, notes, merge_
         click("核对并保存")
         check("freeze-confirmation", width, height); close()
         # No saves or publication are committed by the dialog inventory.
-        click("其他配置", "document.querySelector('.cv-breadcrumb')")
+        if b.eval("Array.from(document.querySelector('.cv-breadcrumb').querySelectorAll('button')).some(b=>b.textContent.trim()==='配置管理')"):
+            click("配置管理", "document.querySelector('.cv-breadcrumb')")
+            click("其他配置")
+        else:
+            click("其他配置", "document.querySelector('.cv-breadcrumb')")
         assert b.eval("document.documentElement.scrollWidth<=innerWidth+2")
         click("新建配置分组")
         check("new-config", width, height); close()

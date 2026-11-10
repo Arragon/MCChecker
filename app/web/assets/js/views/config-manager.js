@@ -21,7 +21,15 @@
     var surface = route && route.arg || q.surface || (q.config ? "configs" : "files");
     if (["configs", "files", "records"].indexOf(surface) < 0) surface = "configs";
     var catalogPage = { loaded: "", loading: false, items: [], total: 0, offset: 0, query: "", error: null, seq: 0 };
-    var disposed = false, dialogs = [], formDrafts = [];
+    var disposed = false, dialogs = [], formDrafts = [], fileOpenSeq = 0;
+    function focusParameterSearch(event) {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || disposed || !el.isConnected || el.classList.contains("hidden") || document.querySelector(".modal-backdrop")) return;
+      var target = event.target;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      var search = el.querySelector('[aria-label="搜索参数"]');
+      if (search) { event.preventDefault(); search.focus(); search.select(); }
+    }
+    document.addEventListener("keydown", focusParameterSearch);
     var activeMenu = null;
     function viewMenu(anchor, items) {
       activeMenu = MC.menu(anchor, items); activeMenu.el.classList.add("cv-menu");
@@ -300,6 +308,8 @@
     function render() {
       if (S.paramTree) { S.paramTree.destroy(); S.paramTree = null; }
       util.clear(el);
+      var activeFile = S.detail && S.detail.file && S.detail.file.name || "";
+      if (el.dataset.managedFileName !== activeFile) { el.dataset.managedFileName = activeFile; if (app.renderFileList) app.renderFileList(); }
       if (surface === "records") el.appendChild(MC.configWorkspaceNav(app, surface));
       if (surface !== "configs") { renderCatalogPage(); return; }
       if (S.opened && S.detail && S.detail.file_id) {
@@ -308,8 +318,8 @@
           h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置管理"),
           icon("chevron-right"), objectPage() ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { changeTab("versions"); } }, file.name || "文件已移除") : h("span", file.name || "文件已移除"),
           objectPage() ? h("span.small.muted", "/ " + (revision() && revision().machine_no || "软件 " + labelOf(S.releaseId))) : null));
-        if (!objectPage()) el.appendChild(h("div.view-header", h("div.cv-file-label", h("span.cv-file-type", icon("file"), (file.format || "").toUpperCase()),
-          h("div.col", h("h1", file.name || S.detail.name), h("span.small.muted", S.detail.name)))));
+        if (!objectPage()) el.appendChild(h("div.view-header.cv32-file-heading", h("div.cv-file-label", h("span.cv-file-type", icon("file"), (file.format || "").toUpperCase()),
+          h("div.col", h("h1", file.name || S.detail.name), h("span.small.muted", S.detail.name + " / " + S.detail.releases.length + " 个软件版本 · " + S.machines.filter(function (m) { return !!m.head_id; }).length + " 台机台"))), S.tab === "versions" ? versionActions() : null));
       } else if (S.opened && S.detail) {
         el.appendChild(h("div.cv-breadcrumb", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () {
           confirmDiscard(function () { S.opened = false; S.cid = null; S.detail = null; S.edits = {}; app.go({ kind: "configv3", arg: "configs", query: {} }); render(); });
@@ -360,18 +370,18 @@
 
     function renderCatalogPage() {
       var files = surface === "files", P = catalogPage;
-      var query = h("input.input", { type: "search", "aria-label": files ? "搜索配置文件" : "搜索配置记录", placeholder: files ? "搜索文件名" : "搜索事件、参数或操作人", value: P.query });
+      var query = h("input.input", { type: "search", "aria-label": files ? "搜索配置文件" : "搜索配置记录", placeholder: files ? "搜索文件名或配置名称" : "搜索事件、参数或操作人", value: P.query });
       function search() { P.query = query.value.trim(); loadCatalogPage(true); }
       query.addEventListener("keydown", function (event) { if (event.key === "Enter") search(); });
       if (files) el.appendChild(h("nav.cv-breadcrumb", { "aria-label": "面包屑" }, h("span", "配置管理"), icon("chevron-right"), h("span", "配置文件")));
-      el.appendChild(h("div.view-header", h("h1", files ? "配置文件" : "操作记录"),
-        files && app.can("tasks_run") ? h("button.btn.btn-sm.btn-primary", { type: "button", onclick: function () { app.go({ kind: "updates", arg: "sources", query: { action: "preview_all", request: util.uid("preview") } }); } }, icon("refresh"), "工作区全量更新") : null,
-        files ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs" }); } }, "其他配置") : null));
-      var card = h("div.config-resource-surface", h("div.row.config-resource-toolbar", query,
-        h("button.btn.btn-sm", { type: "button", onclick: search }, "搜索"),
-        h("button.btn.btn-sm", { type: "button", onclick: function () { loadCatalogPage(false); } }, "刷新"),
-        h("span.spacer"), h("span.small.muted", "共 " + P.total + " 项")));
+      el.appendChild(h("div.view-header", h("div.col", h("h1", files ? "配置文件" : "操作记录"), files ? h("span.small.muted", "当前工作区 · " + (app.session && app.session.profile && app.session.profile.name || app.pid)) : null),
+        files && app.can("tasks_run") ? h("button.btn", { type: "button", title: "预览整个工作区的更新", onclick: function () { app.go({ kind: "updates", arg: "sources", query: { action: "preview_all", request: util.uid("preview") } }); } }, icon("refresh"), "全部更新") : null));
+      var card = h("div.config-resource-surface", h("div.row.config-resource-toolbar", h("label.cv32-searchbox", icon("search"), query),
+        h("span.spacer"), h("span.small.muted", P.total + (files ? " 个文件" : " 条记录"))));
+      var searchTimer;
+      query.addEventListener("input", function () { clearTimeout(searchTimer); searchTimer = setTimeout(function () { if (query.isConnected) search(); }, 200); });
       el.appendChild(card);
+      if (files) el.appendChild(h("div.cv32-library-foot", h("span.small.muted", "所有版本、机台和记录均限定于当前工作区"), h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "configs" }); } }, "其他配置")));
       if (P.loaded !== surface) { loadCatalogPage(true); return; }
       if (P.loading) { card.appendChild(MC.stateBlock({ kind: "loading", title: "正在读取…" })); return; }
       if (P.error) { card.appendChild(MC.errorBlock(P.error, function () { loadCatalogPage(false); })); return; }
@@ -692,12 +702,15 @@
           } }, expand ? "展开全部" : "收起全部");
         })));
       }
-      var toolbar = h("div.cv-toolbar.cv32-evo-toolbar", search, h("button.btn.btn-sm", { type: "button", onclick: applySearch }, "搜索"), filter, h("span.spacer"), toggle);
-      var actions = h("div.cv32-version-actions", h("span.spacer"),
-        h("button.btn.btn-sm", { type: "button", disabled: !canWrite() || !S.revisions.some(function (record) { return record.status === "published" && record.kind !== "machine"; }), onclick: machineDialog }, MC.icon("plus"), "新建机台"),
-        h("button.btn.btn-primary.btn-sm", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, MC.icon("plus"), "新建软件版本"));
-      return h("div.cv-version-view.cv32-version-view", actions,
+      var toolbar = h("div.cv-toolbar.cv32-evo-toolbar", h("label.cv32-searchbox", icon("search"), search), filter, h("span.spacer"), toggle);
+      return h("div.cv-version-view.cv32-version-view", S.detail.file_id ? null : versionActions(),
         h("section.cv32-evo-surface", toolbar, h("div.cv32-evo-scroll.cv-graph-scroll", { tabindex: 0, "aria-label": S.evoView === "graph" ? "版本关系图，可横向和纵向滚动" : "软件版本与机台层级列表" }, body), footer));
+    }
+
+    function versionActions() {
+      return h("div.cv32-version-actions",
+        h("button.btn", { type: "button", disabled: !canWrite() || !S.revisions.some(function (record) { return record.status === "published" && record.kind !== "machine"; }), onclick: machineDialog }, icon("plus"), "新建机台"),
+        h("button.btn.btn-primary", { type: "button", disabled: !canWrite(), onclick: createReleaseDialog }, icon("plus"), "新建软件版本"));
     }
 
     function revisionName(id) { var r = S.revisions.filter(function (n) { return n.id === id; })[0]; return r ? labelOf(r.release_id) + " · " + r.label : id || "—"; }
@@ -1094,10 +1107,6 @@
         S.selectedParam = null; S.paramMode = "list"; loadParamPage(0);
       }
       search.addEventListener("keydown", function (event) { if (event.key === "Enter") searchParameters(); });
-      var parameterFilter = h("select.select", { "aria-label": "筛选参数", onchange: function () { S.parameterFilter = parameterFilter.value; searchParameters(); } },
-        h("option", { value: "all", selected: S.parameterFilter === "all" }, "全部参数"),
-        parameterReference(current) ? h("option", { value: "different", selected: S.parameterFilter === "different" }, current.kind === "machine" ? "与标准值不同" : "与初始值不同") : null,
-        editing ? h("option", { value: "modified", selected: S.parameterFilter === "modified" }, "本次修改") : null);
       var display = h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", "aria-label": "参数表显示设置", title: "显示列与行密度", onclick: function () {
         var fields = h("input", { type: "checkbox", checked: S.showFileField });
         var density = h("select.select", { "aria-label": "行密度" }, ["comfortable", "compact"].map(function (value) { return h("option", { value: value, selected: S.parameterDensity === value }, value === "compact" ? "紧凑" : "标准"); }));
@@ -1133,12 +1142,18 @@
       return h("div.cv-workbench.cv32-workbench" + (S.parameterDensity === "compact" ? ".is-compact" : ""),
         S.valueError ? h("div.banner.banner-warning", { role: "alert" }, h("div.banner-body", "保存未完成，已暂存的内容和本次输入均已保留。", MC.errorText(S.valueError)), S.valueError.code === "REVISION_CONFLICT" ? h("button.btn.btn-sm", { type: "button", onclick: recoverValues }, "核对最新草稿") : null) : null,
 
-        h("div.cv-param-browser", folders, h("section.cv-param-data", h("div.cv-toolbar", search, h("button.btn.btn-sm", { type: "button", onclick: searchParameters }, "搜索"), h("span.spacer"), pageSize,
-          parameterFilter, current && current.kind !== "machine" && !historicalRecord(current) && S.tab !== "initial" ? h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: importParameters }, icon("upload"), "导入") : null,
-          display), h("div.cv-folder-trail.small", S.paramMode === "tree" && S.selectedParam ? S.selectedParam.name : S.folderActive ? "/" + S.dirParent : "全部参数"),
+        h("div.cv-param-browser", folders, h("section.cv-param-data", h("div.cv-toolbar", h("label.cv32-searchbox", icon("search"), search, h("span.small.muted", "/")), h("span.spacer"),
+          h("div.cv32-parameter-actions", h("button.btn.btn-ghost", { type: "button", onclick: compareParameters }, icon("compare"), "对比"),
+          current && current.kind !== "machine" && !historicalRecord(current) && S.tab !== "initial" ? h("button.btn.btn-sm", { type: "button", disabled: !canWrite(), onclick: importParameters }, icon("upload"), "导入") : null, display)),
+          S.paramMode === "tree" && S.selectedParam ? h("div.cv-folder-trail.small", S.selectedParam.name) : null,
+          h("div.cv32-filterbar", { role: "group", "aria-label": "筛选参数" }, [
+            { value: "all", label: "全部" },
+            parameterReference(current) ? { value: "different", label: current.kind === "machine" ? "与标准值不同" : "与初始值不同" } : null,
+            editing ? { value: "modified", label: "本次修改" } : null
+          ].filter(Boolean).map(function (option) { return h("button", { type: "button", "aria-pressed": String(S.parameterFilter === option.value), onclick: function () { S.parameterFilter = option.value; searchParameters(); } }, option.label); })),
           h("div.table-wrap", { tabindex: 0, "aria-label": "参数表滚动区域" }, h("table.table.cv32-parameter-table", h("thead", h("tr", h("th", "参数名称"), editing ? h("th", "上次保存") : null,
             h("th", editing ? "编辑值" : "当前值"), h("th", "单位"), h("th", current && current.kind === "machine" ? "取值方式" : "值状态"), S.showFileField ? h("th", "文件字段") : null)), body)),
-          h("div.cv-param-footer", pagerRow(S.paramMode === "tree" && S.selectedParam ? 1 : S.folderActive ? (page && page.parameter_total || 0) : S.paramTotal, S.paramMode === "tree" && S.selectedParam ? 0 : S.folderActive ? S.dirOffset : S.paramOffset, S.paramLimit, function (offset) { if (S.folderActive) { S.dirOffset = offset; loadDir(S.dirParent, offset); } else loadParamPage(offset); })))), editbar);
+          h("div.cv-param-footer", pageSize, pagerRow(S.paramMode === "tree" && S.selectedParam ? 1 : S.folderActive ? (page && page.parameter_total || 0) : S.paramTotal, S.paramMode === "tree" && S.selectedParam ? 0 : S.folderActive ? S.dirOffset : S.paramOffset, S.paramLimit, function (offset) { if (S.folderActive) { S.dirOffset = offset; loadDir(S.dirParent, offset); } else loadParamPage(offset); })))), editbar);
     }
 
     function recoverValues() {
@@ -2167,20 +2182,22 @@
           S.exportPlan = res.plan; S.exportBusy = false; S.exportDirty = false; render();
         }, function (err) { if (!disposed && scope === cfgPath("")) { S.exportBusy = false; S.exportError = err; render(); } });
       } }, S.exportBusy ? "正在生成预览…" : "预览导出");
-      var source = h("section.cv-export-source", h("div.cv-detail-head", h("h2", "导出来源")), h("div.cv-detail-body.col", { style: "gap:16px" },
-        MC.field({ label: "已保存的配置", control: revSel }), MC.field({ label: "配置文件中的模板", control: fileSel }), h("button.btn", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "查看配置文件"),
+      var source = h("section.cv-export-source", h("div.cv-detail-head", h("h2", "导出设置")), h("div.cv-detail-body.col", { style: "gap:20px" },
+        MC.field({ label: "导出模板", control: fileSel }), MC.field({ label: "导出对象", control: revSel }),
+        MC.field({ label: "参数与字段", control: h("button.btn.btn-ghost", { type: "button", onclick: function () { viewModal({ title: "参数与文件字段", size: "xwide", body: mappingPanel || h("p", "没有可对应的参数") }); } }, "查看对应字段") }),
         S.exportFromEdit ? h("p.small", "正在导出上次保存的配置，编辑内容仍保留。") : null,
         h("label.row.small", { style: "gap:6px" }, confirm, "保留模板中已停用或移除的字段"), !exportReady ? h("p.small.cv-warning", "尚未保存配置，请先保存后导出。") : null, preview, h("details.cv-help", h("summary", "文件保留规则"), h("p.small.muted", "仅写入已确认的文件字段；未匹配字段保持原样。XML / INI 保留注释，JSON 会重新排版；生成新文件，不覆盖原文件。"))));
-      var main = h("section.cv-export-preview", h("div.cv-detail-head", h("h2", S.exportPlan ? "字段映射与预览" : "核对模板映射")));
+      var main = h("section.cv-export-preview", h("div.cv-detail-head", h("h2", S.exportPlan ? "导出文件预览" : "导出文件")));
       var content = h("div.cv-detail-body.col", { style: "gap:14px" }); main.appendChild(content);
       if (S.exportError) content.appendChild(MC.errorBlock(S.exportError, function () { S.exportError = null; S.exportFiles = null; render(); }));
       if (!S.exportFiles.length && !S.exportError) content.appendChild(MC.stateBlock({ kind: "empty", title: "没有 JSON/XML/INI 模板", desc: "先从左侧配置文件列表导入模板文件。" }));
       var plan = S.exportPlan, mapping = plan && plan.mapping || [];
       var parameters = mapping.length ? mapping : (S.paramPage && S.paramPage.items || []).slice(0, 50).map(function (p) { var binding = (S.bindings || []).filter(function (b) { return b.parameter_id === p.parameter_id; })[0]; return { parameter_id: p.parameter_id, name: p.name, locator: binding && binding.locator || "", value: S.draft && S.draft.values && S.draft.values[p.parameter_id] && S.draft.values[p.parameter_id].value }; });
-      if (parameters.length) content.appendChild(h("div.table-wrap", h("table.table.cv-export-mapping", h("thead", h("tr", h("th", "参数"), h("th", "本次模板落点"), h("th", "输出值"))), h("tbody", parameters.map(function (p) {
+      var mappingPanel = parameters.length ? h("div.table-wrap", h("table.table.cv-export-mapping", h("thead", h("tr", h("th", "参数"), h("th", "文件字段"), h("th", "输出值"))), h("tbody", parameters.map(function (p) {
         var input = h("input.input.input-sm.input-mono", { "aria-label": p.name + "的文件字段", placeholder: "填写精确路径；留空则不输出", disabled: !canWrite() || S.exportBusy, value: S.exportMappings && Object.prototype.hasOwnProperty.call(S.exportMappings, p.parameter_id) ? S.exportMappings[p.parameter_id] : p.locator || "", oninput: function () { if (!S.exportMappings) S.exportMappings = {}; S.exportMappings[p.parameter_id] = input.value; invalidate(); } });
         return h("tr", h("td", h("strong", p.name), h("div.mono.xsmall.muted", p.parameter_id)), h("td", h("div.row", { style: "gap:6px" }, input, h("button.btn.btn-sm", { type: "button", disabled: !canWrite() || S.exportBusy || !/\.(json|xml)$/i.test((S.exportFiles.filter(function (f) { return f.version_id === S.exportFileId; })[0] || {}).name || ""), onclick: function () { var f = S.exportFiles.filter(function (row) { return row.version_id === S.exportFileId; })[0]; if (f) sourceFieldPicker(f, function (path) { input.value = path; input.dispatchEvent(new Event("input")); }); } }, "选字段"))), h("td.mono", p.value_state === "null" ? "null" : p.value === "" ? '""' : p.value == null ? "未设" : String(p.value)));
-      })))));
+      })))) : null;
+      if (!plan && !S.exportError && S.exportFiles.length) content.appendChild(MC.stateBlock({ kind: "empty", title: "生成预览后下载", desc: "核对文件格式、参数和字段层级。" }));
       content.appendChild(message);
       if (plan) {
         content.appendChild(h("div.small", "已匹配 " + plan.applied + " 项 · 未输出 " + Math.max(0, (plan.mapping_total || plan.applied) - plan.applied) + " 项 · 其他模板字段保持原样"));
@@ -2194,13 +2211,13 @@
             S.exportArtifact = res.artifact;
             return api.download(root("/exports/" + enc(res.artifact.artifact_id) + "/download")).catch(function (err) { MC.toastError("下载失败，文件已生成，可重试下载", err); });
           }, function (err) { if (scope === cfgPath("") && !disposed) { S.exportError = err; MC.toastError("导出失败", err); } }).then(function () { if (!disposed && scope === cfgPath("")) { S.exportBusy = false; render(); } });
-        } }, "下载文件"); if (!S.exportArtifact) content.appendChild(commit);
+        } }, "下载文件"); if (!S.exportArtifact) main.querySelector(".cv-detail-head").appendChild(commit);
       }
       if (S.exportArtifact) {
         var art = S.exportArtifact;
-        content.appendChild(h("button.btn.btn-primary", { type: "button", "data-export-download": "1", onclick: function () { api.download(root("/exports/" + enc(art.artifact_id) + "/download")).catch(function (err) { MC.toastError("下载失败，请重试", err); }); } }, icon("download"), "再次下载文件"));
+        main.querySelector(".cv-detail-head").appendChild(h("button.btn.btn-primary", { type: "button", "data-export-download": "1", onclick: function () { api.download(root("/exports/" + enc(art.artifact_id) + "/download")).catch(function (err) { MC.toastError("下载失败，请重试", err); }); } }, icon("download"), "再次下载文件"));
       }
-      return h("div.cv-export", h("div.cv-export-progress", h("span", "1 选择配置"), icon("chevron-right"), h("span", "2 选择模板"), icon("chevron-right"), h("span", "3 核对字段"), icon("chevron-right"), h("strong", "4 预览并下载")), h("div.cv-export-workflow", source, main));
+      return h("div.cv-export", h("div.cv-toolbar", h("button.btn.btn-ghost", { type: "button", onclick: function () { changeTab("workbench"); } }, icon("chevron-left"), "返回参数"), h("span.spacer"), h("span.small.muted", "使用已保存的配置")), h("div.cv-export-workflow", source, main));
     }
 
     function historyView() {
@@ -2230,13 +2247,15 @@
             }, function (err) { MC.toastError("恢复失败", err); });
           } }, "从此配置继续编辑"));
         }
-        return h("article.cv-history-event", h("time", util.formatTime(ev.at)), h("div", h("h3", labels[ev.type] || "配置操作"),
-          h("details.cv-help", h("summary", "操作详情"), h("pre.mono.small", JSON.stringify({ before: ev.before, after: ev.after, source: ev.source, request_id: ev.request_id, undo_of: ev.undo_of }, null, 2))), actions),
-          h("div.col.small", h("strong", ev.principal || "—"), h("span.mono.muted", ev.ip || "—")));
+        var record = S.revisions.filter(function (item) { return item.id === source.revision_id; })[0];
+        return h("tr.cv-history-event", h("td", h("div.row", icon("history"), h("div", h("strong", labels[ev.type] || "配置操作"), h("div.small.muted", record ? revisionLabel(record) : S.detail.name)))),
+          h("td", h("details.cv-help", h("summary", "操作详情"), h("pre.mono.small", JSON.stringify({ before: ev.before, after: ev.after, source: ev.source, request_id: ev.request_id, undo_of: ev.undo_of }, null, 2)))),
+          h("td", h("strong", ev.principal || "—"), h("div.mono.small.muted", ev.ip || "—")),
+          h("td", h("time", util.formatTime(ev.at))), h("td", actions));
       });
       return h("div.cv-history", h("div.cv-toolbar", h("span.small.muted", (S.historyTotal || 0) + " 条记录 · 最新优先"), h("span.spacer"), search, button, h("button.btn.btn-sm", { type: "button", onclick: function () { historySeq++; S.historyLoading = false; S.historyEvents = null; S.historyError = null; render(); } }, "刷新")),
         S.historyLoading ? MC.stateBlock({ kind: "loading", title: "读取事件…" }) : S.historyError ? MC.stateBlock({ kind: "error", title: "读取配置事件失败", desc: MC.errorText(S.historyError), actions: [h("button.btn", { type: "button", onclick: function () { S.historyError = null; S.historyEvents = null; render(); } }, "重试")] })
-          : events.length ? h("div.cv-history-events", events) : MC.stateBlock({ kind: "empty", title: "没有配置事件", desc: "配置的导入、提取、发布、导出和恢复操作会记录在这里。" }),
+          : events.length ? h("div.cv-history-events.table-wrap", h("table.table.cv32-history-table", h("thead", h("tr", ["操作 / 对象", "变更内容", "操作人", "时间", "查看"].map(function (label) { return h("th", label); }))), h("tbody", events))) : MC.stateBlock({ kind: "empty", title: "没有配置事件", desc: "保存配置后，操作记录将显示在这里。" }),
         pagerRow(S.historyTotal || 0, S.historyOffset || 0, 50, function (offset) { historySeq++; S.historyLoading = false; S.historyOffset = offset; S.historyEvents = null; S.historyError = null; render(); }));
     }
 
@@ -2309,6 +2328,20 @@
     load(S.cid || undefined);
     return {
       el: el, title: "配置管理", icon: "list",
+      openFile: function (name) {
+        var request = ++fileOpenSeq;
+        confirmDiscard(function () {
+          var epoch = S.contextEpoch, scope = root("");
+          function readPage(offset) { api.getV3(scope + "/config-files", { q: name, limit: 100, offset: offset }).then(function (res) {
+            if (disposed || request !== fileOpenSeq || epoch !== S.contextEpoch || scope !== root("") || el.classList.contains("hidden")) return;
+            var file = (res.items || []).filter(function (item) { return item.name === name; })[0];
+            if (file) openManagedFile(file);
+            else if (res.items && res.items.length && offset + res.items.length < res.total) readPage(offset + res.items.length);
+            else MC.toast.warning("配置文件已不存在，请刷新文件列表。");
+          }, function (err) { if (!disposed && request === fileOpenSeq && epoch === S.contextEpoch && scope === root("")) MC.toastError("读取配置文件失败", err); }); }
+          readPage(0);
+        });
+      },
       update: function (next) {
         var nextSurface = next && (next.arg || (next.query || {}).surface) || (next && next.query && next.query.config ? "configs" : "files");
         if (["configs", "files", "records"].indexOf(nextSurface) < 0) nextSurface = "configs";
@@ -2335,7 +2368,7 @@
       },
       confirmLeave: function () { return new Promise(function (resolve) { confirmDiscard(function () { resolve(true); }, function () { resolve(false); }); }); },
       isDirty: function () { return S.dirty || S.savingValues || S.discarding || S.exportDirty || formDrafts.some(function (form) { return form.dirty; }); },
-      destroy: function () { disposed = true; if (activeMenu && activeMenu.el.isConnected) MC.closePopover(); dialogs.slice().forEach(function (modal) { modal.close(); }); formDrafts = []; catalogPage.seq++; if (S.paramTree) S.paramTree.destroy(); unsub.forEach(function (f) { f(); }); },
+      destroy: function () { disposed = true; document.removeEventListener("keydown", focusParameterSearch); if (activeMenu && activeMenu.el.isConnected) MC.closePopover(); dialogs.slice().forEach(function (modal) { modal.close(); }); formDrafts = []; catalogPage.seq++; if (S.paramTree) S.paramTree.destroy(); unsub.forEach(function (f) { f(); }); },
     };
   };
 })(window);
