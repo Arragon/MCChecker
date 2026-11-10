@@ -12,6 +12,10 @@
 
 [DL 系数按时间查询 API 使用教程](docs/DL_COEFFICIENTS_API.md)：按工作区、机型、计算模块及指定时间获取当时生效的完整系数配置，包含 curl、Python、JavaScript 示例和错误处理。
 
+## 更新来源配置
+
+[从网页链接配置更新：完整操作教程](docs/UPDATE_SOURCE_SETUP_GUIDE.md)：查找真实下载地址、配置 HTTP / SDA 来源、选择接收目标、测试与定时更新，以及常见问题排查。
+
 ## 快速启动
 
 ```bash
