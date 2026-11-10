@@ -54,3 +54,28 @@ test('new machine with no saved head appears once as a draft on its chosen versi
   assert.equal(groups[1].machines.length, 1);
   assert.equal(groups[1].machines[0].saved, null);
 });
+
+test('hierarchy separates saved machines from new drafts and retains full long names', () => {
+  function h(tag, ...args) {
+    const attrs = args[0] && !Array.isArray(args[0]) && typeof args[0] === 'object' && !args[0].tag ? args.shift() : {};
+    return {tag, attrs, style: {}, children: args.flat(Infinity), appendChild(child) { this.children.push(child); }};
+  }
+  let uid = 0;
+  scope.window.MC.util.h = h;
+  scope.window.MC.util.uid = () => 'rows-' + (++uid);
+  scope.window.MC.util.formatTime = () => '今天';
+  scope.window.MC.icon = () => h('svg');
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../assets/js/views/config-evolution.js'), 'utf8'), scope);
+  const data = fixture();
+  data.groups[0].machines.push({machine: {machine_id: 'new', machine_no: 'MC-' + 'Long'.repeat(40)}, saved: null, draft: {id: 'new-draft'}});
+  const tree = scope.window.MC.configEvolution.hierarchy(data.groups, {collapsed: new Set(), canWrite: true, versionName: () => '691', open() {}, edit() {}, toggle() {}});
+  function all(n) { return n && typeof n === 'object' ? [n, ...n.children.flatMap(all)] : []; }
+  const nodes = all(tree);
+  const counts = nodes.filter(n => n.tag.includes('cv32-machine-count'));
+  assert.ok(counts.some(n => n.children.includes('1 台机台 · 1 台待保存')));
+  const link = nodes.find(n => n.attrs['data-machine-link'] === 'new');
+  assert.equal(link.attrs.title, 'MC-' + 'Long'.repeat(40));
+  assert.equal(link.children[0].tag, 'span.cv32-name-text');
+  const emptyToggle = nodes.find(n => n.attrs['data-version-toggle'] === 'r2');
+  assert.equal(emptyToggle.disabled, true);
+});

@@ -27,7 +27,8 @@
 .cv32-parameter-table td { padding:12px; vertical-align:top; }
 .cv32-parameter-table .cv32-old-value { color:var(--c-text-3); }
 .cv32-parameter-table .cv32-file-field { overflow-wrap:anywhere; color:var(--c-text-3); }
-.cv32-parameter-name { padding:0; text-align:left; color:var(--c-text); font-weight:600; white-space:normal; overflow-wrap:anywhere; }
+.cv32-parameter-name { display:block; width:100%; height:auto; min-height:0; padding:0; text-align:left; color:var(--c-text); font-weight:600; white-space:normal; overflow-wrap:anywhere; line-height:1.5; }
+.cv32-parameter-directory { display:block; margin-top:6px; line-height:1.5; overflow-wrap:anywhere; }
 .cv32-workbench.is-compact .cv32-parameter-table td { padding-top:6px; padding-bottom:6px; }
 .cv32-workbench .cv-param-data>.cv-toolbar { gap:6px; flex-wrap:wrap; }
 .cv32-workbench .cv-param-data>.cv-toolbar>.input { flex:1 1 190px; min-width:120px; }
@@ -108,19 +109,26 @@
 .cv32-canvas .cv-graph-node .small { font-size:10px; }
 .cv32-canvas .historical,.cv32-canvas .initial { background:var(--c-surface-2); }
 .cv32-canvas .cv-connections { color:var(--c-text-disabled); z-index:1; }
-.cv32-hierarchy { min-width:640px; table-layout:fixed; }
-.cv32-hierarchy thead th:first-child { width:35%; }
-.cv32-hierarchy thead th:nth-child(2) { width:25%; }
-.cv32-hierarchy thead th:nth-child(3) { width:20%; }
+.cv32-hierarchy { min-width:760px; width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; }
+.cv32-hierarchy thead th:first-child { width:44%; }
+.cv32-hierarchy thead th:nth-child(2) { width:20%; }
+.cv32-hierarchy thead th:nth-child(3) { width:18%; }
+.cv32-hierarchy thead th { position:sticky; top:0; z-index:3; background:var(--c-surface-2); }
 .cv32-hierarchy tbody[hidden] { display:none; }
 .cv32-hierarchy .cv32-version-row { background:var(--c-surface-2); }
-.cv32-hierarchy td { padding:9px 14px; }
-.cv32-tree-name { flex-wrap:nowrap; gap:6px; }
+.cv32-hierarchy td { height:48px; padding:6px 12px; border-bottom:1px solid var(--c-border); vertical-align:middle; }
+.cv32-hierarchy .cv32-version-row td { border-top:1px solid var(--c-border); }
+.cv32-tree-name { flex-wrap:nowrap; gap:8px; min-width:0; }
 .cv32-name { padding:0 2px; color:var(--c-primary); white-space:normal; overflow-wrap:anywhere; text-align:left; min-width:0; }
-.cv32-tree-name .small { flex:none; }
-.cv32-tree-child { padding-left:32px; position:relative; flex-wrap:nowrap; }
-.cv32-tree-child:before { content:''; position:absolute; left:10px; top:0; height:14px; width:13px; border-left:1px solid var(--c-border-strong); border-bottom:1px solid var(--c-border-strong); }
+.cv32-hierarchy .cv32-name { display:flex; max-width:100%; overflow:hidden; min-width:0; text-align:left; justify-content:flex-start; }
+.cv32-name-text { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.cv32-tree-name>.cv32-name { flex:1; font-weight:600; }
+.cv32-tree-name>.btn-icon { flex:none; }
+.cv32-tree-name .cv32-machine-count { flex:none; font-size:11px; white-space:nowrap; }
+.cv32-tree-child { padding-left:36px; position:relative; flex-wrap:nowrap; min-width:0; }
+.cv32-tree-child:before { content:''; position:absolute; left:14px; top:0; height:16px; width:13px; border-left:1px solid var(--c-border-strong); border-bottom:1px solid var(--c-border-strong); }
 .cv32-tree-child svg { flex:none; color:var(--c-text-disabled); }
+.cv32-hierarchy td:last-child { white-space:nowrap; }
 @media(max-width:760px) {
   .config-root.v32 .view-header { padding:12px; }
   .config-root.v32 .config-resource-surface { margin:0 12px 12px; }

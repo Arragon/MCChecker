@@ -57,18 +57,22 @@
           "aria-label": (open ? "收起软件 " : "展开软件 ") + release.version, "data-version-toggle": id }
       });
       var standard = group.standard || group.draft;
+      var savedCount = group.machines.filter(function (row) { return !!row.saved; }).length;
+      var newCount = group.machines.length - savedCount;
+      var countText = savedCount + " 台机台" + (newCount ? " · " + newCount + " 台待保存" : "");
+      if (!group.machines.length) { toggle.disabled = true; toggle.style.visibility = "hidden"; }
       table.appendChild(h("tbody", h("tr.cv32-version-row",
         h("td", h("div.row.cv32-tree-name", toggle,
-          button("软件 " + release.version, function () { options.open(standard, "standard"); }, { className: ".btn-ghost.cv32-name", attrs: { "data-version-link": id, disabled: !standard } }),
-          h("span.small.muted", group.machines.length + " 台机台"))),
-        h("td", h("span.small.muted", "标准参数 "), group.draft ? h("span.badge.badge-warning", "有草稿") : group.standard ? "已保存" : "尚未保存"),
+          button(h("span.cv32-name-text", release.version), function () { options.open(standard, "standard"); }, { className: ".btn-ghost.cv32-name", attrs: { "data-version-link": id, title: release.version, disabled: !standard } }),
+          h("span.small.muted.cv32-machine-count", countText))),
+        h("td", group.draft ? h("span.badge.badge-warning", "有草稿") : group.standard ? "已保存" : "尚未保存"),
         h("td.small.muted", group.standard ? MC.util.formatTime(group.standard.at) : "—"),
         h("td", button(group.draft ? "继续草稿" : "编辑标准", function () { options.edit(group.draft || group.standard); }, { className: ".btn-ghost", attrs: { disabled: !options.canWrite || !standard } }))
       )));
       table.appendChild(h("tbody", { id: childId, hidden: !open }, group.machines.map(function (row) {
         var target = row.draft && options.versionName(row.draft.release_id);
         return h("tr", h("td", h("div.row.cv32-tree-child", MC.icon("monitor"),
-          button(row.machine.machine_no, function () { options.open(row.saved || row.draft, "machine"); }, { className: ".btn-ghost.cv32-name", attrs: { "data-machine-link": row.machine.machine_id } }))),
+          button(h("span.cv32-name-text", row.machine.machine_no), function () { options.open(row.saved || row.draft, "machine"); }, { className: ".btn-ghost.cv32-name", attrs: { title: row.machine.machine_no, "data-machine-link": row.machine.machine_id } }))),
           h("td", row.draft ? h("span.badge.badge-warning", row.saved ? "有草稿" : "新建草稿") : h("span.small.muted", "已保存"),
             row.saved && row.draft && row.saved.release_id !== row.draft.release_id ? h("span.small.cv-warning", " 更新到 " + target) : null),
           h("td.small.muted", row.saved ? MC.util.formatTime(row.saved.at) : "—"),

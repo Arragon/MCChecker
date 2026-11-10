@@ -693,7 +693,7 @@
           h("button.btn.btn-ghost.btn-icon.btn-sm", { type: "button", disabled: S.evoZoom >= 1.25, "aria-label": "放大关系图", onclick: function () { S.evoZoom = Math.min(1.25, S.evoZoom + 0.1); refreshEvolution(); } }, MC.icon("plus")),
           h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { viewModal({ title: "读图说明", body: h("p", "每列是一个软件版本，每行为标准参数或机台。实线表示已记录的保存演进，虚线表示参数来源。来源标准快照表示机台实际采用的历史标准。点击版本号或节点打开完整参数页面。") }); } }, "读图说明")));
       } else {
-        footer.appendChild(h("span.small.muted", groups.length + " 个软件版本 · " + groups.reduce(function (total, group) { return total + group.machines.length; }, 0) + " 台机台"));
+        footer.appendChild(h("span.small.muted", groups.length + " 个软件版本 · " + groups.reduce(function (total, group) { return total + group.machines.filter(function (row) { return !!row.saved; }).length; }, 0) + " 台机台 · " + groups.reduce(function (total, group) { return total + group.machines.filter(function (row) { return !row.saved; }).length; }, 0) + " 台待保存"));
         footer.appendChild(h("div.row", [true, false].map(function (expand) {
           return h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () {
             groups.forEach(function (group) { if (expand) collapsed.delete(group.release.release_id); else collapsed.add(group.release.release_id); });
@@ -1090,7 +1090,7 @@
         var binding = (S.bindings || []).filter(function (b) { return b.parameter_id === p.parameter_id; })[0];
         var different = memberKey(row) !== memberKey(basis);
         return h("tr", { "data-parameter-id": p.parameter_id, "data-different": different ? "true" : "false", class: S.edits[p.parameter_id] ? "cv32-changed" : "" },
-          h("td", h("button.btn.btn-ghost.cv32-parameter-name", { type: "button", onclick: function () { parameterDetails(p, binding); } }, p.name), h("div.muted.xsmall", (p.directory || []).join(" / "))),
+          h("td", h("button.btn.btn-ghost.cv32-parameter-name", { type: "button", onclick: function () { parameterDetails(p, binding); } }, p.name), h("div.muted.xsmall.cv32-parameter-directory", (p.directory || []).join(" / "))),
           editing ? h("td.mono.small.cv32-old-value", memberText((S.lastSavedValues || {})[p.parameter_id])) : null,
           h("td", canEdit ? h("div.col", { style: "gap:4px" }, control, state, validation) : h("strong.mono", memberText(row))), h("td.muted", p.unit || "—"),
           h("td.small", current && current.kind !== "machine" ? "版本设置" : canEdit ? intent : ({ pin: "保持此值", override: "单独设置", inherit: "使用标准值" }[row.intent || "inherit"])),
