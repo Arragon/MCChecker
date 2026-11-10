@@ -971,6 +971,10 @@ class Runner:
             b.eval("document.querySelector('[data-sync-run]').click()")
             if not b.wait_for("Array.from(document.querySelectorAll('.modal-footer button')).some(b => b.textContent === '下载诊断')", timeout=5):
                 raise AssertionError("诊断下载入口不存在")
+            # The footer is constructed before asynchronous detail loading.
+            # Measure the loaded log panel, not the short loading paragraph.
+            if not b.wait_for("!!document.querySelector('.sync-run-dialog .sync-log-body')", timeout=20):
+                raise AssertionError("运行详情正文未加载")
             b.viewport(375, 812)
             geometry = b.eval("""(function(){var d=document.querySelector('.sync-run-dialog'),f=d.querySelector('.modal-footer').getBoundingClientRect(),body=d.querySelector('.modal-body').getBoundingClientRect();return {footerVisible:f.top>=0&&f.bottom<=innerHeight,bodyHeight:body.height,overflow:document.documentElement.scrollWidth-innerWidth}})()""")
             if not geometry or not geometry["footerVisible"] or geometry["bodyHeight"] < 100 or geometry["overflow"] > 1:

@@ -116,6 +116,11 @@
     });
     var width = labelWidth + releases.length * column, height = y + 20;
     var canvas = h("div.cv-graph-canvas.cv32-canvas", { style: "width:" + width + "px;height:" + height + "px;transform:scale(" + options.zoom + ");transform-origin:top left" });
+    function axisContent(w, hgt) { return h("div.cv32-axis-content", { style: "width:" + w + "px;height:" + hgt + "px;transform:scale(" + options.zoom + ");transform-origin:top left" }); }
+    var columns = axisContent(width, header), labels = axisContent(labelWidth, height);
+    var columnLayer = h("div.cv32-fixed-columns", { style: "width:" + width * options.zoom + "px;height:" + header * options.zoom + "px" }, columns);
+    var rowLayer = h("div.cv32-fixed-rows", { style: "width:" + labelWidth * options.zoom + "px;height:" + height * options.zoom + "px" }, labels);
+    var corner = h("div.cv32-fixed-corner", { "aria-hidden": "true", style: "width:" + labelWidth * options.zoom + "px;height:" + header * options.zoom + "px" });
     var nodes = [], keys = Object.create(null), edges = [];
     function add(key, record, title, top, role, style) {
       if (!record) return;
@@ -128,7 +133,7 @@
     full.forEach(function (group, index) {
       var release = group.release;
       canvas.appendChild(h("div.cv-graph-column", { style: "left:" + (labelWidth + index * column) + "px;width:" + column + "px" }));
-      canvas.appendChild(h("div.cv-release-band", { style: "left:" + (labelWidth + index * column) + "px;width:" + column + "px" },
+      columns.appendChild(h("div.cv-release-band", { style: "left:" + (labelWidth + index * column) + "px;width:" + column + "px" },
         button(release.version, function () { options.open(group.standard || group.draft, "standard"); }, { className: ".btn-ghost.cv32-name", attrs: { disabled: !group.standard && !group.draft, "aria-label": "打开软件 " + release.version } }),
         h("span.badge", groups.some(function (g) { return g.release.release_id === release.release_id; }) ? group.standard ? "已保存" : "准备中" : "关联上下文")));
       add("initial-" + release.release_id, group.initial, "初始参数", header, "initial", "initial");
@@ -165,7 +170,7 @@
     });
     canvas.appendChild(svg);
     [{ name: "初始参数", top: header }, { name: "版本标准", top: header + 87 }].concat(rows.map(function (row, index) { return { name: row.machine.machine_no, top: laneTops[index] }; })).forEach(function (lane) {
-      canvas.appendChild(h("div.cv-lane-label", { style: "top:" + (lane.top + 24) + "px", title: lane.name }, h("strong", lane.name)));
+      labels.appendChild(h("div.cv-lane-label", { style: "top:" + (lane.top + 24) + "px", title: lane.name }, h("strong", lane.name)));
     });
     nodes.forEach(function (node) {
       var draft = node.record.status === "draft";
@@ -176,8 +181,11 @@
             "aria-label": node.title + " · 软件 " + options.versionName(node.record.release_id),
             "aria-pressed": String(options.selected === node.record.id && (options.selectedRole || "standard") === node.role) } }));
     });
-    return h("div", { style: "width:" + width * options.zoom + "px;height:" + height * options.zoom + "px" }, canvas);
+    return h("div.cv32-graph-plane", { style: "width:" + width * options.zoom + "px;height:" + height * options.zoom + "px" }, canvas, columnLayer, rowLayer, corner);
   }
 
-  MC.configEvolution = { project: project, hierarchy: hierarchy, graph: graph };
+  function configureAxes(scroll, zoom) {
+    scroll.style.setProperty("--cv-graph-zoom", zoom);
+  }
+  MC.configEvolution = { project: project, hierarchy: hierarchy, graph: graph, configureAxes: configureAxes };
 })(window);

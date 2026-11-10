@@ -3,12 +3,12 @@
   "reference_sha256": "8efb5e9b0480900807c875b72147dd63debb5f8ccf9919f9f044281fbf1658d6",
   "reference_screenshots": 36,
   "package": "dist/MCChecker-3.2.0.zip",
-  "package_sha256": "8818f7c84ae5030685cd075475ebaa067aa84418dfcd165f5041f38779cd285f",
-  "package_bytes": 1018914,
+  "package_sha256": "48792aa216a605720afa8ffbae470409d4de99d15e6c765e9f153bd0801553d5",
+  "package_bytes": 1020220,
   "manifest_verified": true,
   "all_packaged_sources_match": true,
   "source_files": 224,
-  "frontend_browser_tests": 169,
+  "frontend_browser_tests": 170,
   "editor_evolution_tests": 15,
   "real_browser_report": "acceptance.json",
   "summary": {
@@ -25,5 +25,6 @@
   "release_tests_passed": 170,
   "live_preview_verified": true,
   "live_preview_port": 50014,
-  "layout_stability_report": "../layout-stability/acceptance.json"
+  "layout_stability_report": "../layout-stability/acceptance.json",
+  "shared_header_axes_report": "../shared-header-axes/acceptance.json"
 }

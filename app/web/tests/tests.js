@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 169;  // V3.2 原型布局、异步稳定性、文件切换及历史回归
+  var EXPECTED_CASES = 170;  // V3.2 共享文件页头、异步稳定性、文件切换及历史回归
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -6359,6 +6359,25 @@
         ok(modalButton(lastModal(), "继续编辑").disabled);
         var choice = lastModal().querySelector('[aria-label="速度的处理方式"]'); choice.value = "keep_local"; choice.dispatchEvent(new Event("change")); return tick().then(tick);
       }).then(function () { eq(calls[1].body.decision, "keep_local"); ok(!modalButton(lastModal(), "继续编辑").disabled); });
+    });
+  });
+
+  test("V3.2：版本演进与更新管理共享同一文件标题、图标、版本和已保存机台摘要", function () {
+    return productionRun().run(function (r) {
+      configPrototypeFixture(r, true);
+      var get = MC.api.getV3;
+      MC.api.getV3 = function (path) { return get(path).then(function (res) { if (/\/cfg-one$/.test(path)) { res.config.file_id = "file-one"; res.config.file = { name: "LongFile-" + "x".repeat(150) + ".json", format: "json" }; } return res; }); };
+      var request = MC.api.requestV3;
+      MC.api.requestV3 = function (method, path, options) { return method === "GET" ? MC.api.getV3(path) : request(method, path, options); };
+      var app = settingsApp(true); app.can = function () { return true; };
+      var versions = r.mountView(MC.views.configv3(app, { query: { config: "cfg-one", tab: "versions" } }));
+      var updates = r.mountView(MC.views.updates(app, { arg: "sources", query: { config: "cfg-one" } }));
+      return tick().then(tick).then(function () {
+        var first = versions.el.querySelector('.cv32-file-heading .cv-file-label'), second = updates.el.querySelector('.cv32-file-heading .cv-file-label');
+        ok(first && second); eq(first.outerHTML, second.outerHTML, "不同页面不能另写一套标题结构");
+        ok(Math.abs(first.closest('.cv32-file-heading').getBoundingClientRect().height - second.closest('.cv32-file-heading').getBoundingClientRect().height) < 1, "长文件名也不因操作按钮宽度不同而改变跨页标题高度");
+        ok(first.textContent.indexOf("1 个软件版本 · 1 台机台") >= 0, "采用真实已保存机台计数");
+      });
     });
   });
 

@@ -98,9 +98,9 @@
 .cv32-evo-footer { flex:none; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 12px; border-top:1px solid var(--c-border); }
 .cv32-canvas { position:relative; }
 .cv32-canvas .cv-graph-column { z-index:0; }
-.cv32-canvas .cv-release-band { top:0; height:62px; min-height:62px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:6px; }
-.cv32-canvas .cv-release-band .cv32-name { font-size:15px; white-space:normal; overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; max-height:40px; line-height:20px; min-width:0; }
-.cv32-canvas .cv-lane-label { width:120px; left:0; padding:0 10px; font-size:11px; overflow-wrap:anywhere; }
+:is(.cv32-canvas,.cv32-axis-content) .cv-release-band { top:0; height:62px; min-height:62px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:6px; }
+:is(.cv32-canvas,.cv32-axis-content) .cv-release-band .cv32-name { font-size:15px; white-space:normal; overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; max-height:40px; line-height:20px; min-width:0; }
+:is(.cv32-canvas,.cv32-axis-content) .cv-lane-label { width:120px; left:0; padding:0 10px; font-size:11px; overflow-wrap:anywhere; }
 .cv32-canvas .cv-graph-node { transform:none; width:164px; height:53px; min-height:53px; padding:8px 12px; z-index:2; font-size:11px; }
 .cv32-canvas .cv-graph-node>.col { min-width:0; width:100%; gap:4px; }
 .cv32-canvas .cv-graph-node strong { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
@@ -2573,7 +2573,7 @@ a.tool-url:hover {
 }
 
 .sync-root.is-file-config .sync-page { padding:0 28px 20px; gap:18px; }
-.sync-root.is-file-config .sync-page>div:first-child { display:flex; flex-direction:column; gap:18px; flex:none; }
+.sync-root.is-file-config .sync-page>.sync-file-context { display:flex; flex-direction:column; gap:0; flex:none; }
 .sync-root.is-file-config .cv-breadcrumb { margin:0 -28px; padding:0 28px; height:42px; min-height:42px; background:var(--c-surface); border-bottom:1px solid var(--c-border); }
 .sync-root.is-file-config .sync-file-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; padding-top:5px; }
 .sync-root.is-file-config .sync-file-heading h1 { margin:0; font-size:22px; font-weight:650; }
@@ -2656,3 +2656,54 @@ a.tool-url:hover {
 @media(max-width:760px) { .config-root.v32 .cv32-parameter-actions { margin-left:0; gap:6px; } }
 
 .sync-root.is-file-config .sync-file-description { min-height:18px; line-height:18px; }
+
+/* File-level pages share this title geometry; object parameter pages are separate. */
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading { display:flex; flex:none; align-items:center; justify-content:space-between; min-width:0; gap:14px; padding:23px 28px 18px; }
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading .cv-file-label { display:flex; align-items:center; gap:12px; min-width:0; }
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading .col { min-width:0; gap:5px; }
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading h1 { margin:0; font-size:22px; line-height:1.4; font-weight:650; letter-spacing:-.4px; overflow-wrap:anywhere; }
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-summary { min-height:18px; line-height:18px; }
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading .cv-file-type { display:flex; flex:none; align-items:center; justify-content:center; flex-direction:column; gap:1px; width:36px; height:40px; border:1px solid var(--c-border); border-radius:6px; background:var(--c-surface); font-size:7px; color:var(--c-text-3); }
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading .cv-file-type .svg-icon { width:17px; height:17px; }
+.cv32-file-actions { display:flex; flex:none; justify-content:flex-end; min-height:34px; }
+.cv32-file-heading .cv32-file-actions .btn { min-height:34px; padding:6px 12px; font-size:12px; }
+.sync-root.is-file-config .sync-page>.sync-file-context { gap:0; }
+.sync-root.is-file-config .cv32-file-heading { margin:0 -28px; }
+.sync-root.is-file-config .cv-tabs.segmented button { font-size:13px; min-height:39px; }
+@media(min-width:761px) and (max-width:900px) {
+ :is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading { padding:17px 17px 14px; }
+ .sync-root.is-file-config .cv32-file-heading { margin:0 -17px; }
+}
+@media(max-width:760px) {
+ :is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading { flex-direction:column; align-items:stretch; padding:16px 14px 14px; gap:10px; }
+ :is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading h1 { font-size:19px; }
+ .sync-root.is-file-config .cv32-file-heading { margin:0 -14px; }
+ .cv32-file-actions { min-height:44px; }
+ .cv32-file-heading .cv32-file-actions .btn { min-height:44px; }
+}
+
+/* Native sticky rails live outside the transformed canvas and span its full grid area. */
+.cv32-graph-plane { position:relative; display:grid; grid-template:minmax(0,1fr) / minmax(0,1fr); isolation:isolate; }
+.cv32-graph-plane>.cv32-canvas { position:absolute; left:0; top:0; z-index:0; }
+.cv32-graph-plane>.cv32-fixed-columns,.cv32-graph-plane>.cv32-fixed-rows,.cv32-graph-plane>.cv32-fixed-corner { grid-area:1/1; align-self:start; justify-self:start; position:sticky; background:var(--c-surface); }
+.cv32-fixed-columns { top:0; z-index:4; border-bottom:1px solid var(--c-border); }
+.cv32-fixed-rows { left:0; z-index:3; border-right:1px solid var(--c-border); }
+.cv32-fixed-corner { top:0; left:0; z-index:5; border-right:1px solid var(--c-border); border-bottom:1px solid var(--c-border); }
+.cv32-axis-content { position:absolute; left:0; top:0; }
+
+.cv-graph-canvas.cv32-canvas { min-width:0; }
+
+.cv32-evo-scroll:has(.cv32-canvas) { scroll-padding:calc(62px * var(--cv-graph-zoom, 1)) 8px 8px calc(120px * var(--cv-graph-zoom, 1)); }
+
+:is(.config-root.v32,.sync-root.is-file-config) .cv-tabs.segmented { height:39px; min-height:39px; align-items:stretch; box-sizing:border-box; }
+:is(.config-root.v32,.sync-root.is-file-config) .cv-tabs.segmented button { height:100%; min-height:0; box-sizing:border-box; padding:0 0 12px; font-size:13px; }
+@media(max-width:760px),(pointer:coarse) {
+ :is(.config-root.v32,.sync-root.is-file-config) .cv-tabs.segmented { height:44px; min-height:44px; }
+ :is(.config-root.v32,.sync-root.is-file-config) .cv-tabs.segmented button { min-height:44px; padding-bottom:10px; }
+}
+
+:is(.config-root.v32,.sync-root.is-file-config) .cv32-file-heading .cv-file-label { flex:1; }
+.cv32-file-heading>.cv32-file-actions { flex:0 0 230px; width:230px; }
+.config-root.v32>.cv-breadcrumb,.sync-root.is-file-config .cv-breadcrumb { flex-wrap:nowrap; overflow-x:auto; min-width:0; }
+.config-root.v32>.cv-breadcrumb>span,.sync-root.is-file-config .cv-breadcrumb>span { flex-shrink:0; white-space:nowrap; }
+@media(max-width:760px) { .cv32-file-heading>.cv32-file-actions { flex:0 0 auto; width:100%; } }

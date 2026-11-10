@@ -8,6 +8,15 @@
   var h = MC.util.h;
   var icon = MC.icon;
 
+  MC.configFileHeading = function (config, actions) {
+    config = config || {};
+    var file = config.file || {}, filename = file.name || config.name || "正在读取文件…";
+    var format = file.format || (file.name && file.name.split(".").pop()) || "";
+    var summary = config.name ? config.name + " / " + (config.releases || []).length + " 个软件版本 · " + (config.savedMachineCount == null ? "—" : config.savedMachineCount) + " 台机台" : "";
+    return h("div.cv32-file-heading", h("div.cv-file-label", h("span.cv-file-type", MC.icon("file"), format.toUpperCase()),
+      h("div.col", h("h1", filename), h("span.small.muted.cv32-file-summary", summary))), h("div.cv32-file-actions", actions));
+  };
+
   MC.configWorkspaceNav = function (app, active) {
     return h("nav.config-workspace-nav", { "aria-label": "配置管理导航" },
       [{ id: "configs", label: "固定配置", icon: "compare" }, { id: "files", label: "配置文件", icon: "file" },

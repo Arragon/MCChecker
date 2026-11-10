@@ -97,14 +97,26 @@ def run(runner, api, admin_ip, visitor_ip):
         sync_root = "/api/v3/workspaces/%s/sync" % files_wid
         request("POST", sync_root + "/sources", {"name": "Owned update", "profile_id": "default", "kind": "http_file", "resource_ref": "https://example.invalid/owned", "target": {"kind": "file_archive", "file_id": owned["file_id"]}})
         request("POST", sync_root + "/sources", {"name": "Other file update", "profile_id": "default", "kind": "http_file", "resource_ref": "https://example.invalid/other", "target": {"kind": "file_archive", "file_id": "file-other"}})
-        b.eval("""(()=>{let original=window.fetch;window.__sourceLayout=[];window.__restoreLayoutFetch=()=>{window.fetch=original;clearInterval(window.__sourceLayoutTimer)};window.fetch=function(url,options){let response=original.call(window,url,options),path=String(url).split('?')[0];return /\\/configs\\/[^/]+$|\\/sync\\/sources$/.test(path)?Promise.all([response,new Promise(r=>setTimeout(r,200))]).then(v=>v[0]):response};window.__sourceLayoutTimer=setInterval(()=>{let root=document.querySelector('.sync-root:not(.hidden).is-file-config');if(!root)return;let heading=root.querySelector('.sync-file-heading'),work=root.querySelector('.sync-workbench'),table=root.querySelector('.sync-source-table');window.__sourceLayout.push({heading:heading?.getBoundingClientRect().height,top:work?.getBoundingClientRect().top,tableTop:table?.getBoundingClientRect().top,columns:table?.querySelectorAll('thead th').length,oldFilters:!!root.querySelector('.sync-filters')})},16)})()""")
+        b.eval("""(()=>{
+          const original=window.fetch; window.__sourceLayout=[];
+          window.__captureSourceLayout=()=>{const root=document.querySelector('.sync-root:not(.hidden).is-file-config');if(!root)return;
+            const heading=root.querySelector('.sync-file-heading'),work=root.querySelector('.sync-workbench'),table=root.querySelector('.sync-source-table');
+            window.__sourceLayout.push({heading:heading?.getBoundingClientRect().height,top:work?.getBoundingClientRect().top,
+              tableTop:table?.getBoundingClientRect().top,columns:table?.querySelectorAll('thead th').length,
+              loading:!!root.querySelector('.sync-loading'),oldFilters:!!root.querySelector('.sync-filters')});};
+          window.__restoreLayoutFetch=()=>{window.fetch=original;clearInterval(window.__sourceLayoutTimer)};
+          window.fetch=function(url,options){const response=original.call(window,url,options),path=String(url).split('?')[0];
+            return /\\/configs\\/[^/]+$|\\/sync\\/sources$/.test(path)?Promise.all([response,new Promise(r=>setTimeout(r,200))])
+              .then(v=>{window.__captureSourceLayout();return v[0]}):response};
+          window.__sourceLayoutTimer=setInterval(window.__captureSourceLayout,16);
+        })()""")
         b.navigate(runner.url("#/p/default/updates/sources?workspace=" + files_wid + "&config=" + managed_id))
         wait("document.querySelector('.sync-content')?.innerText.includes('Owned update')")
-        samples = b.eval("window.__restoreLayoutFetch();window.__sourceLayout")
-        assert len(samples) >= 2, samples
+        samples = b.eval("window.__captureSourceLayout();window.__restoreLayoutFetch();window.__sourceLayout")
+        assert len(samples) >= 2 and any(sample["loading"] for sample in samples) and any(not sample["loading"] for sample in samples), samples
         assert all(not sample["oldFilters"] and sample["columns"] == 5 for sample in samples), samples
         assert all(abs(sample[key] - samples[0][key]) < 1 for sample in samples for key in ("heading", "top", "tableTop")), samples
-        notes.append("文件更新慢响应200ms：%s帧标题、工作面、表头位置稳定；加载不闪现旧筛选栏" % len(samples))
+        notes.append("文件更新慢响应200ms：%s次布局观测包含加载/完成阶段，标题、工作面、表头稳定；无旧筛选栏" % len(samples))
         runner.shoot("v32-file-updates")
         assert not b.eval("document.querySelector('.sync-content').innerText.includes('Other file update')")
         click("立即更新")
@@ -532,7 +544,7 @@ def run(runner, api, admin_ip, visitor_ip):
             request("POST", base + "/machine-branches", {"machine_no": "MORE-%02d" % i, "release_id": rid, "base_kind": "default", "base_revision_id": "d0-" + rid})
         b.navigate("about:blank")
         b.navigate(runner.url(route + "&config=" + cid))
-        wait("document.querySelector('.cv32-canvas')?.textContent.includes('route-19')")
+        wait("document.querySelector('.cv32-graph-plane')?.textContent.includes('route-19')")
         for width, height in [(1366, 768), (375, 812)]:
             b.viewport(width, height)
             wait("document.getAnimations().every(a=>a.playState!=='running')")
@@ -546,6 +558,9 @@ def run(runner, api, admin_ip, visitor_ip):
                 assert visible.get("visible") and visible.get("hit"), (name, visible)
                 notes.append("graph last target %s %s %s" % (width, name, json.dumps(visible)))
             runner.shoot("v32-many-versions-%s" % width)
+        stage = "shared file header and frozen graph axes"
+        from e2e_config_axes import run as check_file_axes
+        notes.extend(check_file_axes(runner, route + "&config=" + cid))
         runner.role(visitor_ip)
         b.navigate("about:blank")
         b.navigate(runner.url(route + "&config=" + cid + "&tab=workbench"))

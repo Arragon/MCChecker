@@ -318,8 +318,7 @@
           h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置管理"),
           icon("chevron-right"), objectPage() ? h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { changeTab("versions"); } }, file.name || "文件已移除") : h("span", file.name || "文件已移除"),
           objectPage() ? h("span.small.muted", "/ " + (revision() && revision().machine_no || "软件 " + labelOf(S.releaseId))) : null));
-        if (!objectPage()) el.appendChild(h("div.view-header.cv32-file-heading", h("div.cv-file-label", h("span.cv-file-type", icon("file"), (file.format || "").toUpperCase()),
-          h("div.col", h("h1", file.name || S.detail.name), h("span.small.muted", S.detail.name + " / " + S.detail.releases.length + " 个软件版本 · " + S.machines.filter(function (m) { return !!m.head_id; }).length + " 台机台"))), S.tab === "versions" ? versionActions() : null));
+        if (!objectPage()) el.appendChild(MC.configFileHeading(Object.assign({}, S.detail, { savedMachineCount: S.machines.filter(function (m) { return !!m.head_id; }).length }), S.tab === "versions" ? versionActions() : null));
       } else if (S.opened && S.detail) {
         el.appendChild(h("div.cv-breadcrumb", h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () {
           confirmDiscard(function () { S.opened = false; S.cid = null; S.detail = null; S.edits = {}; app.go({ kind: "configv3", arg: "configs", query: {} }); render(); });
@@ -348,7 +347,7 @@
       el.appendChild(mainPanel());
       if (S.tab === "versions") {
         var evoScroll = el.querySelector(".cv32-evo-scroll"), evoPosition = S.evoPositions[S.evoView];
-        if (evoScroll) evoScroll.scrollTo(evoPosition.left, evoPosition.top);
+        if (evoScroll) { evoScroll.scrollTo(evoPosition.left, evoPosition.top); MC.configEvolution.configureAxes(evoScroll, S.evoZoom); }
       }
       if (S.focusRevision) { S.focusRevision = false; var selectedNode = el.querySelector('.cv-graph-node[aria-pressed="true"]'); if (selectedNode) selectedNode.focus({ preventScroll: true }); }
       if (S.focusTab) { S.focusTab = false; var activeTab = el.querySelector('.cv-tabs [aria-selected="true"]'); if (activeTab) activeTab.focus(); }

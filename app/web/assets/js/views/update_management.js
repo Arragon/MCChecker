@@ -196,9 +196,12 @@
       var seq = ++fileSeq, id = fileConfig, wid = workspaceId(); fileDetail = null; fileError = null;
       paintFileNav();
       if (!id) return;
-      MC.api.requestV3("GET", "/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles/" + encodeURIComponent(app.pid) + "/configs/" + encodeURIComponent(id), {}).then(function (res) {
+      var path = "/api/v3/workspaces/" + encodeURIComponent(wid) + "/profiles/" + encodeURIComponent(app.pid) + "/configs/" + encodeURIComponent(id);
+      Promise.all([MC.api.requestV3("GET", path, {}), MC.api.requestV3("GET", path + "/machines", {}).then(function (res) {
+        return (res.items || []).filter(function (machine) { return !!machine.head_id; }).length;
+      }, function () { return null; })]).then(function (results) {
         if (seq !== fileSeq || wid !== workspaceId()) return;
-        fileDetail = res.config; paintFileNav(); paintChrome(); renderBody();
+        fileDetail = Object.assign({}, results[0].config, { savedMachineCount: results[1] }); paintFileNav(); paintChrome(); renderBody();
       }, function (err) { if (seq === fileSeq && wid === workspaceId()) { fileError = err; paintChrome(); renderBody(); } });
     }
     function paintFileNav() {
@@ -208,7 +211,7 @@
       if (!fileConfig) { fileNav.appendChild(MC.configWorkspaceNav(app, "updates")); return; }
       var filename = fileDetail && (fileDetail.file && fileDetail.file.name || fileDetail.name) || "正在读取文件…";
       fileNav.appendChild(h("nav.cv-breadcrumb", { "aria-label": "面包屑" }, h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置管理"), MC.icon("chevron-right"), h("span", filename)));
-      fileNav.appendChild(h("div.sync-file-heading", h("div.col", h("h1", filename), h("span.small.muted.sync-file-description", fileDetail ? fileDetail.name : "")), headActions));
+      var heading = MC.configFileHeading(fileDetail, headActions); heading.classList.add("sync-file-heading"); fileNav.appendChild(heading);
       var tabs = MC.segmented([{ value: "versions", label: "版本演进" }, { value: "updates", label: "更新管理" }, { value: "history", label: "操作记录" }], "updates", function (value) {
         if (value !== "updates") app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig, tab: value } });
       }, "配置文件页面");

@@ -1,0 +1,48 @@
+{
+  "branch": "codex/v32-prototype-parity-20261109",
+  "frontend_passed": 170,
+  "editor_graph_logic_passed": 15,
+  "browser_summary": {
+    "interactive_pass": 39,
+    "interactive_fail": 0,
+    "reachable_pass": 28,
+    "reachable_fail": 0,
+    "api_pass": 1,
+    "api_fail": 0
+  },
+  "screen_sizes": [
+    [
+      1230,
+      873
+    ],
+    [
+      1366,
+      768
+    ],
+    [
+      1920,
+      1080
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      375,
+      812
+    ]
+  ],
+  "graph_zooms": [
+    0.75,
+    1,
+    1.25
+  ],
+  "native_sticky_axes": true,
+  "fixed_header_real_click_verified": true,
+  "package": "dist/MCChecker-3.2.0.zip",
+  "package_sha256": "48792aa216a605720afa8ffbae470409d4de99d15e6c765e9f153bd0801553d5",
+  "package_bytes": 1020220,
+  "source_files_match": true,
+  "api_or_persisted_formats_changed": false,
+  "physical_device_acceptance": false
+}

@@ -1,0 +1,931 @@
+{
+  "generated_at": "2026-11-10T09:06:04Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-26584-1451/data",
+  "server": "http://127.0.0.1:49414",
+  "summary": {
+    "interactive_pass": 39,
+    "interactive_fail": 0,
+    "reachable_pass": 28,
+    "reachable_fail": 0,
+    "api_pass": 1,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "touch-controls",
+      "title": "移动触摸基本操作",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375×812 模拟触摸：来源打开/关闭、内容标签切换、计划面板打开/关闭"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "long-sources",
+      "title": "长名称路径与分页末项",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "desktop-1366 {'height': 682, 'rowBottom': 708, 'workspaceBottom': 768, 'rowVisible': True, 'horizontalEnd': True, 'overflow': 0, 'rows': 55}",
+        "phone-375 {'height': 726, 'rowBottom': 759.5, 'workspaceBottom': 812, 'rowVisible': True, 'horizontalEnd': True, 'overflow': 0, 'rows': 55}",
+        "移动触摸滑动仅滚动数据区，页面工具栏保持可见",
+        "触摸可展开完整路径"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "updates-sources-list",
+      "title": "来源列表/筛选/新建与批量工具条",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-source] ok",
+        "assert [data-sync-new] ok",
+        "assert [data-sync-batch] ok",
+        "停用来源不可更新",
+        "截图 docs/evidence/v3.2/shared-header-axes/updates-sources-list.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-sources-list.png"
+    },
+    {
+      "id": "updates-source-create",
+      "title": "新建来源抽屉（类型/连接/目标绑定）",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-kind] ok",
+        "assert [data-sync-connection] ok",
+        "assert [data-sync-target-kind] ok",
+        "截图 docs/evidence/v3.2/shared-header-axes/updates-source-create.png",
+        "抽屉已关闭"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-source-create.png"
+    },
+    {
+      "id": "updates-source-focus",
+      "title": "抽屉初始焦点、Esc 不关闭未保存抽屉与焦点恢复",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-kind] ok",
+        "焦点在抽屉内",
+        "Tab 从抽屉末尾循环到关闭按钮",
+        "抽屉已关闭",
+        "wait [data-sync-kind] ok",
+        "抽屉已关闭",
+        "焦点已恢复"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "updates-plan",
+      "title": "更新计划与全量预览入口",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-plan-preview] ok",
+        "assert [data-plan-save] ok",
+        "截图 docs/evidence/v3.2/shared-header-axes/updates-plan.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-plan.png"
+    },
+    {
+      "id": "updates-connections",
+      "title": "连接设置（管理员权限）",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-conn-create] ok",
+        "wait [data-conn-name] ok",
+        "assert [data-conn-create-submit] ok",
+        "连接表单校验关联和焦点正常",
+        "截图 docs/evidence/v3.2/shared-header-axes/updates-connections.png",
+        "assert [data-sync-sheet-close] ok",
+        "抽屉已关闭"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-connections.png"
+    },
+    {
+      "id": "updates-runs",
+      "title": "运行记录页渲染",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "text 运行记录 ok",
+        "截图 docs/evidence/v3.2/shared-header-axes/updates-runs.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-runs.png"
+    },
+    {
+      "id": "updates-candidates",
+      "title": "候选列表筛选与批量工具条",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-candidate-state] ok",
+        "assert [data-sync-candidate-profile] ok",
+        "截图 docs/evidence/v3.2/shared-header-axes/updates-candidates.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-candidates.png"
+    },
+    {
+      "id": "F01",
+      "title": "本地上传/导入入口",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/import?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F02",
+      "title": "链接导入入口",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/import?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F03",
+      "title": "文件列表",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F04",
+      "title": "结构树",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F05",
+      "title": "文件内搜索",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/search?q=x&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F06",
+      "title": "收藏",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F07",
+      "title": "速览",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F08",
+      "title": "修改建议 remarks",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F09",
+      "title": "审阅",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/review?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F10",
+      "title": "全局搜索",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/search?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F11",
+      "title": "历史版本",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=history&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F12",
+      "title": "对比",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=compare&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F13",
+      "title": "修改记录",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=records&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F14",
+      "title": "下载",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F15",
+      "title": "旧更新源入口（收口到更新管理）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/sources?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F16",
+      "title": "旧定时更新入口（收口到更新管理）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/schedule?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F17",
+      "title": "人员",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/people?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F18",
+      "title": "管理员",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/people?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F19",
+      "title": "变量绑定",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/bindings?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F20",
+      "title": "外部工具",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/tools?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F21",
+      "title": "DL 计算",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/dl?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F22",
+      "title": "多机型",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/profiles?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F23",
+      "title": "标签页",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F24",
+      "title": "身份",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F25",
+      "title": "删除文件",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?view=tree&workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F26",
+      "title": "旧布局迁移（服务层）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/settings/profiles?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F27",
+      "title": "解析缓存（服务层）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/f/A.xml?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "F28",
+      "title": "启动与端口（服务层）",
+      "level": "reachable",
+      "ok": true,
+      "notes": [
+        "route=#/p/default/overview?workspace=default",
+        "view=True text=True error=False"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "roles-admin-member",
+      "title": "管理员可编辑 / 访客只读",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "admin_edit=True member_edit=True"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-sources-1366-admin.png"
+    },
+    {
+      "id": "viewport-desktop-1366",
+      "title": "视口 1366x768 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 281, 'footerVisible': True, 'height': 682, 'tableHeight': 427, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-sources-1366-admin.png"
+    },
+    {
+      "id": "viewport-desktop-1920",
+      "title": "视口 1920x1080 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 281, 'footerVisible': True, 'height': 994, 'tableHeight': 739, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-sources-1920-admin.png"
+    },
+    {
+      "id": "viewport-tablet-768",
+      "title": "视口 768x1024 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 309, 'footerVisible': True, 'height': 938, 'tableHeight': 663, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-sources-768-admin.png"
+    },
+    {
+      "id": "viewport-phone-375",
+      "title": "视口 375x812 无页面级横向溢出",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "overflow=0 geometry={'tableTop': 469, 'footerVisible': True, 'height': 726, 'tableHeight': 291, 'rowVisible': True, 'horizontalEnd': True}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-sources-375-admin.png"
+    },
+    {
+      "id": "panel-source-desktop-1366",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 768, 'bodyHeight': 643.109375, 'footerTop': 711, 'footerBottom': 768, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-source-desktop-1366.png"
+    },
+    {
+      "id": "panel-plan-desktop-1366",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 768, 'bodyHeight': 659, 'footerTop': 711, 'footerBottom': 768, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-plan-desktop-1366.png"
+    },
+    {
+      "id": "panel-connection-desktop-1366",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 768, 'bodyHeight': 659, 'footerTop': 711, 'footerBottom': 768, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 480, 'height': 319, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-connection-desktop-1366.png"
+    },
+    {
+      "id": "panel-source-desktop-1920",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1080, 'bodyHeight': 955.109375, 'footerTop': 1023, 'footerBottom': 1080, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-source-desktop-1920.png"
+    },
+    {
+      "id": "panel-plan-desktop-1920",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1080, 'bodyHeight': 971, 'footerTop': 1023, 'footerBottom': 1080, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-plan-desktop-1920.png"
+    },
+    {
+      "id": "panel-connection-desktop-1920",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1080, 'bodyHeight': 971, 'footerTop': 1023, 'footerBottom': 1080, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 480, 'height': 319, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-connection-desktop-1920.png"
+    },
+    {
+      "id": "panel-source-tablet-768",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1024, 'bodyHeight': 899.109375, 'footerTop': 967, 'footerBottom': 1024, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-source-tablet-768.png"
+    },
+    {
+      "id": "panel-plan-tablet-768",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1024, 'bodyHeight': 915, 'footerTop': 967, 'footerBottom': 1024, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-plan-tablet-768.png"
+    },
+    {
+      "id": "panel-connection-tablet-768",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 680, 'height': 1024, 'bodyHeight': 915, 'footerTop': 967, 'footerBottom': 1024, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 480, 'height': 319, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-connection-tablet-768.png"
+    },
+    {
+      "id": "panel-source-phone-375",
+      "title": "多视口面板 source",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 375, 'height': 812, 'bodyHeight': 687.109375, 'footerTop': 755, 'footerBottom': 812, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-source-phone-375.png"
+    },
+    {
+      "id": "panel-plan-phone-375",
+      "title": "多视口面板 plan",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 375, 'height': 812, 'bodyHeight': 683, 'footerTop': 747, 'footerBottom': 812, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-plan-phone-375.png"
+    },
+    {
+      "id": "panel-connection-phone-375",
+      "title": "多视口面板 connection",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "{'width': 375, 'height': 812, 'bodyHeight': 683, 'footerTop': 747, 'footerBottom': 812, 'footerVisible': True, 'lastReachable': True, 'overflow': 0}",
+        "nested {'width': 343, 'height': 337, 'footerVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/updates-panel-connection-phone-375.png"
+    },
+    {
+      "id": "shared-modal-settings",
+      "title": "共享弹窗其他调用方",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "设置/机型新增弹窗：进入焦点、Tab 循环、Escape 和焦点返回",
+        "外部工具添加弹窗：进入焦点、Escape 和焦点返回"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "source-error-recovery",
+      "title": "来源错误重试和空结果",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "长错误可换行；合成读取失败可重试并恢复真实 API；空搜索保留查询；连接弹窗长错误可读"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "admin-visitor-auth",
+      "title": "管理员与访客两档授权",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "访客（含旧 token）403；管理员不带 token 201"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "connection-settings",
+      "title": "隔离连接及保活设置",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "浏览器创建和编辑连接、保存 15 分钟停用保活；服务端配置不含令牌"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "diagnostic-download",
+      "title": "运行诊断文件下载",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375px 运行详情页脚换行且可达：{'footerVisible': True, 'bodyHeight': 357, 'overflow': 0}",
+        "下载文件中的运行 ID 和事件列表与隔离任务一致"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "workspace-plan-draft",
+      "title": "计划草稿与工作区切换",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "取消后保留草稿；确认后切换，旧草稿未串入新工作区"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "plan-save-preview",
+      "title": "计划保存、预览与并发冲突",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "计划保存与预览；草稿变化须重新对比，再次并发触发 409，确认后以最新修订保存"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "source-conflict",
+      "title": "来源新建与并发冲突恢复",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "375px 长路径创建、409 草稿保留、对比确认与再次保存通过"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "permission-revocation",
+      "title": "来源编辑期间撤销权限",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "服务端 403、草稿保留、sources.json SHA-256 未变"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "candidate-responsive-synthetic",
+      "title": "合成候选长值与多视口详情",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "desktop-1366 {'bodyHeight': 323.5, 'width': 960, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}",
+        "desktop-1920 {'bodyHeight': 323.5, 'width': 960, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}",
+        "tablet-768 {'bodyHeight': 358, 'width': 736, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}",
+        "phone-375 {'bodyHeight': 436, 'width': 343, 'horizontalEnd': True, 'applyVisible': True, 'overflow': 0}"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "candidate-real-apply",
+      "title": "隔离文件候选真实服务写入草稿",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "合成文件候选经真实 API 预览；并发修改触发 409，重新预览后写入草稿，主分支 head 不变",
+        "V3.2 真实文件内候选：正式2/已有草稿5/来源4同时展示；二次编辑7触发409，核对后写同一草稿；正式保存前仍待处理，保存后移除，D0历史不变"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "candidate-conflict-contract",
+      "title": "候选显式基线与真实决议契约",
+      "level": "api",
+      "ok": true,
+      "notes": [
+        "真实 API：原来源文件值 1、本地值 2、新来源值 3 产生冲突；拒绝客户端改用任意修订，use_new 写入值 3"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "source-profile-scope",
+      "title": "来源机型范围与工作区全量预览",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "当前机型仅显示其来源；全量预览覆盖两个机型；切换后显示全部来源"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "config-prototype",
+      "title": "配置原型真实功能与四视口",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "文件更新慢响应200ms：6次布局观测包含加载/完成阶段，标题、工作面、表头稳定；无旧筛选栏",
+        "文件内更新：真实归档来源按唯一文件身份筛选；当前文件预览排除其他文件，切换运行/候选保留文件上下文；没有执行外部下载",
+        "V3.2 默认文件首页：真实文件建立配置、持久归属、再次进入复用同一配置，访客未配置文件只读",
+        "UI 创建目录总表条目、软件版本、稳定参数，并真实纳入准备版",
+        "真实配置文件 → 字段选择 → 版本绑定，保留 file/version 身份",
+        "409 保留输入 → 比较最新草稿 → 重试保存 → D0 固化并只读",
+        "V3.2 真实文件值导入：未知字段必须逐项明确忽略；写入版本草稿、沿用本版本标准，已保存记录与 head 未改变",
+        "创建基线草稿/保存/发布 B1；选择真实 B1 建机台草稿，固定值发布 r1；主线未被改写",
+        "V3.2 真实层级列表按保存版本合并机台；折叠、搜索、完整参数查看及关系图缩放通过",
+        "修改映射立即使旧预览失效；重新预览的完整输出保留未匹配字段并生成可下载文件",
+        "事件时间线恢复产生新草稿，已发布 r1 与基线 head 不变",
+        "V3.2 机台升级使用真实草稿与原标准，保持固定值，仅改目标草稿；显式放弃恢复原保存版本，历史 r1 未改变",
+        "未保存值/新增表单切换工作区均先确认；取消保留，暂存并离开写入原工作区；放弃表单后关闭旧弹窗，不向 B 写入",
+        "V3.2 graph workspace 1366 {\"height\": 396, \"footer\": 747}",
+        "1366 版本演进 {\"page\": 1366, \"viewport\": 1366, \"height\": 498, \"table\": null}",
+        "prototype geometry 1366 {\"directoryWidth\": 172, \"dataX\": 424, \"breadcrumbHeight\": 42, \"tabbarHidden\": true}",
+        "1366 参数工作台 {\"page\": 1366, \"viewport\": 1366, \"height\": 498, \"footerBottom\": 747, \"table\": {\"client\": 349, \"scroll\": 349}}",
+        "1366 参数总览 {\"page\": 1366, \"viewport\": 1366, \"height\": 498, \"footerBottom\": 747, \"table\": {\"client\": 298, \"scroll\": 8308}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 224, \"sourceWidth\": 256, \"previewWidth\": 824}",
+        "1366 模板导出 {\"page\": 1366, \"viewport\": 1366, \"height\": 498, \"table\": null}",
+        "1366 配置历史 {\"page\": 1366, \"viewport\": 1366, \"height\": 498, \"table\": null}",
+        "V3.2 graph workspace 1920 {\"height\": 708, \"footer\": 1059}",
+        "1920 版本演进 {\"page\": 1920, \"viewport\": 1920, \"height\": 810, \"table\": null}",
+        "prototype geometry 1920 {\"directoryWidth\": 172, \"dataX\": 440, \"breadcrumbHeight\": 42, \"tabbarHidden\": true}",
+        "1920 参数工作台 {\"page\": 1920, \"viewport\": 1920, \"height\": 810, \"footerBottom\": 1059, \"table\": {\"client\": 661, \"scroll\": 661}}",
+        "1920 参数总览 {\"page\": 1920, \"viewport\": 1920, \"height\": 810, \"footerBottom\": 1059, \"table\": {\"client\": 610, \"scroll\": 8308}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 224, \"sourceWidth\": 256, \"previewWidth\": 1362}",
+        "1920 模板导出 {\"page\": 1920, \"viewport\": 1920, \"height\": 810, \"table\": null}",
+        "1920 配置历史 {\"page\": 1920, \"viewport\": 1920, \"height\": 810, \"table\": {\"client\": 1023, \"scroll\": 1023}}",
+        "V3.2 graph workspace 768 {\"height\": 629, \"footer\": 1006}",
+        "768 版本演进 {\"page\": 768, \"viewport\": 768, \"height\": 771, \"table\": null}",
+        "prototype geometry 768 {\"directoryWidth\": 128, \"dataX\": 321, \"breadcrumbHeight\": 42, \"tabbarHidden\": true}",
+        "768 参数工作台 {\"page\": 768, \"viewport\": 768, \"height\": 768, \"footerBottom\": 1006, \"table\": {\"client\": 581, \"scroll\": 581}}",
+        "768 参数总览 {\"page\": 768, \"viewport\": 768, \"height\": 768, \"footerBottom\": 1006, \"table\": {\"client\": 505, \"scroll\": 8308}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 224, \"sourceWidth\": 256, \"previewWidth\": 290}",
+        "768 模板导出 {\"page\": 768, \"viewport\": 768, \"height\": 768, \"table\": null}",
+        "768 配置历史 {\"page\": 768, \"viewport\": 768, \"height\": 771, \"table\": {\"client\": 1608, \"scroll\": 1608}}",
+        "V3.2 graph workspace 375 {\"height\": 314, \"footer\": 797}",
+        "375 版本演进 {\"page\": 375, \"viewport\": 375, \"height\": 515, \"table\": null}",
+        "prototype geometry 375 {\"directoryWidth\": 347, \"dataX\": 14, \"breadcrumbHeight\": 38, \"tabbarHidden\": true}",
+        "375 参数工作台 {\"page\": 375, \"viewport\": 375, \"height\": 514, \"footerBottom\": 797, \"table\": {\"client\": 218, \"scroll\": 218}}",
+        "375 参数总览 {\"page\": 375, \"viewport\": 375, \"height\": 514, \"footerBottom\": 10266.1875, \"table\": {\"client\": 9508, \"scroll\": 9508}}",
+        "export layout {\"stacked\": true, \"fieldWidth\": 211.640625, \"sourceWidth\": 244, \"previewWidth\": 263}",
+        "375 模板导出 {\"page\": 375, \"viewport\": 375, \"height\": 514, \"table\": null}",
+        "375 配置历史 {\"page\": 375, \"viewport\": 375, \"height\": 515, \"table\": {\"client\": 1688, \"scroll\": 1688}}",
+        "dialog 1366x768 new-release {\"name\": \"新建软件版本\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 311.890625, \"bodyOverflow\": 0, \"footerBottom\": 311.890625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 new-machine {\"name\": \"新建机台\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 355.390625, \"bodyOverflow\": 0, \"footerBottom\": 355.390625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 graph-help {\"name\": \"读图说明\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 212.390625, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1366x768 parameter-details {\"name\": \"送料速度\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 312.890625, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1366x768 parameter-display {\"name\": \"参数表显示设置\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 317.390625, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1366x768 save-review {\"name\": \"核对并保存配置\", \"x\": 323, \"y\": 44.390625, \"width\": 720, \"bottom\": 450.390625, \"bodyOverflow\": 0, \"footerBottom\": 450.390625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 933.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 1021}]}",
+        "dialog 1366x768 extract-picker {\"name\": \"从配置文件提取参数\", \"x\": 203, \"y\": 38.45229721069336, \"width\": 960, \"bottom\": 285.45229721069336, \"bodyOverflow\": 0, \"footerBottom\": 285.4523010253906, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1053.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 1141}]}",
+        "dialog 1366x768 extract-preview {\"name\": \"从配置文件提取参数\", \"x\": 203, \"y\": 38.390625, \"width\": 960, \"bottom\": 758.390625, \"bodyOverflow\": 0, \"footerBottom\": 758.390625, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1053.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 1141}]}",
+        "dialog 1366x768 merge-picker {\"name\": \"比较并合并配置\", \"x\": 203, \"y\": 44.390625, \"width\": 960, \"bottom\": 284.890625, \"bodyOverflow\": 0, \"footerBottom\": 284.890625, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1040.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 1141}]}",
+        "dialog 1366x768 merge-preview {\"name\": \"比较并合并配置\", \"x\": 203, \"y\": 38.45229721069336, \"width\": 960, \"bottom\": 437.45229721069336, \"bodyOverflow\": 0, \"footerBottom\": 437.4523010253906, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1040.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 1141}]}",
+        "dialog 1366x768 merge-custom-decision {\"name\": \"比较并合并配置\", \"x\": 203, \"y\": 38.390625, \"width\": 960, \"bottom\": 463.890625, \"bodyOverflow\": 0, \"footerBottom\": 463.890625, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1040.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 1141}]}",
+        "dialog 1366x768 new-parameter {\"name\": \"手动新增参数\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 620.890625, \"bodyOverflow\": 0, \"footerBottom\": 620.890625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 discard-confirmation {\"name\": \"放弃未保存的修改？\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 231.390625, \"bodyOverflow\": 0, \"footerBottom\": 231.390625, \"small\": [], \"buttons\": [{\"text\": \"继续编辑\", \"width\": 79.046875, \"right\": 833.953125}, {\"text\": \"放弃修改\", \"width\": 79.046875, \"right\": 921}]}",
+        "dialog 1366x768 new-directory {\"name\": \"新增目录\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 331.390625, \"bodyOverflow\": 0, \"footerBottom\": 331.390625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 move-directory {\"name\": \"重命名 / 移动目录\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 362.890625, \"bodyOverflow\": 0, \"footerBottom\": 362.890625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 delete-directory {\"name\": \"删除空目录\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 327.390625, \"bodyOverflow\": 0, \"footerBottom\": 327.390625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 820.6875}, {\"text\": \"删除空目录\", \"width\": 92.3125, \"right\": 921}]}",
+        "dialog 1366x768 parameter-properties {\"name\": \"参数属性\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 620.890625, \"bodyOverflow\": 0, \"footerBottom\": 620.890625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 frozen-binding {\"name\": \"版本绑定\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 330.390625, \"bodyOverflow\": 0, \"footerBottom\": 330.390625, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 921}]}",
+        "dialog 1366x768 parameter-history {\"name\": \"参数历程 · 送料速度\", \"x\": 423, \"y\": 38.45229721069336, \"width\": 520, \"bottom\": 526.2022666931152, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1366x768 editable-binding {\"name\": \"版本绑定\", \"x\": 423, \"y\": 38.40210723876953, \"width\": 520, \"bottom\": 455.40210723876953, \"bodyOverflow\": 0, \"footerBottom\": 455.402099609375, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 833.953125}, {\"text\": \"确认绑定\", \"width\": 79.046875, \"right\": 921}]}",
+        "dialog 1366x768 nested-field-picker {\"name\": \"选择文件字段 · Parity.json\", \"x\": 323, \"y\": 38.40210723876953, \"width\": 720, \"bottom\": 489.40210723876953, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1366x768 freeze-confirmation {\"name\": \"核对并保存配置\", \"x\": 323, \"y\": 44.390625, \"width\": 720, \"bottom\": 450.390625, \"bodyOverflow\": 0, \"footerBottom\": 450.390625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 933.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 1021}]}",
+        "dialog 1366x768 new-config {\"name\": \"新建配置分组\", \"x\": 423, \"y\": 44.390625, \"width\": 520, \"bottom\": 333.390625, \"bodyOverflow\": 0, \"footerBottom\": 333.390625, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 860.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 921}]}",
+        "resource 1366 配置文件 reachable/layout",
+        "resource 1366 配置记录 reachable/layout",
+        "dialog 1920x1080 new-release {\"name\": \"新建软件版本\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 321.5, \"bodyOverflow\": 0, \"footerBottom\": 321.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 new-machine {\"name\": \"新建机台\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 365, \"bodyOverflow\": 0, \"footerBottom\": 365, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 graph-help {\"name\": \"读图说明\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 222, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1920x1080 parameter-details {\"name\": \"送料速度\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 322.5, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1920x1080 parameter-display {\"name\": \"参数表显示设置\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 327, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1920x1080 save-review {\"name\": \"核对并保存配置\", \"x\": 600, \"y\": 54, \"width\": 720, \"bottom\": 460, \"bodyOverflow\": 0, \"footerBottom\": 460, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1210.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 1298}]}",
+        "dialog 1920x1080 extract-picker {\"name\": \"从配置文件提取参数\", \"x\": 480, \"y\": 48.06167221069336, \"width\": 960, \"bottom\": 295.06167221069336, \"bodyOverflow\": 0, \"footerBottom\": 295.0616760253906, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1330.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 1418}]}",
+        "dialog 1920x1080 extract-preview {\"name\": \"从配置文件提取参数\", \"x\": 480, \"y\": 48, \"width\": 960, \"bottom\": 776, \"bodyOverflow\": 0, \"footerBottom\": 776, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1330.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 1418}]}",
+        "dialog 1920x1080 merge-picker {\"name\": \"比较并合并配置\", \"x\": 480, \"y\": 54, \"width\": 960, \"bottom\": 294.5, \"bodyOverflow\": 0, \"footerBottom\": 294.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1317.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 1418}]}",
+        "dialog 1920x1080 merge-preview {\"name\": \"比较并合并配置\", \"x\": 480, \"y\": 48.01148223876953, \"width\": 960, \"bottom\": 447.01148223876953, \"bodyOverflow\": 0, \"footerBottom\": 447.011474609375, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1317.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 1418}]}",
+        "dialog 1920x1080 merge-custom-decision {\"name\": \"比较并合并配置\", \"x\": 480, \"y\": 48, \"width\": 960, \"bottom\": 473.5, \"bodyOverflow\": 0, \"footerBottom\": 473.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1317.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 1418}]}",
+        "dialog 1920x1080 new-parameter {\"name\": \"手动新增参数\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 630.5, \"bodyOverflow\": 0, \"footerBottom\": 630.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 discard-confirmation {\"name\": \"放弃未保存的修改？\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 241, \"bodyOverflow\": 0, \"footerBottom\": 241, \"small\": [], \"buttons\": [{\"text\": \"继续编辑\", \"width\": 79.046875, \"right\": 1110.953125}, {\"text\": \"放弃修改\", \"width\": 79.046875, \"right\": 1198}]}",
+        "dialog 1920x1080 new-directory {\"name\": \"新增目录\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 341, \"bodyOverflow\": 0, \"footerBottom\": 341, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 move-directory {\"name\": \"重命名 / 移动目录\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 372.5, \"bodyOverflow\": 0, \"footerBottom\": 372.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 delete-directory {\"name\": \"删除空目录\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 337, \"bodyOverflow\": 0, \"footerBottom\": 337, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1097.6875}, {\"text\": \"删除空目录\", \"width\": 92.3125, \"right\": 1198}]}",
+        "dialog 1920x1080 parameter-properties {\"name\": \"参数属性\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 630.5, \"bodyOverflow\": 0, \"footerBottom\": 630.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 frozen-binding {\"name\": \"版本绑定\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 340, \"bodyOverflow\": 0, \"footerBottom\": 340, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 1198}]}",
+        "dialog 1920x1080 parameter-history {\"name\": \"参数历程 · 送料速度\", \"x\": 700, \"y\": 48.15935516357422, \"width\": 520, \"bottom\": 535.9093551635742, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1920x1080 editable-binding {\"name\": \"版本绑定\", \"x\": 700, \"y\": 48.06167221069336, \"width\": 520, \"bottom\": 465.06167221069336, \"bodyOverflow\": 0, \"footerBottom\": 465.0616760253906, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1110.953125}, {\"text\": \"确认绑定\", \"width\": 79.046875, \"right\": 1198}]}",
+        "dialog 1920x1080 nested-field-picker {\"name\": \"选择文件字段 · Parity.json\", \"x\": 600, \"y\": 48.06167221069336, \"width\": 720, \"bottom\": 499.06167221069336, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 1920x1080 freeze-confirmation {\"name\": \"核对并保存配置\", \"x\": 600, \"y\": 54, \"width\": 720, \"bottom\": 460, \"bodyOverflow\": 0, \"footerBottom\": 460, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1210.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 1298}]}",
+        "dialog 1920x1080 new-config {\"name\": \"新建配置分组\", \"x\": 700, \"y\": 54, \"width\": 520, \"bottom\": 343, \"bodyOverflow\": 0, \"footerBottom\": 343, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 1137.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 1198}]}",
+        "resource 1920 配置文件 reachable/layout",
+        "resource 1920 配置记录 reachable/layout",
+        "dialog 768x1024 new-release {\"name\": \"新建软件版本\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 321.5, \"bodyOverflow\": 0, \"footerBottom\": 321.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 new-machine {\"name\": \"新建机台\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 365, \"bodyOverflow\": 0, \"footerBottom\": 365, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 graph-help {\"name\": \"读图说明\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 222, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 768x1024 parameter-details {\"name\": \"送料速度\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 322.5, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 768x1024 parameter-display {\"name\": \"参数表显示设置\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 327, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 768x1024 save-review {\"name\": \"核对并保存配置\", \"x\": 24, \"y\": 54, \"width\": 720, \"bottom\": 460, \"bodyOverflow\": 0, \"footerBottom\": 460, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 634.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 722}]}",
+        "dialog 768x1024 extract-picker {\"name\": \"从配置文件提取参数\", \"x\": 16, \"y\": 48.06167221069336, \"width\": 736, \"bottom\": 295.06167221069336, \"bodyOverflow\": 0, \"footerBottom\": 295.0616760253906, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 642.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 730}]}",
+        "dialog 768x1024 extract-preview {\"name\": \"从配置文件提取参数\", \"x\": 16, \"y\": 48, \"width\": 736, \"bottom\": 776, \"bodyOverflow\": 0, \"footerBottom\": 776, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 642.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 730}]}",
+        "dialog 768x1024 merge-picker {\"name\": \"比较并合并配置\", \"x\": 16, \"y\": 54, \"width\": 736, \"bottom\": 294.5, \"bodyOverflow\": 0, \"footerBottom\": 294.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 629.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 730}]}",
+        "dialog 768x1024 merge-preview {\"name\": \"比较并合并配置\", \"x\": 16, \"y\": 48.06167221069336, \"width\": 736, \"bottom\": 447.06167221069336, \"bodyOverflow\": 0, \"footerBottom\": 447.0616760253906, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 629.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 730}]}",
+        "dialog 768x1024 merge-custom-decision {\"name\": \"比较并合并配置\", \"x\": 16, \"y\": 48, \"width\": 736, \"bottom\": 473.5, \"bodyOverflow\": 0, \"footerBottom\": 473.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 629.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 730}]}",
+        "dialog 768x1024 new-parameter {\"name\": \"手动新增参数\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 630.5, \"bodyOverflow\": 0, \"footerBottom\": 630.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 discard-confirmation {\"name\": \"放弃未保存的修改？\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 241, \"bodyOverflow\": 0, \"footerBottom\": 241, \"small\": [], \"buttons\": [{\"text\": \"继续编辑\", \"width\": 79.046875, \"right\": 534.953125}, {\"text\": \"放弃修改\", \"width\": 79.046875, \"right\": 622}]}",
+        "dialog 768x1024 new-directory {\"name\": \"新增目录\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 341, \"bodyOverflow\": 0, \"footerBottom\": 341, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 move-directory {\"name\": \"重命名 / 移动目录\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 372.5, \"bodyOverflow\": 0, \"footerBottom\": 372.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 delete-directory {\"name\": \"删除空目录\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 337, \"bodyOverflow\": 0, \"footerBottom\": 337, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 521.6875}, {\"text\": \"删除空目录\", \"width\": 92.3125, \"right\": 622}]}",
+        "dialog 768x1024 parameter-properties {\"name\": \"参数属性\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 630.5, \"bodyOverflow\": 0, \"footerBottom\": 630.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 frozen-binding {\"name\": \"版本绑定\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 340, \"bodyOverflow\": 0, \"footerBottom\": 340, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 622}]}",
+        "dialog 768x1024 parameter-history {\"name\": \"参数历程 · 送料速度\", \"x\": 124, \"y\": 48.15935516357422, \"width\": 520, \"bottom\": 535.9093551635742, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 768x1024 editable-binding {\"name\": \"版本绑定\", \"x\": 124, \"y\": 48.06167221069336, \"width\": 520, \"bottom\": 465.06167221069336, \"bodyOverflow\": 0, \"footerBottom\": 465.0616760253906, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 534.953125}, {\"text\": \"确认绑定\", \"width\": 79.046875, \"right\": 622}]}",
+        "dialog 768x1024 nested-field-picker {\"name\": \"选择文件字段 · Parity.json\", \"x\": 24, \"y\": 48.06167221069336, \"width\": 720, \"bottom\": 499.06167221069336, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 768x1024 freeze-confirmation {\"name\": \"核对并保存配置\", \"x\": 24, \"y\": 54, \"width\": 720, \"bottom\": 460, \"bodyOverflow\": 0, \"footerBottom\": 460, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 634.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 722}]}",
+        "dialog 768x1024 new-config {\"name\": \"新建配置分组\", \"x\": 124, \"y\": 54, \"width\": 520, \"bottom\": 343, \"bodyOverflow\": 0, \"footerBottom\": 343, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 561.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 622}]}",
+        "resource 768 配置文件 reachable/layout",
+        "resource 768 配置记录 reachable/layout",
+        "dialog 375x812 new-release {\"name\": \"新建软件版本\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 310.5, \"bodyOverflow\": 0, \"footerBottom\": 310.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 new-machine {\"name\": \"新建机台\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 366, \"bodyOverflow\": 0, \"footerBottom\": 366, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 graph-help {\"name\": \"读图说明\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 212, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 375x812 parameter-details {\"name\": \"送料速度\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 291.5, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 375x812 parameter-display {\"name\": \"参数表显示设置\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 331, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 375x812 save-review {\"name\": \"核对并保存配置\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 449, \"bodyOverflow\": 0, \"footerBottom\": 449, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 259.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 347}]}",
+        "dialog 375x812 extract-picker {\"name\": \"从配置文件提取参数\", \"x\": 12, \"y\": 12.011482238769531, \"width\": 351, \"bottom\": 384.51148223876953, \"bodyOverflow\": 0, \"footerBottom\": 384.511474609375, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 259.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 347}]}",
+        "dialog 375x812 extract-preview {\"name\": \"从配置文件提取参数\", \"x\": 12, \"y\": 12, \"width\": 351, \"bottom\": 800, \"bodyOverflow\": 0, \"footerBottom\": 800, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 259.953125}, {\"text\": \"提交新增\", \"width\": 79.046875, \"right\": 347}]}",
+        "dialog 375x812 merge-picker {\"name\": \"比较并合并配置\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 494.5, \"bodyOverflow\": 0, \"footerBottom\": 494.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 246.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 347}]}",
+        "dialog 375x812 merge-preview {\"name\": \"比较并合并配置\", \"x\": 12, \"y\": 12.011482238769531, \"width\": 351, \"bottom\": 679.5114822387695, \"bodyOverflow\": 0, \"footerBottom\": 679.511474609375, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 246.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 347}]}",
+        "dialog 375x812 merge-custom-decision {\"name\": \"比较并合并配置\", \"x\": 12, \"y\": 12, \"width\": 351, \"bottom\": 727.5, \"bodyOverflow\": 0, \"footerBottom\": 727.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 246.6875}, {\"text\": \"生成新草稿\", \"width\": 92.3125, \"right\": 347}]}",
+        "dialog 375x812 new-parameter {\"name\": \"手动新增参数\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 692, \"bodyOverflow\": 0, \"footerBottom\": 692, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 discard-confirmation {\"name\": \"放弃未保存的修改？\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 218, \"bodyOverflow\": 0, \"footerBottom\": 218, \"small\": [], \"buttons\": [{\"text\": \"继续编辑\", \"width\": 79.046875, \"right\": 259.953125}, {\"text\": \"放弃修改\", \"width\": 79.046875, \"right\": 347}]}",
+        "dialog 375x812 new-directory {\"name\": \"新增目录\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 354.5, \"bodyOverflow\": 0, \"footerBottom\": 354.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 move-directory {\"name\": \"重命名 / 移动目录\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 386, \"bodyOverflow\": 0, \"footerBottom\": 386, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 delete-directory {\"name\": \"删除空目录\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 338.5, \"bodyOverflow\": 0, \"footerBottom\": 338.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 246.6875}, {\"text\": \"删除空目录\", \"width\": 92.3125, \"right\": 347}]}",
+        "dialog 375x812 parameter-properties {\"name\": \"参数属性\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 692, \"bodyOverflow\": 0, \"footerBottom\": 692, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"保存\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 frozen-binding {\"name\": \"版本绑定\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 348.5, \"bodyOverflow\": 0, \"footerBottom\": 348.5, \"small\": [], \"buttons\": [{\"text\": \"关闭\", \"width\": 52.53125, \"right\": 347}]}",
+        "dialog 375x812 parameter-history {\"name\": \"参数历程 · 送料速度\", \"x\": 12, \"y\": 12.159353256225586, \"width\": 351, \"bottom\": 760.3468532562256, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 375x812 editable-binding {\"name\": \"版本绑定\", \"x\": 12, \"y\": 12.061671257019043, \"width\": 351, \"bottom\": 478.06167125701904, \"bodyOverflow\": 0, \"footerBottom\": 478.0616760253906, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 259.953125}, {\"text\": \"确认绑定\", \"width\": 79.046875, \"right\": 347}]}",
+        "dialog 375x812 nested-field-picker {\"name\": \"选择文件字段 · Parity.json\", \"x\": 12, \"y\": 12.061671257019043, \"width\": 351, \"bottom\": 560.061671257019, \"bodyOverflow\": 0, \"small\": [], \"buttons\": []}",
+        "dialog 375x812 freeze-confirmation {\"name\": \"核对并保存配置\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 468.5, \"bodyOverflow\": 0, \"footerBottom\": 468.5, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 259.953125}, {\"text\": \"保存配置\", \"width\": 79.046875, \"right\": 347}]}",
+        "dialog 375x812 new-config {\"name\": \"新建配置分组\", \"x\": 12, \"y\": 18, \"width\": 351, \"bottom\": 344, \"bodyOverflow\": 0, \"footerBottom\": 344, \"small\": [], \"buttons\": [{\"text\": \"取消\", \"width\": 52.53125, \"right\": 286.46875}, {\"text\": \"创建\", \"width\": 52.53125, \"right\": 347}]}",
+        "resource 375 配置文件 reachable/layout",
+        "resource 375 配置记录 reachable/layout",
+        "3248 parameters 1366x768 {\"tableHeight\": 291, \"tableScroll\": 291, \"editbarBottom\": 748, \"viewport\": 768}",
+        "3248 parameters 1920x1080 {\"tableHeight\": 603, \"tableScroll\": 603, \"editbarBottom\": 1060, \"viewport\": 1080}",
+        "3248 parameters 768x1024 {\"tableHeight\": 523, \"tableScroll\": 523, \"editbarBottom\": 1007, \"viewport\": 1024}",
+        "3248 parameters 375x812 {\"tableHeight\": 172, \"tableScroll\": 172, \"editbarBottom\": 798, \"viewport\": 812}",
+        "3248 parameters 683x384 {\"tableHeight\": 154, \"tableScroll\": 154, \"editbarBottom\": 739.6875, \"viewport\": 384}",
+        "3248 项真实服务合成数据：30/50/100 控件分页、33 页末项、全量名称搜索；683×384 为 1366×768 在 200% 缩放下的等效 CSS 视口，未冒充原生浏览器缩放操作",
+        "375×812 粗指针仿真：真实触摸手势滚动参数表的横纵两轴，主控件高度≥44；核对弹窗标题进入焦点、Shift+Tab/Tab循环、Esc关闭和焦点返回通过。非物理触屏实机证据",
+        "many versions 1366x768 {\"height\": 396, \"width\": 1100, \"scrollHeight\": 3233, \"scrollWidth\": 5352, \"top\": 2837, \"left\": 4252, \"bottom\": 668.796875, \"viewportBottom\": 706}",
+        "graph last target 1366 MORE-29 {\"visible\": true, \"hit\": true, \"text\": \"MORE-29 \\u00b7 \\u8349\\u7a3f\\u8349\\u7a3f \\u00b7 \\u5f85\\u4fdd\\u5b58\"}",
+        "graph last target 1366 软件 route-19 {\"visible\": true, \"hit\": true, \"text\": \"\\u7248\\u672c\\u6807\\u51c6 \\u00b7 \\u6709\\u8349\\u7a3f\\u8349\\u7a3f \\u00b7 \\u5f85\\u4fdd\\u5b58\"}",
+        "many versions 375x812 {\"height\": 314, \"width\": 345, \"scrollHeight\": 3233, \"scrollWidth\": 5352, \"top\": 2919, \"left\": 5007, \"bottom\": 675.59375, \"viewportBottom\": 712.5}",
+        "graph last target 375 MORE-29 {\"visible\": true, \"hit\": true, \"text\": \"MORE-29 \\u00b7 \\u8349\\u7a3f\\u8349\\u7a3f \\u00b7 \\u5f85\\u4fdd\\u5b58\"}",
+        "graph last target 375 软件 route-19 {\"visible\": true, \"hit\": true, \"text\": \"\\u7248\\u672c\\u6807\\u51c6 \\u00b7 \\u6709\\u8349\\u7a3f\\u8349\\u7a3f \\u00b7 \\u5f85\\u4fdd\\u5b58\"}",
+        "cross-page 1230: {\"header\": [208, 98, 1022, 94.796875], \"tabs\": [236, 192.796875, 966, 39], \"work\": [236, 249.796875, 966, 603.203125], \"label\": \"JSONParity.json\\u914d\\u7f6e\\u539f\\u578b\\u9a8c\\u6536 / 24 \\u4e2a\\u8f6f\\u4ef6\\u7248\\u672c \\u00b7 1 \\u53f0\\u673a\\u53f0\"}",
+        "cross-page 1366: {\"header\": [208, 98, 1158, 94.796875], \"tabs\": [236, 192.796875, 1102, 39], \"work\": [236, 249.796875, 1102, 498.203125], \"label\": \"JSONParity.json\\u914d\\u7f6e\\u539f\\u578b\\u9a8c\\u6536 / 24 \\u4e2a\\u8f6f\\u4ef6\\u7248\\u672c \\u00b7 1 \\u53f0\\u673a\\u53f0\"}",
+        "cross-page 1920: {\"header\": [224, 98, 1696, 94.796875], \"tabs\": [252, 192.796875, 1640, 39], \"work\": [252, 249.796875, 1640, 810.203125], \"label\": \"JSONParity.json\\u914d\\u7f6e\\u539f\\u578b\\u9a8c\\u6536 / 24 \\u4e2a\\u8f6f\\u4ef6\\u7248\\u672c \\u00b7 1 \\u53f0\\u673a\\u53f0\"}",
+        "cross-page 768: {\"header\": [166, 98, 602, 84.796875], \"tabs\": [183, 182.796875, 568, 39], \"work\": [183, 235.796875, 568, 771.203125], \"label\": \"JSONParity.json\\u914d\\u7f6e\\u539f\\u578b\\u9a8c\\u6536 / 24 \\u4e2a\\u8f6f\\u4ef6\\u7248\\u672c \\u00b7 1 \\u53f0\\u673a\\u53f0\"}",
+        "cross-page 375: {\"header\": [0, 92, 375, 133.59375], \"tabs\": [14, 225.59375, 347, 44], \"work\": [14, 282.59375, 347, 515.40625], \"label\": \"JSONParity.json\\u914d\\u7f6e\\u539f\\u578b\\u9a8c\\u6536 / 24 \\u4e2a\\u8f6f\\u4ef6\\u7248\\u672c \\u00b7 1 \\u53f0\\u673a\\u53f0\"}",
+        "frozen axes 1366 zoom=1 {\"left\": 2676, \"top\": 1617, \"cornerX\": 237, \"cornerY\": 309.796875}",
+        "frozen axes 1366 zoom=0.75 {\"left\": 2007, \"top\": 1213, \"cornerX\": 237, \"cornerY\": 309.796875}",
+        "frozen axes 1366 zoom=1.25 {\"left\": 3345, \"top\": 2021, \"cornerX\": 237, \"cornerY\": 309.796875}",
+        "frozen axes 375 zoom=1 {\"left\": 2676, \"top\": 1617, \"cornerX\": 15, \"cornerY\": 398.59375}",
+        "frozen axes 375 zoom=0.75 {\"left\": 2007, \"top\": 1213, \"cornerX\": 15, \"cornerY\": 398.59375}",
+        "frozen axes 375 zoom=1.25 {\"left\": 3345, \"top\": 2021, \"cornerX\": 15, \"cornerY\": 398.59375}",
+        "fixed header real click opened 690",
+        "四视口五页面无整页横向溢出；105 参数分页末项可达；访客403/跨工作区404"
+      ],
+      "screenshot": "docs/evidence/v3.2/shared-header-axes/config-prototype-export.png"
+    }
+  ]
+}
