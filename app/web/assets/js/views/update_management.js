@@ -208,7 +208,7 @@
       if (!fileConfig) { fileNav.appendChild(MC.configWorkspaceNav(app, "updates")); return; }
       var filename = fileDetail && (fileDetail.file && fileDetail.file.name || fileDetail.name) || "正在读取文件…";
       fileNav.appendChild(h("nav.cv-breadcrumb", { "aria-label": "面包屑" }, h("button.btn.btn-ghost.btn-sm", { type: "button", onclick: function () { app.go({ kind: "configv3", arg: "files" }); } }, "配置管理"), MC.icon("chevron-right"), h("span", filename)));
-      fileNav.appendChild(h("div.sync-file-heading", h("div.col", h("h1", filename), h("span.small.muted", fileDetail ? fileDetail.name : "")), headActions));
+      fileNav.appendChild(h("div.sync-file-heading", h("div.col", h("h1", filename), h("span.small.muted.sync-file-description", fileDetail ? fileDetail.name : "")), headActions));
       var tabs = MC.segmented([{ value: "versions", label: "版本演进" }, { value: "updates", label: "更新管理" }, { value: "history", label: "操作记录" }], "updates", function (value) {
         if (value !== "updates") app.go({ kind: "configv3", arg: "configs", query: { config: fileConfig, tab: value } });
       }, "配置文件页面");
@@ -2511,6 +2511,17 @@
       });
     }
 
+    function fileSourceFrame(rows) {
+      var S = state.sources;
+      return h("div.card", h("div.card-b",
+        h("div.sync-table-wrap", h("table.table.sync-source-table",
+          h("thead", h("tr", ["来源", "目标版本", "更新计划", "最近结果", "操作"].map(function (name) { return h("th", name); }))), rows)),
+        h("div.sync-list-footer", h("span.muted.xsmall", "获取更新后先核对，再保存为版本标准"),
+          h("div.row", h("span.muted.xsmall", "已加载 " + S.items.length + " / " + S.total), S.next_cursor ? h("button.btn.btn-sm", { type: "button", disabled: S.loading, onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null))));
+    }
+    function fileSourceState(content) {
+      return fileSourceFrame(h("tbody", h("tr", h("td", { colspan: 5 }, content))));
+    }
     function renderSources() {
       var S = state.sources;
       var toolbar = h("div.row.sync-filters", { style: "gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" });
@@ -2575,11 +2586,12 @@
         ));
       }
       if (S.loading && !S.items.length) {
-        body.appendChild(h("div.card", h("div.card-b", toolbar, h("p.muted.sync-loading", { role: "status" }, "正在读取更新源…"))));
+        var loading = h("p.muted.sync-loading", { role: "status" }, "正在读取更新源…");
+        body.appendChild(fileConfig ? fileSourceState(loading) : h("div.card", h("div.card-b", toolbar, loading)));
         return;
       }
       if (S.error && !S.items.length) {
-        body.appendChild(h("div.card", h("div.card-b", toolbar)));
+        body.appendChild(fileConfig ? fileSourceState(h("p.muted.small", "更新来源读取失败，请重试。")) : h("div.card", h("div.card-b", toolbar)));
         return;
       }
       var rows = sortedItems();
@@ -2608,6 +2620,7 @@
       }
 
       if (!S.items.length) {
+        if (fileConfig) { body.appendChild(fileSourceState(emptyState("尚未配置更新来源", "在更新设置中添加此文件的来源。"))); return; }
         body.appendChild(h("div.card",
           h("div.card-b", fileConfig ? null : toolbar,
             emptyState(fileConfig ? "尚未配置更新来源" : S.query || S.status || S.configuration_id || S.release_id ? "没有匹配的更新源" : (S.scope === "profile" ? "当前机型没有更新源" : "添加第一个更新源"), fileConfig ? "在更新设置中添加此文件的来源。" : S.query || S.status || S.configuration_id || S.release_id ? "调整搜索或筛选条件后重试。" : (S.scope === "profile" ? "切换到全部机型查看，或从右上角新增更新源。" : "从右上角新增更新源，绑定来源与接收目标。")))
@@ -2729,16 +2742,17 @@
           h("td", actions)
         ));
       });
+      if (fileConfig) { body.appendChild(fileSourceFrame(tbody)); return; }
       body.appendChild(h("div.card",
         h("div.card-b",
-          fileConfig ? null : toolbar,
-          fileConfig ? null : batchBar,
+          toolbar,
+          batchBar,
           h("div.sync-table-wrap", h("table.table.sync-source-table", h("thead", h("tr",
-            fileConfig ? ["来源", "目标版本", "更新计划", "最近结果", "操作"].map(function (name) { return h("th", name); }) : [h("th", headerBox), h("th", "配置 / 文件"), h("th", "更新来源 / 写入目标"),
-            h("th", "更新计划"), h("th", "最近有效核验"), h("th", "最近结果"), h("th", "操作")]
+            h("th", headerBox), h("th", "配置 / 文件"), h("th", "更新来源 / 写入目标"),
+            h("th", "更新计划"), h("th", "最近有效核验"), h("th", "最近结果"), h("th", "操作")
           )), tbody)),
           h("div.sync-list-footer",
-            h("span.muted.xsmall", fileConfig ? "获取更新后先核对，再保存为版本标准" : "全量更新不受当前筛选条件影响"),
+            h("span.muted.xsmall", "全量更新不受当前筛选条件影响"),
             h("div.row", { style: "gap:8px;align-items:center" },
               h("span.muted.xsmall", "已加载 " + S.items.length + " / " + S.total),
               S.next_cursor ? h("button.btn.btn-sm", { type: "button", onclick: function () { S.expanded = true; loadSources(false); } }, "加载更多") : null
@@ -3845,7 +3859,7 @@
       } else {
         renderSources();
         var recent = state.recentRun;
-        if (recent && recent.run_id && (!recent.workspace_id || recent.workspace_id === workspaceId())) body.appendChild(h("div.sync-recent-run",
+        if (!fileConfig && recent && recent.run_id && (!recent.workspace_id || recent.workspace_id === workspaceId())) body.appendChild(h("div.sync-recent-run",
           h("strong.small", "最近运行"), h("span.small.muted", util.formatTime(recent.created_at)),
           h("span.small", ({ manual: "手动更新", schedule: "定时更新", retry: "失败重试", collector: "采集更新" }[recent.trigger] || "更新任务") + " · " + runStateText(recent.state)),
           h("span.xsmall.muted", runCounts(recent)), h("span.spacer"),

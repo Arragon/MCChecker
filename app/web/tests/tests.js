@@ -52,7 +52,7 @@
    * INH-1915：52 这个值在新增 fileview 门控用例后由页面重读确认（`ALL PASSED (52)`）；
    * M3-14 新增 bindings 生产用例后按页面自报数重读为 53；M3-15 新增 tools 生产用例后
    * 按页面自报数重读为 54。改了 `app/web/**` 或并过主线之后必须再重读一次，不能沿用本值。 */
-  var EXPECTED_CASES = 168;  // V3.2 原型布局、文件切换、对象、草稿、升级及历史回归
+  var EXPECTED_CASES = 169;  // V3.2 原型布局、异步稳定性、文件切换及历史回归
   var traps = [];
   function recordTrap(name, detail) {
     traps.push({ name: name, ok: false, err: detail });
@@ -6359,6 +6359,38 @@
         ok(modalButton(lastModal(), "继续编辑").disabled);
         var choice = lastModal().querySelector('[aria-label="速度的处理方式"]'); choice.value = "keep_local"; choice.dispatchEvent(new Event("change")); return tick().then(tick);
       }).then(function () { eq(calls[1].body.decision, "keep_local"); ok(!modalButton(lastModal(), "继续编辑").disabled); });
+    });
+  });
+
+  test("V3.2：文件更新加载、空结果、成功保持五列表格框架，不闪现旧筛选栏", function () {
+    return productionRun().run(function (r) {
+      var finishConfig, finishSources, phase = "loading";
+      r.useApi({ requestV3: function (method, path) {
+        if (/\/configs\/cfg-file$/.test(path)) return new Promise(function (resolve) { finishConfig = resolve; });
+        if (/\/sync\/sources$/.test(path)) return new Promise(function (resolve) { finishSources = resolve; });
+        if (/\/sync\/runs$/.test(path)) return Promise.resolve({ items: [{ run_id: "old-run", workspace_id: "default", state: "completed" }], total: 1 });
+        return Promise.resolve({ items: [], total: 0 });
+      } });
+      var app = settingsApp(true); app.can = function () { return true; };
+      var inst = r.mountView(MC.views.updates(app, { arg: "sources", query: { config: "cfg-file" } }));
+      var initial;
+      function frame() { return { top: inst.el.querySelector('.sync-workbench').getBoundingClientRect().top, height: inst.el.querySelector('.sync-file-heading').getBoundingClientRect().height }; }
+      function stable() {
+        ok(!inst.el.querySelector('.sync-filters'), phase + "不能插入旧版筛选工具栏");
+        eq(inst.el.querySelectorAll('.sync-source-table thead th').length, 5, phase + "保留五列表头");
+        ok(!inst.el.querySelector('.sync-recent-run'), "文件运行记录从独立页签查看，不异步挤压表格");
+        var current = frame(); ok(Math.abs(current.top - initial.top) < 1 && Math.abs(current.height - initial.height) < 1, phase + "标题和工作面不能跳动");
+      }
+      return tick().then(function () {
+        initial = frame(); stable();
+        finishConfig({ config: { config_id: "cfg-file", name: "运行配置", file_id: "file-one", file: { name: "A.json" } } }); return tick();
+      }).then(function () {
+        phase = "metadata"; stable(); finishSources({ items: [], total: 0 }); return tick();
+      }).then(function () {
+        phase = "empty"; stable(); inst.update({ arg: "sources", query: { config: "cfg-file" } }); return tick();
+      }).then(function () {
+        finishSources({ items: [{ source_id: "source-one", name: "来源", kind: "http_file", enabled: true, schedule_mode: "manual", target: { kind: "file_archive", file_id: "file-one" } }], total: 1 }); return tick();
+      }).then(function () { phase = "success"; stable(); });
     });
   });
 

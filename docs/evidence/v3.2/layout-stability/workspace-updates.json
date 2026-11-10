@@ -1,0 +1,110 @@
+{
+  "generated_at": "2026-11-10T07:08:34Z",
+  "data_dir": "/Users/wangdongxin/.cache/mcc-e2e-40-69936-94503/data",
+  "server": "http://127.0.0.1:65183",
+  "summary": {
+    "interactive_pass": 7,
+    "interactive_fail": 0,
+    "reachable_pass": 0,
+    "reachable_fail": 0,
+    "api_pass": 0,
+    "api_fail": 0
+  },
+  "results": [
+    {
+      "id": "updates-sources-list",
+      "title": "来源列表/筛选/新建与批量工具条",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-source] ok",
+        "assert [data-sync-new] ok",
+        "assert [data-sync-batch] ok",
+        "停用来源不可更新",
+        "截图 docs/evidence/v3.2/layout-stability/updates-sources-list.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/layout-stability/updates-sources-list.png"
+    },
+    {
+      "id": "updates-source-create",
+      "title": "新建来源抽屉（类型/连接/目标绑定）",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-kind] ok",
+        "assert [data-sync-connection] ok",
+        "assert [data-sync-target-kind] ok",
+        "截图 docs/evidence/v3.2/layout-stability/updates-source-create.png",
+        "抽屉已关闭"
+      ],
+      "screenshot": "docs/evidence/v3.2/layout-stability/updates-source-create.png"
+    },
+    {
+      "id": "updates-source-focus",
+      "title": "抽屉初始焦点、Esc 不关闭未保存抽屉与焦点恢复",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-kind] ok",
+        "焦点在抽屉内",
+        "Tab 从抽屉末尾循环到关闭按钮",
+        "抽屉已关闭",
+        "wait [data-sync-kind] ok",
+        "抽屉已关闭",
+        "焦点已恢复"
+      ],
+      "screenshot": null
+    },
+    {
+      "id": "updates-plan",
+      "title": "更新计划与全量预览入口",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-plan-preview] ok",
+        "assert [data-plan-save] ok",
+        "截图 docs/evidence/v3.2/layout-stability/updates-plan.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/layout-stability/updates-plan.png"
+    },
+    {
+      "id": "updates-connections",
+      "title": "连接设置（管理员权限）",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-conn-create] ok",
+        "wait [data-conn-name] ok",
+        "assert [data-conn-create-submit] ok",
+        "连接表单校验关联和焦点正常",
+        "截图 docs/evidence/v3.2/layout-stability/updates-connections.png",
+        "assert [data-sync-sheet-close] ok",
+        "抽屉已关闭"
+      ],
+      "screenshot": "docs/evidence/v3.2/layout-stability/updates-connections.png"
+    },
+    {
+      "id": "updates-runs",
+      "title": "运行记录页渲染",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "text 运行记录 ok",
+        "截图 docs/evidence/v3.2/layout-stability/updates-runs.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/layout-stability/updates-runs.png"
+    },
+    {
+      "id": "updates-candidates",
+      "title": "候选列表筛选与批量工具条",
+      "level": "interactive",
+      "ok": true,
+      "notes": [
+        "wait [data-sync-candidate-state] ok",
+        "assert [data-sync-candidate-profile] ok",
+        "截图 docs/evidence/v3.2/layout-stability/updates-candidates.png"
+      ],
+      "screenshot": "docs/evidence/v3.2/layout-stability/updates-candidates.png"
+    }
+  ]
+}

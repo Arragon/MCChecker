@@ -2654,3 +2654,5 @@ a.tool-url:hover {
 .config-root.v32 .cv32-parameter-actions { display:flex; flex:none; align-items:center; gap:8px; margin-left:auto; }
 @media(max-width:760px),(pointer:coarse) { .config-root.v32 .cv32-parameter-actions .btn { min-height:44px; padding:6px; gap:4px; } .config-root.v32 .cv32-filterbar button { min-height:44px; } }
 @media(max-width:760px) { .config-root.v32 .cv32-parameter-actions { margin-left:0; gap:6px; } }
+
+.sync-root.is-file-config .sync-file-description { min-height:18px; line-height:18px; }

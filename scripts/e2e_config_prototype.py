@@ -97,8 +97,14 @@ def run(runner, api, admin_ip, visitor_ip):
         sync_root = "/api/v3/workspaces/%s/sync" % files_wid
         request("POST", sync_root + "/sources", {"name": "Owned update", "profile_id": "default", "kind": "http_file", "resource_ref": "https://example.invalid/owned", "target": {"kind": "file_archive", "file_id": owned["file_id"]}})
         request("POST", sync_root + "/sources", {"name": "Other file update", "profile_id": "default", "kind": "http_file", "resource_ref": "https://example.invalid/other", "target": {"kind": "file_archive", "file_id": "file-other"}})
+        b.eval("""(()=>{let original=window.fetch;window.__sourceLayout=[];window.__restoreLayoutFetch=()=>{window.fetch=original;clearInterval(window.__sourceLayoutTimer)};window.fetch=function(url,options){let response=original.call(window,url,options),path=String(url).split('?')[0];return /\\/configs\\/[^/]+$|\\/sync\\/sources$/.test(path)?Promise.all([response,new Promise(r=>setTimeout(r,200))]).then(v=>v[0]):response};window.__sourceLayoutTimer=setInterval(()=>{let root=document.querySelector('.sync-root:not(.hidden).is-file-config');if(!root)return;let heading=root.querySelector('.sync-file-heading'),work=root.querySelector('.sync-workbench'),table=root.querySelector('.sync-source-table');window.__sourceLayout.push({heading:heading?.getBoundingClientRect().height,top:work?.getBoundingClientRect().top,tableTop:table?.getBoundingClientRect().top,columns:table?.querySelectorAll('thead th').length,oldFilters:!!root.querySelector('.sync-filters')})},16)})()""")
         b.navigate(runner.url("#/p/default/updates/sources?workspace=" + files_wid + "&config=" + managed_id))
         wait("document.querySelector('.sync-content')?.innerText.includes('Owned update')")
+        samples = b.eval("window.__restoreLayoutFetch();window.__sourceLayout")
+        assert len(samples) >= 2, samples
+        assert all(not sample["oldFilters"] and sample["columns"] == 5 for sample in samples), samples
+        assert all(abs(sample[key] - samples[0][key]) < 1 for sample in samples for key in ("heading", "top", "tableTop")), samples
+        notes.append("文件更新慢响应200ms：%s帧标题、工作面、表头位置稳定；加载不闪现旧筛选栏" % len(samples))
         runner.shoot("v32-file-updates")
         assert not b.eval("document.querySelector('.sync-content').innerText.includes('Other file update')")
         click("立即更新")
