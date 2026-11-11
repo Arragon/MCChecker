@@ -1,4 +1,5 @@
 PASS reconstructed seed preserves file, branch and stable parameter identities
+PASS release families group real saved records without replacing identity, parentage or historical evidence
 PASS pressure unit history converts both value and bound exactly
 PASS direct save requires one admin and CAS, appends an immutable snapshot without review
 PASS same-name parameters retain distinct identities while rename remains one change
@@ -37,4 +38,4 @@ PASS review metadata is locked and merge propagates the proposal reason/links wi
 PASS initialization, version creation and machine creation preserve user metadata separately from system descriptions
 PASS restore uses its own explicit reason and links while original field authors remain historical
 
-38/38 reconstructed model checks passed (fresh run).
+39/39 reconstructed model checks passed (fresh run).

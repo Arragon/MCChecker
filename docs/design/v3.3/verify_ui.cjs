@@ -39,7 +39,8 @@ function createHarness(options = {}) {
       this.children = []; this.parentNode = null; this.events = new Map();
       this._html = ''; this._text = ''; this.value = ''; this.style = {};
       this.checked = false; this.indeterminate = false; this.disabled = false; this.hidden = false; this.open = false;
-      this.selectionStart = 0;
+      this.selectionStart = 0; this.scrollLeft = 0; this.scrollTop = 0;
+      this.focusCalls = []; this.scrollCalls = [];
     }
     get id() { return this.attributes.id || ''; }
     set id(value) { this.attributes.id = String(value); }
@@ -105,9 +106,9 @@ function createHarness(options = {}) {
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
     closest(selector) { let node = this; while (node) { if (node.matches(selector)) return node; node = node.parentNode; } return null; }
     addEventListener(name, fn) { const list = this.events.get(name) || []; list.push(fn); this.events.set(name, list); }
-    focus() { document.activeElement = this; }
+    focus(options) { this.focusCalls.push(options ? clone(options) : null); document.activeElement = this; }
     setSelectionRange(start) { this.selectionStart = start; }
-    scrollIntoView() {} click() {}
+    scrollIntoView(options) { this.scrollCalls.push(options ? clone(options) : null); } click() {}
     showModal() { this.open = true; }
     close() { this.open = false; for (const fn of this.events.get('close') || []) fn(); }
   }
@@ -174,11 +175,44 @@ const checkRevisionEvidence = (h, revision, reason, links = evidenceLinks) => {
   assert.deepEqual(clone(event.details.links), links);
   return event;
 };
+const roadmapOptions = h => Object.assign({}, clone(h.S.roadmap), {
+  assets: h.M.state.assets, branchFilter: h.S.roadmapBranch || 'all',
+  selectedRevisionId: h.S.roadmapSelected, query: h.S.search
+});
+const roadmapGraph = h => h.context.MCPrototypeRoadmap.layout(file(h), roadmapOptions(h));
+const roadmapDestination = (h, id) => clone(h.context.MCPrototypeRoadmap.locateRevision(file(h), id, roadmapOptions(h)));
+const assertLocatedRevision = (h, id, expected) => {
+  for (const key of ['level', 'familyId', 'releaseId', 'columnPage', 'lanePage']) assert.equal(h.S.roadmap[key], expected[key], 'Incorrect roadmap destination: ' + key);
+  assert.equal(h.S.roadmapBranch || 'all', expected.branchFilter);
+  assert.equal(h.S.roadmapSelected, id);
+  assert(roadmapGraph(h).visibleNodes.some(n => n.kind === 'revision' && n.id === id), 'Selected revision must be inside the displayed history window');
+  assert.equal(h.query('[data-action="roadmap-select"][data-revision="' + id + '"]', 'app').getAttribute('aria-pressed'), 'true');
+  assert.equal(h.document.activeElement.dataset.action, 'roadmap-select');
+  assert.equal(h.document.activeElement.dataset.revision, id);
+  const card = h.query('[data-roadmap-record="' + id + '"]', 'app');
+  assert.deepEqual(card.scrollCalls.at(-1), { block: 'nearest', inline: 'nearest' }, 'Location must request reveal of the actual record card');
+};
+const extendBaselineHistory = (h, count = 35) => {
+  for (let i = 0; i < count; i++) {
+    const params = clone(current(h).params); params.find(p => p.id === 'p-temp').value = 43 + i % 2;
+    h.M.save({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: branch(h).headId, params, reason: '窗口核对样本：第 ' + (i + 1) + ' 次验证温控修订' });
+  }
+};
+const assertRoadmapReset = h => {
+  assert.equal(h.S.roadmap.level, 'families');
+  assert.equal(h.S.roadmap.familyId, null); assert.equal(h.S.roadmap.releaseId, null);
+  assert.deepEqual(clone(h.S.roadmap.expandedFamilies), []);
+  assert.equal(h.S.roadmap.columnPage, 0); assert.equal(h.S.roadmap.lanePage, 0);
+  assert.equal(h.S.roadmapSelected, null); assert.equal(h.S.roadmapBranch, 'all');
+};
 
 check('default entry and file links open the roadmap while the parameter page remains reachable', async h => {
   assert.equal(h.S.route[0], 'files');
   assert.equal(h.S.fileId, 'f-machine');
   assert.equal(h.S.route[2], 'roadmap');
+  assertRoadmapReset(h);
+  assert.equal(h.all('[data-action="roadmap-parameters"]', 'app').length, 0, 'The overview must not imply that an old revision is selected');
+  assert.equal(h.all('[data-action="roadmap-export"]', 'app').length, 0, 'A summary is not an exportable configuration snapshot');
   assert.match(h.query('#app').textContent, /路线|版本/);
   const parameters = h.query('a[href="#/files/f-machine/parameters"]', 'app');
   h.route(parameters.getAttribute('href'));
@@ -193,53 +227,178 @@ check('default entry and file links open the roadmap while the parameter page re
   assert(h.query('a[href="#/files/f-machine/parameters"]', 'app'));
 }, { initialHash: '' });
 
-check('roadmap selection, focus and details navigate to an adopted baseline on another page', async h => {
-  // Real model writes produce enough history for the public 30-record page size.
+check('roadmap selection and details locate the exact adopted baseline across history windows', async h => {
+  // Real model writes create a history longer than the bounded column window.
   // The latest machine record still adopts its original, older baseline.
-  for (let i = 0; i < 35; i++) {
-    const params = clone(current(h).params); params.find(p => p.id === 'p-temp').value = 43 + i % 2;
-    h.M.save({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: branch(h).headId, params, reason: '分页核对样本：第 ' + (i + 1) + ' 次验证温控修订' });
+  extendBaselineHistory(h);
+  // Independent later baseline saves do not advance a machine's causal steps.
+  // Give the machine its own long history so its adopted basis is off-window.
+  for (let i = 0; i < 15; i++) {
+    const params = clone(current(h, 'machine-01').params);
+    params.find(p => p.id === 'p-speed').value += 1;
+    h.M.save({ fileId: 'f-machine', branchId: 'machine-01', expectedHeadId: branch(h, 'machine-01').headId, params, reason: '机台窗口核对：第 ' + (i + 1) + ' 次现场送料验证' });
   }
   const machine = branch(h, 'machine-01'), params = clone(current(h, machine.id).params);
   const speed = params.find(p => p.id === 'p-speed'); speed.value = Number(speed.value) + 1; speed.mode = 'override';
   const reason = '机台复验后继续采用原基线，仅调整现场送料速度';
   const saved = h.M.save({ fileId: 'f-machine', branchId: machine.id, expectedHeadId: machine.headId, params, reason, links: evidenceLinks });
   const basisId = saved.baseRevisionId; assert(basisId);
-  h.route('#/files/f-machine/roadmap'); await h.change('#roadmap-page-size', 30);
-  const fullPageRows = h.all('[data-roadmap-row]', 'app').length;
-  const fullLaneCount = h.all('[data-action="roadmap-focus"]', 'app').length;
-  assert(h.query('[data-action="roadmap-select"][data-revision="' + saved.id + '"]', 'app'));
+  const destination = roadmapDestination(h, saved.id);
+  h.route('#/files/f-machine/roadmap?revision=' + encodeURIComponent(saved.id));
+  assertLocatedRevision(h, saved.id, destination);
+  const viewport = clone(h.S.roadmap);
   await h.action('roadmap-select', { revision: saved.id });
-  assert.equal(h.S.roadmapSelected, saved.id);
-  assert.equal(h.query('[data-action="roadmap-select"][data-revision="' + saved.id + '"]', 'app').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(clone(h.S.roadmap), viewport, 'Selecting an already visible revision must preserve its viewport');
   await h.change('#roadmap-focus', machine.id);
   assert.equal(h.S.roadmapBranch, machine.id); assert.equal(h.S.roadmapSelected, saved.id);
-  assert(h.query('[data-roadmap-row="' + saved.id + '"]', 'app'));
-  assert(h.query('[data-roadmap-row="' + basisId + '"]', 'app'), 'Machine focus must retain its actually adopted baseline');
-  assert.equal(h.all('[data-roadmap-row="' + branch(h).headId + '"]', 'app').length, 0, 'Unrelated later baseline changes must not appear in the machine projection');
-  assert(h.all('[data-roadmap-row]', 'app').length < fullPageRows, 'Machine focus must compact unrelated history');
-  assert(h.all('[data-action="roadmap-focus"]', 'app').length < fullLaneCount, 'Machine focus must compact unrelated lanes');
+  const focused = roadmapGraph(h);
+  assert(focused.projectedNodes.some(n => n.kind === 'revision' && n.id === saved.id));
+  assert(focused.projectedNodes.some(n => n.id === basisId), 'Machine focus must retain its actually adopted baseline in the projection');
+  assert(!focused.projectedNodes.some(n => n.id === branch(h).headId), 'Unrelated later baseline changes must not appear in the machine projection');
+  const focusedDestination = roadmapDestination(h, saved.id);
+  await h.action('roadmap-select', { revision: saved.id });
+  assertLocatedRevision(h, saved.id, focusedDestination);
   await h.action('roadmap-detail', { revision: saved.id });
   assert(h.query('#drawer').textContent.includes(reason));
   for (const url of evidenceLinks) assert(h.query('a[href="' + url + '"]', 'drawer'));
   assert(h.query('[data-action="roadmap-jump"][data-revision="' + basisId + '"]', 'drawer'));
   await h.action('close-drawer');
   await h.change('#roadmap-focus', 'all');
-  assert.equal(h.S.roadmapBranch, 'all'); assert.equal(h.S.page, 0);
+  assert.equal(h.S.roadmapBranch, 'all');
   assert.equal(h.S.roadmapSelected, saved.id);
-  assert(h.query('[data-roadmap-row="' + branch(h).headId + '"]', 'app'));
+  const currentDestination = roadmapDestination(h, saved.id);
+  await h.action('roadmap-select', { revision: saved.id });
+  assertLocatedRevision(h, saved.id, currentDestination);
   await h.action('roadmap-detail', { revision: saved.id });
   assert(h.query('[data-action="roadmap-jump"][data-revision="' + basisId + '"]', 'drawer'));
-  assert.equal(h.all('[data-roadmap-row="' + basisId + '"]', 'app').length, 0, 'Fixture must place the adopted baseline outside the current page');
+  const oldDestination = roadmapDestination(h, basisId);
+  assert.notEqual(oldDestination.columnPage, h.S.roadmap.columnPage, 'Fixture must place the adopted baseline outside the selected revision window');
+  assert(!roadmapGraph(h).visibleNodes.some(n => n.id === basisId));
   await h.action('roadmap-jump', { revision: basisId });
-  assert.equal(h.S.roadmapSelected, basisId); assert.equal(h.S.roadmapBranch, 'all'); assert(h.S.page > 0);
-  assert(h.query('[data-roadmap-row="' + basisId + '"]', 'app'));
+  assertLocatedRevision(h, basisId, oldDestination);
   assert.equal(h.query('#drawer').open, false);
+  assert.equal(record(file(h), saved.id).baseRevisionId, basisId);
+  assert(h.query('[data-action="roadmap-compare"][data-revision="' + basisId + '"]', 'app'));
+  await h.action('roadmap-compare', { revision: basisId });
+  assert.equal(h.S.route[2], 'compare'); assert.equal(h.S.compareB, basisId);
+  assert.equal(h.S.compareA, record(file(h), basisId).parentIds[0] || basisId);
+  h.route('#/files/f-machine/roadmap?revision=' + encodeURIComponent(basisId));
+  await h.action('roadmap-detail', { revision: basisId });
+  assert(h.query('[data-action="roadmap-export"][data-revision="' + basisId + '"]', 'drawer'));
+  await h.action('roadmap-export', { revision: basisId });
+  assert.equal(h.S.route[2], 'export'); assert.equal(h.S.revisionId, basisId);
+  assert.equal(h.S.branchId, record(file(h), basisId).branchId);
+  h.route('#/files/f-machine/roadmap?revision=' + encodeURIComponent(basisId));
   assert(h.query('[data-action="roadmap-parameters"][data-revision="' + basisId + '"]', 'app'));
   await h.action('roadmap-parameters', { revision: basisId });
   assert.equal(h.S.route[2], 'parameters'); assert.equal(h.S.revisionId, basisId);
   assert.equal(h.S.branchId, record(file(h), basisId).branchId);
   assert.equal(h.query('[data-action="edit"]', 'app').disabled, true);
+});
+
+check('roadmap family expansion and three-level navigation preserve real records and expose the frozen axes', async h => {
+  h.route('#/files/f-machine/roadmap');
+  const before = snapshot(h), overview = roadmapGraph(h);
+  assert.equal(overview.families.length, 2);
+  assert(overview.visibleNodes.length > 0);
+  assert(overview.visibleNodes.every(n => n.kind === 'family-summary'));
+  assert.equal(h.all('[data-action="roadmap-select"]', 'app').length, 0);
+  const familyButton = h.query('[data-action="roadmap-open-family"]', 'app'), familyId = familyButton.dataset.family;
+  const toggleSelector = '[data-action="roadmap-toggle-family"][data-family="' + familyId + '"]';
+  assert.equal(h.query(toggleSelector, 'app').getAttribute('aria-expanded'), 'false');
+  await h.action('roadmap-toggle-family', { family: familyId });
+  assert.equal(h.S.roadmap.level, 'families'); assert(h.S.roadmap.expandedFamilies.includes(familyId));
+  assert.equal(h.query(toggleSelector, 'app').getAttribute('aria-expanded'), 'true');
+  assert(roadmapGraph(h).visibleNodes.some(n => n.kind === 'release-summary'));
+  assert.equal(snapshot(h), before, 'Expanding presentation groups must not alter saved history');
+  await h.action('roadmap-toggle-family', { family: familyId });
+  assert(!h.S.roadmap.expandedFamilies.includes(familyId));
+  assert.equal(h.query(toggleSelector, 'app').getAttribute('aria-expanded'), 'false');
+  await h.action('roadmap-open-family', { family: familyId });
+  assert.equal(h.S.roadmap.level, 'releases'); assert.equal(h.S.roadmap.familyId, familyId);
+  assert(roadmapGraph(h).visibleNodes.every(n => n.kind === 'release-summary'));
+  const releaseButton = h.query('[data-action="roadmap-open-release"]', 'app'), releaseId = releaseButton.dataset.release;
+  await h.action('roadmap-open-release', { family: familyId, release: releaseId });
+  assert.equal(h.S.roadmap.level, 'history'); assert.equal(h.S.roadmap.releaseId, releaseId);
+  assert(roadmapGraph(h).visibleNodes.every(n => n.kind === 'revision'));
+  const scroll = h.query('[data-roadmap-scroll]', 'app');
+  for (const selector of ['[data-roadmap-corner]', '[data-roadmap-family]', '[data-roadmap-release]', '[data-roadmap-lane-header]']) {
+    const node = h.query(selector, 'app');
+    assert.equal(node.closest('[data-roadmap-scroll]'), scroll, 'Frozen axes and records must share the declared scrolling region');
+  }
+  assert(h.query('[data-action="roadmap-open-family"][data-family="' + familyId + '"]', 'app'));
+  await h.action('roadmap-open-family', { family: familyId }); assert.equal(h.S.roadmap.level, 'releases');
+  assert(h.query('[data-action="roadmap-overview"]', 'app'));
+  await h.action('roadmap-overview'); assert.equal(h.S.roadmap.level, 'families');
+  assert.equal(h.all('[data-action="roadmap-parameters"]', 'app').length, 0);
+  assert.equal(snapshot(h), before);
+});
+
+check('roadmap history and machine windows move independently and locate an off-window machine', async h => {
+  extendBaselineHistory(h);
+  const added = [];
+  for (let i = 0; i < 25; i++) {
+    const id = 'qa-window-asset-' + i;
+    h.M.state.assets.push({ id, name: 'QA-WINDOW-' + String(i).padStart(2, '0'), model: '69X' });
+    added.push(h.M.fork('f-machine', { machineId: id, fromRevisionId: 'r-b12', reason: '多机台窗口核对：建立第 ' + (i + 1) + ' 台配置' }));
+  }
+  h.route('#/files/f-machine/roadmap?revision=r-b12');
+  await h.change('#roadmap-column-limit', 12); await h.change('#roadmap-lane-limit', 12);
+  const listPage = h.S.page, listLimit = h.S.limit;
+  let graph = roadmapGraph(h); assert(graph.columnPageCount > 1); assert(graph.lanePageCount > 1);
+  assert(graph.visibleLanes.length <= 13, 'The fixed baseline and current machine window must remain bounded');
+  let scroll = h.query('[data-roadmap-scroll]', 'app'); scroll.scrollLeft = 220; scroll.scrollTop = 80;
+  const columnNext = h.query('[data-action="roadmap-column-next"]', 'app'), oldLanePage = h.S.roadmap.lanePage;
+  await h.action('roadmap-column-next', { page: columnNext.dataset.page });
+  assert.equal(h.S.roadmap.columnPage, Number(columnNext.dataset.page)); assert.equal(h.S.roadmap.lanePage, oldLanePage);
+  scroll = h.query('[data-roadmap-scroll]', 'app'); assert.equal(scroll.scrollLeft, 0); assert.equal(scroll.scrollTop, 80);
+  scroll.scrollLeft = 140; scroll.scrollTop = 240;
+  const laneNext = h.query('[data-action="roadmap-lane-next"]', 'app'), oldColumnPage = h.S.roadmap.columnPage;
+  await h.action('roadmap-lane-next', { page: laneNext.dataset.page });
+  assert.equal(h.S.roadmap.lanePage, Number(laneNext.dataset.page)); assert.equal(h.S.roadmap.columnPage, oldColumnPage);
+  scroll = h.query('[data-roadmap-scroll]', 'app'); assert.equal(scroll.scrollLeft, 140); assert.equal(scroll.scrollTop, 0);
+  assert.equal(h.S.page, listPage); assert.equal(h.S.limit, listLimit, 'Roadmap windows must not mutate another view\'s list limits');
+  graph = roadmapGraph(h); assert(graph.visibleLanes.length <= 13);
+  assert(graph.visibleNodes.length <= 12 * 13, 'Rendered history must remain bounded by both windows');
+  h.route('#/files/f-machine/parameters?revision=r-b12');
+  h.route('#/files/f-machine/roadmap?revision=r-b12');
+  assert(h.query('[data-action="roadmap-detail"][data-revision="r-b12"]', 'app'));
+  await h.action('roadmap-detail', { revision: 'r-b12' });
+  const target = added[added.length - 1], expected = roadmapDestination(h, target.headId);
+  assert.equal(expected.branchFilter, 'all'); assert(expected.lanePage > 0);
+  assert(h.query('[data-action="roadmap-jump"][data-revision="' + target.headId + '"]', 'drawer'));
+  await h.action('roadmap-jump', { revision: target.headId });
+  assertLocatedRevision(h, target.headId, expected); assert.equal(h.query('#drawer').open, false);
+  assert.equal(record(file(h), target.headId).baseRevisionId, 'r-b12');
+  const viewport = clone(h.S.roadmap);
+  await h.action('roadmap-select', { revision: target.headId });
+  assert.deepEqual(clone(h.S.roadmap), viewport);
+});
+
+check('roadmap context survives a same-file parameter visit and resets for another file or workspace', async h => {
+  extendBaselineHistory(h);
+  h.route('#/files/f-machine/roadmap');
+  const familyId = h.query('[data-action="roadmap-toggle-family"]', 'app').dataset.family;
+  await h.action('roadmap-toggle-family', { family: familyId });
+  h.route('#/files/f-machine/roadmap?revision=' + encodeURIComponent(branch(h).headId));
+  assert.equal(h.S.roadmap.level, 'history'); assert(h.S.roadmap.expandedFamilies.includes(familyId));
+  const context = clone(h.S.roadmap), selected = h.S.roadmapSelected, focused = h.S.roadmapBranch;
+  const scroll = h.query('[data-roadmap-scroll]', 'app'); scroll.scrollLeft = 320; scroll.scrollTop = 120;
+  assert(h.query('[data-action="roadmap-parameters"][data-revision="' + selected + '"]', 'app'));
+  await h.action('roadmap-parameters', { revision: selected });
+  h.route(h.query('a[href="#/files/f-machine/roadmap"]', 'app').getAttribute('href'));
+  assert.deepEqual(clone(h.S.roadmap), context); assert.equal(h.S.roadmapSelected, selected); assert.equal(h.S.roadmapBranch, focused);
+  const returnedScroll = h.query('[data-roadmap-scroll]', 'app');
+  assert.equal(returnedScroll.scrollLeft, 320); assert.equal(returnedScroll.scrollTop, 120);
+  const other = h.M.state.workspaces.find(w => w.id === h.M.state.workspaceId).files.find(f => f.id !== 'f-machine'); assert(other);
+  h.route('#/files/' + encodeURIComponent(other.id) + '/roadmap'); assertRoadmapReset(h);
+  h.route('#/files/f-machine/roadmap'); assertRoadmapReset(h);
+  await h.action('roadmap-toggle-family', { family: familyId });
+  h.route('#/files/f-machine/roadmap?revision=r-m13');
+  assert.equal(h.S.roadmap.level, 'history');
+  await h.change('#workspace', 'ws-lab'); assertRoadmapReset(h);
+  assert.equal(h.M.state.workspaceId, 'ws-lab');
+  assert.equal(h.all('[data-action="roadmap-parameters"]', 'app').length, 0);
 });
 
 check('file list page selection has a mixed state, persists across pages, and clears explicitly', async h => {
@@ -359,7 +518,7 @@ check('file/machine/parameter/review/source/audit routes render for both roles',
 });
 
 check('visible saved-record names are readable across roadmap, selectors and review pages', async h => {
-  for (const route of ['#/files/f-machine/roadmap', '#/files/f-machine/parameters', '#/files/f-machine/compare', '#/files/f-machine/merge?target=machine-01', '#/files/f-machine/export', '#/review/CR-024']) {
+  for (const route of ['#/files/f-machine/roadmap', '#/files/f-machine/roadmap?revision=r-m13', '#/files/f-machine/parameters', '#/files/f-machine/compare', '#/files/f-machine/merge?target=machine-01', '#/files/f-machine/export', '#/review/CR-024']) {
     h.route(route);
     assert.doesNotMatch(h.query('#app').textContent, /\bB\d+\b|\br\d+\b/, 'Raw storage labels remain visible at ' + route);
   }

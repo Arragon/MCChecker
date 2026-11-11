@@ -158,7 +158,12 @@
     const m12 = changed(b11, { 'p-speed': { value: lab ? 72 : 115, mode: 'override' }, 'p-offset': { value: 0.15, mode: 'pin' } });
     const m13 = changed(m12, { 'p-speed': { value: lab ? 78 : 118 } });
     const make = (id, label, branchId, releaseId, parents, baseId, params, authorId, at, message, sourceId) => revision({ id, label, branchId, releaseId, parentIds: parents, baseRevisionId: baseId, sourceRevisionId: sourceId || null, authorId, at, message, links: id === 'r-b12' && !lab ? ['https://docs.example.invalid/demo/feed-speed'] : [], reviewId: id === 'r-b12' && !lab ? 'CR-025' : null, params }, true);
-    return { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
+    const file = { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
+      releaseFamilies: [{ id: 'family-69x', label: '69X', order: 1 }],
+      releases: [
+        { id: '690', version: '690', familyId: 'family-69x', order: 1 },
+        { id: '691', version: '691', familyId: 'family-69x', order: 2 }
+      ],
       branches: [
         { id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: 'r-b12', machineId: null, baseRevisionId: null, initialRevisionId: null },
         { id: 'base-690', label: '版本基线 · 690', kind: 'baseline', releaseId: '690', headId: 'r-b10', machineId: null, baseRevisionId: null, initialRevisionId: null },
@@ -175,6 +180,29 @@
         make('r-m21', 'r1', 'machine-02', '691', ['r-b11'], 'r-b11', b11, 'wang', '2026-11-01T03:10:00Z', '从 B11 建立 MC-002 配置', 'r-b11'),
         make('r-m22', 'r2', 'machine-02', '691', ['r-m21', 'r-b12'], 'r-b12', changed(b12, { 'p-offset': { value: -0.08, mode: 'pin' } }), 'wang', '2026-11-09T02:00:00Z', '采用 B12 并保留原点校准', 'r-b12')
       ] };
+    if (!lab) {
+      // Explicit demonstration metadata groups releases for navigation only.
+      // It does not infer parentage or replace immutable revision identities.
+      file.releaseFamilies.push({ id: 'family-6ax', label: '6AX', order: 2 });
+      file.releases.push(
+        { id: '6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
+        { id: '6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+      );
+      const links = frozen(['https://docs.example.invalid/demo/software-6a']);
+      const makeDemo = (id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, sourceRevisionId) => revision({ id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, links, sourceRevisionId: sourceRevisionId || null });
+      const b13 = makeDemo('r-b13', 'B13', 'base-6A0', '6A0', ['r-b12'], null, changed(b12, { 'p-timeout': { value: 6500 } }), 'wang', '2026-11-09T06:00:00Z', '演示：核对 6A0 通信等待配置', 'r-b12');
+      const b14 = makeDemo('r-b14', 'B14', 'base-6A1', '6A1', ['r-b13'], null, changed(b13.params, { 'p-accel': { value: 550, max: 2200 } }), 'wang', '2026-11-10T01:00:00Z', '演示：适配 6A1 的加速度范围', 'r-b13');
+      const b15 = makeDemo('r-b15', 'B15', 'base-6A1', '6A1', ['r-b14'], null, changed(b14.params, { 'p-temp': { value: 43 } }), 'lin', '2026-11-10T03:00:00Z', '演示：按验证结果微调温控设定', null);
+      const m31 = makeDemo('r-roadmap-m31', 'r1', 'machine-roadmap-03', '6A0', ['r-b13'], 'r-b13', changed(b13.params, { 'p-offset': { value: 0.12, mode: 'pin' } }), 'lin', '2026-11-09T08:00:00Z', '演示：以 6A0 标准建立 MC-003 并完成原点校准', 'r-b13');
+      const m32 = makeDemo('r-roadmap-m32', 'r2', 'machine-roadmap-03', '6A1', ['r-roadmap-m31', 'r-b15'], 'r-b15', changed(b15.params, { 'p-offset': { value: 0.12, mode: 'pin' } }), 'lin', '2026-11-10T04:00:00Z', '演示：MC-003 采用 6A1 并保留现场校准', 'r-b15');
+      file.branches.push(
+        { id: 'base-6A0', label: '版本基线 · 6A0', kind: 'baseline', releaseId: '6A0', headId: b13.id, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: b13.reason, links },
+        { id: 'base-6A1', label: '版本基线 · 6A1', kind: 'baseline', releaseId: '6A1', headId: b15.id, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: b14.reason, links },
+        { id: 'machine-roadmap-03', label: 'MC-003', kind: 'machine', releaseId: '6A1', headId: m32.id, machineId: 'asset-roadmap-03', baseRevisionId: b15.id, initialRevisionId: null, creationReason: m31.reason, links }
+      );
+      file.revisions.push(b13, b14, b15, m31, m32);
+    }
+    return file;
   }
   function smallFile(key, name, description, params, overrides) {
     const baseline = revision({ id: 'r-' + key + '-b1', label: 'B1', branchId: 'base-691', releaseId: '691', parentIds: [], baseRevisionId: null, authorId: 'wang', at: '2026-11-01T01:00:00Z', message: '建立 691 版本基线', params }, true);
@@ -199,7 +227,7 @@
     ], { 'p-gain': { value: 1.015, mode: 'override' } });
     const state = { workspaceId: 'ws-prod', actorId: 'lin', actors: [{ id: 'lin', name: '林工', role: 'admin' }, { id: 'wang', name: '王工', role: 'admin' }, { id: 'guest', name: '访客', role: 'guest' }],
       workspaces: [{ id: 'ws-prod', name: '生产配置', files: [machine, process, coeff] }, { id: 'ws-lab', name: '验证环境', files: [machineFile(true)] }],
-      assets: [{ id: 'asset-01', name: 'MC-001', model: '69X' }, { id: 'asset-02', name: 'MC-002', model: '69X' }], reviews: [], events: [] };
+      assets: [{ id: 'asset-01', name: 'MC-001', model: '69X' }, { id: 'asset-02', name: 'MC-002', model: '69X' }, { id: 'asset-roadmap-03', name: 'MC-003', model: 'MX-820' }], reviews: [], events: [] };
     function workspace() { const w = state.workspaces.find(w => w.id === state.workspaceId); if (!w) fail('WORKSPACE_NOT_FOUND', '当前工作区不存在'); return w; }
     function actor() { const a = state.actors.find(a => a.id === state.actorId); if (!a) fail('FORBIDDEN', '当前操作人无效'); return a; }
     function admin() { if (actor().role !== 'admin') fail('FORBIDDEN', '需要管理员执行此操作'); }

@@ -24,13 +24,64 @@ test('reconstructed seed preserves file, branch and stable parameter identities'
   assert.equal(head(m).params.length, 18);
   assert.equal(m.getFile('f-process').revisions[0].params.length, 6);
   assert.equal(m.getFile('f-coeff').revisions[0].params.length, 6);
-  assert.deepEqual(f.branches.map(b => b.id), ['base-691', 'base-690', 'machine-01', 'machine-02']);
+  assert.deepEqual(f.branches.map(b => b.id), ['base-691', 'base-690', 'machine-01', 'machine-02', 'base-6A0', 'base-6A1', 'machine-roadmap-03']);
   assert.equal(branch(m, 'machine-01').headId, 'r-m13');
   assert.equal(branch(m, 'machine-01').baseRevisionId, 'r-b11');
   assert.equal(revision(f, 'r-m11').releaseId, '690');
   assert.equal(revision(f, 'r-b10').params.find(p => p.id === 'p-speed').name, '传送速度');
   assert.equal(revision(f, 'r-b11').params.find(p => p.id === 'p-speed').name, '送料速度');
   assert(Object.isFrozen(head(m)) && Object.isFrozen(head(m).params[0]));
+});
+
+test('release families group real saved records without replacing identity, parentage or historical evidence', () => {
+  const m = Model.create(), f = file(m), lab = m.state.workspaces.find(w => w.id === 'ws-lab').files.find(f => f.id === 'f-machine');
+  assert.deepEqual(f.releaseFamilies, [{ id: 'family-69x', label: '69X', order: 1 }, { id: 'family-6ax', label: '6AX', order: 2 }]);
+  assert.deepEqual(f.releases, [
+    { id: '690', version: '690', familyId: 'family-69x', order: 1 },
+    { id: '691', version: '691', familyId: 'family-69x', order: 2 },
+    { id: '6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
+    { id: '6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+  ]);
+  const releases = new Set(f.releases.map(r => r.id)), records = new Map(f.revisions.map(r => [r.id, r]));
+  assert.equal(records.size, f.revisions.length);
+  for (const r of f.revisions) {
+    assert(releases.has(r.releaseId), 'every saved record belongs to an explicit software release');
+    assert(f.branches.some(b => b.id === r.branchId));
+    r.parentIds.forEach(id => assert(records.has(id), 'parent reference resolves to a real saved record'));
+    if (r.baseRevisionId) assert(records.has(r.baseRevisionId));
+    if (r.sourceRevisionId) assert(records.has(r.sourceRevisionId));
+  }
+  const expected = [
+    ['r-b13', '6A0', ['r-b12']], ['r-b14', '6A1', ['r-b13']], ['r-b15', '6A1', ['r-b14']],
+    ['r-roadmap-m31', '6A0', ['r-b13']], ['r-roadmap-m32', '6A1', ['r-roadmap-m31', 'r-b15']]
+  ];
+  for (const [id, releaseId, parents] of expected) {
+    const r = records.get(id);
+    assert.equal(r.releaseId, releaseId); assert.deepEqual(r.parentIds, parents);
+    assert(r.reason.startsWith('演示：')); assert.equal(r.message, r.reason);
+    assert.deepEqual(r.links, ['https://docs.example.invalid/demo/software-6a']);
+    assert(Object.isFrozen(r) && Object.isFrozen(r.links) && Object.isFrozen(r.params[0]));
+    assert.deepEqual(r.params.map(p => p.id), records.get('r-b12').params.map(p => p.id));
+    assert(m.diff(records.get(parents[0]).params, r.params).length > 0);
+  }
+  assert.equal(f.initialRevisionId, null);
+  ['base-6A0', 'base-6A1', 'machine-roadmap-03'].forEach(id => assert.equal(branch(m, id).initialRevisionId, null));
+  const asset = m.state.assets.find(a => a.id === 'asset-roadmap-03');
+  assert.equal(asset.name, 'MC-003'); assert.equal(asset.model, 'MX-820');
+  assert(!f.releaseFamilies.some(family => family.label === asset.model), 'machine model does not determine software family');
+  assert.equal(branch(m, 'machine-roadmap-03').headId, 'r-roadmap-m32');
+  assert.equal(branch(m, 'machine-roadmap-03').baseRevisionId, 'r-b15');
+  assert.equal(records.get('r-roadmap-m31').releaseId, '6A0', 'historical release is not the branch current release');
+  const offset = m.blame(f.id, 'r-roadmap-m32', 'p-offset').find(row => row.field === 'value');
+  assert.equal(offset.originRevisionId, 'r-roadmap-m31'); assert.equal(offset.authorId, 'lin');
+  assert.equal(branch(m).headId, 'r-b12'); assert.equal(branch(m, 'base-690').headId, 'r-b10');
+  assert.equal(branch(m, 'machine-02').headId, 'r-m22');
+  assert.equal(records.get('r-b12').reason, null); assert.equal(records.get('r-b12').reviewId, 'CR-025');
+  assert.equal(m.state.reviews.find(r => r.id === 'CR-024').baseRevisionId, 'r-b12');
+  assert.equal(m.state.reviews.find(r => r.id === 'CR-025').mergedRevisionId, 'r-b12');
+  assert.deepEqual(lab.releases.map(r => r.id), ['690', '691']);
+  assert.equal(lab.revisions.length, 8); assert.equal(lab.branches.length, 4);
+  assert(!lab.branches.some(b => b.machineId === asset.id));
 });
 
 test('pressure unit history converts both value and bound exactly', () => {

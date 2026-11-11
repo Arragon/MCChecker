@@ -1,225 +1,297 @@
 'use strict';
-// Pure data/HTML verification. This is not browser, layout or accessibility QA.
+// Pure projection, HTML and provenance checks. No browser/layout/a11y claims.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const Model = require('./prototype/model.js');
-const Roadmap = require('./prototype/roadmap.js');
-const tests = [];
-const test = (name, run) => tests.push([name, run]);
+const R = require('./prototype/roadmap.js');
+const tests = [], test = (name, run) => tests.push([name, run]);
 const copy = value => JSON.parse(JSON.stringify(value));
-const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const file = model => model.getFile('f-machine');
-const revision = (f, id) => f.revisions.find(r => r.id === id);
+const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const file = m => m.getFile('f-machine');
+const rev = (f, id) => f.revisions.find(r => r.id === id);
 const branch = (f, id) => f.branches.find(b => b.id === id);
-const edgeSet = edges => edges.map(e => JSON.stringify([e.childId, e.parentId])).sort();
+const edgeIds = list => list.map(e => JSON.stringify([e.childId, e.parentId])).sort();
 const expectedEdges = f => f.revisions.flatMap(r => [...new Set(r.parentIds)].map(id => JSON.stringify([r.id, id]))).sort();
+const family = (g, label) => g.families.find(f => f.label === label);
+const plot = (m, options) => R.layout(file(m), Object.assign({ assets: m.state.assets }, options));
 
-test('seed records have unique positions, one baseline lane and separate machine lanes', () => {
-  const f = file(Model.create()), before = JSON.stringify(f), graph = Roadmap.layout(f);
-  assert.equal(graph.nodes.length, f.revisions.length);
-  assert.equal(new Set(graph.nodes.map(n => n.id)).size, graph.nodes.length);
-  assert.equal(new Set(graph.nodes.map(n => n.row)).size, graph.nodes.length);
-  assert.equal(graph.lanes.length, 3);
-  for (const node of graph.nodes) {
-    const b = branch(f, node.branchId);
-    assert.equal(node.laneId, b.kind === 'baseline' ? 'baseline' : b.id);
-    assert.equal(node.y, node.row * graph.rowHeight + graph.rowHeight / 2);
-    assert.equal(node.isHead, f.branches.some(b => b.headId === node.id));
+function fixture(saves = 40, machines = 25) {
+  const f = { id: 'window-fixture', name: 'Window.json', branches: [{ id: 'base', kind: 'baseline', label: '版本基线', releaseId: '691', headId: 'b' + saves }], revisions: [] };
+  for (let i = 1; i <= saves; i++) f.revisions.push({ id: 'b' + i, label: 'B' + i, branchId: 'base', releaseId: '691', parentIds: i === 1 ? [] : ['b' + (i - 1)], at: '2026-11-01T00:00:00Z', reason: '基线参数核对 ' + i, authorName: '林工' });
+  for (let i = 0; i < machines; i++) {
+    f.branches.push({ id: 'machine-' + i, kind: 'machine', label: 'MC-' + i, releaseId: '691', headId: 'm' + i, machineId: 'asset-' + i });
+    f.revisions.push({ id: 'm' + i, label: 'r1', branchId: 'machine-' + i, releaseId: '691', parentIds: ['b' + saves], baseRevisionId: 'b' + saves, at: '2026-11-02T00:00:00Z', reason: '机台确认采用基线 ' + i, authorName: '王工' });
   }
-  assert.equal(graph.nodes.find(n => n.id === 'r-b10').laneIndex, 0);
-  assert.equal(graph.nodes.find(n => n.id === 'r-b12').laneIndex, 0);
-  assert.notEqual(graph.nodes.find(n => n.id === 'r-m13').laneIndex, graph.nodes.find(n => n.id === 'r-m22').laneIndex);
-  assert.equal(JSON.stringify(f), before, 'layout must not mutate snapshots or branch metadata');
+  return f;
+}
+function assertActualProjection(graph, f) {
+  const actual = new Set(expectedEdges(f));
+  for (const edge of graph.visibleEdges) {
+    assert(edge.originalEdgeIds.length > 0);
+    assert.equal(edge.count, edge.originalEdgeIds.length);
+    for (const id of edge.originalEdgeIds) assert(actual.has(id), 'projected connectors only aggregate actual parent edges');
+    assert(!/NaN|undefined|Infinity/.test(edge.path));
+  }
+}
+
+test('canonical identities, topology and adopted bases remain immutable across views', () => {
+  const m = Model.create(), f = file(m), before = JSON.stringify(f), g = plot(m);
+  assert.equal(g.nodes.length, f.revisions.length);
+  assert.equal(new Set(g.nodes.map(n => n.id)).size, f.revisions.length);
+  assert.deepEqual(edgeIds(g.edges), expectedEdges(f));
+  assert(g.nodes.filter(n => branch(f, n.branchId).kind === 'baseline').every(n => n.laneId === 'baseline'));
+  assert.equal(g.lanes.find(l => l.id === 'machine-roadmap-03').model, 'MX-820');
+  assert(g.nodes.find(n => n.id === 'r-b11').adoptedBy.some(b => b.branchId === 'machine-01'));
+  for (const e of g.edges) assert(g.nodes.find(n => n.id === e.childId).row < g.nodes.find(n => n.id === e.parentId).row);
+  const skewed = copy(f); rev(skewed, 'r-b10').at = '2099-01-01T00:00:00Z';
+  const skew = R.layout(skewed);
+  for (const e of skew.edges) assert(skew.nodes.find(n => n.id === e.childId).row < skew.nodes.find(n => n.id === e.parentId).row);
+  for (const release of g.releases) {
+    const detail = plot(m, { level: 'history', releaseId: release.id });
+    const occupied = detail.visibleNodes.map(n => JSON.stringify([n.laneId, n.columnId]));
+    assert.equal(new Set(occupied).size, occupied.length, 'history cards cannot overlap in a cell');
+    assert.deepEqual(edgeIds(detail.edges), expectedEdges(f));
+  }
+  assert.equal(JSON.stringify(f), before, 'neither projection nor grouping mutates model snapshots');
 });
 
-test('every connector is an actual parent edge and child order survives clock skew', () => {
-  const f = copy(file(Model.create()));
-  revision(f, 'r-b10').at = '2099-01-01T00:00:00Z';
-  const graph = Roadmap.layout(f), nodes = new Map(graph.nodes.map(n => [n.id, n]));
-  assert.deepEqual(edgeSet(graph.edges), expectedEdges(f));
-  for (const edge of graph.edges) assert(nodes.get(edge.childId).row < nodes.get(edge.parentId).row);
-  assert.equal(graph.edges.find(e => e.childId === 'r-m11' && e.parentId === 'r-b10').kind, 'fork');
-  assert.equal(graph.edges.find(e => e.childId === 'r-m12' && e.parentId === 'r-b11').kind, 'adopt');
-  assert.equal(graph.edges.filter(e => e.childId === 'r-m12').length, 2);
-  assert.equal(graph.edges.filter(e => e.childId === 'r-m13').length, 1);
+test('families expand in place, releases drill down, and history contains only real records', () => {
+  const m = Model.create(), f = file(m), overview = plot(m);
+  assert.equal(overview.level, 'families');
+  assert.deepEqual(overview.columns.map(c => c.label), ['69X', '6AX']);
+  assert(overview.visibleNodes.every(n => n.kind === 'family-summary'));
+  assert.equal(overview.visibleNodes.flatMap(n => n.revisionIds).length, f.revisions.length);
+  const id = family(overview, '69X').id;
+  const expanded = plot(m, { expandedFamilies: [id] });
+  assert.deepEqual(expanded.columns.map(c => [c.kind, c.label]), [['release', '690'], ['release', '691'], ['family', '6AX']]);
+  const releases = plot(m, { level: 'releases', familyId: id });
+  assert.deepEqual(releases.columns.map(c => c.releaseId), ['690', '691']);
+  assert(releases.visibleNodes.every(n => n.kind === 'release-summary'));
+  const history = plot(m, { level: 'history', familyId: id, releaseId: '691' });
+  assert(history.visibleNodes.every(n => n.kind === 'revision' && rev(f, n.id)?.releaseId === '691'));
+  assert.equal(history.visibleNodes.length, f.revisions.filter(r => r.releaseId === '691').length);
+  const overviewHTML = R.render({ file: f, assets: m.state.assets });
+  assert(!overviewHTML.includes('data-roadmap-record='));
+  assert(!overviewHTML.includes('data-action="roadmap-select"'));
+  assert(overviewHTML.includes('data-action="roadmap-open-family"'));
+  assert(overviewHTML.includes('aria-expanded="false"'));
+  const historyHTML = R.render({ file: f, level: 'history', releaseId: '691', selectedRevisionId: 'r-m13' });
+  assert(historyHTML.includes('data-roadmap-record="r-m13"'));
+  assert(historyHTML.includes('aria-pressed="true"'));
+  assert(!/第\d+步/.test(historyHTML), 'layout indices must not masquerade as saved versions');
+  assert(historyHTML.includes('软件 691 · 保存记录'));
+  assert(!/>B\d+</.test(historyHTML) && !/>r\d+</.test(historyHTML));
+  assert.deepEqual(plot(m).columns, overview.columns, 'returning to overview restores the same version grouping');
 });
 
-test('software initialization stays on the main lane without inventing root ancestry', () => {
-  const m = Model.create(), f = file(m), before = f.revisions.length;
-  const pending = m.addRelease(f.id, { releaseId: '692', message: '登记等待配置输入的软件版本' });
-  let graph = Roadmap.layout(f);
-  assert.equal(graph.nodes.length, before);
-  assert(graph.pendingBranches.some(b => b.id === pending.id));
-  const first = m.save({ fileId: f.id, branchId: pending.id, expectedHeadId: null, params: revision(f, 'r-b12').params, message: '手工确认此软件版本的首份配置' });
-  graph = Roadmap.layout(f);
-  assert.deepEqual(first.parentIds, []);
-  assert.equal(graph.nodes.find(n => n.id === first.id).laneId, 'baseline');
-  assert(!graph.edges.some(e => e.childId === first.id), 'same lane does not imply an invented parent');
-  assert(!graph.pendingBranches.some(b => b.id === pending.id));
-  const derived = m.addRelease(f.id, { releaseId: '693', sourceRevisionId: 'r-b12', message: '采用已验证记录初始化软件版本' });
-  graph = Roadmap.layout(f);
-  const initial = revision(f, derived.initialRevisionId);
-  assert.equal(initial.kind, 'initial');
-  assert.equal(graph.nodes.find(n => n.id === initial.id).laneId, 'baseline');
-  assert(graph.edges.some(e => e.childId === initial.id && e.parentId === 'r-b12'));
-  assert(graph.edges.some(e => e.childId === derived.headId && e.parentId === initial.id && e.kind === 'initialize'));
-  assert.deepEqual(edgeSet(graph.edges), expectedEdges(f));
-  const fresh = m.initialize({ name: 'RoadmapFixture.json', format: 'json', releaseId: '700', params: revision(f, 'r-b12').params.slice(0, 1), message: '建立明确输入的测试文件' });
-  const freshGraph = Roadmap.layout(fresh);
-  assert.equal(freshGraph.nodes.length, 2); assert.equal(freshGraph.edges.length, 1);
-  assert.equal(Roadmap.formatRevision(fresh, fresh.initialRevisionId), '初始文件 · 软件 700');
+test('summary connectors preserve exact edge sets and hide only internal real edges', () => {
+  const m = Model.create(), f = file(m), overview = plot(m);
+  assertActualProjection(overview, f);
+  const represented = [...overview.hiddenInternalEdgeIds, ...overview.visibleEdges.flatMap(e => e.originalEdgeIds)].sort();
+  assert.deepEqual(represented, expectedEdges(f));
+  assert.equal(new Set(represented).size, represented.length);
+  assert(overview.hiddenInternalEdgeIds.length > 0);
+  const expanded = plot(m, { expandedFamilies: overview.families.map(f => f.id) });
+  assertActualProjection(expanded, f);
+  const again = [...expanded.hiddenInternalEdgeIds, ...expanded.visibleEdges.flatMap(e => e.originalEdgeIds)].sort();
+  assert.deepEqual(again, expectedEdges(f));
+  for (const edge of expanded.visibleEdges) assert.notEqual(edge.childNodeId, edge.parentNodeId);
 });
 
-test('fork and historical restore preserve explicit provenance and current adoption', () => {
-  const m = Model.create(), f = file(m);
-  m.state.assets.push({ id: 'asset-03', name: 'MC-003', model: '69X' });
-  const fork = m.fork(f.id, { machineId: 'asset-03', fromRevisionId: 'r-b10', message: '机台三采用经过确认的软件配置' });
-  const old = revision(f, 'r-m11');
-  const saved = m.save({ fileId: f.id, branchId: 'machine-01', expectedHeadId: 'r-m13', params: old.params, sourceRevisionId: old.id, restoreRevisionId: old.id, message: '恢复机台历史软件和配置以排查回归' });
-  // A mutable branch's stale metadata must never replace the saved record's basis.
-  branch(f, 'machine-01').baseRevisionId = 'r-b12';
-  const graph = Roadmap.layout(f), b10 = graph.nodes.find(n => n.id === 'r-b10'), b12 = graph.nodes.find(n => n.id === 'r-b12');
-  assert.equal(graph.lanes.length, 4);
-  assert(graph.edges.some(e => e.childId === fork.headId && e.parentId === 'r-b10' && e.kind === 'fork'));
-  assert(graph.edges.some(e => e.childId === saved.id && e.parentId === old.id && e.kind === 'restore'));
-  assert.equal(graph.nodes.find(n => n.id === saved.id).revision.releaseId, '690');
-  assert(b10.adoptedBy.some(b => b.branchId === 'machine-01'));
-  assert(!b12.adoptedBy.some(b => b.branchId === 'machine-01'));
-  assert.deepEqual(edgeSet(graph.edges), expectedEdges(f));
-  const html = Roadmap.render({ file: f });
+test('restoring an older machine release creates a truthful backward version connector', () => {
+  const m = Model.create(), f = file(m), target = rev(f, 'r-m11');
+  const saved = m.save({ fileId: f.id, branchId: 'machine-01', expectedHeadId: 'r-m13', params: target.params, sourceRevisionId: target.id, restoreRevisionId: target.id, reason: '恢复旧软件配置以验证当前回归问题' });
+  branch(f, 'machine-01').baseRevisionId = 'r-b12'; // Deliberately stale mutable metadata.
+  const g = plot(m, { level: 'releases', familyId: 'family-69x' });
+  assert(g.nodes.find(n => n.id === 'r-b10').adoptedBy.some(b => b.branchId === 'machine-01'));
+  assert(!g.nodes.find(n => n.id === 'r-b12').adoptedBy.some(b => b.branchId === 'machine-01'));
+  const back = g.visibleEdges.find(e => e.originalEdges.some(e => e.childId === saved.id && e.parentId === 'r-m13'));
+  assert(back);
+  const child = g.projectedNodes.find(n => n.id === back.childNodeId), parent = g.projectedNodes.find(n => n.id === back.parentNodeId);
+  assert(child.columnIndex < parent.columnIndex, 'a restore into 690 can connect left from 691');
+  assertActualProjection(g, f);
+  const located = R.locateRevision(f, saved.id, { assets: m.state.assets });
+  assert.equal(located.releaseId, '690');
+  const html = R.render(Object.assign({ file: f, assets: m.state.assets }, located));
   assert(html.includes('采用 690 · 第10次保存'));
 });
 
-test('all long-history records remain reachable with bounded 30/50/100-row pages', () => {
-  const f = { id: 'large', branches: [{ id: 'base', kind: 'baseline', label: '基线', releaseId: '691', headId: 'base-300' }], revisions: [] };
-  for (let i = 0; i <= 300; i++) f.revisions.push({ id: 'base-' + i, label: 'B' + (i + 1), branchId: 'base', releaseId: '691', parentIds: i ? ['base-' + (i - 1)] : [], at: '2026-11-01T00:00:00Z', message: '分页保存 ' + i });
-  for (let i = 0; i < 80; i++) {
-    f.branches.push({ id: 'machine-' + i, kind: 'machine', label: 'MC-' + String(i).padStart(3, '0'), releaseId: '691', headId: 'machine-record-' + i });
-    f.revisions.push({ id: 'machine-record-' + i, label: 'r1', branchId: 'machine-' + i, releaseId: '691', parentIds: ['base-200'], baseRevisionId: 'base-200', at: '2026-11-02T00:00:00Z', message: '从已确认基线建立机台' });
-  }
-  for (const pageSize of [30, 50, 100]) {
-    const first = Roadmap.layout(f, { pageSize }), visited = [];
-    assert.equal(first.lanes.length, 81); assert(first.graphWidth > 3000);
-    for (let page = 0; page < first.pageCount; page++) {
-      const graph = Roadmap.layout(f, { page, pageSize }), ids = new Set(graph.visibleNodes.map(n => n.id));
-      assert(graph.visibleNodes.length <= pageSize);
-      visited.push(...ids);
-      for (const edge of graph.visibleEdges) {
-        assert(ids.has(edge.childId) || ids.has(edge.parentId));
-        assert(expectedEdges(f).includes(edge.id));
-        assert(!/NaN|Infinity/.test(edge.path));
-      }
-      const html = Roadmap.render({ file: f, page, pageSize });
-      assert.equal((html.match(/data-roadmap-row=/g) || []).length, graph.visibleNodes.length);
-      assert(html.includes('id="roadmap-page-size"'));
+test('pending releases keep empty headers and initialization never invents saved ancestry', () => {
+  const m = Model.create(), f = file(m), count = f.revisions.length;
+  const pending = m.addRelease(f.id, { releaseId: '692', reason: '登记待确认初始配置的软件版本' });
+  const empty = plot(m, { level: 'history', releaseId: '692' });
+  assert.equal(empty.nodes.length, count);
+  assert.equal(empty.visibleNodes.length, 0);
+  assert.equal(empty.columns.length, 1);
+  assert.equal(empty.columns[0].step, null);
+  const html = R.render({ file: f, level: 'history', releaseId: '692' });
+  assert(html.includes('data-roadmap-release="692"') && html.includes('设置初始配置'));
+  assert(!html.includes('data-roadmap-record='));
+  const saved = m.save({ fileId: f.id, branchId: pending.id, expectedHeadId: null, params: rev(f, 'r-b12').params, reason: '手工核对并建立此软件版本首份配置' });
+  assert.deepEqual(saved.parentIds, []);
+  assert(!plot(m).edges.some(e => e.childId === saved.id));
+  const derived = m.addRelease(f.id, { releaseId: '693', sourceRevisionId: 'r-b12', reason: '从已确认记录显式建立新软件配置' });
+  const g = plot(m, { level: 'history', releaseId: '693' });
+  assert(g.nodes.some(n => n.id === derived.initialRevisionId && n.kind === 'initial'));
+  assert(g.edges.some(e => e.childId === derived.initialRevisionId && e.parentId === 'r-b12'));
+  assert(g.edges.some(e => e.childId === derived.headId && e.parentId === derived.initialRevisionId));
+  assert.equal(R.formatRevision(f, derived.initialRevisionId), '初始文件 · 软件 693');
+  assertActualProjection(g, f);
+});
+
+test('both window axes are bounded, baseline repeats, and all saved records remain reachable', () => {
+  const f = fixture(), first = R.layout(f, { level: 'history', releaseId: '691' }), seen = new Set(), seenMachines = new Set();
+  assert(first.columnPageCount > 1 && first.lanePageCount > 1);
+  for (let columnPage = 0; columnPage < first.columnPageCount; columnPage++) {
+    for (let lanePage = 0; lanePage < first.lanePageCount; lanePage++) {
+      const g = R.layout(f, { level: 'history', releaseId: '691', columnPage, lanePage });
+      assert.equal(g.visibleLanes[0].id, 'baseline');
+      assert(g.visibleColumns.length <= 12 && g.visibleLanes.length <= 13);
+      assert(g.visibleNodes.length <= 12 * 13);
+      g.visibleLanes.filter(l => l.kind === 'machine').forEach(l => seenMachines.add(l.id));
+      g.visibleNodes.forEach(n => seen.add(n.id));
+      assertActualProjection(g, f);
     }
-    assert.equal(visited.length, f.revisions.length);
-    assert.equal(new Set(visited).size, f.revisions.length);
   }
-  assert.equal(Roadmap.layout(f, { pageSize: 100000 }).visibleNodes.length, 100);
-  assert.equal(Roadmap.layout(f, { page: 100000 }).page, Roadmap.layout(f).pageCount - 1);
+  assert.equal(seen.size, f.revisions.length); assert.equal(seenMachines.size, 25);
+  const clamped = R.layout(f, { level: 'history', releaseId: '691', columnLimit: 10000, laneLimit: 10000, columnPage: 10000, lanePage: 10000 });
+  assert.equal(clamped.columnLimit, 30); assert.equal(clamped.laneLimit, 30);
+  assert.equal(clamped.columnPage, clamped.columnPageCount - 1);
+  const html = R.render({ file: f, level: 'history', releaseId: '691' });
+  assert(html.includes('id="roadmap-column-limit"') && html.includes('id="roadmap-lane-limit"'));
+  const long = fixture(3000, 1), last = R.locateRevision(long, 'b3000', {});
+  const window = R.layout(long, last);
+  assert(window.visibleNodes.some(n => n.id === 'b3000'));
+  assert(window.visibleNodes.length <= 12 * 13);
+  const rendered = R.render(Object.assign({ file: long }, last), window);
+  assert.equal((rendered.match(/data-roadmap-record=/g) || []).length, window.visibleNodes.length);
 });
 
-test('query filtering marks omitted endpoints and focus preserves canonical full data', () => {
-  const f = copy(file(Model.create()));
-  for (const r of f.revisions) r.message = ['r-m13', 'r-b10'].includes(r.id) ? 'matching-special' : 'other';
-  const graph = Roadmap.layout(f, { query: 'matching-special' });
-  assert.deepEqual(new Set(graph.visibleNodes.map(n => n.id)), new Set(['r-m13', 'r-b10']));
-  assert(graph.visibleEdges.some(e => e.childId === 'r-m13' && e.parentId === 'r-m12' && e.boundary === 'filtered-parent'));
-  assert(!graph.visibleEdges.some(e => e.childId === 'r-m13' && e.parentId === 'r-b10'), 'never create a shortcut through hidden records');
-  assert(Roadmap.render({ file: f, query: 'matching-special' }).includes('来源在筛选范围外'));
-  const focused = Roadmap.layout(f, { branchFilter: 'machine-01' });
-  assert.equal(focused.nodes.length, f.revisions.length);
-  assert.equal(focused.visibleNodes.length, 5);
-  for (const id of ['r-m11', 'r-m12', 'r-m13', 'r-b10', 'r-b11']) assert(focused.nodes.find(n => n.id === id).focused);
-  assert(!focused.nodes.find(n => n.id === 'r-m22').focused);
-  assert(!focused.nodes.find(n => n.id === 'r-b12').focused);
-  assert(focused.visibleEdges.every(e => edgeSet(focused.edges).includes(e.id)));
+test('locate opens exact history context and resolves both pages without changing all scope', () => {
+  const f = fixture(), target = R.locateRevision(f, 'm24', { level: 'families', query: 'hidden-query', branchFilter: 'all' });
+  assert.equal(target.level, 'history'); assert.equal(target.releaseId, '691');
+  assert.equal(target.branchFilter, 'all'); assert.equal(target.query, '');
+  assert(target.columnPage > 0 && target.lanePage > 0);
+  assert(R.layout(f, target).visibleNodes.some(n => n.kind === 'revision' && n.id === 'm24'));
+  const outside = R.locateRevision(f, 'm24', { branchFilter: 'machine-0' });
+  assert.equal(outside.branchFilter, 'all');
+  const inside = R.locateRevision(f, 'm24', { branchFilter: 'machine-24' });
+  assert.equal(inside.branchFilter, 'machine-24');
+  assert.equal(inside.lanePage, 0);
+  const m = Model.create();
+  for (const r of file(m).revisions) {
+    const found = R.locateRevision(file(m), r.id, { assets: m.state.assets, columnLimit: 2, laneLimit: 1 });
+    assert(R.layout(file(m), found).visibleNodes.some(n => n.id === r.id));
+  }
+  assert.throws(() => R.locateRevision(f, 'missing', {}), e => e.code === 'REVISION_NOT_FOUND');
 });
 
-test('machine focus compresses 81 tracks to the selected machine and actual source tracks', () => {
-  const f = { id: 'focus-space', branches: [{ id: 'base', kind: 'baseline', label: '基线', releaseId: '691', headId: 'b2' }], revisions: [
-    { id: 'b1', branchId: 'base', label: 'B1', releaseId: '691', parentIds: [], at: '2026-11-01T00:00:00Z' },
-    { id: 'b2', branchId: 'base', label: 'B2', releaseId: '691', parentIds: ['b1'], at: '2026-11-02T00:00:00Z' }
-  ] };
-  for (let i = 0; i < 80; i++) {
-    f.branches.push({ id: 'm' + i, label: 'MC-' + i, kind: 'machine', releaseId: '691', headId: 'mr' + i });
-    f.revisions.push({ id: 'mr' + i, branchId: 'm' + i, label: 'r1', releaseId: '691', parentIds: ['b1'], baseRevisionId: 'b1', at: '2026-11-03T00:00:00Z' });
-  }
-  f.revisions.push({ id: 'merge79', branchId: 'm79', label: 'r2', releaseId: '691', parentIds: ['mr79', 'mr12'], baseRevisionId: 'b1', at: '2026-11-04T00:00:00Z', message: 'selected-merge' });
-  branch(f, 'm79').headId = 'merge79';
-  const all = Roadmap.layout(f), focused = Roadmap.layout(f, { branchFilter: 'm79' });
-  assert.equal(all.visibleLanes.length, 81);
-  assert.equal(focused.lanes.length, 81, 'canonical lanes remain available');
-  assert.equal(focused.nodes.length, all.nodes.length);
-  assert.deepEqual(edgeSet(focused.edges), edgeSet(all.edges));
-  assert.deepEqual(focused.visibleLanes.map(l => l.id), ['baseline', 'm12', 'm79']);
-  assert.deepEqual(focused.visibleLanes.map(l => l.index), [0, 1, 2]);
-  assert.deepEqual(focused.visibleLanes.map(l => l.x), [28, 76, 124]);
-  assert(focused.graphWidth < 200 && all.graphWidth > 3800);
-  assert.deepEqual(new Set(focused.matchingIds), new Set(['merge79', 'mr79', 'mr12', 'b1']));
-  assert.equal(focused.total, 4); assert.equal(focused.scopeTotal, 4);
-  assert.equal(focused.visibleNodes.find(n => n.id === 'merge79').x, 124);
-  assert(focused.visibleEdges.every(e => focused.matchingIds.includes(e.childId)));
-  assert.deepEqual(edgeSet(focused.visibleEdges), expectedEdges({ revisions: f.revisions.filter(r => focused.matchingIds.includes(r.id)) }));
-  const baseline = Roadmap.layout(f, { branchFilter: 'baseline' });
-  assert.deepEqual(baseline.visibleLanes.map(l => l.id), ['baseline']);
-  assert.deepEqual(baseline.matchingIds, ['b2', 'b1']);
-  const searched = Roadmap.layout(f, { branchFilter: 'm79', query: 'selected-merge' });
+test('machine focus keeps only its true ancestry rows; query omits endpoints without shortcut edges', () => {
+  const f = fixture(2, 80);
+  f.revisions.push({ id: 'merge79', label: 'r2', branchId: 'machine-79', releaseId: '691', parentIds: ['m79', 'm12'], baseRevisionId: 'b2', reason: 'selected-target', at: '2026-11-03T00:00:00Z' });
+  branch(f, 'machine-79').headId = 'merge79';
+  const all = R.layout(f), focused = R.layout(f, { branchFilter: 'machine-79' });
+  assert.equal(all.lanes.length, 81); assert.equal(focused.lanes.length, 81);
+  assert.deepEqual(focused.projectedLanes.map(l => l.id), ['baseline', 'machine-12', 'machine-79']);
+  assert.equal(focused.visibleLanes.length, 3);
+  assert.deepEqual(edgeIds(focused.edges), expectedEdges(f));
+  const searched = R.layout(f, { level: 'history', releaseId: '691', branchFilter: 'machine-79', query: 'selected-target' });
   assert.deepEqual(searched.matchingIds, ['merge79']);
-  assert.equal(searched.visibleEdges.length, 2);
-  assert(searched.visibleEdges.every(e => e.boundary === 'filtered-parent' && !/NaN|undefined/.test(e.path)));
-  const page = Roadmap.layout(f, { branchFilter: 'm79', page: 1, pageSize: 2 });
-  assert.deepEqual(page.visibleNodes.map(n => n.id), focused.matchingIds.slice(2, 4));
-  const html = Roadmap.render({ file: f, branchFilter: 'm79' });
-  assert.equal((html.match(/class="rm-lane-label/g) || []).length, 3);
-  assert.equal((html.match(/data-roadmap-row=/g) || []).length, 4);
+  assert.equal(searched.visibleNodes.length, 1);
+  assert.equal(searched.visibleEdges.flatMap(e => e.originalEdgeIds).length, 2);
+  assert(searched.visibleEdges.every(e => e.boundary === 'filtered-parent'));
+  assert(!searched.visibleEdges.some(e => e.originalEdges.some(e => e.childId === 'merge79' && e.parentId === 'b2')));
+  assertActualProjection(searched, f);
+  const baseline = R.layout(f, { branchFilter: 'baseline' });
+  assert.deepEqual(baseline.projectedLanes.map(l => l.id), ['baseline']);
 });
 
-test('every visible record provides selectable and detail buttons with readable names', () => {
-  const f = file(Model.create()), graph = Roadmap.layout(f), html = Roadmap.render({ file: f, selectedRevisionId: 'r-m13', actorLabel: id => ({ lin: '林工', wang: '王工' }[id] || '访客') });
-  assert.equal(Roadmap.formatRevision(f, 'r-b12'), '版本基线 · 软件 691 · 第12次保存');
-  assert.equal(Roadmap.formatRevision(f, 'r-m13'), 'MC-001 · 软件 691 · 第3次保存');
-  assert.equal(Roadmap.formatRevision(f, 'r-m13', { compact: true }), '第3次保存');
-  for (const node of graph.visibleNodes) {
-    assert(html.includes('data-action="roadmap-select" data-revision="' + node.id + '"'));
-    assert(html.includes('data-action="roadmap-detail" data-revision="' + node.id + '"'));
-    assert(html.includes(escape(node.title)));
-  }
-  assert(html.includes('aria-pressed="true"'));
-  assert(html.includes('当前配置')); assert(html.includes('正在采用')); assert(html.includes('林工'));
-  assert(!/>B\d+</.test(html) && !/>r\d+</.test(html), 'technical revision labels are not primary text');
-  assert(!html.includes('真实保存关系') && !html.includes('较新记录在上'));
+test('explicit version IDs and display labels take precedence; unknown families are not guessed', () => {
+  const f = {
+    id: 'metadata', releaseFamilies: [{ id: 'release-family', label: '69X', order: 2 }, { id: 'other-family', label: '6AX', order: 1 }],
+    releases: [{ id: 'rel-uuid', version: '691', familyId: 'release-family', order: 9 }, { id: 'another-id', version: '6A0', label: '6A0 正式版', familyId: 'other-family', order: 1 }],
+    branches: [{ id: 'b', label: '基线', kind: 'baseline', headId: 'r', releaseId: 'rel-uuid' }, { id: 'm', label: 'MC-X', kind: 'machine', headId: 'mr', releaseId: 'rel-uuid', machineId: 'asset' }],
+    revisions: [{ id: 'r', branchId: 'b', releaseId: 'rel-uuid', label: 'B7', parentIds: [] }, { id: 'mr', branchId: 'm', releaseId: 'rel-uuid', label: 'r1', parentIds: ['r'], baseRevisionId: 'r' }]
+  };
+  const g = R.layout(f, { assets: [{ id: 'asset', name: 'MC-X', model: 'MX-820' }] });
+  assert.deepEqual(g.families.map(f => f.label), ['6AX', '69X']);
+  assert.equal(R.formatRevision(f, 'r'), '版本基线 · 软件 691 · 第7次保存');
+  assert.equal(R.formatRevision(f, 'mr'), 'MC-X · 软件 691 · 第1次保存');
+  assert(!g.nodes.find(n => n.id === 'r').title.includes('rel-uuid'));
+  assert.equal(g.lanes.find(l => l.id === 'm').model, 'MX-820');
+  const html = R.render({ file: f, level: 'history', releaseId: 'rel-uuid' });
+  assert(html.includes('软件 691 · 保存记录'));
+  assert(!html.includes('软件 rel-uuid'));
+  const fallback = fixture(1, 0);
+  fallback.branches[0].releaseId = 'ZZ-2026'; fallback.revisions[0].releaseId = 'ZZ-2026';
+  assert.equal(R.layout(fallback).families[0].label, '未分组');
+  fallback.branches[0].releaseId = '6A9'; fallback.revisions[0].releaseId = '6A9';
+  assert.equal(R.layout(fallback).families[0].label, '6AX');
 });
 
-test('untrusted names, IDs, reasons, actor names and search text are escaped', () => {
-  const f = copy(file(Model.create())), payload = '\"><img src=x onerror=alert(1)><script>bad()</script>&\'';
-  f.id = 'file' + payload;
-  branch(f, 'machine-01').label = 'MC' + payload;
-  revision(f, 'r-m13').reason = payload;
-  revision(f, 'r-m13').id = 'id' + payload;
-  branch(f, 'machine-01').headId = 'id' + payload;
-  const html = Roadmap.render({ file: f, actorLabel: () => payload, getReason: r => r.reason || r.message });
+test('HTML escapes metadata and identifiers and only safe related URLs become links', () => {
+  const m = Model.create(), f = copy(file(m)), payload = String.fromCharCode(34) + '<img src=x onerror=alert(1)><script>bad()</script>&' + String.fromCharCode(39);
+  f.id += payload;
+  branch(f, 'machine-01').label = 'MC-' + payload;
+  const r = rev(f, 'r-m13'), old = r.id; r.id += payload; branch(f, 'machine-01').headId = r.id;
+  f.revisions.forEach(x => { x.parentIds = x.parentIds.map(id => id === old ? r.id : id); });
+  r.reason = payload; r.links = [{ url: 'javascript:alert(1)', label: 'unsafe' }, { url: 'https://user:pass@example.test', label: 'credential' }, { url: 'https://example.test/\nunsafe', label: 'control' }, { url: 'https://example.test/task?a=1&b=2', label: payload }, 'https://example.test/second'];
+  const opts = Object.assign({ file: f, actorLabel: () => payload }, R.locateRevision(f, r.id));
+  const html = R.render(opts);
   assert(!/<script\b|<img\b/i.test(html));
-  assert(html.includes(escape(payload)));
-  assert(html.includes('data-revision="' + escape('id' + payload) + '"'));
-  assert(html.includes('data-roadmap-file="' + escape(f.id) + '"'));
-  const queryHtml = Roadmap.render({ file: f, query: payload });
-  assert(queryHtml.includes('value="' + escape(payload) + '"'));
-  assert(!/<script\b|<img\b/i.test(queryHtml));
+  assert(html.includes(esc(payload)));
+  assert(html.includes('data-roadmap-record="' + esc(r.id) + '"'));
+  assert(!html.includes('href="javascript:') && !html.includes('href="https://user:'));
+  assert(html.includes('href="https://example.test/task?a=1&amp;b=2"'));
+  assert(html.includes('+1 链接'));
+  const summary = R.render({ file: f, actorLabel: () => payload });
+  assert(!/<script\b|<img\b/i.test(summary)); assert(summary.includes(esc(payload)));
+  const query = R.render({ file: f, query: payload });
+  assert(query.includes('value="' + esc(payload) + '"'));
 });
 
-test('missing ancestry is explicit; malformed or cyclic identities fail without fake nodes', () => {
-  const f = copy(file(Model.create())); revision(f, 'r-b10').parentIds = ['not-loaded'];
-  const graph = Roadmap.layout(f);
-  assert.equal(graph.nodes.length, f.revisions.length);
-  assert.equal(graph.unknownParents.length, 1);
-  assert(graph.visibleEdges.some(e => e.parentId === 'not-loaded' && e.boundary === 'missing-parent'));
-  assert(Roadmap.render({ file: f }).includes('来源记录未载入'));
-  const cycle = copy(file(Model.create())); revision(cycle, 'r-b10').parentIds = ['r-b12'];
-  assert.throws(() => Roadmap.layout(cycle), e => e.code === 'INVALID_DAG');
-  assert(Roadmap.render({ file: cycle }).includes('保存关系需要核对'));
+test('legacy descriptions remain visibly distinct from explicit change reasons', () => {
+  const f = copy(file(Model.create())), old = rev(f, 'r-m13');
+  old.reason = null; old.message = '旧系统保存说明';
+  let html = R.render({ file: f, level: 'history', releaseId: '691', getReason: r => r.reason || r.message || '' });
+  assert(html.includes('原因未记录 · 历史说明：旧系统保存说明'));
+  old.reason = '已确认的新修改原因';
+  html = R.render({ file: f, level: 'history', releaseId: '691' });
+  assert(html.includes('已确认的新修改原因'));
+  assert(!html.includes('原因未记录 · 历史说明：已确认的新修改原因'));
+});
+
+test('unknown ancestry and malformed DAGs remain explicit without phantom records', () => {
+  const f = copy(file(Model.create())); rev(f, 'r-b10').parentIds = ['not-loaded'];
+  const g = R.layout(f, { level: 'history', releaseId: '690' });
+  assert.equal(g.nodes.length, f.revisions.length);
+  assert(g.visibleEdges.some(e => e.boundary === 'missing-parent'));
+  assert(R.render({ file: f, level: 'history', releaseId: '690' }).includes('部分来源未载入'));
+  const cycle = copy(file(Model.create())); rev(cycle, 'r-b10').parentIds = ['r-b12'];
+  assert.throws(() => R.layout(cycle), e => e.code === 'INVALID_DAG');
+  assert(R.render({ file: cycle }).includes('保存关系需要核对'));
   const duplicate = copy(file(Model.create())); duplicate.revisions.push(copy(duplicate.revisions[0]));
-  assert.throws(() => Roadmap.layout(duplicate), e => e.code === 'DUPLICATE_REVISION');
+  assert.throws(() => R.layout(duplicate), e => e.code === 'DUPLICATE_REVISION');
+  const invalid = copy(file(Model.create())); invalid.revisions[0].parentIds = null;
+  assert.throws(() => R.layout(invalid), e => e.code === 'INVALID_PARENTS');
+  assert(R.render({ file: { id: 'empty', branches: [], revisions: [] } }).includes('还没有保存记录'));
+  assert(R.render({ file: f, query: 'no-matching-saved-record' }).includes('没有匹配的保存记录'));
+});
+
+test('render accepts its prepared graph and emits one shared matrix with semantic header rows', () => {
+  const m = Model.create(), opts = { file: file(m), assets: m.state.assets, expandedFamilies: ['family-69x'] }, graph = R.layout(opts.file, opts);
+  assert.equal(R.render(opts, graph), R.render(opts));
+  const html = R.render(opts, graph);
+  assert.equal((html.match(/data-roadmap-scroll/g) || []).length, 1);
+  assert(html.includes('data-roadmap-corner role="columnheader" aria-colindex="1" aria-rowspan="2"'));
+  assert.equal((html.match(/class="rm-axis-row" role="row"/g) || []).length, 2);
+  assert(html.includes('aria-controls=') && html.includes('aria-expanded="true"'));
+  assert(html.includes('data-roadmap-lane-header='));
+  assert(!html.includes('id="roadmap-column-limit"') && !html.includes('id="roadmap-lane-limit"'), 'small views retain range summaries without unnecessary pagination controls');
+  const css = fs.readFileSync(require.resolve('./prototype/roadmap.css'), 'utf8');
+  assert(css.includes('scroll-padding-left:176px') && css.includes('scroll-padding-top:88px'));
+  assert(css.includes('.rm-axis{position:sticky;top:0') && css.includes('.rm-lane-head{position:sticky;left:0'));
+  // These are static hooks, not proof of scrolling, overlap, focus or visual quality.
 });
 
 let failed = 0;
@@ -227,5 +299,5 @@ for (const [name, run] of tests) {
   try { run(); console.log('PASS ' + name); }
   catch (error) { failed++; console.error('FAIL ' + name + '\n' + error.stack); }
 }
-console.log(`${tests.length - failed}/${tests.length} roadmap data/HTML checks passed (not browser QA)`);
+console.log((tests.length - failed) + '/' + tests.length + ' roadmap data/HTML checks passed (not browser QA)');
 if (failed) process.exitCode = 1;

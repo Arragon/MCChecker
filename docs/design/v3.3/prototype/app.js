@@ -33,7 +33,8 @@ const draftKey=(fileId,branchId)=>M.state.workspaceId+'/'+fileId+'/'+branchId;
 const recordTitle=(file,r)=>r?MCPrototypeRoadmap.formatRevision(file,r):'尚未保存';
 const recordShort=(file,r)=>r?MCPrototypeRoadmap.formatRevision(file,r,{compact:true}):'尚未保存';
 const recordDescription=r=>r?.reason||String(r?.message||'').replace(/\bB(\d+)\b/g,'基线第 $1 次保存').replace(/\br(\d+)\b/g,'机台第 $1 次保存');
-Object.assign(S,{roadmapSelected:null,roadmapBranch:'all',selectionScope:null,tracePickScope:null,sourceWriteMeta:null});
+const newRoadmapState=()=>({level:'families',familyId:null,releaseId:null,expandedFamilies:[],columnPage:0,columnLimit:12,lanePage:0,laneLimit:12});
+Object.assign(S,{roadmapSelected:null,roadmapBranch:'all',roadmap:newRoadmapState(),roadmapScroll:{},roadmapLocate:null,selectionScope:null,tracePickScope:null,sourceWriteMeta:null});
 function modificationFields(prefix,meta){
   const reason=meta?.reason??meta?.message??'',raw=meta?.linksText??(meta?.links||[]).join('\n');
   const reasonId=prefix==='save'?'save-message':prefix+'-reason';
@@ -103,22 +104,76 @@ function branchControls(file){const b=branch(file),r=current(file),edit=S.edit?.
 function paramInput(p){if(p.type==='boolean')return '<select data-edit-value="'+e(p.id)+'" aria-label="'+e(p.name)+' 值"><option value="true" '+(p.value===true?'selected':'')+'>true</option><option value="false" '+(p.value===false?'selected':'')+'>false</option></select>';return '<input '+(p.type==='number'?'inputmode="decimal"':'')+' data-edit-value="'+e(p.id)+'" aria-label="'+e(p.name)+' 值" value="'+e(p.value)+'">';}
 function parameterPage(file){const b=branch(file),r=current(file),edit=S.edit&&S.edit.fileId===file.id&&S.edit.branchId===b.id?S.edit:null;const params=edit?.params||r?.params||[],base=reference(file,b,r,edit),baseMap=new Map((base?.params||[]).map(p=>[p.id,p])),modified=new Set(edit?M.diff(rev(file,edit.headId)?.params||[],params).map(x=>x.paramId):[]),q=S.search.toLowerCase();const list=params.filter(p=>(p.name+' '+p.path+' '+val(p.value)).toLowerCase().includes(q)&&(S.category==='all'||p.path.split('/')[1]===S.category)&&(S.filter!=='different'||val(p.value)!==val(baseMap.get(p.id)?.value))&&(S.filter!=='modified'||modified.has(p.id)));const cats=[...new Set(params.map(p=>p.path.split('/')[1]))];const actions=edit?'':link('比较',contextUrl(file,'compare',r),'compare')+link('导出',contextUrl(file,'export',r),'download')+btn(S.drafts[draftKey(file.id,b.id)]?'继续草稿':'编辑参数','edit','edit','primary',admin()&&!S.revisionId&&r?'':'disabled');const visible=pageRows(list),selectHead=selectionHeader('params',list,visible);const rows=visible.map(p=>{const origin=S.blame&&r?.params.some(x=>x.id===p.id)?M.blame(file.id,r.id,p.id).find(x=>x.field==='value'):null;return '<tr><td class="check-cell"><input type="checkbox" data-select-param="'+e(p.id)+'" aria-label="选择 '+e(p.name)+'" '+(S.selected.has(p.id)?'checked':'')+'></td><td class="param-name"><button class="link-button name" data-action="parameter-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono" title="'+e(p.path)+'">'+e(p.path)+'</div></td><td class="number muted">'+e(val(baseMap.get(p.id)?.value))+'</td><td class="number '+(modified.has(p.id)?'changed':'')+'">'+(edit?paramInput(p):e(val(p.value)))+'</td><td class="small muted">'+e(p.unit||'—')+'</td><td>'+(edit&&b.kind==='machine'?'<select data-edit-mode="'+e(p.id)+'" aria-label="'+e(p.name)+' 取值方式">'+['inherit','override','pin'].map(key=>'<option value="'+key+'" '+(p.mode===key?'selected':'')+'>'+modes[key]+'</option>').join('')+'</select>':b.kind==='baseline'?'<span class="muted small">基线值</span>':p.mode==='pin'?badge('保持此值','purple'):p.mode==='override'?badge('单独设置','amber'):'<span class="muted small">采用基线</span>')+'</td>'+(S.blame?'<td class="small">'+e(origin?.known?actor(origin.authorId).name:modified.has(p.id)?'尚未保存':'未记录')+'<div class="sub">'+e(origin?.known?recordShort(file,rev(file,origin.originRevisionId)):'—')+'</div></td>':'')+'<td>'+btn('追溯','parameter-detail','history','sm quiet','data-param="'+e(p.id)+'"')+'</td></tr>';}).join('');shell(fileHeading(file,actions)+fileTabs(file,'parameters')+'<section class="panel work-panel">'+branchControls(file)+(S.revisionId?'<div class="info-line">'+ic('history')+'正在查看 '+e(recordTitle(file,r))+' 的完整保存内容。'+btn('返回当前配置','return-current',null,'sm quiet')+btn('恢复此快照','restore',null,'sm quiet','data-revision="'+e(r?.id)+'" '+disabled())+'</div>':'')+'<div class="toolbar">'+search(S.search,'搜索参数名、字段或值')+'<select class="control" id="param-filter" aria-label="参数筛选">'+[['all','全部参数'],['different','与参考不同'],...(edit?[['modified','本次修改']]:[])].map(([key,label])=>'<option value="'+key+'" '+(S.filter===key?'selected':'')+'>'+label+'</option>').join('')+'</select><span class="spacer"></span>'+(S.selected.size?btn('跟踪所选 '+S.selected.size+' 项','trace-selected','params'):btn(S.blame?'隐藏修改人':'显示修改人','toggle-blame','eye','quiet'))+btn('显示','display','settings','quiet')+'</div>'+selectionBar('params',list)+(r||edit?'<div class="workspace"><aside class="directories" aria-label="参数目录" '+(S.directories?'':'hidden')+'><div class="nav-label">参数目录</div><button class="directory '+(S.category==='all'?'active':'')+'" data-action="category" data-category="all">全部参数<span>'+params.length+'</span></button>'+cats.map(cat=>'<button class="directory '+(S.category===cat?'active':'')+'" data-action="category" data-category="'+e(cat)+'">'+e(categories[cat]||cat)+'<span>'+params.filter(p=>p.path.split('/')[1]===cat).length+'</span></button>').join('')+'</aside><div class="table-wrap"><table class="table '+(S.compact?'compact':'')+'"><thead><tr><th class="check-cell">'+selectHead+'</th><th>参数 / 文件字段</th><th>'+e(b.kind==='machine'?'采用的基线':'上一保存记录')+'</th><th>'+ (edit?'修改后的值':'当前值')+'</th><th>单位</th><th>取值方式</th>'+(S.blame?'<th>最后改值</th>':'')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配的参数','调整搜索或筛选条件。',btn('清除筛选','clear-search')):'')+'</div></div>':empty('这个版本尚未初始化','导入本版本的配置文件，核对后建立保存记录。',btn('导入初始文件','initialize-branch','upload','primary',disabled())))+paginate(list.length)+(edit?'<div class="editbar"><span class="edit-summary"><span class="draft-dot"></span><span id="edit-count">'+modified.size+'</span> 项修改 <span class="muted">· 尚未保存到 '+e(b.label)+'</span></span><span class="spacer"></span>'+btn('取消','cancel-edit',null,'quiet')+btn('暂存','stash')+btn('核对保存','review-save','check','primary')+'</div>':'')+'</section>',[{label:'配置文件',url:'#/files'},{label:file.name}],true);}
 function roadmapPage(file){
-  const defaultBranch=file.branches.find(b=>b.kind==='baseline'&&b.headId)||file.branches[0];
-  let selected=rev(file,S.roadmapSelected)||rev(file,S.query.revision)||rev(file,branch(file,S.query.branch)?.headId)||rev(file,defaultBranch?.headId);
-  if(selected)S.roadmapSelected=selected.id;
-  const r=selected,b=r&&branch(file,r.branchId),head=r&&b.headId===r.id;
-  const body=MCPrototypeRoadmap.render({file,selectedRevisionId:r?.id,page:S.page,pageSize:S.limit,branchFilter:S.roadmapBranch||'all',query:S.search,actorLabel:id=>actor(id).name,getReason:recordDescription});
-  const selection=r?'<div class="roadmap-selection"><div class="roadmap-selection-name"><strong>'+e(recordTitle(file,r))+'</strong>'+badge(head?'当前保存':'历史记录',head?'green':'')+'</div><span class="spacer"></span>'+btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('比较','roadmap-compare','compare',null,'data-revision="'+e(r.id)+'"')+btn('详情','roadmap-detail','info',null,'data-revision="'+e(r.id)+'"')+btn('编辑当前配置','roadmap-edit','edit','primary','data-revision="'+e(r.id)+'" '+disabled())+'</div>':'';
+  const opts=roadmapOptions(file);let graph;
+  try{graph=MCPrototypeRoadmap.layout(file,opts);}catch(_){/* The isolated view renders its recoverable error state. */}
+  if(graph)Object.assign(S.roadmap,{level:graph.level,familyId:graph.familyId,releaseId:graph.releaseId,columnPage:graph.columnPage,lanePage:graph.lanePage});
+  const selected=rev(file,S.roadmapSelected),visible=graph?.visibleNodes.some(n=>n.kind==='revision'&&n.id===selected?.id);
+  const r=visible?selected:null,b=r&&branch(file,r.branchId),head=r&&b.headId===r.id;
+  const body=MCPrototypeRoadmap.render(opts,graph);
+  const selection=r?'<div class="roadmap-selection"><div class="roadmap-selection-name"><strong>'+e(recordTitle(file,r))+'</strong>'+badge(head?'当前保存':'历史记录',head?'green':'')+'</div><span class="spacer"></span>'+btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('比较','roadmap-compare','compare',null,'data-revision="'+e(r.id)+'"')+btn('详情','roadmap-detail','info',null,'data-revision="'+e(r.id)+'"')+btn('导出','roadmap-export','download',null,'data-revision="'+e(r.id)+'"')+(head&&r.kind!=='initial'?btn('编辑当前配置','roadmap-edit','edit','primary','data-revision="'+e(r.id)+'" '+disabled()):r.kind!=='initial'?btn('以此创建草稿','restore','history',null,'data-revision="'+e(r.id)+'" '+disabled()):'')+'</div>':'';
   shell(fileHeading(file,btn('新建软件版本','new-release','plus',null,disabled())+btn('添加机台','fork','machine',null,disabled()))+fileTabs(file,'roadmap')+'<section class="panel work-panel roadmap-panel">'+body+selection+'</section>',[{label:'配置文件',url:'#/files'},{label:file.name}],true);
+  const page=document.querySelector('.page');if(page)page.className+=' roadmap-page';
+  restoreRoadmapScroll();
+}
+function roadmapOptions(file){
+  return Object.assign({},S.roadmap,{file:file||f(),assets:M.state.assets,branchFilter:S.roadmapBranch||'all',query:S.search,selectedRevisionId:S.roadmapSelected,actorLabel:id=>actor(id).name,getReason:recordDescription});
+}
+function roadmapScrollKey(){
+  const v=S.roadmap;
+  return JSON.stringify([M.state.workspaceId,S.fileId,v.level,v.familyId,v.releaseId,v.expandedFamilies.slice().sort(),v.columnPage,v.columnLimit,v.lanePage,v.laneLimit,S.roadmapBranch,S.search]);
+}
+function rememberRoadmapScroll(){
+  const scroll=document.querySelector('.rm-scroll'),key=scroll?.dataset.roadmapScrollKey;
+  if(key){let context;try{context=JSON.parse(key);}catch(_){return;}if(context[0]!==M.state.workspaceId||context[1]!==S.fileId)return;S.roadmapScroll[key]={left:scroll.scrollLeft||0,top:scroll.scrollTop||0};const keys=Object.keys(S.roadmapScroll);if(keys.length>40)delete S.roadmapScroll[keys[0]];}
+}
+function restoreRoadmapScroll(){
+  const scroll=document.querySelector('.rm-scroll');if(!scroll)return;
+  const key=roadmapScrollKey(),position=S.roadmapScroll[key];scroll.dataset.roadmapScrollKey=key;
+  if(position){scroll.scrollLeft=position.left;scroll.scrollTop=position.top;}
+  if(S.roadmapLocate){const id=S.roadmapLocate;S.roadmapLocate=null;revealRoadmapRecord(id);}
+}
+function revealRoadmapRecord(id){
+  const card=Array.from(document.querySelectorAll('[data-roadmap-record]')).find(node=>node.dataset.roadmapRecord===id);
+  if(!card)return;
+  const trigger=card.matches('[data-action="roadmap-select"]')?card:card.querySelector('[data-action="roadmap-select"]');
+  trigger?.focus({preventScroll:true});card.scrollIntoView({block:'nearest',inline:'nearest'});
+}
+function applyRoadmapLocation(location){
+  for(const key of Object.keys(newRoadmapState()))if(Object.prototype.hasOwnProperty.call(location,key))S.roadmap[key]=location[key];
+  if(location.branchFilter)S.roadmapBranch=location.branchFilter;
+  if(Object.prototype.hasOwnProperty.call(location,'query'))S.search=location.query;
+}
+function roadmapUrl(revisionId){
+  const v=S.roadmap,q=new URLSearchParams({view:v.level});
+  if(v.familyId&&v.level!=='families')q.set('family',v.familyId);
+  if(v.releaseId&&v.level==='history')q.set('release',v.releaseId);
+  if(revisionId)q.set('revision',revisionId);
+  return fileUrl(f(),'roadmap')+'?'+q.toString();
+}
+function openRoadmapLevel(level,familyId,releaseId){
+  rememberRoadmapScroll();Object.assign(S.roadmap,{level,familyId:familyId||null,releaseId:releaseId||null,columnPage:0,lanePage:0});
+  S.search='';S.roadmapLocate=null;go(roadmapUrl());
+}
+function locateRoadmapRecord(id,force){
+  const file=f(),record=rev(file,id);if(!record)throw new Error('保存记录不存在');
+  const graph=MCPrototypeRoadmap.layout(file,roadmapOptions(file));
+  S.roadmapSelected=id;S.roadmapLocate=id;
+  if(force||!graph.visibleNodes.some(node=>node.kind==='revision'&&node.id===id)){
+    applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(file,id,roadmapOptions(file)));go(roadmapUrl(id));
+  }else render();
+}
+function pageRoadmap(axis,page){
+  const scroll=document.querySelector('.rm-scroll'),position={left:scroll?.scrollLeft||0,top:scroll?.scrollTop||0};
+  S.roadmap[axis+'Page']=Math.max(0,Number(page)||0);
+  S.roadmapScroll[roadmapScrollKey()]={left:axis==='column'?0:position.left,top:axis==='lane'?0:position.top};render();
 }
 function revisionDetail(id){
   const file=f(),r=rev(file,id);if(!r)throw new Error('保存记录不存在');const b=branch(file,r.branchId),before=rev(file,r.parentIds[0]),base=rev(file,r.baseRevisionId),currentHead=rev(file,b.headId),adopted=file.branches.filter(x=>x.kind==='machine'&&rev(file,x.headId)?.baseRevisionId===r.id);
   showDrawer(recordTitle(file,r),'<div class="side-stat"><span>配置对象</span><strong>'+e(b.label)+'</strong></div><div class="side-stat"><span>软件版本</span><strong>'+e(r.releaseId)+'</strong></div><div class="side-stat"><span>保存时间 / 人员</span><strong>'+date(r.at)+' · '+e(actor(r.authorId).name)+'</strong></div>'+changeContext(r,true)+(base?'<div class="section-head space-top"><h3>采用的基线</h3></div><button class="link-button" data-action="roadmap-jump" data-revision="'+e(base.id)+'">'+e(recordTitle(file,base))+'</button>':'')+'<div class="section-head space-top"><h3>来源记录</h3></div>'+(r.parentIds.length?'<div class="stack">'+r.parentIds.map(parentId=>{const parent=rev(file,parentId);return parent?'<button class="link-button" data-action="roadmap-jump" data-revision="'+e(parent.id)+'">'+e(recordTitle(file,parent))+'</button>':'<span class="muted">部分来源未记录</span>';}).join('')+'</div>':'<p class="small muted">此记录是已知历史的起点。</p>')+(adopted.length?'<div class="section-head space-top"><h3>当前采用此基线的机台</h3></div><div class="row wrap">'+adopted.map(m=>btn(m.label,'roadmap-jump','machine','sm','data-revision="'+e(m.headId)+'"')).join('')+'</div>':'')+(before?'<div class="section-head space-top"><h3>与上次保存的变化</h3></div>'+pagedDiffTable(M.diff(before.params,r.params),recordShort(file,before),recordShort(file,r)):'')+(r.reviewId?'<div class="space-top">'+link('查看关联评审','#/review/'+encodeURIComponent(r.reviewId),'review')+'</div>':''),btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('导出','roadmap-export','download',null,'data-revision="'+e(r.id)+'"')+(r.kind==='initial'?'':btn('恢复此记录','restore','history',null,'data-revision="'+e(r.id)+'" '+disabled()))+btn('比较','roadmap-compare','compare','primary','data-revision="'+e(r.id)+'"'));
 }
 function focusRoadmap(id){
-  const file=f();S.roadmapBranch=id||'all';S.page=0;
-  const selected=id==='baseline'?file.branches.find(b=>b.kind==='baseline'&&b.headId):file.branches.find(b=>b.id===id);
-  if(selected?.headId)S.roadmapSelected=selected.headId;render();
+  const file=f();if(id&&!['all','baseline'].includes(id)&&!file.branches.some(b=>b.id===id))throw new Error('此配置对象不存在');
+  S.roadmapBranch=id||'all';S.roadmap.columnPage=0;S.roadmap.lanePage=0;render();
 }
 function machinePage(){const selected=S.route[1]&&M.state.assets.find(a=>a.id===S.route[1]);if(S.route[1]&&!selected){shell(empty('未找到机台','返回机台列表选择。',link('机台列表','#/machines')),[{label:'机台'}]);return;}if(selected){const bindings=files().flatMap(file=>file.branches.filter(b=>b.machineId===selected.id).map(b=>({file,b,r:rev(file,b.headId)})));shell(heading(selected.name,'<span>机型 '+e(selected.model||'69X')+'</span><span>·</span>'+bindings.length+' 个配置文件',btn('导出文件集','export-machine','download','primary','data-machine="'+e(selected.id)+'"'))+'<section class="panel work-panel"><div class="info-line">'+ic('info')+'以下为管理系统已保存配置；尚无设备回读证据。</div><div class="table-wrap"><table class="table"><thead><tr><th>配置文件</th><th>软件版本</th><th>机台记录</th><th>采用基线</th><th>与基线差异</th><th>最近保存</th><th></th></tr></thead><tbody>'+pageRows(bindings).map(({file,b,r})=>{const base=rev(file,r?.baseRevisionId);return '<tr><td><a class="name" href="'+fileUrl(file)+'?branch='+e(b.id)+'">'+e(file.name)+'</a><div class="sub">'+e(file.description)+'</div></td><td>'+e(r?.releaseId||b.releaseId)+'</td><td class="mono">'+e(r?recordShort(file,r):'—')+'</td><td class="mono">'+e(base?recordTitle(file,base):'未记录')+'</td><td>'+ (r?M.diff(base?.params||[],r.params).length:0)+' 项</td><td class="muted small">'+date(r?.at)+'</td><td>'+link('打开',fileUrl(file)+'?branch='+e(b.id),'eye','sm quiet')+' '+link('合并更新',fileUrl(file,'merge')+'?target='+e(b.id),'branch','sm')+'</td></tr>';}).join('')+'</tbody></table>'+(!bindings.length?empty('此机台没有关联配置文件','先在配置文件中添加机台配置。',link('查看文件','#/files')):'')+'</div>'+paginate(bindings.length)+'</section>',[{label:'机台',url:'#/machines'},{label:selected.name}],true);return;}const q=S.search.toLowerCase(),list=M.state.assets.filter(a=>files().some(file=>file.branches.some(b=>b.machineId===a.id))&&(a.name+' '+a.model).toLowerCase().includes(q));shell(heading('机台','查看一台机台使用的全部配置文件','')+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索机台编号或机型')+'</div><div class="table-wrap"><table class="table"><thead><tr><th>机台</th><th>机型</th><th>配置文件</th><th>管理状态</th><th>设备回读</th><th></th></tr></thead><tbody>'+pageRows(list).map(a=>'<tr><td><div class="file-cell">'+ic('machine')+'<a class="name" href="#/machines/'+e(a.id)+'">'+e(a.name)+'</a></div></td><td>'+e(a.model||'69X')+'</td><td>'+files().filter(file=>file.branches.some(b=>b.machineId===a.id)).length+' 个</td><td>'+badge('已保存','green')+'</td><td class="muted">未采集</td><td>'+link('查看配置','#/machines/'+e(a.id),'chevron','sm quiet')+'</td></tr>').join('')+'</tbody></table></div>'+paginate(list.length)+'</section>',[{label:'机台'}],true);}
 function tracePage(){const file=f(),all=file.revisions,latest=rev(file,file.branches.find(b=>b.kind==='baseline'&&b.headId)?.headId);if(!S.traceRevs.length)S.traceRevs=all.filter(r=>r.kind!=='initial').slice().sort((a,b)=>new Date(a.at)-new Date(b.at)).slice(-4).map(r=>r.id);const records=S.traceRevs.map(id=>rev(file,id)).filter(Boolean),identities=new Map();all.forEach(r=>r.params.forEach(p=>identities.set(p.id,p)));if(!S.traceIds.size)S.traceIds=new Set(latest?.params.slice(0,3).map(p=>p.id));const items=[...S.traceIds].map(id=>identities.get(id)).filter(Boolean).filter(p=>(p.name+' '+p.path).toLowerCase().includes(S.search.toLowerCase()));const rows=pageRows(items).map(p=>{let before,seen=false;return '<tr><td class="fixed-name"><button class="link-button name" data-action="trace-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono">'+e(p.path)+'</div></td>'+records.map(r=>{const current=r.params.find(x=>x.id===p.id),diff=seen?M.diff(before?[before]:[],current?[current]:[]):[];const changed=diff.length>0;before=current;seen=true;return '<td class="'+(changed?'trace-changed':'')+'">'+(current?'<div class="trace-value">'+e(val(current.value))+' <span class="muted small">'+e(current.unit)+'</span></div><div class="small">'+e(current.name)+'</div><div class="trace-meta">'+e(current.type)+' · '+e(val(current.min))+'–'+e(val(current.max))+'</div>'+(changed?'<div class="space-sm">'+diff.flatMap(x=>x.fields).map(x=>badge(fields[x.field]||x.field)).join(' ')+'</div>':''):'<span class="muted">此记录不存在</span>'+(changed?'<div class="space-sm">'+badge('已移除','amber')+'</div>':''))+'</td>';}).join('')+'</tr>';}).join('');shell(heading('参数变化','更名、属性和值按同一参数身份连续查看',btn('选择参数','choose-parameters','params')+btn('选择记录','trace-versions','history'))+'<section class="panel work-panel"><div class="toolbar"><label class="small">配置文件 <select class="control" id="trace-file">'+options(files(),file.id)+'</select></label>'+search(S.search,'搜索所选参数')+'<span class="spacer"></span><span class="small muted">'+S.traceIds.size+' 个参数 · '+records.length+' 条记录</span></div><div class="table-wrap"><table class="table trace-table"><thead><tr><th class="fixed-name">参数 / 文件字段</th>'+records.map(r=>'<th>'+e(recordShort(file,r))+' · 软件 '+e(r.releaseId)+'<div class="sub">'+e(branch(file,r.branchId).label)+'</div></th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配参数','可从文件参数表搜索、勾选后跟踪。',link('打开参数表',fileUrl(file,'parameters'))):'')+'</div>'+paginate(items.length)+'</section>',[{label:'参数'}],true);}
@@ -158,7 +213,7 @@ function beginEdit(){ensureAdmin();const file=f(),b=branch(file),r=rev(file,b.he
 function validateEdit(){if(!S.edit)throw new Error('没有正在编辑的内容');for(const p of S.edit.params){if(!String(p.name||'').trim())throw new Error('参数名不能为空');if(p.type==='number'&&(p.value===null||p.value===undefined))throw new Error(p.name+'：请输入有效数值');if(p.type==='boolean'&&typeof p.value!=='boolean')throw new Error(p.name+'：请选择 true 或 false');}return S.edit;}
 function reviewEdit(){const edit=validateEdit(),file=f(edit.fileId),b=branch(file,edit.branchId),before=rev(file,edit.headId),changes=M.diff(before?.params||[],edit.params),nextBase=reference(file,b,before,edit),basisChanged=b.kind==='machine'&&nextBase?.id!==before?.baseRevisionId;if(!changes.length&&!basisChanged){toast('没有需要保存的修改');return;}showDialog('核对本次修改','<p>'+e(b.label)+' · '+changes.length+' 项变化，保存会生成新记录。</p>'+(basisChanged?'<div class="notice">采用基线由 '+e(before?.baseRevisionId?recordTitle(file,rev(file,before.baseRevisionId)):'未记录')+' 变更为 '+e(nextBase?recordTitle(file,nextBase):'未记录')+' · 软件 '+e(nextBase?.releaseId||b.releaseId)+'</div>':'')+pagedDiffTable(changes,'保存前','保存后')+(edit.operationDescription?'<div class="notice">'+e(edit.operationDescription)+'</div>':'')+modificationFields('save',edit)+'<p class="help-note">需要他人确认时选择提交评审；普通修改可直接保存。</p>',btn('返回编辑','close-dialog',null,'quiet')+btn('提交评审','submit-review','review')+btn('保存配置','commit-edit','check','primary'),true);}
 function preserveHead(edit){const b=branch(f(edit.fileId),edit.branchId);if(b.headId!==edit.headId){const err=new Error('配置已有新的保存记录，请保留输入并重新核对');err.code='STALE_HEAD';throw err;}}
-function finishEdit(result){const edit=S.edit,file=f(edit.fileId),bid=edit.branchId;let sourcePending=false;if(edit.sourceId&&edit.candidateId){const state=Sources.markApplied(M.state.workspaceId,edit.sourceId,edit.candidateId,result.id);sourcePending=!state.applied;}delete S.drafts[draftKey(file.id,bid)];S.roadmapSelected=result.id;S.edit=null;S.revisionId=null;S.mergePlan=null;S.decisions={};S.branchId=bid;closeDialog();go(fileUrl(file,'parameters')+'?branch='+encodeURIComponent(bid));toast('已保存为 '+recordTitle(file,result)+'。'+(sourcePending?'尚未完全采用的来源内容仍待核对。':'历史记录已保留。'));}
+function finishEdit(result){const edit=S.edit,file=f(edit.fileId),bid=edit.branchId;let sourcePending=false;if(edit.sourceId&&edit.candidateId){const state=Sources.markApplied(M.state.workspaceId,edit.sourceId,edit.candidateId,result.id);sourcePending=!state.applied;}delete S.drafts[draftKey(file.id,bid)];S.roadmapSelected=result.id;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(file,result.id,roadmapOptions(file)));S.roadmapLocate=result.id;S.edit=null;S.revisionId=null;S.mergePlan=null;S.decisions={};S.branchId=bid;closeDialog();go(fileUrl(file,'parameters')+'?branch='+encodeURIComponent(bid));toast('已保存为 '+recordTitle(file,result)+'。'+(sourcePending?'尚未完全采用的来源内容仍待核对。':'历史记录已保留。'));}
 function stash(){if(S.edit)S.drafts[draftKey(S.edit.fileId,S.edit.branchId)]=copy(S.edit);}
 function leaveDialog(callback){S.leaveCallback=callback;showDialog('保留本次修改？','<p>当前编辑尚未保存。暂存后可继续编辑；放弃本次修改不会删除已保存记录。</p>',btn('继续编辑','close-dialog',null,'quiet')+btn('放弃本次修改','discard-leave')+btn('暂存并离开','stash-leave','check','primary'));}
 function staleDialog(){const edit=S.edit,file=f(edit.fileId),old=rev(file,edit.headId),latest=rev(file,branch(file,edit.branchId).headId);const merged=copy(latest.params),changes=M.diff(old?.params||[],edit.params),conflicts=[],equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);for(const change of changes){const original=old?.params.find(p=>p.id===change.paramId),server=latest.params.find(p=>p.id===change.paramId),local=edit.params.find(p=>p.id===change.paramId),at=merged.findIndex(p=>p.id===change.paramId);if(original&&server&&local){for(const field of change.fields){if(!equal(server[field.field],original[field.field])&&!equal(server[field.field],local[field.field]))conflicts.push({paramId:change.paramId,name:change.name,field:field.field,original:original[field.field],server:server[field.field],local:local[field.field]});else merged[at][field.field]=copy(local[field.field]);}}else if(!original&&!server&&local)merged.push(copy(local));else if(original&&server&&!local&&M.diff([original],[server]).length===0)merged.splice(at,1);else if(!server&&!local){}else if(server&&local&&equal(server,local)){}else conflicts.push({paramId:change.paramId,name:change.name,field:'membership',original,server,local});}S.stale={headId:latest.id,params:merged,conflicts};function display(v,field){if(field!=='membership')return fmt(v,field);return v?['name','type','unit','min','max','value','mode'].map(key=>'<div class="field-change"><span class="muted">'+fields[key]+'</span>'+fmt(v[key],key)+'</div>').join(''):'已移除';}showDialog('重新核对最新配置','<p>同一字段的冲突逐项选择，其余独立修改已保留。参数新增或移除需整体确认。</p><div class="table-wrap"><table class="table"><thead><tr><th>参数 / 字段</th><th>编辑前</th><th>最新保存</th><th>本次输入</th><th>采用</th></tr></thead><tbody>'+conflicts.map((c,i)=>'<tr><td>'+e(c.name)+'<div class="sub">'+e(fields[c.field])+'</div></td><td class="diff-detail">'+display(c.original,c.field)+'</td><td class="diff-detail">'+display(c.server,c.field)+'</td><td class="diff-detail">'+display(c.local,c.field)+'</td><td><select data-stale-choice="'+i+'" aria-label="'+e(c.name+' '+fields[c.field])+' 冲突处理"><option value="">请选择</option><option value="server">最新保存</option><option value="local">本次输入</option></select></td></tr>').join('')+'</tbody></table></div>'+(!conflicts.length?'<div class="notice">没有同一字段的冲突，请核对组合后的值和属性。</div>':''),btn('返回编辑','close-dialog')+btn('采用并继续核对','apply-stale','check','primary'),true);}
@@ -216,23 +271,22 @@ async function handleAction(action,el){
     }
     case 'clear-trace-records':document.querySelectorAll('[data-trace-record]').forEach(node=>{node.checked=false;});return;
     case 'roadmap-focus':focusRoadmap(data.branch);return;
-    case 'roadmap-prev':case 'roadmap-next':S.page=Math.max(0,Number(data.page)||0);render();return;
-    case 'roadmap-select':{
-      const file=f(),r=rev(file,data.revision);if(!r)throw new Error('保存记录不存在');
-      const graph=MCPrototypeRoadmap.layout(file,{page:S.page,pageSize:S.limit,query:S.search,branchFilter:S.roadmapBranch});
-      if(!graph.visibleNodes.some(n=>n.id===r.id)){
-        S.search='';let complete=MCPrototypeRoadmap.layout(file,{pageSize:S.limit,branchFilter:S.roadmapBranch});
-        let index=complete.matchingIds.indexOf(r.id);
-        if(index<0){S.roadmapBranch='all';complete=MCPrototypeRoadmap.layout(file,{pageSize:S.limit});index=complete.matchingIds.indexOf(r.id);}
-        S.page=Math.max(0,Math.floor(index/S.limit));
-      }
-      S.roadmapSelected=r.id;render();document.querySelector('[data-action="roadmap-select"][data-revision="'+r.id+'"]')?.focus();return;
+    case 'roadmap-overview':openRoadmapLevel('families');return;
+    case 'roadmap-open-family':openRoadmapLevel('releases',data.family);return;
+    case 'roadmap-open-release':openRoadmapLevel('history',data.family,data.release);return;
+    case 'roadmap-toggle-family':{
+      const expanded=new Set(S.roadmap.expandedFamilies);
+      if(expanded.has(data.family))expanded.delete(data.family);else expanded.add(data.family);
+      S.roadmap.expandedFamilies=[...expanded];S.roadmap.columnPage=0;render();
+      const header=Array.from(document.querySelectorAll('[data-roadmap-family]')).find(node=>node.dataset.roadmapFamily===data.family);
+      header?.scrollIntoView({block:'nearest',inline:'nearest'});return;
     }
+    case 'roadmap-column-prev':case 'roadmap-column-next':pageRoadmap('column',data.page);return;
+    case 'roadmap-lane-prev':case 'roadmap-lane-next':pageRoadmap('lane',data.page);return;
+    case 'roadmap-select':locateRoadmapRecord(data.revision,false);return;
     case 'roadmap-detail':revisionDetail(data.revision||S.roadmapSelected);return;
     case 'roadmap-jump':{
-      const file=f(),r=rev(file,data.revision);if(!r)throw new Error('保存记录不存在');S.roadmapSelected=r.id;S.roadmapBranch='all';S.search='';closeOverlays();
-      if(S.route[2]!=='roadmap')go(fileUrl(file));
-      const graph=MCPrototypeRoadmap.layout(file,{pageSize:S.limit});S.page=Math.max(0,Math.floor(graph.matchingIds.indexOf(r.id)/S.limit));render();return;
+      closeOverlays();locateRoadmapRecord(data.revision,true);return;
     }
     case 'roadmap-parameters':case 'roadmap-export':case 'roadmap-compare':case 'roadmap-edit':{
       const file=f(),r=rev(file,data.revision||S.roadmapSelected);if(!r)throw new Error('请先选择一条保存记录');closeOverlays();
@@ -331,7 +385,7 @@ async function handleAction(action,el){
       openEditDraft(file,b,makeDraft(file,b,r.proposedParams,{headId:r.baseRevisionId,sourceRevisionId:r.sourceRevisionId,restoreRevisionId:r.restoreRevisionId,message:r.reason||r.title,links:copy(r.links||[]),operationDescription:'重新核对 '+r.id+' 的原建议'}));staleDialog();return;
     }
     case 'approve-review':M.approve(data.review);render();toast('评审已通过，可合并到当前配置。');return;
-    case 'merge-review':{maybeFail();const result=M.merge(data.review),review=reviews().find(r=>r.id===data.review);sourceAdoption(result,review.fileId,review.branchId);S.roadmapSelected=result.id;render();toast('已合并为 '+recordTitle(f(review.fileId),result)+'。机台可单独核对采用。');return;}
+    case 'merge-review':{maybeFail();const result=M.merge(data.review),review=reviews().find(r=>r.id===data.review);sourceAdoption(result,review.fileId,review.branchId);S.roadmapSelected=result.id;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(f(review.fileId),result.id,roadmapOptions(f(review.fileId))));S.roadmapLocate=result.id;render();toast('已合并为 '+recordTitle(f(review.fileId),result)+'。机台可单独核对采用。');return;}
     case 'new-release':newReleaseDialog();return;
     case 'create-release':{
       ensureAdmin();const meta=readModification('release');maybeFail();const file=f(),b=M.addRelease(file.id,Object.assign({releaseId:inputValue('release-name').trim(),sourceRevisionId:inputValue('release-source')||undefined},meta));closeDialog();go(fileUrl(file,b.headId?'roadmap':'parameters')+'?branch='+encodeURIComponent(b.id));return;
@@ -426,7 +480,7 @@ async function handleAction(action,el){
 let searchTimer=null;
 function handleInput(target){
   if(target.id==='roadmap-search'){
-    const value=target.value,hash=location.hash,wid=M.state.workspaceId;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(hash!==location.hash||wid!==M.state.workspaceId)return;S.search=value;S.page=0;render();const next=document.getElementById('roadmap-search');next?.focus();if(next?.setSelectionRange)try{next.setSelectionRange(value.length,value.length);}catch(_){}},120);return;
+    const value=target.value,hash=location.hash,wid=M.state.workspaceId;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(hash!==location.hash||wid!==M.state.workspaceId)return;S.search=value;S.roadmap.columnPage=0;S.roadmap.lanePage=0;render();const next=document.getElementById('roadmap-search');next?.focus();if(next?.setSelectionRange)try{next.setSelectionRange(value.length,value.length);}catch(_){}},120);return;
   }
   if(target.dataset.search){
     const value=target.value,kind=target.dataset.search,hash=location.hash,wid=M.state.workspaceId;
@@ -489,14 +543,15 @@ async function handleChange(target){
       const id=target.value;if(!M.state.workspaces.some(w=>w.id===id))throw new Error('工作区不存在');
       guardedChange(()=>{
         S.sourceSeq++;S.uploadSeq++;Sources.invalidate('source-form');M.state.workspaceId=id;
-        Object.assign(S,{fileId:files()[0].id,branchId:files()[0].branches[0].id,revisionId:null,compareA:null,compareB:null,external:null,mergePlan:null,decisions:{},sourceDraft:null,sourcePreview:null,sourceBusy:false,init:null,traceIds:new Set(),traceRevs:[],selected:new Set(),candidate:null,bundle:null,search:'',page:0,roadmapSelected:null,roadmapBranch:'all',selectionScope:null,tracePickScope:null});
+        Object.assign(S,{fileId:files()[0].id,branchId:files()[0].branches[0].id,revisionId:null,compareA:null,compareB:null,external:null,mergePlan:null,decisions:{},sourceDraft:null,sourcePreview:null,sourceBusy:false,init:null,traceIds:new Set(),traceRevs:[],selected:new Set(),candidate:null,bundle:null,search:'',page:0,roadmapSelected:null,roadmapBranch:'all',roadmap:newRoadmapState(),roadmapScroll:{},roadmapLocate:null,selectionScope:null,tracePickScope:null});
         closeOverlays();go('#/files');toast('已切换到 '+ws().name+'。');
       });return;
     }
     case 'branch':{const id=target.value;guardedChange(()=>go(fileUrl(f(),'parameters')+'?branch='+encodeURIComponent(id)));return;}
     case 'revision':{const id=target.value;guardedChange(()=>go(fileUrl(f(),'parameters')+'?branch='+encodeURIComponent(S.branchId)+(id?'&revision='+encodeURIComponent(id):'')));return;}
     case 'page-limit':S.limit=Number(target.value);S.page=0;render();return;
-    case 'roadmap-page-size':S.limit=Number(target.value);S.page=0;render();return;
+    case 'roadmap-column-limit':S.roadmap.columnLimit=Math.max(1,Math.min(30,Number(target.value)||12));S.roadmap.columnPage=0;render();return;
+    case 'roadmap-lane-limit':S.roadmap.laneLimit=Math.max(1,Math.min(30,Number(target.value)||12));S.roadmap.lanePage=0;render();return;
     case 'roadmap-focus':focusRoadmap(target.value);return;
     case 'param-filter':S.filter=target.value;S.page=0;render();return;
     case 'trace-file':{
@@ -530,6 +585,7 @@ async function handleChange(target){
   }
 }
 function render(){
+  rememberRoadmapScroll();
   S.renderError=null;
   S.selectionScope=null;
   try{
@@ -568,7 +624,7 @@ function navigate(){
     if(route[0]==='files'&&route[1]){S.fileId=newFile;S.lastHash=hash;render();return;}
     S.fileId=files()[0].id;
   }else S.fileId=newFile;
-  if(S.fileId!==oldFile){S.branchId=f().branches[0].id;S.roadmapSelected=null;S.roadmapBranch='all';S.traceIds=new Set();S.traceRevs=[];S.compareA=null;S.compareB=null;S.external=null;S.mergePlan=null;S.decisions={};S.exportFormat=f().format;}
+  if(S.fileId!==oldFile){S.branchId=f().branches[0].id;S.roadmapSelected=null;S.roadmapBranch='all';S.roadmap=newRoadmapState();S.roadmapScroll={};S.roadmapLocate=null;S.traceIds=new Set();S.traceRevs=[];S.compareA=null;S.compareB=null;S.external=null;S.mergePlan=null;S.decisions={};S.exportFormat=f().format;}
   if(route[0]==='review'){
     const review=reviews().find(r=>r.id===route[1]);if(review){S.fileId=review.fileId;S.branchId=review.branchId;}
   }
@@ -576,13 +632,20 @@ function navigate(){
   else if(!f().branches.some(b=>b.id===S.branchId))S.branchId=f().branches[0].id;
   S.revisionId=q.revision&&rev(f(),q.revision)?q.revision:null;
   if(S.revisionId)S.branchId=rev(f(),S.revisionId).branchId;
-  if(changed&&route[2]==='roadmap'&&(q.revision||q.branch))S.roadmapSelected=S.revisionId||branch(f(),S.branchId).headId;
+  if(changed&&route[2]==='roadmap'){
+    if(['families','releases','history'].includes(q.view)){
+      const level=q.view,familyId=level==='families'?null:q.family||null,releaseId=level==='history'?q.release||null:null;
+      if(level!==S.roadmap.level||familyId!==S.roadmap.familyId||releaseId!==S.roadmap.releaseId){Object.assign(S.roadmap,{level,familyId,releaseId,columnPage:0,lanePage:0});}
+    }
+    const requested=S.revisionId||(!q.view&&q.branch?branch(f(),S.branchId).headId:null);
+    if(requested){S.roadmapSelected=requested;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(f(),requested,roadmapOptions(f())));S.roadmapLocate=requested;}
+  }
   if(changed){
     S.page=0;S.search='';S.category='all';S.filter='all';S.selected=new Set();
     if(route[0]==='files'&&route[2]==='compare'){S.compareA=q.left||null;S.compareB=q.right||null;S.external=null;}
     S.sourceDraft=null;S.sourcePreview=null;S.sourceBusy=false;
   }
-  S.lastHash=hash;render();if(changed)document.getElementById('page-title')?.focus();
+  const recordFocus=route[2]==='roadmap'&&S.roadmapLocate;S.lastHash=hash;render();if(changed&&!recordFocus)document.getElementById('page-title')?.focus();
 }
 // Push navigation synchronously so draft creation and the following confirmation share one context.
 go=function(url){if(location.hash!==url)history.pushState(null,'',url);navigate();};

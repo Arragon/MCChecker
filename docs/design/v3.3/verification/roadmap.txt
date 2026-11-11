@@ -1,11 +1,14 @@
-PASS seed records have unique positions, one baseline lane and separate machine lanes
-PASS every connector is an actual parent edge and child order survives clock skew
-PASS software initialization stays on the main lane without inventing root ancestry
-PASS fork and historical restore preserve explicit provenance and current adoption
-PASS all long-history records remain reachable with bounded 30/50/100-row pages
-PASS query filtering marks omitted endpoints and focus preserves canonical full data
-PASS machine focus compresses 81 tracks to the selected machine and actual source tracks
-PASS every visible record provides selectable and detail buttons with readable names
-PASS untrusted names, IDs, reasons, actor names and search text are escaped
-PASS missing ancestry is explicit; malformed or cyclic identities fail without fake nodes
-10/10 roadmap data/HTML checks passed (not browser QA)
+PASS canonical identities, topology and adopted bases remain immutable across views
+PASS families expand in place, releases drill down, and history contains only real records
+PASS summary connectors preserve exact edge sets and hide only internal real edges
+PASS restoring an older machine release creates a truthful backward version connector
+PASS pending releases keep empty headers and initialization never invents saved ancestry
+PASS both window axes are bounded, baseline repeats, and all saved records remain reachable
+PASS locate opens exact history context and resolves both pages without changing all scope
+PASS machine focus keeps only its true ancestry rows; query omits endpoints without shortcut edges
+PASS explicit version IDs and display labels take precedence; unknown families are not guessed
+PASS HTML escapes metadata and identifiers and only safe related URLs become links
+PASS legacy descriptions remain visibly distinct from explicit change reasons
+PASS unknown ancestry and malformed DAGs remain explicit without phantom records
+PASS render accepts its prepared graph and emits one shared matrix with semantic header rows
+13/13 roadmap data/HTML checks passed (not browser QA)

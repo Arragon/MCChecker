@@ -1,6 +1,9 @@
 Execution target: built HTML inline scripts (exactly match sources)
 PASS default entry and file links open the roadmap while the parameter page remains reachable
-PASS roadmap selection, focus and details navigate to an adopted baseline on another page
+PASS roadmap selection and details locate the exact adopted baseline across history windows
+PASS roadmap family expansion and three-level navigation preserve real records and expose the frozen axes
+PASS roadmap history and machine windows move independently and locate an off-window machine
+PASS roadmap context survives a same-file parameter visit and resets for another file or workspace
 PASS file list page selection has a mixed state, persists across pages, and clears explicitly
 PASS select all matching files obeys the active filter and reaches beyond the current page
 PASS parameter selection has explicit page/all scopes and preserves selections across pages
@@ -28,4 +31,4 @@ PASS merge field selection saves the new basis while retaining independent name 
 PASS historical machine restore uses actual UI save and retains the old software/basis and history
 PASS guest handlers reject editing/saving and leave the model unchanged
 
-28/28 Node VM UI integration checks passed. No browser, layout, accessibility or visual verification.
+31/31 Node VM UI integration checks passed. No browser, layout, accessibility or visual verification.

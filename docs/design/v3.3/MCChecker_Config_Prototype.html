@@ -15,60 +15,96 @@
 .selection-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 14px;border-bottom:1px solid #dbe6f7;background:#f3f7fe;color:#486383;font-size:12px;flex-shrink:0}.selection-bar strong{font-weight:600;color:#305786}.required-mark{font-size:10px;font-weight:500;color:#bd3752;margin-left:4px}.modification-fields{margin-top:20px;padding-top:17px;border-top:1px solid var(--line)}.modification-fields textarea{min-height:68px;line-height:1.6}.change-context{font-size:12px;padding:12px 0}.change-context h3{margin-bottom:8px}.change-context p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;color:#42556e}.related-links{display:flex;flex-direction:column;gap:6px;margin-top:10px}.related-link{display:flex;align-items:flex-start;gap:7px;padding:7px 9px;border:1px solid #e3e9f1;border-radius:5px;background:#f8fafc;font-size:11px;line-height:1.6}.related-link span{overflow-wrap:anywhere;flex:1;min-width:0}.related-link .icon{margin-top:2px;width:13px;height:13px;flex-basis:13px}.roadmap-selection{display:flex;align-items:center;gap:8px;padding:11px 14px;border-top:1px solid #d8e2ef;flex-shrink:0;background:#f8faff}.roadmap-selection-name{display:flex;align-items:center;gap:9px;min-width:0;font-size:12px}.roadmap-selection-name strong{font-weight:600}.roadmap-panel{overflow:hidden}.branchbar select#revision{max-width:360px}.drawer .change-context{padding-top:18px;border-top:1px solid var(--line);margin-top:12px}
 @media(max-width:1100px){.roadmap-selection{flex-wrap:wrap}.roadmap-selection-name{flex-basis:100%}.roadmap-selection>.spacer{display:none}.roadmap-selection .btn{flex:1}}
 @media(max-width:760px){.selection-bar{padding:8px 10px}.roadmap-selection{padding:10px}.roadmap-selection-name{flex-wrap:wrap}.branchbar select#revision{max-width:100%}}
+/* The roadmap is the file's main work area; keep its surrounding chrome compact. */
+.roadmap-page .heading{min-height:44px;margin-bottom:10px}.roadmap-page .file-icon{height:36px}.roadmap-page .tabs{min-height:32px;margin-bottom:10px}.roadmap-page .roadmap-panel{min-height:0}.roadmap-page .roadmap-selection{padding:8px 12px;min-height:44px}.roadmap-page .roadmap-selection-name strong{overflow-wrap:anywhere}
+@media(max-width:760px){.roadmap-page .heading{margin-bottom:8px}.roadmap-page .roadmap-selection{padding:8px 10px}.roadmap-page .roadmap-selection-name{font-size:11px}}
 
-/* Scoped roadmap styles; uses the existing light product tokens. */
-.rm-view{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;background:var(--surface,#fff);color:var(--ink,#1f2937)}
-.rm-toolbar{display:flex;align-items:center;gap:12px;min-height:49px;padding:9px 14px;border-bottom:1px solid var(--line,#e3e7ed);flex-shrink:0;flex-wrap:wrap}
-.rm-focus-label{display:flex;align-items:center;gap:7px;color:var(--muted,#687386);font-size:11px;white-space:nowrap}
-.rm-focus-label select{min-height:30px;max-width:180px;padding:4px 26px 4px 8px;font-size:12px;background:#fff}
-.rm-search{display:flex;align-items:center;gap:7px;width:300px;max-width:100%;min-width:150px;border:1px solid #d5dbe3;border-radius:5px;padding:0 9px;background:#fff}
-.rm-search svg{width:15px;height:15px;fill:none;stroke:#8390a2;stroke-width:1.6;flex:0 0 15px}
-.rm-search input{border:0;padding:5px 0;min-height:29px;font-size:12px;width:100%;min-width:0;background:transparent}
+/* One scrolling matrix: both header rows and row labels use its coordinates. */
+.rm-view{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;background:var(--surface,#fff);color:var(--ink,#243247)}
+.rm-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:50px;padding:9px 14px;border-bottom:1px solid var(--line,#e3e7ed);flex-shrink:0}
+.rm-spacer{flex:1;min-width:0}
+.rm-breadcrumbs{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;white-space:nowrap;color:#a1aab7}
+.rm-crumb{padding:4px 5px;min-height:28px;border:0;border-radius:4px;background:transparent;font-size:12px;color:#64758a;white-space:nowrap}
+button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}.rm-crumb.is-current{background:#edf4ff;color:#245db5;font-weight:600}.rm-crumb.is-unavailable{color:#9ba4b1}
+.rm-focus-label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted,#687386);white-space:nowrap}
+.rm-focus-label select{min-height:30px;max-width:170px;padding:4px 24px 4px 8px;font-size:12px;background:#fff}
+.rm-search{display:flex;align-items:center;gap:7px;width:250px;max-width:100%;min-width:150px;border:1px solid #d5dce5;border-radius:5px;padding:0 9px;background:#fff}
+.rm-search svg{width:15px;height:15px;fill:none;stroke:#586b83;stroke-width:1.6;flex:0 0 15px}
+.rm-search input{width:100%;min-width:0;min-height:29px;padding:5px 0;border:0;background:transparent;font-size:12px}
 .rm-search input:focus{outline:none}.rm-search:focus-within{outline:2px solid #93b6fc;outline-offset:1px}
-.rm-toolbar-spacer{flex:1}.rm-record-count{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:var(--muted,#687386);white-space:nowrap}
-.rm-pending{display:flex;align-items:center;gap:12px;padding:7px 14px;background:#fffaf0;border-bottom:1px solid #eee4cd;font-size:11px;flex-wrap:wrap}
-.rm-pending>span{color:#9a6a1a}.rm-pending a{color:#6a7383;text-decoration:underline;text-underline-offset:2px}
-.rm-scroll{overflow:auto;min-height:0;min-width:0;flex:1;position:relative;overscroll-behavior:contain;scrollbar-gutter:stable}
+.rm-pending{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:7px 14px;background:#fffaf0;border-bottom:1px solid #eee4cd;font-size:11px;flex-shrink:0}
+.rm-pending>span{color:#9a6a1a}.rm-pending a{color:#786038;text-decoration:underline;text-underline-offset:2px}
+.rm-scroll{position:relative;flex:1;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scroll-padding-left:176px;scroll-padding-top:88px;background:#f8fafc}
 .rm-scroll:focus-visible{outline:2px solid #93b6fc;outline-offset:-2px}
-.rm-table{min-width:calc(var(--rm-graph-width) + 740px);width:100%;position:relative}
-.rm-header,.rm-row{display:grid;grid-template-columns:var(--rm-graph-width) minmax(320px,1fr) 82px 154px 134px 50px}
-.rm-header{position:sticky;top:0;z-index:8;height:52px;background:#f9fafc;border-bottom:1px solid #dfe5ed}
-.rm-header-cell{display:flex;align-items:center;padding:0 10px;color:#778294;font-size:10px;font-weight:550;white-space:nowrap;min-width:0}
-.rm-graph-heading{padding:0;border-right:1px solid #e9edf2}.rm-axis{position:relative;width:100%;height:52px}
-.rm-lane-label{position:absolute;top:15px;width:46px;min-height:22px;padding:2px 0 3px;background:transparent;border:0;border-top:2px solid var(--rm-lane-color);border-radius:0;color:#657187;font-size:10px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;line-height:15px}
-.rm-lane-label:hover,.rm-lane-label.is-focused{background:#eaf1fc;color:#224d8f}.rm-lane-label:focus-visible{outline:2px solid #93b6fc;outline-offset:1px}
-.rm-canvas{position:relative;isolation:isolate}.rm-lines{position:absolute;left:0;top:0;z-index:1;pointer-events:none;overflow:hidden}
-.rm-edge{fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}.rm-edge.is-dimmed{opacity:.17}.rm-edge.is-continuation{stroke-dasharray:2 4}
-.rm-row{height:var(--rm-row-height);position:relative;border-bottom:1px solid #edf0f4}
-.rm-row:before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:transparent}
-.rm-row:hover:before{background:#f8fafd}.rm-row.is-selected:before{background:#edf4ff;border-left:3px solid #2563eb}
-.rm-cell{position:relative;z-index:2;min-width:0;padding:8px 10px;display:flex;flex-direction:column;justify-content:center;gap:3px}
-.rm-graph-cell{padding:0;border-right:1px solid #f0f2f6;display:block}
-.rm-row.is-dimmed .rm-cell{opacity:.43}.rm-row.is-dimmed:hover .rm-cell,.rm-row.is-dimmed:focus-within .rm-cell{opacity:1}
-.rm-node{position:absolute;top:calc(var(--rm-row-height)/2 - 14px);width:28px;height:28px;min-height:28px;padding:0;border:0;background:transparent;border-radius:50%;cursor:pointer}
-.rm-node:hover{box-shadow:0 0 0 3px #7198c322}.rm-node:focus-visible{outline:2px solid #2d67cd;outline-offset:1px}
-.rm-record-title-row{display:flex;align-items:center;gap:6px;min-width:0}
-.rm-record-title{min-width:0;max-width:100%;padding:0;border:0;background:transparent;color:#31435c;font-size:13px;font-weight:550;line-height:18px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
-.rm-record-title:hover{color:#225fc4;text-decoration:underline;text-underline-offset:2px}
-.rm-reason{font-size:11px;line-height:15px;color:#7b8798;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rm-tag{display:inline-block;flex:0 0 auto;border:1px solid #dfe5ed;background:#f5f7fa;border-radius:3px;padding:0 4px;font-size:10px;font-weight:400;line-height:15px;color:#738097;white-space:nowrap}
-.rm-tag.is-head{border-color:#cfdef7;background:#f0f6ff;color:#3867ae}
-.rm-release{font:11px/1.5 var(--mono,monospace);color:#586981;display:inline-block;align-self:flex-start;background:#f1f4f8;padding:1px 6px;border-radius:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rm-object-name{font-size:11px;color:#475970;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rm-basis,.rm-adoption,.rm-link{padding:0;min-height:0;border:0;background:transparent;text-align:left;color:#587aab;font-size:10px;line-height:15px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:100%;cursor:pointer}
-.rm-basis:hover,.rm-adoption:hover,.rm-link:hover{text-decoration:underline;text-underline-offset:2px}
-.rm-unrecorded,.rm-outside{font-size:10px;color:#9a7b46}.rm-outside{padding-left:9px}
-.rm-author{font-size:11px;color:#536176;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rm-author-cell time{font-size:11px;color:#8a94a3;white-space:nowrap;font-variant-numeric:tabular-nums}
-.rm-detail-cell{padding:8px 4px}.rm-detail{align-self:center;border:0;background:transparent;padding:4px;font-size:11px;color:#5d7eab;min-height:28px;line-height:18px;cursor:pointer;border-radius:4px}
-.rm-detail:hover{background:#e7eefb;color:#215bc1}
-.rm-empty{padding:38px 18px;min-height:190px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:#7c899c;font-size:12px}
-.rm-empty strong{font-size:14px;color:#536176;font-weight:550}.rm-empty p{max-width:460px;line-height:1.7}
-.rm-footer{min-height:43px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line,#e3e7ed);font-size:10px;color:#798497;flex-shrink:0;background:#fff}
-.rm-footer label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.rm-footer select{min-height:26px;padding:3px 23px 3px 6px;font-size:10px}
-.rm-footer .btn{min-height:26px;padding:3px 7px;font-size:10px}.rm-page-context{color:#8a95a4}.rm-warning{color:#9a6a1a}
-@media(max-width:1100px){.rm-toolbar{gap:9px}.rm-search{width:265px}.rm-record-count{margin-left:auto}}
-@media(max-width:760px){.rm-toolbar{padding:9px 10px;gap:8px}.rm-focus-label select{max-width:145px;min-height:34px}.rm-search{flex:1;min-width:170px}.rm-search input{min-height:32px}.rm-toolbar-spacer{display:none}.rm-record-count{font-size:10px}.rm-footer{padding:8px 10px;gap:7px}.rm-page-context{flex-basis:100%;order:1}.rm-footer .btn{min-height:32px}.rm-footer select{min-height:30px}.rm-pending{padding:7px 10px}.rm-table{min-width:calc(var(--rm-graph-width) + 740px)}}
+.rm-matrix{position:relative;width:var(--rm-matrix-width);min-width:100%;isolation:isolate;background:#fff}
+.rm-axis,.rm-matrix-row{display:grid;grid-template-columns:var(--rm-label-width) repeat(var(--rm-column-count),var(--rm-column-width))}
+.rm-axis{position:sticky;top:0;z-index:30;height:var(--rm-header-height);grid-template-rows:34px 42px;background:#f4f7fb;box-shadow:0 1px 0 #d6e0ec}
+.rm-axis-row{display:contents}
+.rm-axis-corner{position:sticky;left:0;top:0;z-index:40;grid-column:1;grid-row:1 / 3;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:12px 16px;background:#edf2f8;border-right:1px solid #d9e2ed;color:#475a73}
+.rm-axis-corner strong{font-size:12px;font-weight:600}.rm-axis-corner span{font-size:10px;color:#586b83}
+.rm-family-heading{grid-row:1;display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:0 16px;background:#eaf0f8;box-shadow:inset 8px 0 #ccd9e9;border-bottom:1px solid #dce5f0;color:#425e80;font-size:12px}
+.rm-family-heading strong{font-size:14px;font-weight:650}.rm-family-heading:nth-child(odd){background:#e2eaf5}.rm-family-heading .rm-family-name{font-size:14px}
+.rm-family-name,.rm-release-heading-link{border:0;background:transparent;padding:4px 0;text-align:left;color:#3a5f91;font-size:12px;font-weight:600;cursor:pointer}
+.rm-family-name:hover,.rm-release-heading-link:hover{text-decoration:underline;text-underline-offset:2px}
+.rm-expand{border:1px solid #cbd9eb;border-radius:4px;background:#f6f9fd;color:#5a7396;padding:2px 7px;min-height:24px;font-size:10px;white-space:nowrap;cursor:pointer}
+.rm-expand:hover{background:#fff;color:#245cb1;border-color:#afc5e4}
+.rm-column-heading{grid-row:2;display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:0 20px;background:#f5f8fc;border-bottom:1px solid #dae3ee;color:#586b83;font-size:11px}
+.rm-column-heading>span{font-size:10px;color:#586b83}.rm-column-heading.is-group-start{box-shadow:inset 8px 0 #ccd9e9}
+.rm-column-heading>.rm-history-heading{font-size:11px;font-weight:550;color:#586b83}
+.rm-body{position:relative;min-height:200px}
+.rm-links{position:absolute;left:var(--rm-label-width);top:0;z-index:2;overflow:hidden;pointer-events:none}
+.rm-edge{fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.64}.rm-edge.is-continuation{stroke-dasharray:3 4;opacity:.55}
+.rm-matrix-row{height:var(--rm-row-height);position:relative;background:#fff;box-shadow:inset 0 -1px #e7ecf3}
+.rm-matrix-row:nth-of-type(even){background:#fbfcfe}.rm-matrix-row.is-baseline{background:#f0f6ff;box-shadow:inset 0 -1px #d5e3f8}
+.rm-lane-head{position:sticky;left:0;z-index:12;height:var(--rm-row-height);display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:7px;min-width:0;padding:16px;background:#f8fafc;border-right:1px solid #dce4ee;box-shadow:inset 0 -1px #e7ecf3;color:#475c77}
+.rm-matrix-row.is-baseline .rm-lane-head{background:#e8f1ff;color:#275da9;border-right-color:#cddcf0;box-shadow:inset 3px 0 #2e6ac4,inset 0 -1px #d5e3f8}
+.rm-lane-head>strong{font-size:13px;font-weight:650;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rm-lane-head>span:not(.rm-lane-icon){font-size:11px;color:#586b83;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rm-lane-icon{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid #dfe7ef;border-radius:6px;background:#fff;color:var(--rm-lane-color)}
+.rm-lane-icon svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.rm-lane-focus{min-height:22px;padding:1px 0;border:0;background:transparent;color:#3b6594;font-size:10px;cursor:pointer}.rm-lane-focus:hover{color:#255eb7;text-decoration:underline}
+.rm-cell{position:relative;min-width:0;height:var(--rm-row-height);z-index:3}
+.rm-cell{box-shadow:inset 1px 0 #e3e9f1}.rm-cell.is-group-start{box-shadow:inset 8px 0 #dce5f1,inset 9px 0 #c4d1e2}
+.rm-cell-empty{position:absolute;left:20px;top:18px;width:252px;height:164px;border:1px dashed #ccd9e8;border-radius:7px;background:#f8fbff;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;font-size:12px;color:#586b83}
+.rm-cell-empty a{font-size:11px;color:#3c6fb3;text-decoration:underline;text-underline-offset:3px}
+.rm-card{position:absolute;left:20px;top:18px;display:flex;flex-direction:column;width:252px;height:164px;overflow:hidden;border:1px solid #d8e2ec;border-radius:7px;background:#fff;color:#394e68;box-shadow:0 1px 2px #273a5410;text-align:left;scroll-margin:12px}
+.rm-card.is-baseline{border-color:#bfd1eb}.rm-card.is-selected{border-color:#3779d6;box-shadow:0 0 0 2px #3678d523,0 2px 5px #244d8010}
+.rm-card-head{display:flex;align-items:center;gap:6px;justify-content:space-between;min-height:33px;padding:5px 9px;background:#edf6f1;border-bottom:1px solid #e0ece5;flex:0 0 33px;color:var(--rm-lane-color)}
+.rm-card.is-machine .rm-card-head{background:color-mix(in srgb,var(--rm-lane-color) 10%,white);border-bottom-color:color-mix(in srgb,var(--rm-lane-color) 16%,white)}
+.rm-card.is-baseline .rm-card-head{background:#e6f0ff;color:#265fae;border-bottom-color:#d2e2f7}
+.rm-card-object,.rm-card-select{display:flex;align-items:center;gap:6px;min-width:0}
+.rm-card-object svg,.rm-card-select svg{width:15px;height:15px;flex:0 0 15px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.rm-card-object strong,.rm-card-select strong{font-size:12px;line-height:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rm-card-select{border:0;padding:0;min-height:20px;background:transparent;cursor:pointer;color:inherit;text-align:left;scroll-margin:12px}
+.rm-card-select:hover{color:#1d55a7;text-decoration:underline;text-underline-offset:2px}
+.rm-tag{display:inline-block;flex:0 0 auto;max-width:94px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid #d7e0eb;background:#f8fafc;border-radius:3px;padding:0 4px;font-size:10px;font-weight:400;line-height:16px;color:#586b83}
+.rm-tag.is-head{background:#fff;border-color:#bcd2ee;color:#3f6ca8}
+.rm-card-body{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;gap:6px;padding:9px 10px 8px}
+.rm-reason{margin:0;min-height:31px;max-height:31px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:11px;line-height:15.5px;color:#53657b;text-align:left;overflow-wrap:anywhere}
+.rm-card-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:15px;font-size:11px;line-height:15px;color:#586b83;white-space:nowrap}
+.rm-card-meta>span{min-width:0;max-width:80px;overflow:hidden;text-overflow:ellipsis}.rm-card-meta time{font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rm-basis-line{display:flex;align-items:center;min-height:14px;min-width:0}
+.rm-basis,.rm-link{padding:0;min-height:0;max-width:100%;border:0;background:transparent;text-align:left;color:#3b6594;font-size:10px;line-height:14px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+.rm-basis:hover,.rm-link:hover{text-decoration:underline;text-underline-offset:2px}
+.rm-unrecorded,.rm-record-object{font-size:10px;line-height:14px;color:#586b83;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.rm-card-footer{display:flex;align-items:center;gap:6px;min-width:0;margin-top:auto;min-height:18px;font-size:10px}
+.rm-related-link{display:block;max-width:125px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3b6594;text-decoration:none;line-height:18px}.rm-related-link:hover{text-decoration:underline;text-underline-offset:2px}
+.rm-more-links,.rm-source-note{padding:0;border:0;background:transparent;color:#586b83;font-size:10px;line-height:18px;white-space:nowrap;cursor:pointer}.rm-source-note{color:#786544}.rm-more-links:hover,button.rm-source-note:hover{color:#356cb9;text-decoration:underline}
+.rm-detail{flex:0 0 auto;min-height:21px;padding:0 4px;border:0;border-radius:3px;background:transparent;color:#3b6594;font-size:10px;line-height:18px;cursor:pointer}.rm-detail:hover{background:#edf4ff;color:#245eb7}
+.rm-summary{padding:0;cursor:pointer;font:inherit}.rm-summary:hover{border-color:#9fb9d9;box-shadow:0 2px 7px #2e4c7618}.rm-summary .rm-card-body{gap:6px;width:100%}
+.rm-summary-range{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;line-height:16px;color:#586b83}.rm-summary-range>span{font-size:10px;color:#586b83;white-space:nowrap}
+.rm-summary .rm-reason{width:100%}.rm-summary .rm-card-meta{width:100%}.rm-summary-open{display:flex;justify-content:space-between;align-items:center;min-height:16px;margin-top:auto;color:#3b6594;font-size:10px}
+.rm-empty{padding:30px 20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:200px;text-align:center;color:#586b83;font-size:12px}
+.rm-empty strong{font-size:14px;font-weight:600;color:#536981}.rm-empty p{margin:0;line-height:1.7;max-width:430px}
+.rm-empty-overlay{position:absolute;left:var(--rm-label-width);right:0;top:0;z-index:4;background:#ffffffdb;min-height:var(--rm-row-height);pointer-events:none}
+.rm-footer{display:flex;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0;padding:8px 12px;min-height:44px;border-top:1px solid var(--line,#e3e7ed);background:#fff;color:#586b83;font-size:10px}
+.rm-window-control{display:flex;align-items:center;gap:7px;white-space:nowrap}.rm-window-control>span{font-variant-numeric:tabular-nums;min-width:93px}.rm-window-control label{display:inline-flex;align-items:center;gap:5px}
+.rm-window-control select{min-height:26px;padding:3px 22px 3px 5px;font-size:10px;max-width:64px;background:#fff}
+.rm-page-button{min-height:26px;padding:3px 7px;background:#fff;border:1px solid #dce3ec;border-radius:4px;color:#586b83;font-size:10px;line-height:18px;cursor:pointer;white-space:nowrap}
+.rm-page-button:hover:enabled{background:#f3f7fd;border-color:#b9cde6;color:#2b61ab}.rm-page-button:disabled{color:#bac3cf;background:#fafbfd;border-color:#e8edf3;cursor:default}
+.rm-view button:focus-visible,.rm-view a:focus-visible,.rm-view select:focus-visible{outline:2px solid #4587e5;outline-offset:2px}
+@media(max-width:1100px){.rm-toolbar{gap:9px}.rm-search{width:225px}.rm-footer>.rm-spacer{display:none}.rm-footer{justify-content:space-between}.rm-window-control{gap:5px}.rm-window-control>span{min-width:86px}}
+@media(max-width:760px){.rm-toolbar{padding:8px 10px;gap:8px}.rm-breadcrumbs{width:100%;gap:5px}.rm-toolbar>.rm-spacer{display:none}.rm-search{flex:1;min-width:170px}.rm-search input{min-height:32px}.rm-focus-label select{min-height:34px;max-width:145px}.rm-footer{padding:7px 10px;gap:7px}.rm-window-control{flex:1 0 100%;gap:7px}.rm-window-control>span{min-width:99px}.rm-window-control label{margin-left:auto}.rm-page-button{min-height:30px}.rm-pending{padding:7px 10px}}
 </style>
 </head>
 <body>
@@ -237,7 +273,12 @@
     const m12 = changed(b11, { 'p-speed': { value: lab ? 72 : 115, mode: 'override' }, 'p-offset': { value: 0.15, mode: 'pin' } });
     const m13 = changed(m12, { 'p-speed': { value: lab ? 78 : 118 } });
     const make = (id, label, branchId, releaseId, parents, baseId, params, authorId, at, message, sourceId) => revision({ id, label, branchId, releaseId, parentIds: parents, baseRevisionId: baseId, sourceRevisionId: sourceId || null, authorId, at, message, links: id === 'r-b12' && !lab ? ['https://docs.example.invalid/demo/feed-speed'] : [], reviewId: id === 'r-b12' && !lab ? 'CR-025' : null, params }, true);
-    return { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
+    const file = { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
+      releaseFamilies: [{ id: 'family-69x', label: '69X', order: 1 }],
+      releases: [
+        { id: '690', version: '690', familyId: 'family-69x', order: 1 },
+        { id: '691', version: '691', familyId: 'family-69x', order: 2 }
+      ],
       branches: [
         { id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: 'r-b12', machineId: null, baseRevisionId: null, initialRevisionId: null },
         { id: 'base-690', label: '版本基线 · 690', kind: 'baseline', releaseId: '690', headId: 'r-b10', machineId: null, baseRevisionId: null, initialRevisionId: null },
@@ -254,6 +295,29 @@
         make('r-m21', 'r1', 'machine-02', '691', ['r-b11'], 'r-b11', b11, 'wang', '2026-11-01T03:10:00Z', '从 B11 建立 MC-002 配置', 'r-b11'),
         make('r-m22', 'r2', 'machine-02', '691', ['r-m21', 'r-b12'], 'r-b12', changed(b12, { 'p-offset': { value: -0.08, mode: 'pin' } }), 'wang', '2026-11-09T02:00:00Z', '采用 B12 并保留原点校准', 'r-b12')
       ] };
+    if (!lab) {
+      // Explicit demonstration metadata groups releases for navigation only.
+      // It does not infer parentage or replace immutable revision identities.
+      file.releaseFamilies.push({ id: 'family-6ax', label: '6AX', order: 2 });
+      file.releases.push(
+        { id: '6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
+        { id: '6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+      );
+      const links = frozen(['https://docs.example.invalid/demo/software-6a']);
+      const makeDemo = (id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, sourceRevisionId) => revision({ id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, links, sourceRevisionId: sourceRevisionId || null });
+      const b13 = makeDemo('r-b13', 'B13', 'base-6A0', '6A0', ['r-b12'], null, changed(b12, { 'p-timeout': { value: 6500 } }), 'wang', '2026-11-09T06:00:00Z', '演示：核对 6A0 通信等待配置', 'r-b12');
+      const b14 = makeDemo('r-b14', 'B14', 'base-6A1', '6A1', ['r-b13'], null, changed(b13.params, { 'p-accel': { value: 550, max: 2200 } }), 'wang', '2026-11-10T01:00:00Z', '演示：适配 6A1 的加速度范围', 'r-b13');
+      const b15 = makeDemo('r-b15', 'B15', 'base-6A1', '6A1', ['r-b14'], null, changed(b14.params, { 'p-temp': { value: 43 } }), 'lin', '2026-11-10T03:00:00Z', '演示：按验证结果微调温控设定', null);
+      const m31 = makeDemo('r-roadmap-m31', 'r1', 'machine-roadmap-03', '6A0', ['r-b13'], 'r-b13', changed(b13.params, { 'p-offset': { value: 0.12, mode: 'pin' } }), 'lin', '2026-11-09T08:00:00Z', '演示：以 6A0 标准建立 MC-003 并完成原点校准', 'r-b13');
+      const m32 = makeDemo('r-roadmap-m32', 'r2', 'machine-roadmap-03', '6A1', ['r-roadmap-m31', 'r-b15'], 'r-b15', changed(b15.params, { 'p-offset': { value: 0.12, mode: 'pin' } }), 'lin', '2026-11-10T04:00:00Z', '演示：MC-003 采用 6A1 并保留现场校准', 'r-b15');
+      file.branches.push(
+        { id: 'base-6A0', label: '版本基线 · 6A0', kind: 'baseline', releaseId: '6A0', headId: b13.id, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: b13.reason, links },
+        { id: 'base-6A1', label: '版本基线 · 6A1', kind: 'baseline', releaseId: '6A1', headId: b15.id, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: b14.reason, links },
+        { id: 'machine-roadmap-03', label: 'MC-003', kind: 'machine', releaseId: '6A1', headId: m32.id, machineId: 'asset-roadmap-03', baseRevisionId: b15.id, initialRevisionId: null, creationReason: m31.reason, links }
+      );
+      file.revisions.push(b13, b14, b15, m31, m32);
+    }
+    return file;
   }
   function smallFile(key, name, description, params, overrides) {
     const baseline = revision({ id: 'r-' + key + '-b1', label: 'B1', branchId: 'base-691', releaseId: '691', parentIds: [], baseRevisionId: null, authorId: 'wang', at: '2026-11-01T01:00:00Z', message: '建立 691 版本基线', params }, true);
@@ -278,7 +342,7 @@
     ], { 'p-gain': { value: 1.015, mode: 'override' } });
     const state = { workspaceId: 'ws-prod', actorId: 'lin', actors: [{ id: 'lin', name: '林工', role: 'admin' }, { id: 'wang', name: '王工', role: 'admin' }, { id: 'guest', name: '访客', role: 'guest' }],
       workspaces: [{ id: 'ws-prod', name: '生产配置', files: [machine, process, coeff] }, { id: 'ws-lab', name: '验证环境', files: [machineFile(true)] }],
-      assets: [{ id: 'asset-01', name: 'MC-001', model: '69X' }, { id: 'asset-02', name: 'MC-002', model: '69X' }], reviews: [], events: [] };
+      assets: [{ id: 'asset-01', name: 'MC-001', model: '69X' }, { id: 'asset-02', name: 'MC-002', model: '69X' }, { id: 'asset-roadmap-03', name: 'MC-003', model: 'MX-820' }], reviews: [], events: [] };
     function workspace() { const w = state.workspaces.find(w => w.id === state.workspaceId); if (!w) fail('WORKSPACE_NOT_FOUND', '当前工作区不存在'); return w; }
     function actor() { const a = state.actors.find(a => a.id === state.actorId); if (!a) fail('FORBIDDEN', '当前操作人无效'); return a; }
     function admin() { if (actor().role !== 'admin') fail('FORBIDDEN', '需要管理员执行此操作'); }
@@ -921,8 +985,8 @@
   return {LIMITS, numericValue, parseText, serialize, composeUrl, redactUrl, sampleDraft, countChanges, create};
 });
 </script>
-<script id="prototype-roadmap">/* Configuration roadmap view. Pure projection of saved revisions/parentIds.
- * No model mutation, event listeners, network, dependencies or fabricated edges.
+<script id="prototype-roadmap">/* Horizontal configuration roadmap: immutable saved records projected into
+ * family, release and history views. No event handlers, model writes or network.
  */
 (function (root, factory) {
   const api = factory();
@@ -930,155 +994,425 @@
   root.MCPrototypeRoadmap = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-  const COLORS = Object.freeze(['#2563eb', '#148366', '#8058b5', '#b77b20', '#147e9b', '#ad527d', '#607994']);
-  const ROW_HEIGHT = 56, LANE_PITCH = 48, GUTTER = 28;
+  const COLORS = Object.freeze(['#2563eb', '#148366', '#8058b5', '#147e9b', '#ad527d', '#a57925']);
+  const COLUMN_WIDTH = 292, ROW_HEIGHT = 200, CARD_WIDTH = 252, CARD_HEIGHT = 164, LABEL_WIDTH = 164, HEADER_HEIGHT = 76;
+  const UNKNOWN_RELEASE = '__unknown_release__', UNKNOWN_FAMILY = '__ungrouped__';
   const escape = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-  const integer = (value, fallback) => Number.isFinite(Number(value)) ? Math.floor(Number(value)) : fallback;
+  const integer = (value, fallback) => value !== null && value !== '' && Number.isFinite(Number(value)) ? Math.floor(Number(value)) : fallback;
+  const limit = (value, fallback) => Math.min(30, Math.max(1, integer(value, fallback)));
+  const unique = values => [...new Set(values)];
+  const releaseKey = value => value == null || value === '' ? UNKNOWN_RELEASE : String(value);
+  const domId = value => 'rm-' + Array.from(String(value)).map(c => c.codePointAt(0).toString(16)).join('-');
   function error(code, message) { const e = new Error(message); e.code = code; throw e; }
   function branchName(branch) { return branch?.kind === 'baseline' ? '版本基线' : branch?.label || '归属未记录'; }
+  function readableRelease(file, id) {
+    const entries = file?.releases;
+    const entry = Array.isArray(entries) ? entries.find(r => String(typeof r === 'object' && r ? r.id || r.releaseId || r.version : r) === String(id)) : entries && typeof entries === 'object' ? entries[id] : null;
+    return entry && typeof entry === 'object' ? entry.label || entry.version || id : typeof entry === 'string' ? entry : id;
+  }
   function formatRevision(file, input, options) {
     options = options || {};
     const r = typeof input === 'string' ? file?.revisions?.find(r => r.id === input) : input;
     if (!r) return options.compact ? '记录未载入' : '保存记录未载入';
-    const release = r.releaseId ? '软件 ' + r.releaseId : '软件版本未记录';
+    const release = r.releaseId ? '软件 ' + (options.releaseLabel || readableRelease(file, r.releaseId)) : '软件版本未记录';
     if (r.kind === 'initial') return options.compact ? '初始文件' : '初始文件 · ' + release;
     const match = /^(?:B|r)(\d+)$/i.exec(String(r.label || ''));
     const count = match && Number.isSafeInteger(Number(match[1])) ? Number(match[1]) : null;
     const saved = count !== null ? '第' + count + '次保存' : '保存记录';
     if (options.compact) return saved;
-    const branch = file?.branches?.find(b => b.id === r.branchId);
-    return branchName(branch) + ' · ' + release + ' · ' + saved;
+    return (options.objectLabel || branchName(file?.branches?.find(b => b.id === r.branchId))) + ' · ' + release + ' · ' + saved;
   }
   function timestamp(record) { const value = Date.parse(record.at || ''); return Number.isFinite(value) ? value : -Infinity; }
-  // Latest-first topological order: clock skew cannot place a parent above a child.
+  // Parent-first constraints outrank wall-clock time. Returned order is newest first.
   function ordered(revisions, byId) {
-    const pending = new Map(revisions.map(r => [r.id, 0]));
-    const index = new Map(revisions.map((r, i) => [r.id, i]));
-    revisions.forEach(r => [...new Set(r.parentIds || [])].forEach(id => { if (byId.has(id)) pending.set(id, pending.get(id) + 1); }));
+    const pending = new Map(revisions.map(r => [r.id, 0])), index = new Map(revisions.map((r, i) => [r.id, i]));
+    revisions.forEach(r => unique(r.parentIds).forEach(id => { if (byId.has(id)) pending.set(id, pending.get(id) + 1); }));
     const heap = [], ahead = (a, b) => timestamp(a) > timestamp(b) || timestamp(a) === timestamp(b) && index.get(a.id) > index.get(b.id);
-    function push(value) { let i = heap.length; heap.push(value); while (i) { const parent = (i - 1) >> 1; if (!ahead(heap[i], heap[parent])) break; [heap[i], heap[parent]] = [heap[parent], heap[i]]; i = parent; } }
+    function push(value) { let i = heap.length; heap.push(value); while (i) { const p = (i - 1) >> 1; if (!ahead(heap[i], heap[p])) break; [heap[i], heap[p]] = [heap[p], heap[i]]; i = p; } }
     function pop() { const first = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; while (true) { let best = i, left = i * 2 + 1, right = left + 1; if (left < heap.length && ahead(heap[left], heap[best])) best = left; if (right < heap.length && ahead(heap[right], heap[best])) best = right; if (best === i) break; [heap[i], heap[best]] = [heap[best], heap[i]]; i = best; } } return first; }
     revisions.forEach(r => { if (!pending.get(r.id)) push(r); });
     const result = [];
-    while (heap.length) { const r = pop(); result.push(r); for (const id of new Set(r.parentIds || [])) if (byId.has(id)) { pending.set(id, pending.get(id) - 1); if (!pending.get(id)) push(byId.get(id)); } }
+    while (heap.length) { const r = pop(); result.push(r); for (const id of unique(r.parentIds)) if (byId.has(id)) { pending.set(id, pending.get(id) - 1); if (!pending.get(id)) push(byId.get(id)); } }
     if (result.length !== revisions.length) error('INVALID_DAG', '保存关系存在循环，请核对来源记录');
     return result;
+  }
+  function inputEntries(value) {
+    if (Array.isArray(value)) return value.map(x => typeof x === 'object' && x ? Object.assign({}, x) : { id: String(x) });
+    if (value && typeof value === 'object') return Object.entries(value).map(([id, x]) => typeof x === 'object' && x ? Object.assign({ id }, x) : { id, label: String(x) });
+    return [];
+  }
+  function versionMetadata(file) {
+    const familyMap = new Map(), releaseMap = new Map(), familyMembership = new Map();
+    inputEntries(file.releaseFamilies).forEach((entry, i) => {
+      const id = String(entry.id || entry.familyId || entry.label || '');
+      if (!id) return;
+      familyMap.set(id, { id, label: String(entry.label || entry.name || id), order: integer(entry.order, i), releaseIds: [] });
+      const members = entry.releaseIds || entry.releases || [];
+      (Array.isArray(members) ? members : Object.keys(members)).forEach(r => familyMembership.set(releaseKey(typeof r === 'object' ? r.id || r.version : r), id));
+    });
+    function fallbackFamily(id) {
+      const known = /^69[0-9a-z]$/i.test(id) ? '69X' : /^6a[0-9a-z]$/i.test(id) ? '6AX' : null;
+      if (!known) return UNKNOWN_FAMILY;
+      return [...familyMap.values()].find(f => f.id.toUpperCase() === known || f.label.toUpperCase() === known)?.id || known;
+    }
+    function ensureRelease(id, entry) {
+      id = releaseKey(id); entry = entry || {};
+      const previous = releaseMap.get(id);
+      const familyId = String(entry.familyId || familyMembership.get(id) || previous?.familyId || fallbackFamily(id));
+      if (!familyMap.has(familyId)) familyMap.set(familyId, { id: familyId, label: familyId === UNKNOWN_FAMILY ? '未分组' : familyId, order: Number.MAX_SAFE_INTEGER, releaseIds: [] });
+      const r = { id, label: String(entry.label || entry.version || previous?.label || (id === UNKNOWN_RELEASE ? '版本未记录' : id)), familyId, order: integer(entry.order, previous?.order ?? Number.MAX_SAFE_INTEGER) };
+      releaseMap.set(id, r); return r;
+    }
+    inputEntries(file.releases).forEach(entry => ensureRelease(entry.id || entry.releaseId || entry.version, entry));
+    familyMembership.forEach((familyId, id) => { if (!releaseMap.has(id)) ensureRelease(id, { familyId }); });
+    file.branches.forEach(b => { if (!releaseMap.has(releaseKey(b.releaseId))) ensureRelease(b.releaseId); });
+    file.revisions.forEach(r => { if (!releaseMap.has(releaseKey(r.releaseId))) ensureRelease(r.releaseId); });
+    const compare = (a, b) => a.order - b.order || a.id.localeCompare(b.id, 'en', { numeric: true, sensitivity: 'base' });
+    const families = [...familyMap.values()].sort(compare);
+    const releases = [];
+    families.forEach((family, familyIndex) => {
+      const members = [...releaseMap.values()].filter(r => r.familyId === family.id).sort(compare);
+      family.index = familyIndex; family.releaseIds = members.map(r => r.id); family.releases = members;
+      members.forEach(r => { r.index = releases.length; releases.push(r); });
+    });
+    return { families, releases, familyMap: new Map(families.map(f => [f.id, f])), releaseMap };
   }
   function relatedIds(focus, branches, byId, revisions) {
     if (!focus || focus === 'all') return new Set(revisions.map(r => r.id));
     if (focus === 'baseline') return new Set(revisions.filter(r => branches.get(r.branchId)?.kind === 'baseline').map(r => r.id));
     const queue = revisions.filter(r => r.branchId === focus).map(r => r.id), found = new Set();
-    for (let i = 0; i < queue.length; i++) { const id = queue[i]; if (found.has(id)) continue; found.add(id); const r = byId.get(id); if (r) queue.push(...(r.parentIds || [])); }
+    for (let i = 0; i < queue.length; i++) { const id = queue[i]; if (found.has(id)) continue; found.add(id); const r = byId.get(id); if (r) queue.push(...r.parentIds); }
     return found;
   }
   function edgeKind(child, parent, order, branches) {
     if (child.restoreRevisionId === parent?.id) return 'restore';
     const a = branches.get(child.branchId), b = branches.get(parent?.branchId);
-    if (a?.kind === 'machine' && b?.kind === 'baseline') return (child.parentIds || []).length > 1 ? 'adopt' : 'fork';
+    if (a?.kind === 'machine' && b?.kind === 'baseline') return child.parentIds.length > 1 ? 'adopt' : 'fork';
     if (order > 0) return 'merge';
     if (parent?.kind === 'initial') return 'initialize';
     return 'lineage';
   }
-  function curve(x1, y1, x2, y2) { const middle = (y1 + y2) / 2; return x1 === x2 ? `M ${x1} ${y1} L ${x2} ${y2}` : `M ${x1} ${y1} C ${x1} ${middle}, ${x2} ${middle}, ${x2} ${y2}`; }
-  function layout(file, options) {
-    options = options || {};
+  function reason(record, options) {
+    const supplied = options.getReason ? options.getReason(record) : record.reason || record.message;
+    const text = typeof supplied === 'string' ? supplied : supplied?.text || supplied?.reason || supplied?.summary || '';
+    return record.reason === null ? '原因未记录' + (text ? ' · 历史说明：' + text : '') : text;
+  }
+  function actorLabel(record, options) { return options.actorLabel ? String(options.actorLabel(record.authorId, record)) : record.authorName || '作者未记录'; }
+  function canonical(file, options) {
     if (!file || !Array.isArray(file.revisions) || !Array.isArray(file.branches)) error('INVALID_FILE', '配置文件的保存关系不可读取');
     const byId = new Map(), branches = new Map();
     file.branches.forEach(b => { if (!b.id || branches.has(b.id)) error('DUPLICATE_BRANCH', '配置对象身份重复'); branches.set(b.id, b); });
     file.revisions.forEach(r => { if (!r.id || byId.has(r.id)) error('DUPLICATE_REVISION', '保存记录身份重复'); if (!Array.isArray(r.parentIds)) error('INVALID_PARENTS', '保存记录缺少明确的父记录列表'); byId.set(r.id, r); });
-    const sorted = ordered(file.revisions, byId), lanes = [{ id: 'baseline', label: '基线主线', kind: 'baseline', index: 0, x: GUTTER, color: COLORS[0], branchIds: file.branches.filter(b => b.kind === 'baseline').map(b => b.id) }];
-    file.branches.filter(b => b.kind !== 'baseline').forEach(b => { const index = lanes.length; lanes.push({ id: b.id, label: branchName(b), kind: b.kind || 'unknown', index, x: GUTTER + index * LANE_PITCH, color: COLORS[1 + (index - 1) % (COLORS.length - 1)], branchIds: [b.id] }); });
-    sorted.filter(r => !branches.has(r.branchId)).forEach(r => { if (!lanes.some(lane => lane.id === 'unknown:' + r.branchId)) { const index = lanes.length; lanes.push({ id: 'unknown:' + r.branchId, label: '归属未记录', kind: 'unknown', index, x: GUTTER + index * LANE_PITCH, color: '#7d8795', branchIds: [r.branchId] }); } });
+    const sorted = ordered(file.revisions, byId), metadata = versionMetadata(file);
+    const assets = new Map((options.assets || []).map(a => [a.id, a]));
+    const lanes = [{ id: 'baseline', label: '版本基线', kind: 'baseline', index: 0, model: null, color: COLORS[0], branchIds: file.branches.filter(b => b.kind === 'baseline').map(b => b.id) }];
+    file.branches.filter(b => b.kind !== 'baseline').forEach(b => {
+      const asset = assets.get(b.machineId), index = lanes.length;
+      lanes.push({ id: b.id, label: asset?.name || branchName(b), kind: b.kind || 'unknown', index, machineId: b.machineId || null, model: asset?.model || null, color: COLORS[1 + (index - 1) % (COLORS.length - 1)], branchIds: [b.id] });
+    });
+    sorted.filter(r => !branches.has(r.branchId)).forEach(r => {
+      if (!lanes.some(l => l.id === 'unknown:' + r.branchId)) lanes.push({ id: 'unknown:' + r.branchId, label: '归属未记录', kind: 'unknown', index: lanes.length, model: null, color: '#7d8795', branchIds: [r.branchId] });
+    });
     const laneByBranch = new Map(); lanes.forEach(lane => lane.branchIds.forEach(id => laneByBranch.set(id, lane)));
     const heads = new Map(), adopted = new Map();
     file.branches.forEach(b => {
       if (b.headId && byId.has(b.headId)) { const list = heads.get(b.headId) || []; list.push(b); heads.set(b.headId, list); }
       const head = byId.get(b.headId);
-      if (b.kind === 'machine' && head?.baseRevisionId) { const list = adopted.get(head.baseRevisionId) || []; list.push({ branchId: b.id, label: branchName(b), machineId: b.machineId, headId: head.id }); adopted.set(head.baseRevisionId, list); }
+      if (b.kind === 'machine' && head?.baseRevisionId) { const list = adopted.get(head.baseRevisionId) || []; list.push({ branchId: b.id, label: assets.get(b.machineId)?.name || branchName(b), machineId: b.machineId, headId: head.id }); adopted.set(head.baseRevisionId, list); }
     });
-    const focus = String(options.branchFilter || options.focusBranch || 'all'), related = relatedIds(focus, branches, byId, sorted);
-    const nodes = sorted.map((r, row) => { const lane = laneByBranch.get(r.branchId), branch = branches.get(r.branchId); return { id: r.id, revision: r, branchId: r.branchId, branchLabel: branchName(branch), kind: r.kind === 'initial' ? 'initial' : branch?.kind || 'unknown', laneId: lane.id, laneIndex: lane.index, x: lane.x, row, y: row * ROW_HEIGHT + ROW_HEIGHT / 2, color: lane.color, parentIds: [...new Set(r.parentIds)], isHead: heads.has(r.id), heads: (heads.get(r.id) || []).map(b => ({ id: b.id, label: branchName(b), releaseId: b.releaseId, kind: b.kind })), adoptedBy: adopted.get(r.id) || [], focused: related.has(r.id), selected: options.selectedRevisionId === r.id, title: formatRevision(file, r) }; });
-    const nodeById = new Map(nodes.map(node => [node.id, node]));
-    const edges = nodes.flatMap(node => node.parentIds.map((id, order) => { const parent = nodeById.get(id); return { id: JSON.stringify([node.id, id]), childId: node.id, parentId: id, from: node.id, to: id, parentExists: !!parent, childLane: node.laneId, parentLane: parent?.laneId || null, kind: parent ? edgeKind(node.revision, parent.revision, order, branches) : 'unknown', order, color: node.kind === 'baseline' && parent?.kind === 'machine' ? parent.color : node.color, focused: node.focused && (!parent || parent.focused) }; }));
-    // Keep canonical nodes/edges/lanes intact. Focus projects the selected
-    // object's real ancestry onto only the tracks it needs, reclaiming space
-    // when a file is used by many machines. Search applies inside that scope.
-    const scoped = focus === 'all' ? nodes : nodes.filter(node => node.focused);
-    const scopeIds = new Set(scoped.map(node => node.id)), scopeLanes = new Set(scoped.map(node => node.laneId));
-    const visibleLanes = (focus === 'all' ? lanes : lanes.filter(lane => scopeLanes.has(lane.id))).map((lane, index) => Object.assign({}, lane, { index, x: GUTTER + index * LANE_PITCH }));
-    const projectedLanes = new Map(visibleLanes.map(lane => [lane.id, lane]));
-    const query = String(options.query || '').trim().toLocaleLowerCase();
-    const matching = (query ? scoped.filter(node => [node.title, node.branchLabel, node.revision.releaseId, node.revision.message, node.revision.reason, node.revision.authorName].filter(Boolean).join(' ').toLocaleLowerCase().includes(query)) : scoped).map(node => Object.assign({}, node, { laneIndex: projectedLanes.get(node.laneId).index, x: projectedLanes.get(node.laneId).x }));
-    const matchingIds = matching.map(node => node.id);
-    const pageSize = Math.min(100, Math.max(1, integer(options.pageSize, 30))), total = matching.length, pageCount = Math.max(1, Math.ceil(total / pageSize)), page = Math.max(0, Math.min(integer(options.page, 0), pageCount - 1)), offset = page * pageSize;
-    const displayIndex = new Map(matching.map((node, i) => [node.id, i]));
-    const visibleNodes = matching.slice(offset, offset + pageSize).map((node, i) => Object.assign({}, node, { displayIndex: offset + i, visibleRow: i, y: i * ROW_HEIGHT + ROW_HEIGHT / 2 }));
-    const visibleIds = new Set(visibleNodes.map(node => node.id)), height = visibleNodes.length * ROW_HEIGHT;
-    // Draw only edges incident to a visible record. Off-page endpoints continue
-    // to the viewport edge; a filtered endpoint gets an explicit short stub.
-    // We never join the next displayed record in place of the actual parent.
-    const scopedEdges = edges.filter(edge => scopeIds.has(edge.childId));
-    const visibleEdges = scopedEdges.filter(edge => visibleIds.has(edge.childId) || visibleIds.has(edge.parentId)).map(edge => {
-      const child = nodeById.get(edge.childId), parent = nodeById.get(edge.parentId), childIndex = displayIndex.get(edge.childId), parentIndex = displayIndex.get(edge.parentId);
-      const childX = projectedLanes.get(child.laneId)?.x, parentX = parent && projectedLanes.get(parent.laneId)?.x;
-      const childVisible = visibleIds.has(edge.childId), parentVisible = visibleIds.has(edge.parentId);
-      let path, boundary = null;
-      if (childIndex !== undefined && parentIndex !== undefined) {
-        const cy = (childIndex - offset) * ROW_HEIGHT + ROW_HEIGHT / 2, py = (parentIndex - offset) * ROW_HEIGHT + ROW_HEIGHT / 2;
-        path = curve(childX, cy, parentX, py);
-        if (!childVisible || !parentVisible) boundary = !childVisible ? 'newer-page' : 'older-page';
-      } else if (childVisible) {
-        const y = (childIndex - offset) * ROW_HEIGHT + ROW_HEIGHT / 2;
-        path = curve(childX, y, childX, y + 18); boundary = parent ? 'filtered-parent' : 'missing-parent';
-      } else {
-        const y = (parentIndex - offset) * ROW_HEIGHT + ROW_HEIGHT / 2;
-        path = curve(parentX, y - 18, parentX, y); boundary = 'filtered-child';
-      }
-      return Object.assign({}, edge, { path, boundary, childVisible, parentVisible });
+    const focus = String(options.branchFilter || 'all'), related = relatedIds(focus, branches, byId, sorted);
+    const nodes = sorted.map((r, row) => {
+      const lane = laneByBranch.get(r.branchId), b = branches.get(r.branchId), release = metadata.releaseMap.get(releaseKey(r.releaseId));
+      return { id: r.id, revision: r, branchId: r.branchId, branchLabel: branchName(b), kind: r.kind === 'initial' ? 'initial' : b?.kind || 'unknown', objectKind: b?.kind || 'unknown', laneId: lane.id, laneIndex: lane.index, color: lane.color, row, parentIds: unique(r.parentIds), releaseId: release.id, familyId: release.familyId, isHead: heads.has(r.id), heads: (heads.get(r.id) || []).map(b => ({ id: b.id, label: branchName(b), releaseId: b.releaseId, kind: b.kind })), adoptedBy: adopted.get(r.id) || [], focused: related.has(r.id), selected: options.selectedRevisionId === r.id, title: formatRevision(file, r, { releaseLabel: release.label, objectLabel: branchName(b) }), historyStep: 1 };
     });
-    return { nodes, edges, lanes, visibleLanes, matchingIds, visibleNodes, visibleEdges, rowHeight: ROW_HEIGHT, graphWidth: Math.max(164, GUTTER * 2 + (visibleLanes.length - 1) * LANE_PITCH), canvasHeight: height, page, pageSize, pageCount, offset, total, totalRecords: nodes.length, scopeTotal: scoped.length, branchFilter: focus, query, pendingBranches: file.branches.filter(b => !b.headId && (focus === 'all' || focus === 'baseline' && b.kind === 'baseline' || b.id === focus)).map(b => ({ id: b.id, label: branchName(b), releaseId: b.releaseId })), unknownParents: scopedEdges.filter(e => !e.parentExists).map(e => ({ childId: e.childId, parentId: e.parentId })) };
+    const nodeById = new Map(nodes.map(n => [n.id, n])), lastInLane = new Map();
+    // Within a release, parent constraints and lane occupancy define steps.
+    // Date labels never determine the horizontal axis; gaps are not new saves.
+    nodes.slice().reverse().forEach(node => {
+      const key = JSON.stringify([node.releaseId, node.laneId]);
+      const parentSteps = node.parentIds.map(id => nodeById.get(id)).filter(p => p && p.releaseId === node.releaseId).map(p => p.historyStep);
+      node.historyStep = Math.max(lastInLane.get(key) || 0, ...parentSteps, 0) + 1;
+      lastInLane.set(key, node.historyStep);
+    });
+    const edges = nodes.flatMap(node => node.parentIds.map((id, order) => {
+      const parent = nodeById.get(id);
+      return { id: JSON.stringify([node.id, id]), childId: node.id, parentId: id, from: node.id, to: id, parentExists: !!parent, childLane: node.laneId, parentLane: parent?.laneId || null, kind: parent ? edgeKind(node.revision, parent.revision, order, branches) : 'unknown', order, color: node.objectKind === 'baseline' && parent?.objectKind === 'machine' ? parent.color : node.color };
+    }));
+    return { nodes, edges, lanes, nodeById, branches, byId, metadata, focus };
   }
-  function timeLabel(record, zone) { const date = new Date(record.at); if (!Number.isFinite(date.getTime())) return '时间未记录'; return date.toLocaleString('zh-CN', { timeZone: zone || 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); }
-  function reason(record, options) { const supplied = options.getReason ? options.getReason(record) : record.reason || record.message; return typeof supplied === 'string' ? supplied : supplied?.text || supplied?.reason || supplied?.summary || ''; }
+  function contextFor(data, options) {
+    const level = ['families', 'releases', 'history'].includes(options.level) ? options.level : 'families';
+    let family = null, release = null;
+    if (level === 'releases') {
+      family = options.familyId ? data.metadata.familyMap.get(String(options.familyId)) : data.metadata.families[0] || null;
+      if (options.familyId && !family) error('INVALID_FAMILY', '此大版本不存在，请返回大版本选择');
+    }
+    if (level === 'history') {
+      release = options.releaseId ? data.metadata.releaseMap.get(String(options.releaseId)) : null;
+      if (options.releaseId && !release) error('INVALID_RELEASE', '此小版本不存在，请返回大版本选择');
+      if (!release) {
+        family = options.familyId ? data.metadata.familyMap.get(String(options.familyId)) : data.metadata.families[0] || null;
+        release = family?.releases[0] || null;
+      }
+      family = release ? data.metadata.familyMap.get(release.familyId) : family;
+    }
+    return { level, familyId: family?.id || null, releaseId: release?.id || null, family, release };
+  }
+  function connector(parent, child) {
+    const py = parent.y + CARD_HEIGHT / 2, cy = child.y + CARD_HEIGHT / 2;
+    if (parent.columnIndex === child.columnIndex) {
+      const x = parent.x + CARD_WIDTH, outer = x + 15;
+      return 'M ' + x + ' ' + py + ' C ' + outer + ' ' + py + ', ' + outer + ' ' + cy + ', ' + (child.x + CARD_WIDTH) + ' ' + cy;
+    }
+    const forward = child.columnIndex > parent.columnIndex;
+    const px = parent.x + (forward ? CARD_WIDTH : 0), cx = child.x + (forward ? 0 : CARD_WIDTH), middle = (px + cx) / 2;
+    return 'M ' + px + ' ' + py + ' C ' + middle + ' ' + py + ', ' + middle + ' ' + cy + ', ' + cx + ' ' + cy;
+  }
+  function boundaryPath(node, direction, incoming) {
+    const y = node.y + CARD_HEIGHT / 2, edge = node.x + (direction === 'right' ? CARD_WIDTH : 0), outside = edge + (direction === 'right' ? 17 : -17);
+    return incoming ? 'M ' + outside + ' ' + y + ' L ' + edge + ' ' + y : 'M ' + edge + ' ' + y + ' L ' + outside + ' ' + y;
+  }
+  function layout(file, options) {
+    options = options || {};
+    const data = canonical(file, options), context = contextFor(data, options);
+    const { nodes, edges, lanes, nodeById, metadata, focus } = data;
+    const scoped = focus === 'all' ? nodes : nodes.filter(n => n.focused), scopeIds = new Set(scoped.map(n => n.id));
+    const query = String(options.query || '').trim().toLocaleLowerCase();
+    const laneMap = new Map(lanes.map(l => [l.id, l]));
+    const matches = node => !query || [node.title, node.branchLabel, laneMap.get(node.laneId)?.model, metadata.familyMap.get(node.familyId)?.label, metadata.releaseMap.get(node.releaseId)?.label, reason(node.revision, options), actorLabel(node.revision, options)].filter(Boolean).join(' ').toLocaleLowerCase().includes(query);
+    const searched = scoped.filter(matches);
+    const inContext = n => context.level === 'families' || context.level === 'releases' && n.familyId === context.familyId || context.level === 'history' && n.releaseId === context.releaseId;
+    const matching = searched.filter(inContext), matchingIds = matching.map(n => n.id), matchingSet = new Set(matchingIds);
+    const expandedFamilies = unique(Array.isArray(options.expandedFamilies) ? options.expandedFamilies.map(String) : []);
+    let columns = [];
+    function familyColumn(f) { return { id: 'family:' + f.id, kind: 'family', familyId: f.id, releaseId: null, label: f.label, familyLabel: f.label }; }
+    function releaseColumn(r) { return { id: 'release:' + r.id, kind: 'release', familyId: r.familyId, releaseId: r.id, label: r.label, familyLabel: metadata.familyMap.get(r.familyId).label }; }
+    if (context.level === 'families') {
+      metadata.families.forEach(family => {
+        if (expandedFamilies.includes(family.id) && family.releases.length) columns.push(...family.releases.map(releaseColumn));
+        else columns.push(familyColumn(family));
+      });
+    } else if (context.level === 'releases') columns = (context.family?.releases || []).map(releaseColumn);
+    else if (context.release) {
+      const steps = unique(scoped.filter(n => n.releaseId === context.releaseId).map(n => n.historyStep)).sort((a, b) => a - b);
+      columns = (steps.length ? steps : [null]).map(step => ({ id: 'history:' + context.releaseId + ':' + (step || 'empty'), kind: 'history', familyId: context.familyId, releaseId: context.releaseId, familyLabel: context.family.label, label: '保存记录', step }));
+    }
+    const membersByColumn = new Map(), columnIds = new Set(columns.map(c => c.id)), expandedSet = new Set(expandedFamilies);
+    matching.forEach(node => {
+      const id = context.level === 'history' ? 'history:' + node.releaseId + ':' + node.historyStep : context.level === 'releases' || expandedSet.has(node.familyId) ? 'release:' + node.releaseId : 'family:' + node.familyId;
+      if (!columnIds.has(id)) return;
+      const members = membersByColumn.get(id) || []; members.push(node); membersByColumn.set(id, members);
+    });
+    if (query) columns = columns.filter(column => membersByColumn.has(column.id));
+    columns = columns.map((c, index) => Object.assign({}, c, { index, x: index * COLUMN_WIDTH, width: COLUMN_WIDTH }));
+    const scopedLaneIds = new Set((query ? searched : scoped).map(n => n.laneId));
+    const projectedLanes = lanes.filter(l => l.id === 'baseline' || !query && focus === 'all' || scopedLaneIds.has(l.id) || !query && l.id === focus).map((lane, index) => Object.assign({}, lane, { projectedIndex: index }));
+    const machines = projectedLanes.filter(l => l.id !== 'baseline');
+    const columnLimit = limit(options.columnLimit, context.level === 'history' ? limit(options.pageSize, 12) : 12), laneLimit = limit(options.laneLimit, 12);
+    const columnPageCount = Math.max(1, Math.ceil(columns.length / columnLimit)), lanePageCount = Math.max(1, Math.ceil(machines.length / laneLimit));
+    const columnPage = Math.max(0, Math.min(integer(options.columnPage, context.level === 'history' ? integer(options.page, 0) : 0), columnPageCount - 1));
+    const lanePage = Math.max(0, Math.min(integer(options.lanePage, 0), lanePageCount - 1));
+    const columnOffset = columnPage * columnLimit, laneOffset = lanePage * laneLimit;
+    const visibleColumns = columns.slice(columnOffset, columnOffset + columnLimit).map((c, i) => Object.assign({}, c, { visibleIndex: i, x: i * COLUMN_WIDTH }));
+    const visibleLanes = [projectedLanes.find(l => l.id === 'baseline'), ...machines.slice(laneOffset, laneOffset + laneLimit)].filter(Boolean).map((lane, i) => Object.assign({}, lane, { visibleIndex: i, y: i * ROW_HEIGHT }));
+    const visibleColumnIds = new Set(visibleColumns.map(c => c.id)), visibleLaneIds = new Set(visibleLanes.map(l => l.id));
+    const machineIndices = new Map(machines.map((l, i) => [l.id, i]));
+    const projectedNodes = [], representatives = new Map();
+    for (const column of columns) {
+      const members = membersByColumn.get(column.id) || [];
+      if (column.kind === 'history') {
+        members.forEach(node => {
+          const projected = Object.assign({}, node, { kind: 'revision', recordKind: node.kind, revisionIds: [node.id], columnId: column.id, columnIndex: column.index });
+          projectedNodes.push(projected); representatives.set(node.id, projected);
+        });
+      } else {
+        const groups = new Map();
+        members.forEach(node => { const group = groups.get(node.laneId) || []; group.push(node); groups.set(node.laneId, group); });
+        groups.forEach((group, laneId) => {
+          const lane = laneMap.get(laneId), newest = group[0];
+          const projected = { id: JSON.stringify(['summary', column.id, laneId]), kind: column.kind === 'family' ? 'family-summary' : 'release-summary', objectKind: lane.kind, laneId, laneIndex: lane.index, color: lane.color, familyId: column.familyId, releaseId: column.releaseId, columnId: column.id, columnIndex: column.index, revisionIds: group.map(n => n.id), releaseIds: unique(group.map(n => n.releaseId)).sort((a, b) => metadata.releaseMap.get(a).index - metadata.releaseMap.get(b).index), newestRevisionId: newest.id, headRevisionIds: group.filter(n => n.isHead).map(n => n.id), title: column.label, selected: false, hiddenInternalEdgeIds: [] };
+          projectedNodes.push(projected); group.forEach(node => representatives.set(node.id, projected));
+        });
+      }
+    }
+    function position(node) {
+      const row = node.laneId === 'baseline' ? 0 : machineIndices.get(node.laneId) - laneOffset + 1;
+      return Object.assign({}, node, { x: (node.columnIndex - columnOffset) * COLUMN_WIDTH + (COLUMN_WIDTH - CARD_WIDTH) / 2, y: row * ROW_HEIGHT + (ROW_HEIGHT - CARD_HEIGHT) / 2, width: CARD_WIDTH, height: CARD_HEIGHT, visibleRow: row });
+    }
+    const visibleNodes = projectedNodes.filter(n => visibleColumnIds.has(n.columnId) && visibleLaneIds.has(n.laneId)).map(position);
+    const visibleNodeMap = new Map(visibleNodes.map(n => [n.id, n]));
+    const aggregate = new Map(), hiddenInternalEdgeIds = [];
+    const relevantEdges = edges.filter(edge => scopeIds.has(edge.childId));
+    relevantEdges.forEach(edge => {
+      const child = representatives.get(edge.childId), parent = representatives.get(edge.parentId);
+      if (child && parent && child.id === parent.id) {
+        hiddenInternalEdgeIds.push(edge.id); child.hiddenInternalEdgeIds?.push(edge.id); return;
+      }
+      const childVisible = child && visibleNodeMap.has(child.id), parentVisible = parent && visibleNodeMap.has(parent.id);
+      if (!childVisible && !parentVisible) return;
+      let boundary = null, direction = 'left', path;
+      if (child && parent) {
+        const a = position(parent), b = position(child);
+        path = connector(a, b);
+        if (!parentVisible || !childVisible) {
+          const missing = !parentVisible ? parent : child;
+          boundary = (!visibleLaneIds.has(missing.laneId) ? 'lane-page-' : 'column-page-') + (!parentVisible ? 'parent' : 'child');
+        }
+      } else {
+        const childNode = nodeById.get(edge.childId), parentNode = nodeById.get(edge.parentId);
+        const absent = child ? parentNode : childNode, visible = child ? visibleNodeMap.get(child.id) : visibleNodeMap.get(parent.id);
+        const side = child ? 'parent' : 'child';
+        boundary = !absent ? 'missing-' + side : !scopeIds.has(absent.id) ? 'outside-scope-' + side : !inContext(absent) ? 'outside-level-' + side : 'filtered-' + side;
+        const absentRelease = absent && metadata.releaseMap.get(absent.releaseId), currentRelease = child ? metadata.releaseMap.get(childNode.releaseId) : metadata.releaseMap.get(parentNode.releaseId);
+        direction = absentRelease && currentRelease && absentRelease.index > currentRelease.index ? 'right' : 'left';
+        path = boundaryPath(visible, direction, !!child);
+      }
+      const key = JSON.stringify([child?.id || null, parent?.id || null, boundary, child ? null : nodeById.get(edge.childId)?.releaseId, parent ? null : nodeById.get(edge.parentId)?.releaseId, direction]);
+      let group = aggregate.get(key);
+      if (!group) {
+        group = { id: key, childNodeId: child?.id || null, parentNodeId: parent?.id || null, childId: edge.childId, parentId: edge.parentId, childVisible: !!childVisible, parentVisible: !!parentVisible, boundary, direction, path, color: edge.color, kind: edge.kind, originalEdgeIds: [], originalEdges: [] };
+        aggregate.set(key, group);
+      }
+      group.originalEdgeIds.push(edge.id); group.originalEdges.push(edge);
+    });
+    const visibleEdges = [...aggregate.values()].map(e => Object.assign(e, { count: e.originalEdgeIds.length }));
+    const pendingBranches = file.branches.filter(b => !b.headId && (focus === 'all' || focus === 'baseline' && b.kind === 'baseline' || b.id === focus)).map(b => ({ id: b.id, label: branchName(b), releaseId: releaseKey(b.releaseId), familyId: metadata.releaseMap.get(releaseKey(b.releaseId)).familyId }));
+    return Object.assign({}, context, {
+      nodes, edges, lanes, families: metadata.families, releases: metadata.releases, visibleNodes, visibleEdges, projectedNodes, projectedLanes, columns, visibleColumns, visibleLanes, matchingIds, hiddenInternalEdgeIds, expandedFamilies,
+      columnPage, columnLimit, columnPageCount, columnCount: columns.length, columnOffset, lanePage, laneLimit, lanePageCount, laneCount: machines.length, laneOffset,
+      total: matching.length, totalRecords: nodes.length, scopeTotal: scoped.length, query, branchFilter: focus, pendingBranches,
+      unknownParents: relevantEdges.filter(e => !e.parentExists).map(e => ({ childId: e.childId, parentId: e.parentId })),
+      graphWidth: Math.max(1, visibleColumns.length) * COLUMN_WIDTH, canvasHeight: visibleLanes.length * ROW_HEIGHT, matrixWidth: LABEL_WIDTH + Math.max(1, visibleColumns.length) * COLUMN_WIDTH,
+      rowHeight: ROW_HEIGHT, columnWidth: COLUMN_WIDTH, labelWidth: LABEL_WIDTH, headerHeight: HEADER_HEIGHT,
+      // Read-only compatibility for callers transitioning from one-axis history.
+      page: columnPage, pageSize: columnLimit, pageCount: columnPageCount
+    });
+  }
+  function locateRevision(file, id, options) {
+    options = options || {};
+    const data = canonical(file, options), node = data.nodeById.get(id);
+    if (!node) error('REVISION_NOT_FOUND', '此保存记录不存在或尚未载入');
+    const branchFilter = data.focus === 'all' || node.focused ? data.focus : 'all';
+    const target = { level: 'history', familyId: node.familyId, releaseId: node.releaseId, branchFilter, query: '', columnPage: 0, lanePage: 0, columnLimit: limit(options.columnLimit, 12), laneLimit: limit(options.laneLimit, 12), selectedRevisionId: node.id };
+    const graph = layout(file, Object.assign({}, options, target));
+    const column = graph.columns.find(c => c.kind === 'history' && c.step === node.historyStep);
+    const machineIndex = graph.projectedLanes.filter(l => l.id !== 'baseline').findIndex(l => l.id === node.laneId);
+    target.columnPage = Math.floor((column?.index || 0) / graph.columnLimit);
+    target.lanePage = node.laneId === 'baseline' ? Math.max(0, Math.min(integer(options.lanePage, 0), graph.lanePageCount - 1)) : Math.floor(Math.max(0, machineIndex) / graph.laneLimit);
+    return target;
+  }
+  function timeLabel(record, zone) {
+    const date = new Date(record.at); if (!Number.isFinite(date.getTime())) return '时间未记录';
+    return date.toLocaleString('zh-CN', { timeZone: zone || 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  }
   function button(action, text, attrs, klass) { return '<button type="button" class="' + (klass || 'rm-link') + '" data-action="' + action + '" ' + (attrs || '') + '>' + text + '</button>'; }
   function recordAttrs(id) { return 'data-revision="' + escape(id) + '"'; }
   function tag(text, type) { return '<span class="rm-tag ' + (type || '') + '">' + escape(text) + '</span>'; }
-  function render(options) {
-    options = options || {}; const file = options.file; let graph;
-    try { graph = layout(file, options); }
-    catch (err) { return '<section class="rm-view"><div class="rm-empty" role="alert"><strong>保存关系需要核对</strong><p>' + escape(err.message) + '</p></div></section>'; }
-    const byId = new Map(graph.nodes.map(node => [node.id, node]));
-    const focusOptions = [['all', '全部配置'], ['baseline', '基线主线'], ...file.branches.filter(b => b.kind === 'machine').map(b => [b.id, branchName(b)])];
-    const toolbar = '<div class="rm-toolbar"><label class="rm-focus-label">聚焦 <select id="roadmap-focus" aria-label="聚焦配置">' + focusOptions.map(([id, name]) => '<option value="' + escape(id) + '" ' + (graph.branchFilter === id ? 'selected' : '') + '>' + escape(name) + '</option>').join('') + '</select></label><label class="rm-search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0"/></svg><input id="roadmap-search" type="search" data-search="roadmap" aria-label="搜索路线图" placeholder="搜索机台、软件版本或修改说明" value="' + escape(options.query || '') + '"></label><span class="rm-toolbar-spacer"></span><span class="rm-record-count">' + graph.total + ' 条记录</span></div>';
-    const pending = graph.pendingBranches.length ? '<div class="rm-pending"><span>待初始化</span>' + graph.pendingBranches.map(b => '<a href="#/files/' + encodeURIComponent(file.id) + '/parameters?branch=' + encodeURIComponent(b.id) + '">软件 ' + escape(b.releaseId) + '</a>').join('') + '</div>' : '';
-    const axis = '<div class="rm-axis">' + graph.visibleLanes.map(lane => button('roadmap-focus', escape(lane.label), 'data-branch="' + escape(lane.id) + '" title="聚焦' + escape(lane.label) + '" style="left:' + (lane.x - 23) + 'px;--rm-lane-color:' + lane.color + '"', 'rm-lane-label' + (graph.branchFilter === lane.id ? ' is-focused' : ''))).join('') + '</div>';
-    const header = '<div class="rm-header" role="row">' + '<div class="rm-header-cell rm-graph-heading" role="columnheader">' + axis + '</div><div class="rm-header-cell" role="columnheader">保存记录 / 修改说明</div><div class="rm-header-cell" role="columnheader">软件版本</div><div class="rm-header-cell" role="columnheader">配置对象 / 采用基线</div><div class="rm-header-cell" role="columnheader">操作人 / 时间</div><div class="rm-header-cell" role="columnheader"><span class="visually-hidden">详情</span></div></div>';
-    const paths = graph.visibleEdges.map(edge => '<path class="rm-edge' + (!edge.focused ? ' is-dimmed' : '') + (edge.boundary?.startsWith('filtered') || edge.boundary === 'missing-parent' ? ' is-continuation' : '') + '" data-child="' + escape(edge.childId) + '" data-parent="' + escape(edge.parentId) + '" data-kind="' + edge.kind + '"' + (edge.boundary ? ' data-boundary="' + edge.boundary + '"' : '') + ' d="' + edge.path + '" stroke="' + edge.color + '"/>' ).join('');
-    const symbols = graph.visibleNodes.map(node => {
-      const common = 'stroke="' + node.color + '"', opacity = node.focused || node.selected ? '' : ' opacity=".3"';
-      const halo = node.selected ? '<circle cx="' + node.x + '" cy="' + node.y + '" r="12" fill="#dceaff"/>' : '';
-      const mark = node.kind === 'initial' ? '<rect x="' + (node.x - 4.5) + '" y="' + (node.y - 4.5) + '" width="9" height="9" rx="1" fill="white" ' + common + ' stroke-width="2"/>' : node.parentIds.length > 1 ? '<path d="M ' + node.x + ' ' + (node.y - 6) + ' l 6 6 -6 6 -6 -6 Z" fill="' + node.color + '" stroke="white" stroke-width="1.5"/>' : '<circle cx="' + node.x + '" cy="' + node.y + '" r="4.5" fill="' + node.color + '" stroke="white" stroke-width="1.5"/>';
-      return '<g data-node-symbol="' + escape(node.id) + '"' + opacity + '>' + halo + (node.isHead ? '<circle cx="' + node.x + '" cy="' + node.y + '" r="8.5" fill="white" ' + common + ' stroke-width="1.5"/>' : '') + mark + '</g>';
-    }).join('');
-    const svg = '<svg class="rm-lines" width="' + graph.graphWidth + '" height="' + graph.canvasHeight + '" viewBox="0 0 ' + graph.graphWidth + ' ' + Math.max(1, graph.canvasHeight) + '" aria-hidden="true" focusable="false">' + paths + symbols + '</svg>';
-    const rows = graph.visibleNodes.map(node => {
-      const r = node.revision, actor = options.actorLabel ? options.actorLabel(r.authorId, r) : r.authorName || '作者未记录', summary = reason(r, options), attrs = recordAttrs(r.id);
-      const parentNames = node.parentIds.map(id => byId.get(id)?.title || '来源记录未载入');
-      const state = node.isHead ? tag(node.kind === 'baseline' ? '当前基线' : node.kind === 'machine' ? '当前配置' : '当前', 'is-head') : '';
-      const operation = r.restoreRevisionId ? tag('恢复') : r.parentIds.length > 1 ? tag('合并') : r.kind === 'initial' ? tag('初始文件') : '';
-      const adopted = node.adoptedBy.length ? button('roadmap-detail', escape(node.adoptedBy.length === 1 ? node.adoptedBy[0].label + ' 正在采用' : node.adoptedBy.length + ' 台机台正在采用'), attrs + ' title="' + escape(node.adoptedBy.map(b => b.label).join('、')) + '"', 'rm-adoption') : '';
-      const basis = node.kind === 'machine' && r.baseRevisionId ? byId.get(r.baseRevisionId) : null;
-      const basisText = basis ? button('roadmap-select', '采用 ' + escape(basis.revision.releaseId) + ' · ' + escape(formatRevision(file, basis.revision, { compact: true })), recordAttrs(basis.id) + ' title="' + escape(basis.title) + '"', 'rm-basis') : node.kind === 'machine' ? '<span class="rm-unrecorded">采用基线未记录</span>' : adopted;
-      const filteredParents = graph.visibleEdges.filter(edge => edge.childId === node.id && ['filtered-parent', 'missing-parent'].includes(edge.boundary));
-      const continuation = filteredParents.length ? '<span class="rm-outside" title="' + escape(parentNames.join('；')) + '">' + (filteredParents.some(e => e.boundary === 'missing-parent') ? '来源记录未载入' : '来源在筛选范围外') + '</span>' : '';
-      return '<div class="rm-row' + (node.selected ? ' is-selected' : '') + (!node.focused && !node.selected ? ' is-dimmed' : '') + '" role="row" aria-rowindex="' + (node.displayIndex + 2) + '" data-roadmap-row="' + escape(node.id) + '"' + '><div class="rm-cell rm-graph-cell" role="cell">' + button('roadmap-select', '<span class="visually-hidden">' + escape(node.title) + '</span>', attrs + ' aria-label="选择 ' + escape(node.title + (parentNames.length ? '；来源：' + parentNames.join('；') : '；独立起点')) + '" title="' + escape(node.title) + '" style="left:' + (node.x - 14) + 'px"' + (node.selected ? ' aria-pressed="true"' : ' aria-pressed="false"'), 'rm-node') + '</div><div class="rm-cell rm-record-cell" role="cell"><div class="rm-record-title-row">' + button('roadmap-select', escape(node.title), attrs + ' title="' + escape(node.title) + '"', 'rm-record-title') + state + operation + '</div><div class="rm-reason" title="' + escape(summary) + '">' + escape(summary || '未填写修改说明') + continuation + '</div></div><div class="rm-cell rm-release-cell" role="cell"><span class="rm-release">' + escape(r.releaseId || '未记录') + '</span></div><div class="rm-cell rm-object-cell" role="cell"><span class="rm-object-name" title="' + escape(node.branchLabel) + '">' + escape(node.branchLabel) + '</span>' + basisText + '</div><div class="rm-cell rm-author-cell" role="cell"><span class="rm-author">' + escape(actor) + '</span><time datetime="' + escape(r.at || '') + '">' + escape(timeLabel(r, options.timeZone)) + '</time></div><div class="rm-cell rm-detail-cell" role="cell">' + button('roadmap-detail', '详情', attrs + ' aria-label="查看 ' + escape(node.title) + ' 详情"', 'rm-detail') + '</div></div>';
-    }).join('');
-    const empty = !graph.visibleNodes.length ? '<div class="rm-empty"><strong>' + (graph.totalRecords ? '没有匹配的保存记录' : '还没有保存记录') + '</strong><p>' + (graph.totalRecords ? '调整搜索条件后继续查看。' : '从配置文件初始化，或明确选择已有记录作为起点。') + '</p></div>' : '';
-    const continuationCount = graph.visibleEdges.filter(edge => edge.boundary && edge.boundary.endsWith('page')).length;
-    const footer = '<div class="rm-footer"><span>' + (graph.total ? (graph.offset + 1) + '–' + Math.min(graph.offset + graph.pageSize, graph.total) + ' / ' + graph.total + ' 条' : '0 条记录') + '</span>' + (continuationCount ? '<span class="rm-page-context">' + continuationCount + ' 条连线延续至其他页</span>' : '') + (graph.unknownParents.length ? '<span class="rm-warning">' + graph.unknownParents.length + ' 条来源未载入</span>' : '') + '<span class="rm-toolbar-spacer"></span><label>每页 <select id="roadmap-page-size" aria-label="路线图每页记录数">' + [30, 50, 100].map(n => '<option value="' + n + '" ' + (graph.pageSize === n ? 'selected' : '') + '>' + n + '</option>').join('') + '</select></label>' + button('roadmap-prev', '上一页', 'data-page="' + Math.max(0, graph.page - 1) + '" ' + (graph.page ? '' : 'disabled'), 'btn sm') + '<span>' + (graph.page + 1) + ' / ' + graph.pageCount + '</span>' + button('roadmap-next', '下一页', 'data-page="' + Math.min(graph.pageCount - 1, graph.page + 1) + '" ' + (graph.page + 1 < graph.pageCount ? '' : 'disabled'), 'btn sm') + '</div>';
-    return '<section class="rm-view" aria-label="版本路线图" data-roadmap-file="' + escape(file.id) + '">' + toolbar + pending + '<div class="rm-scroll" tabindex="0" aria-label="保存关系与记录；可横向滚动查看机台轨道"><div class="rm-table" role="table" aria-label="配置文件保存关系" aria-rowcount="' + (graph.total + 1) + '" aria-colcount="6" style="--rm-graph-width:' + graph.graphWidth + 'px;--rm-row-height:' + ROW_HEIGHT + 'px">' + header + '<div class="rm-canvas" style="min-height:' + graph.canvasHeight + 'px">' + svg + rows + '</div>' + empty + '</div></div>' + footer + '</section>';
+  function icon(kind) {
+    return kind === 'baseline' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v18M16 3v18M4 8h16M4 16h16"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4zM8 17v3m8-3v3M7 9h5v4H7zM16 9h1m-1 4h1"/></svg>';
   }
-  return { layout, render, formatRevision, colors: COLORS, rowHeight: ROW_HEIGHT };
+  function safeLinks(record) {
+    if (!Array.isArray(record.links)) return [];
+    return record.links.map(link => typeof link === 'string' ? { url: link, label: link } : link).filter(link => {
+      const raw = link?.url || link?.href || '';
+      if (typeof raw !== 'string' || !/^https?:\/\//i.test(raw) || /[\u0000-\u0020\u007f-\u009f\\]/.test(raw)) return false;
+      try { const parsed = new URL(raw); return ['https:', 'http:'].includes(parsed.protocol) && parsed.hostname && !parsed.username && !parsed.password; } catch (_) { return false; }
+    }).map(link => ({ url: new URL(link.url || link.href).href, label: link.label || link.title || link.url || link.href }));
+  }
+  function releaseLabel(graph, id) { return graph.releases.find(r => r.id === id)?.label || (id === UNKNOWN_RELEASE ? '版本未记录' : id); }
+  function summaryCard(node, graph, file, options) {
+    const latest = graph.nodes.find(n => n.id === node.newestRevisionId)?.revision, lane = graph.lanes.find(l => l.id === node.laneId);
+    const action = node.kind === 'family-summary' ? 'roadmap-open-family' : 'roadmap-open-release';
+    const attrs = 'data-family="' + escape(node.familyId) + '"' + (node.releaseId ? ' data-release="' + escape(node.releaseId) + '"' : '');
+    const versions = node.releaseIds.map(id => releaseLabel(graph, id));
+    const range = versions.length > 1 ? versions[0] + ' – ' + versions[versions.length - 1] : versions[0] || '尚无小版本';
+    const head = node.headRevisionIds.length ? tag(node.objectKind === 'baseline' ? '含当前基线' : '含当前配置', 'is-head') : '';
+    return '<button type="button" class="rm-card rm-summary ' + (node.objectKind === 'baseline' ? 'is-baseline' : 'is-machine') + '" data-action="' + action + '" ' + attrs + ' data-roadmap-summary="' + (node.kind === 'family-summary' ? 'family' : 'release') + '" data-summary-id="' + escape(node.id) + '" style="--rm-lane-color:' + node.color + '" aria-label="' + escape(lane.label + ' · ' + node.title + ' · ' + node.revisionIds.length + ' 条保存记录，查看' + (node.kind === 'family-summary' ? '小版本' : '保存记录')) + '"><span class="rm-card-head"><span class="rm-card-object">' + icon(node.objectKind) + '<strong>' + escape(node.title) + '</strong></span>' + head + '</span><span class="rm-card-body"><span class="rm-summary-range">' + escape(range) + '<span>' + node.revisionIds.length + ' 条记录</span></span><span class="rm-reason" title="' + escape(reason(latest, options)) + '">' + escape(reason(latest, options) || '未填写修改原因') + '</span><span class="rm-card-meta">' + escape(actorLabel(latest, options)) + '<time datetime="' + escape(latest.at || '') + '">' + escape(timeLabel(latest, options.timeZone)) + '</time></span><span class="rm-summary-open">查看' + (node.kind === 'family-summary' ? '小版本' : '保存记录') + '<span aria-hidden="true">→</span></span></span></button>';
+  }
+  function recordCard(node, graph, file, options) {
+    const r = node.revision, attrs = recordAttrs(r.id), links = safeLinks(r);
+    const basis = node.objectKind === 'machine' && r.baseRevisionId ? graph.nodes.find(n => n.id === r.baseRevisionId) : null;
+    const status = node.isHead ? tag(node.objectKind === 'baseline' ? '当前基线' : '当前配置', 'is-head') : r.restoreRevisionId ? tag('恢复') : r.parentIds.length > 1 ? tag('合并') : '';
+    const basisLine = node.objectKind === 'machine' ? basis ? button('roadmap-select', '采用 ' + escape(releaseLabel(graph, basis.releaseId)) + ' · ' + escape(formatRevision(file, basis.revision, { compact: true })), recordAttrs(basis.id) + ' title="' + escape(basis.title) + '"', 'rm-basis') : '<span class="rm-unrecorded">采用基线未记录</span>' : node.adoptedBy.length ? button('roadmap-detail', escape(node.adoptedBy.length === 1 ? node.adoptedBy[0].label + ' 正在采用' : node.adoptedBy.length + ' 台机台正在采用'), attrs, 'rm-basis') : '<span class="rm-record-object">版本基线 · ' + escape(releaseLabel(graph, node.releaseId)) + '</span>';
+    const outside = graph.visibleEdges.filter(edge => edge.boundary && edge.originalEdges.some(e => e.childId === node.id)).flatMap(e => e.originalEdges.filter(e => e.childId === node.id));
+    const missing = outside.find(e => !e.parentExists), source = outside.find(e => e.parentExists && e.parentId !== basis?.id);
+    const sourceNode = source && graph.nodes.find(n => n.id === source.parentId);
+    const sourceLink = missing ? '<span class="rm-source-note">部分来源未载入</span>' : sourceNode ? button('roadmap-select', '来源 ' + escape(releaseLabel(graph, sourceNode.releaseId)), recordAttrs(sourceNode.id) + ' title="' + escape(sourceNode.title) + '"', 'rm-source-note') : '';
+    const firstLink = links.length ? '<a class="rm-related-link" href="' + escape(links[0].url) + '" target="_blank" rel="noopener noreferrer" title="' + escape(links[0].label) + '">' + escape(links[0].label) + '</a>' : sourceLink;
+    const more = links.length > 1 ? button('roadmap-detail', '+' + (links.length - 1) + ' 链接', attrs, 'rm-more-links') : '';
+    return '<article class="rm-card rm-revision ' + (node.objectKind === 'baseline' ? 'is-baseline' : 'is-machine') + (node.selected ? ' is-selected' : '') + '" data-roadmap-record="' + escape(r.id) + '" data-roadmap-row="' + escape(r.id) + '" ' + attrs + ' style="--rm-lane-color:' + node.color + '" aria-label="' + escape(node.title) + '"><div class="rm-card-head">' + button('roadmap-select', icon(node.objectKind) + '<strong>' + escape(formatRevision(file, r, { compact: true })) + '</strong>', attrs + ' aria-pressed="' + (node.selected ? 'true' : 'false') + '" aria-label="选择 ' + escape(node.title) + '"', 'rm-card-select') + status + '</div><div class="rm-card-body"><p class="rm-reason" title="' + escape(reason(r, options)) + '">' + escape(reason(r, options) || '未填写修改原因') + '</p><div class="rm-card-meta"><span>' + escape(actorLabel(r, options)) + '</span><time datetime="' + escape(r.at || '') + '">' + escape(timeLabel(r, options.timeZone)) + '</time></div><div class="rm-basis-line">' + basisLine + '</div><div class="rm-card-footer">' + firstLink + more + '<span class="rm-spacer"></span>' + button('roadmap-detail', '详情', attrs + ' aria-label="查看 ' + escape(node.title) + ' 详情"', 'rm-detail') + '</div></div></article>';
+  }
+  function breadcrumbs(graph) {
+    const first = button('roadmap-overview', '大版本', graph.level === 'families' ? 'aria-current="page"' : '', 'rm-crumb' + (graph.level === 'families' ? ' is-current' : ''));
+    const second = graph.family ? button('roadmap-open-family', escape(graph.family.label) + ' · 小版本', 'data-family="' + escape(graph.familyId) + '"' + (graph.level === 'releases' ? ' aria-current="page"' : ''), 'rm-crumb' + (graph.level === 'releases' ? ' is-current' : '')) : '<span class="rm-crumb is-unavailable">小版本</span>';
+    const third = graph.release ? '<span class="rm-crumb is-current" aria-current="page">' + escape(graph.release.label) + ' · 保存记录</span>' : '<span class="rm-crumb is-unavailable">保存记录</span>';
+    return '<nav class="rm-breadcrumbs" aria-label="路线图层级">' + first + '<span aria-hidden="true">/</span>' + second + '<span aria-hidden="true">/</span>' + third + '</nav>';
+  }
+  function matrixHeader(graph, matrixId) {
+    const groups = [];
+    graph.visibleColumns.forEach((column, index) => {
+      const previous = groups[groups.length - 1];
+      if (previous && previous.familyId === column.familyId) previous.span++;
+      else groups.push({ familyId: column.familyId, label: column.familyLabel, start: index, span: 1 });
+    });
+    if (!groups.length && graph.family) groups.push({ familyId: graph.family.id, label: graph.family.label, start: 0, span: 1 });
+    const corner = '<div class="rm-axis-corner" data-roadmap-corner role="columnheader" aria-colindex="1" aria-rowspan="2"><strong>配置对象</strong><span>软件版本 →</span></div>';
+    const familyHeads = groups.map(group => {
+      const family = graph.families.find(f => f.id === group.familyId), expanded = graph.expandedFamilies.includes(group.familyId);
+      const title = graph.level === 'families' ? button('roadmap-open-family', escape(group.label), 'data-family="' + escape(group.familyId) + '"', 'rm-family-name') : '<strong>' + escape(group.label) + '</strong>';
+      const toggle = graph.level === 'families' && family.releaseIds.length ? button('roadmap-toggle-family', expanded ? '收起' : '展开小版本', 'data-family="' + escape(group.familyId) + '" aria-expanded="' + expanded + '" aria-controls="' + matrixId + '"', 'rm-expand') : '';
+      return '<div class="rm-family-heading" data-roadmap-family="' + escape(group.familyId) + '" role="columnheader" aria-colindex="' + (group.start + 2) + '" aria-colspan="' + group.span + '" style="grid-column:' + (group.start + 2) + ' / span ' + group.span + '">' + title + toggle + '</div>';
+    }).join('');
+    const lower = graph.level === 'history' && graph.release ? '<div class="rm-column-heading is-group-start" data-roadmap-release="' + escape(graph.releaseId) + '" role="columnheader" aria-colindex="2" aria-colspan="' + Math.max(1, graph.visibleColumns.length) + '" style="grid-column:2 / span ' + Math.max(1, graph.visibleColumns.length) + '"><span class="rm-history-heading">软件 ' + escape(graph.release.label) + ' · 保存记录</span></div>' : graph.visibleColumns.map((column, index) => {
+      let content = escape(column.kind === 'family' ? '全部小版本' : column.label);
+      if (column.kind === 'release') content = button('roadmap-open-release', escape(column.label), 'data-family="' + escape(column.familyId) + '" data-release="' + escape(column.releaseId) + '"', 'rm-release-heading-link');
+      const releaseAttr = column.releaseId ? ' data-roadmap-release="' + escape(column.releaseId) + '"' : '';
+      const previous = graph.visibleColumns[index - 1];
+      return '<div class="rm-column-heading' + (!previous || previous.familyId !== column.familyId ? ' is-group-start' : '') + '" data-roadmap-column="' + escape(column.id) + '"' + releaseAttr + ' role="columnheader" aria-colindex="' + (index + 2) + '" style="grid-column:' + (index + 2) + '">' + content + (column.kind === 'history' ? '<span>' + escape(releaseLabel(graph, column.releaseId)) + '</span>' : '') + '</div>';
+    }).join('');
+    return '<div class="rm-axis" data-roadmap-axis role="rowgroup"><div class="rm-axis-row" role="row" aria-rowindex="1">' + corner + familyHeads + '</div><div class="rm-axis-row" role="row" aria-rowindex="2">' + lower + '</div></div>';
+  }
+  function windowControls(graph) {
+    function select(id, value, label) { return '<label>' + label + ' <select id="' + id + '" aria-label="' + label + '">' + [6, 12, 20, 30].map(n => '<option value="' + n + '"' + (value === n ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label>'; }
+    const columnSummary = graph.level === 'history' ? '保存记录 · ' + (graph.columnPage + 1) + ' / ' + graph.columnPageCount + ' 组' : '版本列 ' + (graph.columnCount ? graph.columnOffset + 1 + '–' + Math.min(graph.columnOffset + graph.columnLimit, graph.columnCount) : '0') + ' / ' + graph.columnCount;
+    const columns = '<div class="rm-window-control"><span>' + columnSummary + '</span>' + (graph.columnCount > 12 || graph.columnLimit !== 12 ? button('roadmap-column-prev', '前一组', 'data-page="' + Math.max(0, graph.columnPage - 1) + '" ' + (graph.columnPage ? '' : 'disabled'), 'rm-page-button') + button('roadmap-column-next', '后一组', 'data-page="' + Math.min(graph.columnPageCount - 1, graph.columnPage + 1) + '" ' + (graph.columnPage + 1 < graph.columnPageCount ? '' : 'disabled'), 'rm-page-button') + select('roadmap-column-limit', graph.columnLimit, '每组列数') : '') + '</div>';
+    const lanes = '<div class="rm-window-control"><span>机台 ' + (graph.laneCount ? graph.laneOffset + 1 + '–' + Math.min(graph.laneOffset + graph.laneLimit, graph.laneCount) : '0') + ' / ' + graph.laneCount + '</span>' + (graph.laneCount > 12 || graph.laneLimit !== 12 ? button('roadmap-lane-prev', '上一组', 'data-page="' + Math.max(0, graph.lanePage - 1) + '" ' + (graph.lanePage ? '' : 'disabled'), 'rm-page-button') + button('roadmap-lane-next', '下一组', 'data-page="' + Math.min(graph.lanePageCount - 1, graph.lanePage + 1) + '" ' + (graph.lanePage + 1 < graph.lanePageCount ? '' : 'disabled'), 'rm-page-button') + select('roadmap-lane-limit', graph.laneLimit, '每组机台') : '') + '</div>';
+    return '<footer class="rm-footer">' + columns + '<span class="rm-spacer"></span>' + lanes + '</footer>';
+  }
+  function render(options, preparedGraph) {
+    options = options || {}; const file = options.file; let graph = preparedGraph;
+    try { if (!graph) graph = layout(file, options); }
+    catch (err) { return '<section class="rm-view" data-roadmap-level="error"><div class="rm-empty" role="alert"><strong>保存关系需要核对</strong><p>' + escape(err.message) + '</p>' + button('roadmap-overview', '返回大版本', '', 'rm-page-button') + '</div></section>'; }
+    const matrixId = domId(file.id + ':matrix'), arrowId = domId(file.id + ':arrow'), marker = 'url(#' + arrowId + ')';
+    const focusOptions = [['all', '全部配置'], ['baseline', '版本基线'], ...graph.lanes.filter(l => l.kind === 'machine').map(l => [l.id, l.label])];
+    const toolbar = '<div class="rm-toolbar">' + breadcrumbs(graph) + '<span class="rm-spacer"></span><label class="rm-focus-label">聚焦 <select id="roadmap-focus" aria-label="聚焦配置">' + focusOptions.map(([id, name]) => '<option value="' + escape(id) + '" ' + (graph.branchFilter === id ? 'selected' : '') + '>' + escape(name) + '</option>').join('') + '</select></label><label class="rm-search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0"/></svg><input id="roadmap-search" type="search" data-search="roadmap" aria-label="搜索路线图" placeholder="搜索机台、版本或修改原因" value="' + escape(options.query || '') + '"></label></div>';
+    const pending = graph.pendingBranches.filter(b => graph.level === 'families' || graph.level === 'releases' && b.familyId === graph.familyId || graph.level === 'history' && b.releaseId === graph.releaseId);
+    const pendingBar = pending.length ? '<div class="rm-pending"><span>待初始化</span>' + pending.map(b => '<a href="#/files/' + encodeURIComponent(file.id) + '/parameters?branch=' + encodeURIComponent(b.id) + '">软件 ' + escape(releaseLabel(graph, b.releaseId)) + '</a>').join('') + '</div>' : '';
+    const paths = graph.visibleEdges.map(edge => {
+      const description = edge.originalEdges.slice(0, 3).map(e => {
+        const child = graph.nodes.find(n => n.id === e.childId), parent = graph.nodes.find(n => n.id === e.parentId);
+        return (parent?.title || '来源记录未载入') + ' → ' + child.title;
+      }).join('；');
+      return '<path class="rm-edge' + (edge.boundary ? ' is-continuation' : '') + '" data-child-node="' + escape(edge.childNodeId || '') + '" data-parent-node="' + escape(edge.parentNodeId || '') + '" data-original-edge-count="' + edge.count + '"' + (edge.boundary ? ' data-boundary="' + edge.boundary + '"' : '') + ' d="' + edge.path + '" stroke="' + edge.color + '" marker-end="' + marker + '"><title>' + escape(description + (edge.count > 3 ? '；共 ' + edge.count + ' 条来源关系' : '')) + '</title></path>';
+    }).join('');
+    const svg = '<svg class="rm-links" width="' + graph.graphWidth + '" height="' + graph.canvasHeight + '" viewBox="0 0 ' + graph.graphWidth + ' ' + Math.max(1, graph.canvasHeight) + '" aria-hidden="true" focusable="false"><defs><marker id="' + arrowId + '" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1l6 3-6 3" fill="none" stroke="#7f92aa" stroke-width="1.4"/></marker></defs>' + paths + '</svg>';
+    const nodeByCell = new Map(graph.visibleNodes.map(n => [JSON.stringify([n.laneId, n.columnId]), n]));
+    const rows = graph.visibleLanes.map(lane => {
+      const head = '<div class="rm-lane-head" data-roadmap-lane-header="' + escape(lane.id) + '" role="rowheader"><span class="rm-lane-icon">' + icon(lane.kind) + '</span><strong title="' + escape(lane.label) + '">' + escape(lane.label) + '</strong><span>' + escape(lane.kind === 'baseline' ? '软件配置主线' : lane.model || '型号未记录') + '</span>' + (lane.kind === 'machine' ? button('roadmap-focus', '聚焦', 'data-branch="' + escape(lane.id) + '"', 'rm-lane-focus') : '') + '</div>';
+      const cells = graph.visibleColumns.map((column, index) => {
+        const node = nodeByCell.get(JSON.stringify([lane.id, column.id])), previous = graph.visibleColumns[index - 1];
+        let content = node ? node.kind === 'revision' ? recordCard(node, graph, file, options) : summaryCard(node, graph, file, options) : '';
+        const pendingHere = lane.id === 'baseline' ? pending.find(b => column.kind === 'family' ? b.familyId === column.familyId : b.releaseId === column.releaseId) : null;
+        if (!content && pendingHere) content = '<div class="rm-cell-empty"><span>尚未初始化</span><a href="#/files/' + encodeURIComponent(file.id) + '/parameters?branch=' + encodeURIComponent(pendingHere.id) + '">设置初始配置</a></div>';
+        return '<div class="rm-cell' + (!previous || previous.familyId !== column.familyId ? ' is-group-start' : '') + '" role="cell" data-roadmap-cell="' + escape(column.id) + '">' + content + '</div>';
+      }).join('');
+      return '<div class="rm-matrix-row' + (lane.kind === 'baseline' ? ' is-baseline' : '') + '" data-roadmap-lane="' + escape(lane.id) + '" role="row" style="--rm-lane-color:' + lane.color + '">' + head + cells + '</div>';
+    }).join('');
+    const empty = !graph.total && !pending.length ? '<div class="rm-empty rm-empty-overlay"><strong>' + (graph.query ? '没有匹配的保存记录' : graph.totalRecords ? '此范围还没有保存记录' : '还没有保存记录') + '</strong><p>' + (graph.query ? '调整搜索条件后继续查看。' : '选择其他版本，或从配置文件初始化。') + '</p></div>' : '';
+    const vars = '--rm-column-count:' + Math.max(1, graph.visibleColumns.length) + ';--rm-column-width:' + COLUMN_WIDTH + 'px;--rm-row-height:' + ROW_HEIGHT + 'px;--rm-label-width:' + LABEL_WIDTH + 'px;--rm-header-height:' + HEADER_HEIGHT + 'px;--rm-matrix-width:' + graph.matrixWidth + 'px';
+    return '<section class="rm-view" aria-label="版本路线图" data-roadmap-level="' + graph.level + '" data-roadmap-file="' + escape(file.id) + '">' + toolbar + pendingBar + '<div class="rm-scroll" data-roadmap-scroll tabindex="0" aria-label="版本与配置对象矩阵，可横向和纵向滚动"><div class="rm-matrix" id="' + matrixId + '" role="table" aria-label="配置版本关系" aria-rowcount="' + (graph.visibleLanes.length + 2) + '" aria-colcount="' + (Math.max(1, graph.visibleColumns.length) + 1) + '" style="' + vars + '">' + matrixHeader(graph, matrixId) + '<div class="rm-body" role="rowgroup" style="height:' + graph.canvasHeight + 'px">' + svg + rows + empty + '</div></div></div>' + windowControls(graph) + '</section>';
+  }
+  return { layout, render, locateRevision, formatRevision, colors: COLORS, rowHeight: ROW_HEIGHT, columnWidth: COLUMN_WIDTH, labelWidth: LABEL_WIDTH, headerHeight: HEADER_HEIGHT };
 });
 </script>
 <script id="prototype-ui">/* Rebuilt 2026-11-11. Offline design demonstration; no production APIs. */
@@ -1116,7 +1450,8 @@ const draftKey=(fileId,branchId)=>M.state.workspaceId+'/'+fileId+'/'+branchId;
 const recordTitle=(file,r)=>r?MCPrototypeRoadmap.formatRevision(file,r):'尚未保存';
 const recordShort=(file,r)=>r?MCPrototypeRoadmap.formatRevision(file,r,{compact:true}):'尚未保存';
 const recordDescription=r=>r?.reason||String(r?.message||'').replace(/\bB(\d+)\b/g,'基线第 $1 次保存').replace(/\br(\d+)\b/g,'机台第 $1 次保存');
-Object.assign(S,{roadmapSelected:null,roadmapBranch:'all',selectionScope:null,tracePickScope:null,sourceWriteMeta:null});
+const newRoadmapState=()=>({level:'families',familyId:null,releaseId:null,expandedFamilies:[],columnPage:0,columnLimit:12,lanePage:0,laneLimit:12});
+Object.assign(S,{roadmapSelected:null,roadmapBranch:'all',roadmap:newRoadmapState(),roadmapScroll:{},roadmapLocate:null,selectionScope:null,tracePickScope:null,sourceWriteMeta:null});
 function modificationFields(prefix,meta){
   const reason=meta?.reason??meta?.message??'',raw=meta?.linksText??(meta?.links||[]).join('\n');
   const reasonId=prefix==='save'?'save-message':prefix+'-reason';
@@ -1186,22 +1521,76 @@ function branchControls(file){const b=branch(file),r=current(file),edit=S.edit?.
 function paramInput(p){if(p.type==='boolean')return '<select data-edit-value="'+e(p.id)+'" aria-label="'+e(p.name)+' 值"><option value="true" '+(p.value===true?'selected':'')+'>true</option><option value="false" '+(p.value===false?'selected':'')+'>false</option></select>';return '<input '+(p.type==='number'?'inputmode="decimal"':'')+' data-edit-value="'+e(p.id)+'" aria-label="'+e(p.name)+' 值" value="'+e(p.value)+'">';}
 function parameterPage(file){const b=branch(file),r=current(file),edit=S.edit&&S.edit.fileId===file.id&&S.edit.branchId===b.id?S.edit:null;const params=edit?.params||r?.params||[],base=reference(file,b,r,edit),baseMap=new Map((base?.params||[]).map(p=>[p.id,p])),modified=new Set(edit?M.diff(rev(file,edit.headId)?.params||[],params).map(x=>x.paramId):[]),q=S.search.toLowerCase();const list=params.filter(p=>(p.name+' '+p.path+' '+val(p.value)).toLowerCase().includes(q)&&(S.category==='all'||p.path.split('/')[1]===S.category)&&(S.filter!=='different'||val(p.value)!==val(baseMap.get(p.id)?.value))&&(S.filter!=='modified'||modified.has(p.id)));const cats=[...new Set(params.map(p=>p.path.split('/')[1]))];const actions=edit?'':link('比较',contextUrl(file,'compare',r),'compare')+link('导出',contextUrl(file,'export',r),'download')+btn(S.drafts[draftKey(file.id,b.id)]?'继续草稿':'编辑参数','edit','edit','primary',admin()&&!S.revisionId&&r?'':'disabled');const visible=pageRows(list),selectHead=selectionHeader('params',list,visible);const rows=visible.map(p=>{const origin=S.blame&&r?.params.some(x=>x.id===p.id)?M.blame(file.id,r.id,p.id).find(x=>x.field==='value'):null;return '<tr><td class="check-cell"><input type="checkbox" data-select-param="'+e(p.id)+'" aria-label="选择 '+e(p.name)+'" '+(S.selected.has(p.id)?'checked':'')+'></td><td class="param-name"><button class="link-button name" data-action="parameter-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono" title="'+e(p.path)+'">'+e(p.path)+'</div></td><td class="number muted">'+e(val(baseMap.get(p.id)?.value))+'</td><td class="number '+(modified.has(p.id)?'changed':'')+'">'+(edit?paramInput(p):e(val(p.value)))+'</td><td class="small muted">'+e(p.unit||'—')+'</td><td>'+(edit&&b.kind==='machine'?'<select data-edit-mode="'+e(p.id)+'" aria-label="'+e(p.name)+' 取值方式">'+['inherit','override','pin'].map(key=>'<option value="'+key+'" '+(p.mode===key?'selected':'')+'>'+modes[key]+'</option>').join('')+'</select>':b.kind==='baseline'?'<span class="muted small">基线值</span>':p.mode==='pin'?badge('保持此值','purple'):p.mode==='override'?badge('单独设置','amber'):'<span class="muted small">采用基线</span>')+'</td>'+(S.blame?'<td class="small">'+e(origin?.known?actor(origin.authorId).name:modified.has(p.id)?'尚未保存':'未记录')+'<div class="sub">'+e(origin?.known?recordShort(file,rev(file,origin.originRevisionId)):'—')+'</div></td>':'')+'<td>'+btn('追溯','parameter-detail','history','sm quiet','data-param="'+e(p.id)+'"')+'</td></tr>';}).join('');shell(fileHeading(file,actions)+fileTabs(file,'parameters')+'<section class="panel work-panel">'+branchControls(file)+(S.revisionId?'<div class="info-line">'+ic('history')+'正在查看 '+e(recordTitle(file,r))+' 的完整保存内容。'+btn('返回当前配置','return-current',null,'sm quiet')+btn('恢复此快照','restore',null,'sm quiet','data-revision="'+e(r?.id)+'" '+disabled())+'</div>':'')+'<div class="toolbar">'+search(S.search,'搜索参数名、字段或值')+'<select class="control" id="param-filter" aria-label="参数筛选">'+[['all','全部参数'],['different','与参考不同'],...(edit?[['modified','本次修改']]:[])].map(([key,label])=>'<option value="'+key+'" '+(S.filter===key?'selected':'')+'>'+label+'</option>').join('')+'</select><span class="spacer"></span>'+(S.selected.size?btn('跟踪所选 '+S.selected.size+' 项','trace-selected','params'):btn(S.blame?'隐藏修改人':'显示修改人','toggle-blame','eye','quiet'))+btn('显示','display','settings','quiet')+'</div>'+selectionBar('params',list)+(r||edit?'<div class="workspace"><aside class="directories" aria-label="参数目录" '+(S.directories?'':'hidden')+'><div class="nav-label">参数目录</div><button class="directory '+(S.category==='all'?'active':'')+'" data-action="category" data-category="all">全部参数<span>'+params.length+'</span></button>'+cats.map(cat=>'<button class="directory '+(S.category===cat?'active':'')+'" data-action="category" data-category="'+e(cat)+'">'+e(categories[cat]||cat)+'<span>'+params.filter(p=>p.path.split('/')[1]===cat).length+'</span></button>').join('')+'</aside><div class="table-wrap"><table class="table '+(S.compact?'compact':'')+'"><thead><tr><th class="check-cell">'+selectHead+'</th><th>参数 / 文件字段</th><th>'+e(b.kind==='machine'?'采用的基线':'上一保存记录')+'</th><th>'+ (edit?'修改后的值':'当前值')+'</th><th>单位</th><th>取值方式</th>'+(S.blame?'<th>最后改值</th>':'')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配的参数','调整搜索或筛选条件。',btn('清除筛选','clear-search')):'')+'</div></div>':empty('这个版本尚未初始化','导入本版本的配置文件，核对后建立保存记录。',btn('导入初始文件','initialize-branch','upload','primary',disabled())))+paginate(list.length)+(edit?'<div class="editbar"><span class="edit-summary"><span class="draft-dot"></span><span id="edit-count">'+modified.size+'</span> 项修改 <span class="muted">· 尚未保存到 '+e(b.label)+'</span></span><span class="spacer"></span>'+btn('取消','cancel-edit',null,'quiet')+btn('暂存','stash')+btn('核对保存','review-save','check','primary')+'</div>':'')+'</section>',[{label:'配置文件',url:'#/files'},{label:file.name}],true);}
 function roadmapPage(file){
-  const defaultBranch=file.branches.find(b=>b.kind==='baseline'&&b.headId)||file.branches[0];
-  let selected=rev(file,S.roadmapSelected)||rev(file,S.query.revision)||rev(file,branch(file,S.query.branch)?.headId)||rev(file,defaultBranch?.headId);
-  if(selected)S.roadmapSelected=selected.id;
-  const r=selected,b=r&&branch(file,r.branchId),head=r&&b.headId===r.id;
-  const body=MCPrototypeRoadmap.render({file,selectedRevisionId:r?.id,page:S.page,pageSize:S.limit,branchFilter:S.roadmapBranch||'all',query:S.search,actorLabel:id=>actor(id).name,getReason:recordDescription});
-  const selection=r?'<div class="roadmap-selection"><div class="roadmap-selection-name"><strong>'+e(recordTitle(file,r))+'</strong>'+badge(head?'当前保存':'历史记录',head?'green':'')+'</div><span class="spacer"></span>'+btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('比较','roadmap-compare','compare',null,'data-revision="'+e(r.id)+'"')+btn('详情','roadmap-detail','info',null,'data-revision="'+e(r.id)+'"')+btn('编辑当前配置','roadmap-edit','edit','primary','data-revision="'+e(r.id)+'" '+disabled())+'</div>':'';
+  const opts=roadmapOptions(file);let graph;
+  try{graph=MCPrototypeRoadmap.layout(file,opts);}catch(_){/* The isolated view renders its recoverable error state. */}
+  if(graph)Object.assign(S.roadmap,{level:graph.level,familyId:graph.familyId,releaseId:graph.releaseId,columnPage:graph.columnPage,lanePage:graph.lanePage});
+  const selected=rev(file,S.roadmapSelected),visible=graph?.visibleNodes.some(n=>n.kind==='revision'&&n.id===selected?.id);
+  const r=visible?selected:null,b=r&&branch(file,r.branchId),head=r&&b.headId===r.id;
+  const body=MCPrototypeRoadmap.render(opts,graph);
+  const selection=r?'<div class="roadmap-selection"><div class="roadmap-selection-name"><strong>'+e(recordTitle(file,r))+'</strong>'+badge(head?'当前保存':'历史记录',head?'green':'')+'</div><span class="spacer"></span>'+btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('比较','roadmap-compare','compare',null,'data-revision="'+e(r.id)+'"')+btn('详情','roadmap-detail','info',null,'data-revision="'+e(r.id)+'"')+btn('导出','roadmap-export','download',null,'data-revision="'+e(r.id)+'"')+(head&&r.kind!=='initial'?btn('编辑当前配置','roadmap-edit','edit','primary','data-revision="'+e(r.id)+'" '+disabled()):r.kind!=='initial'?btn('以此创建草稿','restore','history',null,'data-revision="'+e(r.id)+'" '+disabled()):'')+'</div>':'';
   shell(fileHeading(file,btn('新建软件版本','new-release','plus',null,disabled())+btn('添加机台','fork','machine',null,disabled()))+fileTabs(file,'roadmap')+'<section class="panel work-panel roadmap-panel">'+body+selection+'</section>',[{label:'配置文件',url:'#/files'},{label:file.name}],true);
+  const page=document.querySelector('.page');if(page)page.className+=' roadmap-page';
+  restoreRoadmapScroll();
+}
+function roadmapOptions(file){
+  return Object.assign({},S.roadmap,{file:file||f(),assets:M.state.assets,branchFilter:S.roadmapBranch||'all',query:S.search,selectedRevisionId:S.roadmapSelected,actorLabel:id=>actor(id).name,getReason:recordDescription});
+}
+function roadmapScrollKey(){
+  const v=S.roadmap;
+  return JSON.stringify([M.state.workspaceId,S.fileId,v.level,v.familyId,v.releaseId,v.expandedFamilies.slice().sort(),v.columnPage,v.columnLimit,v.lanePage,v.laneLimit,S.roadmapBranch,S.search]);
+}
+function rememberRoadmapScroll(){
+  const scroll=document.querySelector('.rm-scroll'),key=scroll?.dataset.roadmapScrollKey;
+  if(key){let context;try{context=JSON.parse(key);}catch(_){return;}if(context[0]!==M.state.workspaceId||context[1]!==S.fileId)return;S.roadmapScroll[key]={left:scroll.scrollLeft||0,top:scroll.scrollTop||0};const keys=Object.keys(S.roadmapScroll);if(keys.length>40)delete S.roadmapScroll[keys[0]];}
+}
+function restoreRoadmapScroll(){
+  const scroll=document.querySelector('.rm-scroll');if(!scroll)return;
+  const key=roadmapScrollKey(),position=S.roadmapScroll[key];scroll.dataset.roadmapScrollKey=key;
+  if(position){scroll.scrollLeft=position.left;scroll.scrollTop=position.top;}
+  if(S.roadmapLocate){const id=S.roadmapLocate;S.roadmapLocate=null;revealRoadmapRecord(id);}
+}
+function revealRoadmapRecord(id){
+  const card=Array.from(document.querySelectorAll('[data-roadmap-record]')).find(node=>node.dataset.roadmapRecord===id);
+  if(!card)return;
+  const trigger=card.matches('[data-action="roadmap-select"]')?card:card.querySelector('[data-action="roadmap-select"]');
+  trigger?.focus({preventScroll:true});card.scrollIntoView({block:'nearest',inline:'nearest'});
+}
+function applyRoadmapLocation(location){
+  for(const key of Object.keys(newRoadmapState()))if(Object.prototype.hasOwnProperty.call(location,key))S.roadmap[key]=location[key];
+  if(location.branchFilter)S.roadmapBranch=location.branchFilter;
+  if(Object.prototype.hasOwnProperty.call(location,'query'))S.search=location.query;
+}
+function roadmapUrl(revisionId){
+  const v=S.roadmap,q=new URLSearchParams({view:v.level});
+  if(v.familyId&&v.level!=='families')q.set('family',v.familyId);
+  if(v.releaseId&&v.level==='history')q.set('release',v.releaseId);
+  if(revisionId)q.set('revision',revisionId);
+  return fileUrl(f(),'roadmap')+'?'+q.toString();
+}
+function openRoadmapLevel(level,familyId,releaseId){
+  rememberRoadmapScroll();Object.assign(S.roadmap,{level,familyId:familyId||null,releaseId:releaseId||null,columnPage:0,lanePage:0});
+  S.search='';S.roadmapLocate=null;go(roadmapUrl());
+}
+function locateRoadmapRecord(id,force){
+  const file=f(),record=rev(file,id);if(!record)throw new Error('保存记录不存在');
+  const graph=MCPrototypeRoadmap.layout(file,roadmapOptions(file));
+  S.roadmapSelected=id;S.roadmapLocate=id;
+  if(force||!graph.visibleNodes.some(node=>node.kind==='revision'&&node.id===id)){
+    applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(file,id,roadmapOptions(file)));go(roadmapUrl(id));
+  }else render();
+}
+function pageRoadmap(axis,page){
+  const scroll=document.querySelector('.rm-scroll'),position={left:scroll?.scrollLeft||0,top:scroll?.scrollTop||0};
+  S.roadmap[axis+'Page']=Math.max(0,Number(page)||0);
+  S.roadmapScroll[roadmapScrollKey()]={left:axis==='column'?0:position.left,top:axis==='lane'?0:position.top};render();
 }
 function revisionDetail(id){
   const file=f(),r=rev(file,id);if(!r)throw new Error('保存记录不存在');const b=branch(file,r.branchId),before=rev(file,r.parentIds[0]),base=rev(file,r.baseRevisionId),currentHead=rev(file,b.headId),adopted=file.branches.filter(x=>x.kind==='machine'&&rev(file,x.headId)?.baseRevisionId===r.id);
   showDrawer(recordTitle(file,r),'<div class="side-stat"><span>配置对象</span><strong>'+e(b.label)+'</strong></div><div class="side-stat"><span>软件版本</span><strong>'+e(r.releaseId)+'</strong></div><div class="side-stat"><span>保存时间 / 人员</span><strong>'+date(r.at)+' · '+e(actor(r.authorId).name)+'</strong></div>'+changeContext(r,true)+(base?'<div class="section-head space-top"><h3>采用的基线</h3></div><button class="link-button" data-action="roadmap-jump" data-revision="'+e(base.id)+'">'+e(recordTitle(file,base))+'</button>':'')+'<div class="section-head space-top"><h3>来源记录</h3></div>'+(r.parentIds.length?'<div class="stack">'+r.parentIds.map(parentId=>{const parent=rev(file,parentId);return parent?'<button class="link-button" data-action="roadmap-jump" data-revision="'+e(parent.id)+'">'+e(recordTitle(file,parent))+'</button>':'<span class="muted">部分来源未记录</span>';}).join('')+'</div>':'<p class="small muted">此记录是已知历史的起点。</p>')+(adopted.length?'<div class="section-head space-top"><h3>当前采用此基线的机台</h3></div><div class="row wrap">'+adopted.map(m=>btn(m.label,'roadmap-jump','machine','sm','data-revision="'+e(m.headId)+'"')).join('')+'</div>':'')+(before?'<div class="section-head space-top"><h3>与上次保存的变化</h3></div>'+pagedDiffTable(M.diff(before.params,r.params),recordShort(file,before),recordShort(file,r)):'')+(r.reviewId?'<div class="space-top">'+link('查看关联评审','#/review/'+encodeURIComponent(r.reviewId),'review')+'</div>':''),btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('导出','roadmap-export','download',null,'data-revision="'+e(r.id)+'"')+(r.kind==='initial'?'':btn('恢复此记录','restore','history',null,'data-revision="'+e(r.id)+'" '+disabled()))+btn('比较','roadmap-compare','compare','primary','data-revision="'+e(r.id)+'"'));
 }
 function focusRoadmap(id){
-  const file=f();S.roadmapBranch=id||'all';S.page=0;
-  const selected=id==='baseline'?file.branches.find(b=>b.kind==='baseline'&&b.headId):file.branches.find(b=>b.id===id);
-  if(selected?.headId)S.roadmapSelected=selected.headId;render();
+  const file=f();if(id&&!['all','baseline'].includes(id)&&!file.branches.some(b=>b.id===id))throw new Error('此配置对象不存在');
+  S.roadmapBranch=id||'all';S.roadmap.columnPage=0;S.roadmap.lanePage=0;render();
 }
 function machinePage(){const selected=S.route[1]&&M.state.assets.find(a=>a.id===S.route[1]);if(S.route[1]&&!selected){shell(empty('未找到机台','返回机台列表选择。',link('机台列表','#/machines')),[{label:'机台'}]);return;}if(selected){const bindings=files().flatMap(file=>file.branches.filter(b=>b.machineId===selected.id).map(b=>({file,b,r:rev(file,b.headId)})));shell(heading(selected.name,'<span>机型 '+e(selected.model||'69X')+'</span><span>·</span>'+bindings.length+' 个配置文件',btn('导出文件集','export-machine','download','primary','data-machine="'+e(selected.id)+'"'))+'<section class="panel work-panel"><div class="info-line">'+ic('info')+'以下为管理系统已保存配置；尚无设备回读证据。</div><div class="table-wrap"><table class="table"><thead><tr><th>配置文件</th><th>软件版本</th><th>机台记录</th><th>采用基线</th><th>与基线差异</th><th>最近保存</th><th></th></tr></thead><tbody>'+pageRows(bindings).map(({file,b,r})=>{const base=rev(file,r?.baseRevisionId);return '<tr><td><a class="name" href="'+fileUrl(file)+'?branch='+e(b.id)+'">'+e(file.name)+'</a><div class="sub">'+e(file.description)+'</div></td><td>'+e(r?.releaseId||b.releaseId)+'</td><td class="mono">'+e(r?recordShort(file,r):'—')+'</td><td class="mono">'+e(base?recordTitle(file,base):'未记录')+'</td><td>'+ (r?M.diff(base?.params||[],r.params).length:0)+' 项</td><td class="muted small">'+date(r?.at)+'</td><td>'+link('打开',fileUrl(file)+'?branch='+e(b.id),'eye','sm quiet')+' '+link('合并更新',fileUrl(file,'merge')+'?target='+e(b.id),'branch','sm')+'</td></tr>';}).join('')+'</tbody></table>'+(!bindings.length?empty('此机台没有关联配置文件','先在配置文件中添加机台配置。',link('查看文件','#/files')):'')+'</div>'+paginate(bindings.length)+'</section>',[{label:'机台',url:'#/machines'},{label:selected.name}],true);return;}const q=S.search.toLowerCase(),list=M.state.assets.filter(a=>files().some(file=>file.branches.some(b=>b.machineId===a.id))&&(a.name+' '+a.model).toLowerCase().includes(q));shell(heading('机台','查看一台机台使用的全部配置文件','')+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索机台编号或机型')+'</div><div class="table-wrap"><table class="table"><thead><tr><th>机台</th><th>机型</th><th>配置文件</th><th>管理状态</th><th>设备回读</th><th></th></tr></thead><tbody>'+pageRows(list).map(a=>'<tr><td><div class="file-cell">'+ic('machine')+'<a class="name" href="#/machines/'+e(a.id)+'">'+e(a.name)+'</a></div></td><td>'+e(a.model||'69X')+'</td><td>'+files().filter(file=>file.branches.some(b=>b.machineId===a.id)).length+' 个</td><td>'+badge('已保存','green')+'</td><td class="muted">未采集</td><td>'+link('查看配置','#/machines/'+e(a.id),'chevron','sm quiet')+'</td></tr>').join('')+'</tbody></table></div>'+paginate(list.length)+'</section>',[{label:'机台'}],true);}
 function tracePage(){const file=f(),all=file.revisions,latest=rev(file,file.branches.find(b=>b.kind==='baseline'&&b.headId)?.headId);if(!S.traceRevs.length)S.traceRevs=all.filter(r=>r.kind!=='initial').slice().sort((a,b)=>new Date(a.at)-new Date(b.at)).slice(-4).map(r=>r.id);const records=S.traceRevs.map(id=>rev(file,id)).filter(Boolean),identities=new Map();all.forEach(r=>r.params.forEach(p=>identities.set(p.id,p)));if(!S.traceIds.size)S.traceIds=new Set(latest?.params.slice(0,3).map(p=>p.id));const items=[...S.traceIds].map(id=>identities.get(id)).filter(Boolean).filter(p=>(p.name+' '+p.path).toLowerCase().includes(S.search.toLowerCase()));const rows=pageRows(items).map(p=>{let before,seen=false;return '<tr><td class="fixed-name"><button class="link-button name" data-action="trace-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono">'+e(p.path)+'</div></td>'+records.map(r=>{const current=r.params.find(x=>x.id===p.id),diff=seen?M.diff(before?[before]:[],current?[current]:[]):[];const changed=diff.length>0;before=current;seen=true;return '<td class="'+(changed?'trace-changed':'')+'">'+(current?'<div class="trace-value">'+e(val(current.value))+' <span class="muted small">'+e(current.unit)+'</span></div><div class="small">'+e(current.name)+'</div><div class="trace-meta">'+e(current.type)+' · '+e(val(current.min))+'–'+e(val(current.max))+'</div>'+(changed?'<div class="space-sm">'+diff.flatMap(x=>x.fields).map(x=>badge(fields[x.field]||x.field)).join(' ')+'</div>':''):'<span class="muted">此记录不存在</span>'+(changed?'<div class="space-sm">'+badge('已移除','amber')+'</div>':''))+'</td>';}).join('')+'</tr>';}).join('');shell(heading('参数变化','更名、属性和值按同一参数身份连续查看',btn('选择参数','choose-parameters','params')+btn('选择记录','trace-versions','history'))+'<section class="panel work-panel"><div class="toolbar"><label class="small">配置文件 <select class="control" id="trace-file">'+options(files(),file.id)+'</select></label>'+search(S.search,'搜索所选参数')+'<span class="spacer"></span><span class="small muted">'+S.traceIds.size+' 个参数 · '+records.length+' 条记录</span></div><div class="table-wrap"><table class="table trace-table"><thead><tr><th class="fixed-name">参数 / 文件字段</th>'+records.map(r=>'<th>'+e(recordShort(file,r))+' · 软件 '+e(r.releaseId)+'<div class="sub">'+e(branch(file,r.branchId).label)+'</div></th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配参数','可从文件参数表搜索、勾选后跟踪。',link('打开参数表',fileUrl(file,'parameters'))):'')+'</div>'+paginate(items.length)+'</section>',[{label:'参数'}],true);}
@@ -1241,7 +1630,7 @@ function beginEdit(){ensureAdmin();const file=f(),b=branch(file),r=rev(file,b.he
 function validateEdit(){if(!S.edit)throw new Error('没有正在编辑的内容');for(const p of S.edit.params){if(!String(p.name||'').trim())throw new Error('参数名不能为空');if(p.type==='number'&&(p.value===null||p.value===undefined))throw new Error(p.name+'：请输入有效数值');if(p.type==='boolean'&&typeof p.value!=='boolean')throw new Error(p.name+'：请选择 true 或 false');}return S.edit;}
 function reviewEdit(){const edit=validateEdit(),file=f(edit.fileId),b=branch(file,edit.branchId),before=rev(file,edit.headId),changes=M.diff(before?.params||[],edit.params),nextBase=reference(file,b,before,edit),basisChanged=b.kind==='machine'&&nextBase?.id!==before?.baseRevisionId;if(!changes.length&&!basisChanged){toast('没有需要保存的修改');return;}showDialog('核对本次修改','<p>'+e(b.label)+' · '+changes.length+' 项变化，保存会生成新记录。</p>'+(basisChanged?'<div class="notice">采用基线由 '+e(before?.baseRevisionId?recordTitle(file,rev(file,before.baseRevisionId)):'未记录')+' 变更为 '+e(nextBase?recordTitle(file,nextBase):'未记录')+' · 软件 '+e(nextBase?.releaseId||b.releaseId)+'</div>':'')+pagedDiffTable(changes,'保存前','保存后')+(edit.operationDescription?'<div class="notice">'+e(edit.operationDescription)+'</div>':'')+modificationFields('save',edit)+'<p class="help-note">需要他人确认时选择提交评审；普通修改可直接保存。</p>',btn('返回编辑','close-dialog',null,'quiet')+btn('提交评审','submit-review','review')+btn('保存配置','commit-edit','check','primary'),true);}
 function preserveHead(edit){const b=branch(f(edit.fileId),edit.branchId);if(b.headId!==edit.headId){const err=new Error('配置已有新的保存记录，请保留输入并重新核对');err.code='STALE_HEAD';throw err;}}
-function finishEdit(result){const edit=S.edit,file=f(edit.fileId),bid=edit.branchId;let sourcePending=false;if(edit.sourceId&&edit.candidateId){const state=Sources.markApplied(M.state.workspaceId,edit.sourceId,edit.candidateId,result.id);sourcePending=!state.applied;}delete S.drafts[draftKey(file.id,bid)];S.roadmapSelected=result.id;S.edit=null;S.revisionId=null;S.mergePlan=null;S.decisions={};S.branchId=bid;closeDialog();go(fileUrl(file,'parameters')+'?branch='+encodeURIComponent(bid));toast('已保存为 '+recordTitle(file,result)+'。'+(sourcePending?'尚未完全采用的来源内容仍待核对。':'历史记录已保留。'));}
+function finishEdit(result){const edit=S.edit,file=f(edit.fileId),bid=edit.branchId;let sourcePending=false;if(edit.sourceId&&edit.candidateId){const state=Sources.markApplied(M.state.workspaceId,edit.sourceId,edit.candidateId,result.id);sourcePending=!state.applied;}delete S.drafts[draftKey(file.id,bid)];S.roadmapSelected=result.id;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(file,result.id,roadmapOptions(file)));S.roadmapLocate=result.id;S.edit=null;S.revisionId=null;S.mergePlan=null;S.decisions={};S.branchId=bid;closeDialog();go(fileUrl(file,'parameters')+'?branch='+encodeURIComponent(bid));toast('已保存为 '+recordTitle(file,result)+'。'+(sourcePending?'尚未完全采用的来源内容仍待核对。':'历史记录已保留。'));}
 function stash(){if(S.edit)S.drafts[draftKey(S.edit.fileId,S.edit.branchId)]=copy(S.edit);}
 function leaveDialog(callback){S.leaveCallback=callback;showDialog('保留本次修改？','<p>当前编辑尚未保存。暂存后可继续编辑；放弃本次修改不会删除已保存记录。</p>',btn('继续编辑','close-dialog',null,'quiet')+btn('放弃本次修改','discard-leave')+btn('暂存并离开','stash-leave','check','primary'));}
 function staleDialog(){const edit=S.edit,file=f(edit.fileId),old=rev(file,edit.headId),latest=rev(file,branch(file,edit.branchId).headId);const merged=copy(latest.params),changes=M.diff(old?.params||[],edit.params),conflicts=[],equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);for(const change of changes){const original=old?.params.find(p=>p.id===change.paramId),server=latest.params.find(p=>p.id===change.paramId),local=edit.params.find(p=>p.id===change.paramId),at=merged.findIndex(p=>p.id===change.paramId);if(original&&server&&local){for(const field of change.fields){if(!equal(server[field.field],original[field.field])&&!equal(server[field.field],local[field.field]))conflicts.push({paramId:change.paramId,name:change.name,field:field.field,original:original[field.field],server:server[field.field],local:local[field.field]});else merged[at][field.field]=copy(local[field.field]);}}else if(!original&&!server&&local)merged.push(copy(local));else if(original&&server&&!local&&M.diff([original],[server]).length===0)merged.splice(at,1);else if(!server&&!local){}else if(server&&local&&equal(server,local)){}else conflicts.push({paramId:change.paramId,name:change.name,field:'membership',original,server,local});}S.stale={headId:latest.id,params:merged,conflicts};function display(v,field){if(field!=='membership')return fmt(v,field);return v?['name','type','unit','min','max','value','mode'].map(key=>'<div class="field-change"><span class="muted">'+fields[key]+'</span>'+fmt(v[key],key)+'</div>').join(''):'已移除';}showDialog('重新核对最新配置','<p>同一字段的冲突逐项选择，其余独立修改已保留。参数新增或移除需整体确认。</p><div class="table-wrap"><table class="table"><thead><tr><th>参数 / 字段</th><th>编辑前</th><th>最新保存</th><th>本次输入</th><th>采用</th></tr></thead><tbody>'+conflicts.map((c,i)=>'<tr><td>'+e(c.name)+'<div class="sub">'+e(fields[c.field])+'</div></td><td class="diff-detail">'+display(c.original,c.field)+'</td><td class="diff-detail">'+display(c.server,c.field)+'</td><td class="diff-detail">'+display(c.local,c.field)+'</td><td><select data-stale-choice="'+i+'" aria-label="'+e(c.name+' '+fields[c.field])+' 冲突处理"><option value="">请选择</option><option value="server">最新保存</option><option value="local">本次输入</option></select></td></tr>').join('')+'</tbody></table></div>'+(!conflicts.length?'<div class="notice">没有同一字段的冲突，请核对组合后的值和属性。</div>':''),btn('返回编辑','close-dialog')+btn('采用并继续核对','apply-stale','check','primary'),true);}
@@ -1299,23 +1688,22 @@ async function handleAction(action,el){
     }
     case 'clear-trace-records':document.querySelectorAll('[data-trace-record]').forEach(node=>{node.checked=false;});return;
     case 'roadmap-focus':focusRoadmap(data.branch);return;
-    case 'roadmap-prev':case 'roadmap-next':S.page=Math.max(0,Number(data.page)||0);render();return;
-    case 'roadmap-select':{
-      const file=f(),r=rev(file,data.revision);if(!r)throw new Error('保存记录不存在');
-      const graph=MCPrototypeRoadmap.layout(file,{page:S.page,pageSize:S.limit,query:S.search,branchFilter:S.roadmapBranch});
-      if(!graph.visibleNodes.some(n=>n.id===r.id)){
-        S.search='';let complete=MCPrototypeRoadmap.layout(file,{pageSize:S.limit,branchFilter:S.roadmapBranch});
-        let index=complete.matchingIds.indexOf(r.id);
-        if(index<0){S.roadmapBranch='all';complete=MCPrototypeRoadmap.layout(file,{pageSize:S.limit});index=complete.matchingIds.indexOf(r.id);}
-        S.page=Math.max(0,Math.floor(index/S.limit));
-      }
-      S.roadmapSelected=r.id;render();document.querySelector('[data-action="roadmap-select"][data-revision="'+r.id+'"]')?.focus();return;
+    case 'roadmap-overview':openRoadmapLevel('families');return;
+    case 'roadmap-open-family':openRoadmapLevel('releases',data.family);return;
+    case 'roadmap-open-release':openRoadmapLevel('history',data.family,data.release);return;
+    case 'roadmap-toggle-family':{
+      const expanded=new Set(S.roadmap.expandedFamilies);
+      if(expanded.has(data.family))expanded.delete(data.family);else expanded.add(data.family);
+      S.roadmap.expandedFamilies=[...expanded];S.roadmap.columnPage=0;render();
+      const header=Array.from(document.querySelectorAll('[data-roadmap-family]')).find(node=>node.dataset.roadmapFamily===data.family);
+      header?.scrollIntoView({block:'nearest',inline:'nearest'});return;
     }
+    case 'roadmap-column-prev':case 'roadmap-column-next':pageRoadmap('column',data.page);return;
+    case 'roadmap-lane-prev':case 'roadmap-lane-next':pageRoadmap('lane',data.page);return;
+    case 'roadmap-select':locateRoadmapRecord(data.revision,false);return;
     case 'roadmap-detail':revisionDetail(data.revision||S.roadmapSelected);return;
     case 'roadmap-jump':{
-      const file=f(),r=rev(file,data.revision);if(!r)throw new Error('保存记录不存在');S.roadmapSelected=r.id;S.roadmapBranch='all';S.search='';closeOverlays();
-      if(S.route[2]!=='roadmap')go(fileUrl(file));
-      const graph=MCPrototypeRoadmap.layout(file,{pageSize:S.limit});S.page=Math.max(0,Math.floor(graph.matchingIds.indexOf(r.id)/S.limit));render();return;
+      closeOverlays();locateRoadmapRecord(data.revision,true);return;
     }
     case 'roadmap-parameters':case 'roadmap-export':case 'roadmap-compare':case 'roadmap-edit':{
       const file=f(),r=rev(file,data.revision||S.roadmapSelected);if(!r)throw new Error('请先选择一条保存记录');closeOverlays();
@@ -1414,7 +1802,7 @@ async function handleAction(action,el){
       openEditDraft(file,b,makeDraft(file,b,r.proposedParams,{headId:r.baseRevisionId,sourceRevisionId:r.sourceRevisionId,restoreRevisionId:r.restoreRevisionId,message:r.reason||r.title,links:copy(r.links||[]),operationDescription:'重新核对 '+r.id+' 的原建议'}));staleDialog();return;
     }
     case 'approve-review':M.approve(data.review);render();toast('评审已通过，可合并到当前配置。');return;
-    case 'merge-review':{maybeFail();const result=M.merge(data.review),review=reviews().find(r=>r.id===data.review);sourceAdoption(result,review.fileId,review.branchId);S.roadmapSelected=result.id;render();toast('已合并为 '+recordTitle(f(review.fileId),result)+'。机台可单独核对采用。');return;}
+    case 'merge-review':{maybeFail();const result=M.merge(data.review),review=reviews().find(r=>r.id===data.review);sourceAdoption(result,review.fileId,review.branchId);S.roadmapSelected=result.id;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(f(review.fileId),result.id,roadmapOptions(f(review.fileId))));S.roadmapLocate=result.id;render();toast('已合并为 '+recordTitle(f(review.fileId),result)+'。机台可单独核对采用。');return;}
     case 'new-release':newReleaseDialog();return;
     case 'create-release':{
       ensureAdmin();const meta=readModification('release');maybeFail();const file=f(),b=M.addRelease(file.id,Object.assign({releaseId:inputValue('release-name').trim(),sourceRevisionId:inputValue('release-source')||undefined},meta));closeDialog();go(fileUrl(file,b.headId?'roadmap':'parameters')+'?branch='+encodeURIComponent(b.id));return;
@@ -1509,7 +1897,7 @@ async function handleAction(action,el){
 let searchTimer=null;
 function handleInput(target){
   if(target.id==='roadmap-search'){
-    const value=target.value,hash=location.hash,wid=M.state.workspaceId;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(hash!==location.hash||wid!==M.state.workspaceId)return;S.search=value;S.page=0;render();const next=document.getElementById('roadmap-search');next?.focus();if(next?.setSelectionRange)try{next.setSelectionRange(value.length,value.length);}catch(_){}},120);return;
+    const value=target.value,hash=location.hash,wid=M.state.workspaceId;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(hash!==location.hash||wid!==M.state.workspaceId)return;S.search=value;S.roadmap.columnPage=0;S.roadmap.lanePage=0;render();const next=document.getElementById('roadmap-search');next?.focus();if(next?.setSelectionRange)try{next.setSelectionRange(value.length,value.length);}catch(_){}},120);return;
   }
   if(target.dataset.search){
     const value=target.value,kind=target.dataset.search,hash=location.hash,wid=M.state.workspaceId;
@@ -1572,14 +1960,15 @@ async function handleChange(target){
       const id=target.value;if(!M.state.workspaces.some(w=>w.id===id))throw new Error('工作区不存在');
       guardedChange(()=>{
         S.sourceSeq++;S.uploadSeq++;Sources.invalidate('source-form');M.state.workspaceId=id;
-        Object.assign(S,{fileId:files()[0].id,branchId:files()[0].branches[0].id,revisionId:null,compareA:null,compareB:null,external:null,mergePlan:null,decisions:{},sourceDraft:null,sourcePreview:null,sourceBusy:false,init:null,traceIds:new Set(),traceRevs:[],selected:new Set(),candidate:null,bundle:null,search:'',page:0,roadmapSelected:null,roadmapBranch:'all',selectionScope:null,tracePickScope:null});
+        Object.assign(S,{fileId:files()[0].id,branchId:files()[0].branches[0].id,revisionId:null,compareA:null,compareB:null,external:null,mergePlan:null,decisions:{},sourceDraft:null,sourcePreview:null,sourceBusy:false,init:null,traceIds:new Set(),traceRevs:[],selected:new Set(),candidate:null,bundle:null,search:'',page:0,roadmapSelected:null,roadmapBranch:'all',roadmap:newRoadmapState(),roadmapScroll:{},roadmapLocate:null,selectionScope:null,tracePickScope:null});
         closeOverlays();go('#/files');toast('已切换到 '+ws().name+'。');
       });return;
     }
     case 'branch':{const id=target.value;guardedChange(()=>go(fileUrl(f(),'parameters')+'?branch='+encodeURIComponent(id)));return;}
     case 'revision':{const id=target.value;guardedChange(()=>go(fileUrl(f(),'parameters')+'?branch='+encodeURIComponent(S.branchId)+(id?'&revision='+encodeURIComponent(id):'')));return;}
     case 'page-limit':S.limit=Number(target.value);S.page=0;render();return;
-    case 'roadmap-page-size':S.limit=Number(target.value);S.page=0;render();return;
+    case 'roadmap-column-limit':S.roadmap.columnLimit=Math.max(1,Math.min(30,Number(target.value)||12));S.roadmap.columnPage=0;render();return;
+    case 'roadmap-lane-limit':S.roadmap.laneLimit=Math.max(1,Math.min(30,Number(target.value)||12));S.roadmap.lanePage=0;render();return;
     case 'roadmap-focus':focusRoadmap(target.value);return;
     case 'param-filter':S.filter=target.value;S.page=0;render();return;
     case 'trace-file':{
@@ -1613,6 +2002,7 @@ async function handleChange(target){
   }
 }
 function render(){
+  rememberRoadmapScroll();
   S.renderError=null;
   S.selectionScope=null;
   try{
@@ -1651,7 +2041,7 @@ function navigate(){
     if(route[0]==='files'&&route[1]){S.fileId=newFile;S.lastHash=hash;render();return;}
     S.fileId=files()[0].id;
   }else S.fileId=newFile;
-  if(S.fileId!==oldFile){S.branchId=f().branches[0].id;S.roadmapSelected=null;S.roadmapBranch='all';S.traceIds=new Set();S.traceRevs=[];S.compareA=null;S.compareB=null;S.external=null;S.mergePlan=null;S.decisions={};S.exportFormat=f().format;}
+  if(S.fileId!==oldFile){S.branchId=f().branches[0].id;S.roadmapSelected=null;S.roadmapBranch='all';S.roadmap=newRoadmapState();S.roadmapScroll={};S.roadmapLocate=null;S.traceIds=new Set();S.traceRevs=[];S.compareA=null;S.compareB=null;S.external=null;S.mergePlan=null;S.decisions={};S.exportFormat=f().format;}
   if(route[0]==='review'){
     const review=reviews().find(r=>r.id===route[1]);if(review){S.fileId=review.fileId;S.branchId=review.branchId;}
   }
@@ -1659,13 +2049,20 @@ function navigate(){
   else if(!f().branches.some(b=>b.id===S.branchId))S.branchId=f().branches[0].id;
   S.revisionId=q.revision&&rev(f(),q.revision)?q.revision:null;
   if(S.revisionId)S.branchId=rev(f(),S.revisionId).branchId;
-  if(changed&&route[2]==='roadmap'&&(q.revision||q.branch))S.roadmapSelected=S.revisionId||branch(f(),S.branchId).headId;
+  if(changed&&route[2]==='roadmap'){
+    if(['families','releases','history'].includes(q.view)){
+      const level=q.view,familyId=level==='families'?null:q.family||null,releaseId=level==='history'?q.release||null:null;
+      if(level!==S.roadmap.level||familyId!==S.roadmap.familyId||releaseId!==S.roadmap.releaseId){Object.assign(S.roadmap,{level,familyId,releaseId,columnPage:0,lanePage:0});}
+    }
+    const requested=S.revisionId||(!q.view&&q.branch?branch(f(),S.branchId).headId:null);
+    if(requested){S.roadmapSelected=requested;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(f(),requested,roadmapOptions(f())));S.roadmapLocate=requested;}
+  }
   if(changed){
     S.page=0;S.search='';S.category='all';S.filter='all';S.selected=new Set();
     if(route[0]==='files'&&route[2]==='compare'){S.compareA=q.left||null;S.compareB=q.right||null;S.external=null;}
     S.sourceDraft=null;S.sourcePreview=null;S.sourceBusy=false;
   }
-  S.lastHash=hash;render();if(changed)document.getElementById('page-title')?.focus();
+  const recordFocus=route[2]==='roadmap'&&S.roadmapLocate;S.lastHash=hash;render();if(changed&&!recordFocus)document.getElementById('page-title')?.focus();
 }
 // Push navigation synchronously so draft creation and the following confirmation share one context.
 go=function(url){if(location.hash!==url)history.pushState(null,'',url);navigate();};

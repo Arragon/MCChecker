@@ -1,6 +1,6 @@
 # 配置管理 V3.3 设计包
 
-先打开 [单文件交互原型](MCChecker_Config_Prototype.html)。下载 HTML 后可在浏览器中打开；GitHub 文件页显示的是源码。当前为 2026-11-11 重建设计的本轮原型迭代，已纳入版本路线图、多选和修改原因规则。生产实现尚未开始，模块与界面检查的范围见下表，真实浏览器验收仍待完成。
+先打开 [单文件交互原型](MCChecker_Config_Prototype.html)。下载 HTML 后可在浏览器中打开；GitHub 文件页显示的是源码。本轮继续迭代 2026-11-11 重建设计，路线图改为横向“大版本 → 小版本 → 参数保存历史”，以信息卡展示并冻结双轴。多选、完整记录名称与修改原因规则保留，生产实现尚未开始；检查范围见下表，真实浏览器验收仍待完成。
 
 | 资料 | 内容 |
 | --- | --- |
@@ -12,7 +12,7 @@
 
 ## 原型入口
 
-文件详情默认打开版本路线图：一条基线主线贯穿软件版本，每台机台有独立轨道，真实父关系表达分叉、采用和合并。记录行显示完整名称、原因、作者和时间；选节点可查看参数、比较、详情或导出，参数表保留独立标签。普通管理员采用“编辑 → 核对保存”，需要协作时再提交评审。文件、机台和参数视图读取同一组示例保存记录。
+文件详情默认打开大版本总览：纵轴为版本基线与机台编号/型号，横轴为软件版本层级。展开或进入大版本后查看小版本，再进入某个小版本的保存历史。汇总卡用于导航，真实保存卡显示完整名称、原因、作者和时间，并可查看参数、比较、详情或导出。参数保留独立标签；普通管理员“编辑 → 核对保存”，评审可选，三个视图读取同一组记录。
 
 | 场景 | 入口 |
 | --- | --- |
@@ -21,6 +21,7 @@
 | 文件参数表 | [MachineConfig.xml](MCChecker_Config_Prototype.html#/files/f-machine/parameters) |
 | 旧版历史入口 | [versions 深链](MCChecker_Config_Prototype.html#/files/f-machine/versions)兼容到同一版本路线图 |
 | 一台机台的全部文件 | [MC-001](MCChecker_Config_Prototype.html#/machines/asset-01) |
+| 新增跨版本示例 | [MC-003 · MX-820](MCChecker_Config_Prototype.html#/machines/asset-roadmap-03) |
 | 参数更名、属性和值变化 | [参数变化](MCChecker_Config_Prototype.html#/parameters?file=f-machine) |
 | 可选评审 | [CR-024](MCChecker_Config_Prototype.html#/review/CR-024) |
 | 更新来源 | [更新管理](MCChecker_Config_Prototype.html#/sources)、[添加来源](MCChecker_Config_Prototype.html#/sources/new) |
@@ -31,7 +32,9 @@
 
 | 例子 | 操作与观察 |
 | --- | --- |
-| 查看版本路线图 | 打开 `MachineConfig.xml`，选取一条基线或机台记录，核对完整名称、原因和作者时间，再查看参数或比较。“聚焦机台及来源”收拢到该机台及真实祖先/采用关系，“全部配置”恢复完整图；筛选不产生新的父边。 |
+| 三级版本路线图 | 打开 `MachineConfig.xml`，先看 69X/6AX 大版本；展开 69X 查看 690/691，进入 691 查看同一版本内的保存历史。折叠和返回后，仍可定位所选真实记录；汇总卡不冒充保存记录。 |
+| 6AX 与机台型号 | 展开 6AX 的 6A0/6A1，核对基线保存卡和 MC-003 的采用关系。该机台型号为 MX-820，与软件大版本分开显示；6A1 有两次基线保存可比较，MC-003 保留原点校准值。 |
+| 空间与来源 | 局部横向/纵向滚动时顶部版本轴、左侧对象轴及交叉角应固定；“聚焦机台及来源”收拢到该机台及真实祖先/采用关系，“全部配置”恢复。列与机台分别分页；实际浏览器冻结效果仍待验收。 |
 | 日常编辑 | 从所选当前节点进入参数，或直接打开参数标签，编辑后填写具体修改原因，可按行附上关联 HTTP(S) 链接，再核对保存。查看新增记录与参数来源；历史记录保持只读。 |
 | MC-001 采用新基线 | 在 MC-001 的 `MachineConfig.xml` 行打开“合并更新”。示例从“版本基线 · 软件 691 · 第11次保存”采用“版本基线 · 软件 691 · 第12次保存”；核对共同起点、机台当前及新基线，处理冲突、填写原因，再核对保存；固定校准值需保留。 |
 | CR-024 评审 | 该示例由王工提出，林工可回复并处理讨论后批准，再合并。原因和关联链接在提交评审时冻结，并传播到合并后的记录。提出人不能独立批准自己的提案；普通保存仍可直接完成。目标已改变时应重新核对。 |
@@ -44,6 +47,10 @@
 ## 演示边界
 
 数据、人员、机台与网址都是示例，状态只保存在页面内存中，刷新还原。身份切换演示权限状态，不代表生产身份认证；并发与不可变记录的模型检查不代表磁盘事务已经实现。
+
+软件大版本是分组，横轴版本次序不是日期。主文件有显式 69X/6AX 目录，旧文件仅对约定的 `69?`/`6A?` 做有限推导；机台型号不参与推导。真实保存卡按自身软件版本归列；汇总连线只聚合已存在的父引用，不因折叠、排序或软件前驱补造记录关系。生产可选大版本元数据、设置原因与审计仍待实现。
+
+新增 6A0/6A1 的 5 条示例保存保留真实父引用、演示原因和链接，原 690/691、MC-001/002 与 CR-024/025 场景不变；没有原始输入证据的初始快照仍为空。原型基线写入当前以所选版本分支 head 为起点，生产则有全配置 main_branch；本轮不以布局补线掩盖两者差异，也不改变核心保存语义。
 
 保存配置、创建评审、初始化、新建软件版本、增加机台、恢复历史和修改来源等实际内容或业务设置，都需要用户填写非空原因，自动操作说明不代填。关联链接仅接受完整 HTTP(S) 地址，规范化并去重后保存和显示为可点击链接；非法协议、嵌入账号密码及控制字符会被拒绝。旧历史缺少原因时仍显示未知，原有说明不被补写成用户原因；恢复操作也不改写原始作者。
 
@@ -59,13 +66,13 @@
 
 | 验证 | 本轮结果 | 证明范围 |
 | --- | --- | --- |
-| [verify_model.cjs](verify_model.cjs) | 38 / 38 通过 | 纯模型中的保存、并发拒绝、不可变快照、独立评审、字段合并、恢复、身份/来源归属，以及原因与安全链接的拒绝、冻结和传播 |
-| [verify_sources.cjs](verify_sources.cjs) | 69 / 69 通过 | 离线来源状态、预览失效、范围/候选隔离，以及受限 JSON/XML 解析与精度规则 |
-| [verify_ui.cjs](verify_ui.cjs) | 28 / 28 通过 | 本轮界面接线检查；使用 Node VM 与 DOM 替身，不能替代浏览器渲染与真实输入行为 |
-| [verify_roadmap.cjs](verify_roadmap.cjs) | 10 / 10 通过 | 路线图的真实父关系、布局、聚焦范围、轨道收拢、分页及转义，属于数据与 HTML 检查 |
-| 真实浏览器视觉/交互 | 待完成 | 多尺寸、滚动、键盘/焦点、响应式、弹窗和实际下载尚未验收 |
+| [verify_model.cjs](verify_model.cjs) | 39 / 39 本轮通过 | 保留全部业务验证，增加大版本目录、真实保存引用、型号区分、工作区旧记录及来源归属的完整性检查 |
+| [verify_sources.cjs](verify_sources.cjs) | 69 / 69 本轮通过 | 最终包复跑：离线来源状态、预览失效、范围/候选隔离，以及受限 JSON/XML 解析与精度规则 |
+| [verify_ui.cjs](verify_ui.cjs) | 31 / 31 本轮通过 | 对最终 CSS 包运行横向三级导航与保存卡操作的接线回归；使用 Node VM 与 DOM 替身 |
+| [verify_roadmap.cjs](verify_roadmap.cjs) | 13 / 13 本轮通过 | 三级分组、展开/定位、真实父边聚合、行列窗口、公共矩阵与转义；属于数据和生成 HTML 检查 |
+| 真实浏览器视觉/交互 | 待完成 | 双轴冻结、交叉角、多尺寸、滚动、键盘/焦点、弹窗和实际下载尚未验收 |
 
-表中四组共 145 项检查通过，结果来自本轮实际执行。原始输出见 [模型](verification/model.txt)、[来源](verification/sources.txt)、[路线图](verification/roadmap.txt) 与 [页面](verification/ui.txt) 记录。Node 检查不能替代真实浏览器或生产服务验证；检查范围及待验项见 [验证记录](VERIFICATION.md)。
+最终包共 152 项检查通过，原始输出见 [模型](verification/model.txt)、[来源](verification/sources.txt)、[路线图](verification/roadmap.txt) 与 [页面](verification/ui.txt) 记录。源码与 HTML 内嵌脚本一致；Node 数据/HTML 与 VM 检查不能替代真实浏览器、冻结轴视觉或生产服务验证，范围及待验项见 [验证记录](VERIFICATION.md)。
 
 在仓库根目录可重新构建与运行模块检查：
 
@@ -81,8 +88,10 @@ node docs/design/v3.3/verify_roadmap.cjs
 
 ## 基准与下一检查点
 
-项目基准为 [codex/v32-prototype-parity-20261109](https://github.com/Arragon/MCChecker/tree/codex/v32-prototype-parity-20261109)，准确提交 `d19ee3e8f896a089a2d8eb5628c0e8bb9b18a0de`。本轮技能入口与正文固定于 [Arragon/skill-hub@23a6e990](https://github.com/Arragon/skill-hub/tree/23a6e990fec0b7024c5e64098e8a607485b9eb8e)，主要视觉规范参考 [pbakaus/impeccable@2f98774f](https://github.com/pbakaus/impeccable/tree/2f98774f86bc05563876643db37e6c37c322850f)。
+生产项目基准为 [codex/v32-prototype-parity-20261109](https://github.com/Arragon/MCChecker/tree/codex/v32-prototype-parity-20261109)，准确提交 `d19ee3e8f896a089a2d8eb5628c0e8bb9b18a0de`。本轮原型从 [e621696b](https://github.com/Arragon/MCChecker/commit/e621696be3b509c682ca0d7cd19876f1a4ffff10) 继续。技能入口与正文固定于 [Arragon/skill-hub@23a6e990](https://github.com/Arragon/skill-hub/tree/23a6e990fec0b7024c5e64098e8a607485b9eb8e)，主要视觉规范参考 [pbakaus/impeccable@2f98774f](https://github.com/pbakaus/impeccable/tree/2f98774f86bc05563876643db37e6c37c322850f)。
 
 路线图的信息组织参考 [GitKraken Desktop 官方界面说明](https://help.gitkraken.com/gitkraken-desktop/interface/)，采用图、记录信息和选中详情配合的方式；视觉继续沿用 MCChecker，不复制商业素材或代码。
 
-默认路线图、多选范围、完整记录名称和修改原因规则已经确定，继续在本轮原型中落实与验证。本轮反馈未批准生产改造；后续生产工作按实施计划推进，并分别记录真实实现、测试和现场验收证据，本设计包不代表生产功能已经完成。
+本轮也阅读了 [FullCalendar Timeline View](https://fullcalendar.io/docs/timeline-view)，仅参考水平资源行与层级展开组织，不引入 Premium/Scheduler 依赖；[GitHub Projects 路线图布局](https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/customizing-the-roadmap-layout)仅参考总览/细览密度和分组组织，不复制日期、排期或拖动改计划语义，不添加依赖。这里的横轴仍是软件版本。
+
+横向三级路线图、信息卡、双轴冻结、多选范围、完整记录名称和修改原因规则已落实为本轮原型，离线检查已完成。真实浏览器验收仍待进行，本轮反馈未批准生产改造；后续生产工作按实施计划推进，本设计包不代表生产功能已经完成。
