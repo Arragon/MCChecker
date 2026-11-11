@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+  <Motion>
+    <FeedSpeed>125</FeedSpeed>
+    <Acceleration>500</Acceleration>
+    <Deceleration>600</Deceleration>
+    <PositionTolerance>0.05</PositionTolerance>
+    <HomeOffset>0.2</HomeOffset>
+  </Motion>
+  <Thermal>
+    <Setpoint>43</Setpoint>
+    <AlarmLimit>60</AlarmLimit>
+    <StabilizeDelay>30</StabilizeDelay>
+    <CoolingEnabled>true</CoolingEnabled>
+  </Thermal>
+  <Pneumatic>
+    <SupplyPressure>100</SupplyPressure>
+    <VacuumThreshold>-60</VacuumThreshold>
+  </Pneumatic>
+  <Control>
+    <PID>
+      <P>2.4</P>
+      <I>0.8</I>
+      <D>0.1</D>
+    </PID>
+  </Control>
+  <Safety>
+    <DoorInterlock>true</DoorInterlock>
+  </Safety>
+  <Communication>
+    <Timeout>6000</Timeout>
+    <Retries>3</Retries>
+  </Communication>
+  <General>
+    <StationName>装配工位 A</StationName>
+  </General>
+</Configuration>

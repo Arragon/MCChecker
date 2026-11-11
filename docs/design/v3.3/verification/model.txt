@@ -1,0 +1,32 @@
+PASS reconstructed seed preserves file, branch and stable parameter identities
+PASS pressure unit history converts both value and bound exactly
+PASS direct save requires one admin and CAS, appends an immutable snapshot without review
+PASS same-name parameters retain distinct identities while rename remains one change
+PASS reviews capture immutable proposal and author/base identities
+PASS self approval and unresolved discussion block review publication
+PASS new discussion invalidates previous approval and scopes comment resolution
+PASS approved review cannot replace a concurrently advanced target
+PASS review merge records independent actor and replay does not duplicate history or audit
+PASS workspace scope prevents cross-workspace reviews, files and mutations
+PASS guest may propose and comment but cannot save, approve, fork or initialize
+PASS invalid typed values and numeric bounds leave head, history and audit untouched
+PASS numeric strings preserve large integers and exact fractional range boundaries
+PASS new releases are empty until input or source is explicitly supplied
+PASS manual save of a pending release does not invent an initial source snapshot
+PASS initialization creates separate frozen original and baseline snapshots
+PASS fork uses an exact baseline and rejects duplicate physical machine association
+PASS three-way merge identifies value conflict and preserves pinned values
+PASS source deletion of a pinned machine parameter requires explicit resolution
+PASS independent name and value changes merge by stable identity
+PASS unit changes conflict with a custom value instead of silently changing its meaning
+PASS merge preview detects incompatible combined value and range changes
+PASS inherited machine values cannot diverge from the exact chosen basis
+PASS adopting a new basis can record provenance even when parameter values are unchanged
+PASS direct restore preserves historical machine release and basis without mandatory review
+PASS reviewed restore is an append-only proposal and restores its historical basis
+PASS history reports real rename, unit, attribute and value diffs
+PASS blame distinguishes source origin from application and retains unchanged attribution
+PASS first fork records application separately from source and preserves it after unchanged saves
+PASS blame reports unknown when predecessor evidence is missing
+
+30/30 reconstructed model checks passed (fresh run).

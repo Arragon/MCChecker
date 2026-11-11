@@ -1,0 +1,5 @@
+{
+  "Motion": {"FeedSpeed": 125, "HomeOffset": 0.2},
+  "Thermal": {"Setpoint": 43, "CoolingEnabled": true},
+  "General": {"StationName": "装配工位 C", "DeviceSerial": 18446744073709551615}
+}

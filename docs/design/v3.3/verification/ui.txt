@@ -1,0 +1,16 @@
+Execution target: built HTML inline scripts (exactly match sources)
+PASS file/machine/parameter/review/source/audit routes render for both roles
+PASS parameter/file pages respect 30, 50, 100 limits with reachable subsequent pages
+PASS large check/save dialog and optional review paginate differences at 50 rows
+PASS new draft parameters can display blame without querying absent saved identities
+PASS failed direct save preserves inputs and retries through the actual save handler
+PASS concurrent same-field choice preserves independent server name and unit changes
+PASS seed review resolves discussion, independently approves and merges without advancing machines
+PASS workspace switching clears transient foreign state and keeps workspace drafts isolated
+PASS source fingerprint invalidation and actual candidate adoption run through UI handlers
+PASS explicit head snapshot exits read-only and historical machine shows its own basis
+PASS merge field selection saves the new basis while retaining independent name and pinned value
+PASS historical machine restore uses actual UI save and retains the old software/basis and history
+PASS guest handlers reject editing/saving and leave the model unchanged
+
+13/13 Node VM UI integration checks passed. No browser, layout, accessibility or visual verification.
