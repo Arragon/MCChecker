@@ -11,7 +11,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const directory = __dirname;
-const mappings = [['prototype-model', 'model.js'], ['prototype-sources', 'sources.js'], ['prototype-ui', 'app.js']];
+const mappings = [['prototype-model', 'model.js'], ['prototype-sources', 'sources.js'], ['prototype-roadmap', 'roadmap.js'], ['prototype-ui', 'app.js']];
 const htmlPath = path.join(directory, 'MCChecker_Config_Prototype.html');
 const useHtml = !process.argv.includes('--source') && fs.existsSync(htmlPath);
 const html = useHtml ? fs.readFileSync(htmlPath, 'utf8') : '';
@@ -30,7 +30,7 @@ const decode = value => String(value).replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot
 });
 const camel = key => key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
-function createHarness() {
+function createHarness(options = {}) {
   let document;
   const timers = new Set(), documentEvents = new Map(), windowEvents = new Map();
   class Element {
@@ -38,7 +38,7 @@ function createHarness() {
       this.tagName = tag.toUpperCase(); this.attributes = {}; this.dataset = {};
       this.children = []; this.parentNode = null; this.events = new Map();
       this._html = ''; this._text = ''; this.value = ''; this.style = {};
-      this.checked = false; this.disabled = false; this.hidden = false; this.open = false;
+      this.checked = false; this.indeterminate = false; this.disabled = false; this.hidden = false; this.open = false;
       this.selectionStart = 0;
     }
     get id() { return this.attributes.id || ''; }
@@ -64,8 +64,12 @@ function createHarness() {
       }
       for (const node of this.descendants()) {
         if (node.tagName === 'OPTION' && !node.hasAttribute('value')) node.value = node.textContent;
-        if (node.tagName === 'SELECT') { const options = node.querySelectorAll('option'); node.value = (options.find(o => o.hasAttribute('selected')) || options[0])?.value || ''; }
         if (node.tagName === 'TEXTAREA') node.value = node.textContent;
+      }
+      // Resolve option text values before each select chooses its initial option.
+      // A single preorder pass reads SELECT before its OPTION children.
+      for (const node of this.descendants()) if (node.tagName === 'SELECT') {
+        const options = node.querySelectorAll('option'); node.value = (options.find(o => o.hasAttribute('selected')) || options[0])?.value || '';
       }
     }
     get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
@@ -116,7 +120,7 @@ function createHarness() {
     addEventListener(name, fn) { const list = documentEvents.get(name) || []; list.push(fn); documentEvents.set(name, list); }
   };
   for (const [tag, id] of [['div', 'app'], ['dialog', 'dialog'], ['dialog', 'drawer'], ['div', 'toast']]) { const el = new Element(tag); el.id = id; body.append(el); }
-  const location = { hash: '#/files/f-machine/parameters' };
+  const location = { hash: options.initialHash ?? '#/files/f-machine/parameters' };
   const context = { document, location, console, URL, URLSearchParams, Blob, AbortController, TextEncoder, TextDecoder,
     history: { pushState(_s, _title, url) { location.hash = String(url); }, replaceState(_s, _title, url) { location.hash = String(url); } },
     setTimeout(fn, ms, ...args) {
@@ -149,20 +153,221 @@ function createHarness() {
 }
 
 const checks = [];
-const check = (name, run) => checks.push([name, run]);
+const check = (name, run, options = {}) => checks.push([name, run, options]);
 const file = h => h.M.getFile('f-machine');
 const branch = (h, id = 'base-691') => file(h).branches.find(b => b.id === id);
 const record = (f, id) => f.revisions.find(r => r.id === id);
 const current = (h, id = 'base-691') => record(file(h), branch(h, id).headId);
 const snapshot = h => JSON.stringify({ head: branch(h).headId, revisions: file(h).revisions, events: h.M.state.events });
+const evidenceLinks = ['https://quality.example.invalid/tickets/QA-219', 'http://intranet.example.invalid/validation/691?run=42'];
+const explain = (h, reason, links = []) => {
+  h.input('#save-message', reason);
+  h.input('#save-links', links.join('\n'));
+};
+const checkRevisionEvidence = (h, revision, reason, links = evidenceLinks) => {
+  assert.equal(revision.reason, reason);
+  assert.equal(revision.message, reason);
+  assert.deepEqual(clone(revision.links), links);
+  const event = h.M.state.events.find(ev => ev.revisionId === revision.id || ev.details?.after === revision.id);
+  assert(event, 'Saved revision must have an audit event');
+  assert.equal(event.details.reason, reason);
+  assert.deepEqual(clone(event.details.links), links);
+  return event;
+};
+
+check('default entry and file links open the roadmap while the parameter page remains reachable', async h => {
+  assert.equal(h.S.route[0], 'files');
+  assert.equal(h.S.fileId, 'f-machine');
+  assert.equal(h.S.route[2], 'roadmap');
+  assert.match(h.query('#app').textContent, /路线|版本/);
+  const parameters = h.query('a[href="#/files/f-machine/parameters"]', 'app');
+  h.route(parameters.getAttribute('href'));
+  assert.equal(h.all('[data-select-param]', 'app').length, 18);
+  assert.equal(h.query('[data-action="edit"]', 'app').disabled, false);
+  h.route('#/files');
+  const openFile = h.query('a[href="#/files/f-machine/roadmap"]', 'app');
+  h.route(openFile.getAttribute('href'));
+  assert.equal(h.S.route[2], 'roadmap');
+  h.route('#/files/f-machine/versions');
+  assert.match(h.query('#app').textContent, /路线|版本/);
+  assert(h.query('a[href="#/files/f-machine/parameters"]', 'app'));
+}, { initialHash: '' });
+
+check('roadmap selection, focus and details navigate to an adopted baseline on another page', async h => {
+  // Real model writes produce enough history for the public 30-record page size.
+  // The latest machine record still adopts its original, older baseline.
+  for (let i = 0; i < 35; i++) {
+    const params = clone(current(h).params); params.find(p => p.id === 'p-temp').value = 43 + i % 2;
+    h.M.save({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: branch(h).headId, params, reason: '分页核对样本：第 ' + (i + 1) + ' 次验证温控修订' });
+  }
+  const machine = branch(h, 'machine-01'), params = clone(current(h, machine.id).params);
+  const speed = params.find(p => p.id === 'p-speed'); speed.value = Number(speed.value) + 1; speed.mode = 'override';
+  const reason = '机台复验后继续采用原基线，仅调整现场送料速度';
+  const saved = h.M.save({ fileId: 'f-machine', branchId: machine.id, expectedHeadId: machine.headId, params, reason, links: evidenceLinks });
+  const basisId = saved.baseRevisionId; assert(basisId);
+  h.route('#/files/f-machine/roadmap'); await h.change('#roadmap-page-size', 30);
+  const fullPageRows = h.all('[data-roadmap-row]', 'app').length;
+  const fullLaneCount = h.all('[data-action="roadmap-focus"]', 'app').length;
+  assert(h.query('[data-action="roadmap-select"][data-revision="' + saved.id + '"]', 'app'));
+  await h.action('roadmap-select', { revision: saved.id });
+  assert.equal(h.S.roadmapSelected, saved.id);
+  assert.equal(h.query('[data-action="roadmap-select"][data-revision="' + saved.id + '"]', 'app').getAttribute('aria-pressed'), 'true');
+  await h.change('#roadmap-focus', machine.id);
+  assert.equal(h.S.roadmapBranch, machine.id); assert.equal(h.S.roadmapSelected, saved.id);
+  assert(h.query('[data-roadmap-row="' + saved.id + '"]', 'app'));
+  assert(h.query('[data-roadmap-row="' + basisId + '"]', 'app'), 'Machine focus must retain its actually adopted baseline');
+  assert.equal(h.all('[data-roadmap-row="' + branch(h).headId + '"]', 'app').length, 0, 'Unrelated later baseline changes must not appear in the machine projection');
+  assert(h.all('[data-roadmap-row]', 'app').length < fullPageRows, 'Machine focus must compact unrelated history');
+  assert(h.all('[data-action="roadmap-focus"]', 'app').length < fullLaneCount, 'Machine focus must compact unrelated lanes');
+  await h.action('roadmap-detail', { revision: saved.id });
+  assert(h.query('#drawer').textContent.includes(reason));
+  for (const url of evidenceLinks) assert(h.query('a[href="' + url + '"]', 'drawer'));
+  assert(h.query('[data-action="roadmap-jump"][data-revision="' + basisId + '"]', 'drawer'));
+  await h.action('close-drawer');
+  await h.change('#roadmap-focus', 'all');
+  assert.equal(h.S.roadmapBranch, 'all'); assert.equal(h.S.page, 0);
+  assert.equal(h.S.roadmapSelected, saved.id);
+  assert(h.query('[data-roadmap-row="' + branch(h).headId + '"]', 'app'));
+  await h.action('roadmap-detail', { revision: saved.id });
+  assert(h.query('[data-action="roadmap-jump"][data-revision="' + basisId + '"]', 'drawer'));
+  assert.equal(h.all('[data-roadmap-row="' + basisId + '"]', 'app').length, 0, 'Fixture must place the adopted baseline outside the current page');
+  await h.action('roadmap-jump', { revision: basisId });
+  assert.equal(h.S.roadmapSelected, basisId); assert.equal(h.S.roadmapBranch, 'all'); assert(h.S.page > 0);
+  assert(h.query('[data-roadmap-row="' + basisId + '"]', 'app'));
+  assert.equal(h.query('#drawer').open, false);
+  assert(h.query('[data-action="roadmap-parameters"][data-revision="' + basisId + '"]', 'app'));
+  await h.action('roadmap-parameters', { revision: basisId });
+  assert.equal(h.S.route[2], 'parameters'); assert.equal(h.S.revisionId, basisId);
+  assert.equal(h.S.branchId, record(file(h), basisId).branchId);
+  assert.equal(h.query('[data-action="edit"]', 'app').disabled, true);
+});
+
+check('file list page selection has a mixed state, persists across pages, and clears explicitly', async h => {
+  await h.action('demo-files'); await h.change('#page-limit', 30);
+  const pageOne = h.all('[data-select-file]', 'app').map(n => n.dataset.selectFile);
+  assert.equal(pageOne.length, 30);
+  assert.equal(h.query('[data-select-page="files"]').checked, false);
+  await h.change('[data-select-file="' + pageOne[0] + '"]', true);
+  assert.equal(h.query('[data-select-page="files"]').indeterminate, true);
+  await h.change('[data-select-page="files"]', true);
+  assert.equal(h.S.selected.size, 30);
+  assert(pageOne.every(id => h.S.selected.has(id)));
+  assert.equal(h.query('[data-select-page="files"]').checked, true);
+  assert.equal(h.query('[data-select-page="files"]').indeterminate, false);
+  await h.action('next');
+  assert.equal(h.query('[data-select-page="files"]').checked, false);
+  const secondId = h.all('[data-select-file]', 'app')[0].dataset.selectFile;
+  await h.change('[data-select-file="' + secondId + '"]', true);
+  assert.equal(h.S.selected.size, 31);
+  assert.equal(h.query('[data-select-page="files"]').indeterminate, true);
+  await h.action('prev');
+  assert.equal(h.query('[data-select-page="files"]').checked, true);
+  assert(h.S.selected.has(secondId), 'Changing page must not discard selection on other pages');
+  await h.action('clear-selection');
+  assert.equal(h.S.selected.size, 0);
+  assert.equal(h.query('[data-select-page="files"]').checked, false);
+  assert.equal(h.query('[data-select-page="files"]').indeterminate, false);
+});
+
+check('select all matching files obeys the active filter and reaches beyond the current page', async h => {
+  await h.action('demo-files'); await h.change('#page-limit', 30);
+  h.input('[data-search="main"]', '.json');
+  await new Promise(resolve => setTimeout(resolve, 10)); h.clean();
+  const expected = h.M.state.workspaces[0].files.filter(f => (f.name + ' ' + f.description).toLowerCase().includes('.json')).map(f => f.id);
+  assert(expected.length > 30, 'Fixture must exercise selection beyond page one');
+  await h.change('[data-select-page="files"]', true);
+  assert(h.query('[data-action="select-all-matches"][data-scope="files"]'));
+  await h.action('select-all-matches', { scope: 'files' });
+  assert.deepEqual([...h.S.selected].sort(), clone(expected).sort());
+  await h.action('next');
+  assert(h.all('[data-select-file]', 'app').every(n => n.checked));
+  await h.action('clear-selection'); assert.equal(h.S.selected.size, 0);
+});
+
+check('parameter selection has explicit page/all scopes and preserves selections across pages', async h => {
+  await h.action('demo-large'); h.route('#/files/f-machine/parameters'); await h.change('#page-limit', 30);
+  const firstPage = h.all('[data-select-param]', 'app').map(n => n.dataset.selectParam);
+  await h.change('[data-select-param="' + firstPage[0] + '"]', true);
+  assert.equal(h.query('[data-select-page="params"]').indeterminate, true);
+  await h.change('[data-select-page="params"]', true); assert.equal(h.S.selected.size, 30);
+  await h.action('next'); const secondId = h.all('[data-select-param]', 'app')[0].dataset.selectParam;
+  await h.change('[data-select-param="' + secondId + '"]', true); assert.equal(h.S.selected.size, 31);
+  await h.action('prev'); assert(firstPage.every(id => h.S.selected.has(id))); assert(h.S.selected.has(secondId));
+  await h.action('clear-selection');
+  h.input('[data-search="main"]', '/Axis1/'); await new Promise(resolve => setTimeout(resolve, 10)); h.clean();
+  const expected = current(h).params.filter(p => (p.name + ' ' + p.path + ' ' + String(p.value)).toLowerCase().includes('/axis1/')).map(p => p.id);
+  assert(expected.length > 30);
+  await h.change('[data-select-page="params"]', true);
+  assert(h.query('[data-action="select-all-matches"][data-scope="params"]'));
+  await h.action('select-all-matches', { scope: 'params' });
+  assert.deepEqual([...h.S.selected].sort(), clone(expected).sort());
+  assert.equal(h.query('[data-select-page="params"]').checked, true);
+  await h.action('clear-selection'); assert.equal(h.S.selected.size, 0);
+});
+
+check('source preview provides select all, mixed state, and explicit deselection', async h => {
+  h.route('#/sources/new'); await h.action('source-sample', { kind: 'html' }); await h.action('detect-source');
+  assert.equal(h.S.sourcePreview.files.length, 2);
+  assert.equal(h.query('[data-select-preview-all]').checked, true);
+  await h.change('[data-preview-select="0"]', false);
+  assert.equal(h.query('[data-select-preview-all]').indeterminate, true);
+  await h.change('[data-select-preview-all]', false);
+  assert(h.S.sourcePreview.files.every(row => !row.selected));
+  assert.equal(h.query('[data-select-preview-all]').indeterminate, false);
+  await h.change('[data-select-preview-all]', true);
+  assert(h.S.sourcePreview.files.every(row => row.selected));
+});
+
+check('parameter picker distinguishes its displayed page from all matches and can clear both', async h => {
+  await h.action('demo-large'); h.route('#/files/f-machine/parameters'); await h.action('choose-parameters');
+  await h.action('picker-clear');
+  assert.equal(h.S.tracePick.size, 0);
+  const visible = h.all('[data-trace-pick]', 'dialog'); assert.equal(visible.length, 100);
+  await h.change('[data-trace-pick="' + visible[0].dataset.tracePick + '"]', true);
+  assert.equal(h.query('[data-select-picker-page]', 'dialog').indeterminate, true);
+  await h.change('[data-select-picker-page]', true); assert.equal(h.S.tracePick.size, 100);
+  await h.action('picker-select-all');
+  const allIds = new Set(file(h).revisions.flatMap(r => r.params.map(p => p.id)));
+  assert.equal(h.S.tracePick.size, allIds.size);
+  await h.action('picker-clear'); assert.equal(h.S.tracePick.size, 0);
+  assert.equal(h.query('[data-select-picker-page]', 'dialog').checked, false);
+  assert.equal(h.query('[data-select-picker-page]', 'dialog').indeterminate, false);
+});
+
+check('record comparison selects the latest six explicitly and rejects an oversized selection', async h => {
+  h.route('#/parameters?file=f-machine'); await h.action('trace-versions');
+  const previousRecords = [...h.S.traceRevs];
+  assert(h.query('[data-action="select-trace-records"]', 'dialog'));
+  assert(h.query('[data-action="clear-trace-records"]', 'dialog'));
+  await h.action('clear-trace-records'); assert.equal(h.all('[data-trace-record]:checked', 'dialog').length, 0);
+  await h.action('select-trace-records');
+  const selected = h.all('[data-trace-record]:checked', 'dialog').map(n => n.dataset.traceRecord);
+  const expected = file(h).revisions.filter(r => r.kind !== 'initial').slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6).map(r => r.id);
+  assert.deepEqual(selected.slice().sort(), clone(expected).sort());
+  assert.equal(selected.length, 6);
+  const seventh = h.all('[data-trace-record]', 'dialog').find(n => !n.checked); assert(seventh);
+  seventh.checked = true;
+  await assert.rejects(h.action('apply-trace-versions'), /1[–—-]6|最多.*6/);
+  assert.deepEqual([...h.S.traceRevs], previousRecords);
+  await h.action('select-trace-records'); await h.action('apply-trace-versions');
+  assert.deepEqual([...h.S.traceRevs].sort(), clone(expected).sort());
+});
 
 check('file/machine/parameter/review/source/audit routes render for both roles', async h => {
   const routes = ['#/files', '#/files/f-machine/parameters', '#/files/f-machine/versions', '#/files/f-machine/compare', '#/files/f-machine/merge?target=machine-01', '#/files/f-machine/export', '#/files/f-machine/reviews', '#/files/f-machine/updates', '#/files/f-machine/records', '#/machines', '#/machines/asset-01', '#/parameters', '#/reviews', '#/review/CR-024', '#/review/CR-025', '#/sources', '#/sources/new', '#/records', '#/initialize'];
   for (const actor of ['lin', 'guest']) { h.M.state.actorId = actor; for (const route of routes) { h.route(route); assert(h.query('#page-title').textContent.length > 0); } }
 });
 
+check('visible saved-record names are readable across roadmap, selectors and review pages', async h => {
+  for (const route of ['#/files/f-machine/roadmap', '#/files/f-machine/parameters', '#/files/f-machine/compare', '#/files/f-machine/merge?target=machine-01', '#/files/f-machine/export', '#/review/CR-024']) {
+    h.route(route);
+    assert.doesNotMatch(h.query('#app').textContent, /\bB\d+\b|\br\d+\b/, 'Raw storage labels remain visible at ' + route);
+  }
+});
+
 check('parameter/file pages respect 30, 50, 100 limits with reachable subsequent pages', async h => {
   await h.action('demo-large');
+  h.route('#/files/f-machine/parameters');
   assert.equal(current(h).params.length, 3248);
   for (const limit of [30, 50, 100]) { await h.change('#page-limit', limit); assert.equal(h.all('[data-select-param]', 'app').length, limit); await h.action('next'); assert.equal(h.all('[data-select-param]', 'app').length, limit); assert.equal(h.S.page, 1); }
   await h.action('demo-files'); assert.equal(h.M.state.workspaces[0].files.length, 100);
@@ -170,7 +375,7 @@ check('parameter/file pages respect 30, 50, 100 limits with reachable subsequent
 });
 
 check('large check/save dialog and optional review paginate differences at 50 rows', async h => {
-  await h.action('demo-large'); await h.action('edit');
+  await h.action('demo-large'); h.route('#/files/f-machine/parameters'); await h.action('edit');
   for (const p of h.S.edit.params) {
     if (p.type === 'number') p.value = Math.min(Number(p.max ?? Infinity), Number(p.value) + 1);
     else if (p.type === 'boolean') p.value = !p.value;
@@ -181,6 +386,7 @@ check('large check/save dialog and optional review paginate differences at 50 ro
   const next = h.query('[data-action="diff-next"]', 'dialog'); await h.action('diff-next', { view: next.dataset.view });
   assert.equal(h.all('tbody', 'dialog')[0].children.length, 50);
   assert.match(h.query('#dialog').textContent, /51[–—-]100/);
+  explain(h, '批量参数经过测试核对，需要按本轮验证结果统一修订');
   await h.action('submit-review');
   assert.equal(h.S.route[0], 'review');
   assert.equal(h.all('tbody', 'app')[0].children.length, 50);
@@ -196,8 +402,54 @@ check('new draft parameters can display blame without querying absent saved iden
   assert.equal(h.all('[data-select-param]', 'app').length, 19);
 });
 
+check('empty reason and unsafe links reject before mutation while preserving the edited values', async h => {
+  await h.action('edit'); h.input('[data-edit-value="p-temp"]', 44); await h.action('review-save');
+  assert.equal(h.query('#save-message').value, '');
+  assert(h.query('#save-message').hasAttribute('required'));
+  explain(h, '   ', evidenceLinks); const before = snapshot(h);
+  await assert.rejects(h.action('commit-edit'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(snapshot(h), before);
+  assert.equal(h.S.edit.params.find(p => p.id === 'p-temp').value, 44);
+  assert.equal(h.query('#save-message').value.trim(), '');
+  assert.equal(h.query('#save-links').value, evidenceLinks.join('\n'));
+  for (const unsafe of ['javascript:alert(1)', 'data:text/html,unsafe', 'file:///etc/passwd']) {
+    explain(h, '验证完成后调整温控设定', [evidenceLinks[0], unsafe]);
+    await assert.rejects(h.action('commit-edit'), error => /^INVALID_LINK/.test(error.code || '') || /链接|HTTP/.test(error.message));
+    assert.equal(snapshot(h), before, 'Rejected URL must not create a revision or audit event');
+    assert.equal(h.S.edit.params.find(p => p.id === 'p-temp').value, 44);
+    assert(h.query('#save-links').value.includes(unsafe), 'Invalid input must remain available for correction');
+  }
+  const reason = '温控设定已通过现场验证，按验证记录调整至 44 度';
+  explain(h, reason, [...evidenceLinks, evidenceLinks[0]]); await h.action('commit-edit');
+  const saved = current(h), event = checkRevisionEvidence(h, saved, reason);
+  assert.equal(saved.params.find(p => p.id === 'p-temp').value, 44);
+  await h.action('event-detail', { event: event.id });
+  assert(h.query('#drawer').textContent.includes(reason));
+  for (const url of evidenceLinks) assert(h.query('a[href="' + url + '"]', 'drawer'));
+});
+
+check('review submission rejects an empty reason and preserves evidence through approval and merge', async h => {
+  await h.action('edit'); h.input('[data-edit-value="p-temp"]', 44); await h.action('review-save');
+  explain(h, '', evidenceLinks); const before = snapshot(h), reviewCount = h.M.state.reviews.length;
+  await assert.rejects(h.action('submit-review'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(snapshot(h), before); assert.equal(h.M.state.reviews.length, reviewCount); assert(h.S.edit);
+  const reason = '温控调整需要另一位管理员结合现场验证记录确认';
+  explain(h, reason, evidenceLinks); await h.action('submit-review');
+  const review = h.M.state.reviews.find(r => r.id === h.S.route[1]);
+  assert.equal(review.reason, reason); assert.equal(review.message, reason); assert.deepEqual(clone(review.links), evidenceLinks);
+  assert.equal(branch(h).headId, 'r-b12'); assert.equal(h.S.edit, null);
+  assert(h.query('#app').textContent.includes(reason));
+  for (const url of evidenceLinks) assert(h.query('a[href="' + url + '"]', 'app'));
+  const created = h.M.state.events.find(ev => ev.action === 'review_created' && ev.reviewId === review.id);
+  assert(created); assert.equal(created.details.reason, reason); assert.deepEqual(clone(created.details.links), evidenceLinks);
+  h.M.state.actorId = 'wang'; h.app.render(); h.clean();
+  await h.action('approve-review', { review: review.id }); await h.action('merge-review', { review: review.id });
+  assert.equal(review.status, 'merged'); checkRevisionEvidence(h, current(h), reason);
+});
+
 check('failed direct save preserves inputs and retries through the actual save handler', async h => {
   await h.action('edit'); h.input('[data-edit-value="p-temp"]', 44); await h.action('review-save');
+  explain(h, '热稳定验证要求将温控设定调整为 44 度');
   const before = snapshot(h); h.S.failNext = true;
   await assert.rejects(h.action('commit-edit'), /模拟保存失败/);
   assert.equal(snapshot(h), before); assert.equal(h.S.edit.params.find(p => p.id === 'p-temp').value, 44);
@@ -206,6 +458,7 @@ check('failed direct save preserves inputs and retries through the actual save h
 
 check('concurrent same-field choice preserves independent server name and unit changes', async h => {
   await h.action('edit'); h.input('[data-edit-value="p-speed"]', 125);
+  await h.action('review-save'); explain(h, '采用本轮节拍验证的 125 速度，同时保留现场校准属性');
   const params = clone(current(h).params), p = params.find(p => p.id === 'p-speed');
   Object.assign(p, { name: '送料速度（校准）', unit: 'mm·s⁻¹', value: 130 });
   const server = h.M.save({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: branch(h).headId, params, message: '并发属性及值更新' });
@@ -245,6 +498,7 @@ check('source fingerprint invalidation and actual candidate adoption run through
   const originalSources = JSON.stringify(h.sources.list('ws-prod'));
   h.route('#/sources/new'); await h.action('source-sample', { kind: 'html' });
   h.input('#source-name', '集成核对来源'); await h.action('detect-source');
+  h.input('#source-reason', '配置经过核对的文件来源，后续更新先进入待核对');
   const proof = h.S.sourcePreview; assert(proof?.testId);
   h.input('#source-path', 'a.download[href]'); assert.equal(h.S.sourcePreview, null); assert.equal(h.query('#save-source').disabled, true);
   await assert.rejects(h.action('save-source'), e => e.code === 'STALE_TEST'); assert.equal(JSON.stringify(h.sources.list('ws-prod')), originalSources);
@@ -255,10 +509,75 @@ check('source fingerprint invalidation and actual candidate adoption run through
   const oldHead = branch(h).headId;
   await h.action('candidate', { source: source.id, candidate: candidate.id }); await h.action('apply-candidate');
   assert.equal(branch(h).headId, oldHead); assert.equal(h.S.edit.sourceId, source.id); assert.equal(h.S.edit.headId, candidate.headId);
-  await h.action('review-save'); await h.action('commit-edit');
+  await h.action('review-save'); assert.equal(h.query('#save-message').value, '', 'Generated source-operation text must not stand in for a user reason');
+  explain(h, '已核对来源中的温控变化，采用验证后的设定'); await h.action('commit-edit');
   assert.notEqual(branch(h).headId, oldHead); assert.equal(current(h).params.find(p => p.id === 'p-temp').value, 45);
   assert(!h.sources.candidates('ws-prod', source.id).some(c => c.id === candidate.id));
   assert(h.M.state.events.some(ev => ev.action === 'source_candidate_applied' && ev.details.candidateId === candidate.id));
+});
+
+check('source changes require a fresh reason and audited links without invalidating extraction metadata', async h => {
+  h.route('#/sources/new'); await h.action('source-sample', { kind: 'file' }); h.input('#source-name', '来源审计核对'); await h.action('detect-source');
+  const previewId = h.S.sourcePreview.testId, original = JSON.stringify(h.sources.list('ws-prod')), auditCount = h.M.state.events.length;
+  h.input('#source-reason', ''); h.input('#source-links', evidenceLinks.join('\n'));
+  assert.equal(h.S.sourcePreview.testId, previewId, 'Reason and links are operation metadata, not extraction rules');
+  await assert.rejects(h.action('save-source'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(JSON.stringify(h.sources.list('ws-prod')), original); assert.equal(h.M.state.events.length, auditCount);
+  h.input('#source-reason', '为已核对的配置建立更新入口，关联下载规范和验证记录');
+  h.input('#source-links', 'javascript:alert(1)');
+  await assert.rejects(h.action('save-source'), error => /^INVALID_LINK/.test(error.code || '') || /链接|HTTP/.test(error.message));
+  assert.equal(JSON.stringify(h.sources.list('ws-prod')), original); assert.equal(h.M.state.events.length, auditCount);
+  h.input('#source-links', evidenceLinks.join('\n')); await h.action('save-source');
+  const source = h.sources.list('ws-prod').find(s => s.name === '来源审计核对'); assert(source);
+  const first = h.M.state.events.find(ev => ev.action === 'source_saved' && ev.sourceId === source.id);
+  assert(first); assert.equal(first.details.reason, '为已核对的配置建立更新入口，关联下载规范和验证记录'); assert.deepEqual(clone(first.details.links), evidenceLinks);
+  h.route('#/sources/new?source=' + source.id);
+  assert.equal(h.query('#source-reason').value.trim(), '', 'A new source modification must not silently reuse the prior reason');
+  h.input('#source-name', '来源审计核对（修订）'); await h.action('detect-source');
+  const before = JSON.stringify(h.sources.get('ws-prod', source.id));
+  await assert.rejects(h.action('save-source'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(JSON.stringify(h.sources.get('ws-prod', source.id)), before);
+  h.input('#source-reason', '调整来源名称以对应新的设备参数目录'); h.input('#source-links', evidenceLinks[1]); await h.action('save-source');
+  const second = h.M.state.events.find(ev => ev.action === 'source_saved' && ev.sourceId === source.id);
+  assert.notEqual(second.id, first.id); assert.equal(second.details.reason, '调整来源名称以对应新的设备参数目录'); assert.deepEqual(clone(second.details.links), [evidenceLinks[1]]);
+  await h.action('event-detail', { event: second.id }); assert(h.query('#drawer').textContent.includes(second.details.reason));
+  assert(h.query('a[href="' + evidenceLinks[1] + '"]', 'drawer'));
+});
+
+check('initialization rejects an empty reason and stores the supplied explanation and links', async h => {
+  h.route('#/initialize'); await h.action('init-sample');
+  const count = h.M.state.workspaces[0].files.length, params = JSON.stringify(h.S.init.params), events = h.M.state.events.length;
+  h.input('#init-reason', '');
+  await assert.rejects(h.action('init-save'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(h.M.state.workspaces[0].files.length, count); assert.equal(h.M.state.events.length, events); assert.equal(JSON.stringify(h.S.init.params), params);
+  h.input('#init-reason', '为新设备建立经过核对的参数起点'); h.input('#init-links', evidenceLinks.join('\n')); await h.action('init-save');
+  const created = h.M.state.workspaces[0].files.find(f => f.name === 'DeviceSettings.xml'); assert(created);
+  const baseline = record(created, created.branches[0].headId);
+  assert.equal(baseline.reason, '为新设备建立经过核对的参数起点'); assert.deepEqual(clone(baseline.links), evidenceLinks);
+});
+
+check('new-machine creation validates its reason before creating an asset or branch', async h => {
+  await h.action('fork');
+  h.query('#fork-asset').value = 'new'; h.input('#fork-name', 'QA-NEW-MACHINE'); h.input('#fork-reason', '');
+  const assets = JSON.stringify(h.M.state.assets), branches = JSON.stringify(file(h).branches), events = h.M.state.events.length;
+  await assert.rejects(h.action('create-fork'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(JSON.stringify(h.M.state.assets), assets); assert.equal(JSON.stringify(file(h).branches), branches); assert.equal(h.M.state.events.length, events);
+  h.input('#fork-reason', '新机台完成入场验证，从核定基线建立独立配置'); h.input('#fork-links', evidenceLinks.join('\n')); await h.action('create-fork');
+  const asset = h.M.state.assets.find(a => a.name === 'QA-NEW-MACHINE'); assert(asset);
+  const created = file(h).branches.find(b => b.machineId === asset.id); assert(created);
+  const saved = record(file(h), created.headId); assert.equal(saved.reason, '新机台完成入场验证，从核定基线建立独立配置'); assert.deepEqual(clone(saved.links), evidenceLinks);
+});
+
+check('new software version keeps a separate required reason and associated links', async h => {
+  await h.action('new-release'); h.input('#release-name', '692'); h.input('#release-reason', '');
+  const before = JSON.stringify(file(h).branches), events = h.M.state.events.length;
+  await assert.rejects(h.action('create-release'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
+  assert.equal(JSON.stringify(file(h).branches), before); assert.equal(h.M.state.events.length, events);
+  h.input('#release-reason', '为软件 692 建立独立参数版本，等待对应版本文件'); h.input('#release-links', evidenceLinks.join('\n')); await h.action('create-release');
+  const created = file(h).branches.find(b => b.releaseId === '692'); assert(created);
+  assert.equal(created.creationReason, '为软件 692 建立独立参数版本，等待对应版本文件'); assert.deepEqual(clone(created.links), evidenceLinks);
+  const event = h.M.state.events.find(ev => ev.action === 'release_created' && ev.branchId === created.id); assert(event);
+  assert.equal(event.details.reason, created.creationReason); assert.deepEqual(clone(event.details.links), evidenceLinks);
 });
 
 check('explicit head snapshot exits read-only and historical machine shows its own basis', async h => {
@@ -266,7 +585,7 @@ check('explicit head snapshot exits read-only and historical machine shows its o
   assert.equal(h.S.revisionId, 'r-b12'); assert.equal(h.query('[data-action="edit"]', 'app').disabled, true);
   await h.action('return-current'); assert.equal(h.S.revisionId, null); assert.equal(h.query('[data-action="edit"]', 'app').disabled, false);
   const b = branch(h, 'machine-01');
-  h.M.save({ fileId: 'f-machine', branchId: b.id, expectedHeadId: b.headId, params: record(file(h), 'r-b12').params, sourceRevisionId: 'r-b12' });
+  h.M.save({ fileId: 'f-machine', branchId: b.id, expectedHeadId: b.headId, params: record(file(h), 'r-b12').params, sourceRevisionId: 'r-b12', message: '采用已验证的新基线，核对历史记录保持原参考' });
   h.route('#/files/f-machine/parameters?branch=machine-01&revision=r-m13');
   assert(h.query('[data-revision="r-b11"]', 'app'));
   assert.equal(h.query('#revision').value, 'r-m13');
@@ -283,6 +602,8 @@ check('merge field selection saves the new basis while retaining independent nam
   await h.action('merge-save', { target: b.id });
   assert.equal(b.headId, before.id); assert.equal(h.S.edit.sourceRevisionId, 'r-b12');
   assert.equal(h.S.edit.params.find(p => p.id === 'p-speed').name, '送料速度（机台显示）');
+  assert.equal(h.query('#save-message').value, '', 'Generated merge description must not satisfy the reason requirement');
+  explain(h, '采用最新节拍基线，同时保留机台已校准的显示名称和保持值', evidenceLinks);
   await h.action('commit-edit');
   const saved = record(file(h), b.headId), speed = saved.params.find(p => p.id === 'p-speed'), pinned = saved.params.find(p => p.id === 'p-offset');
   assert.equal(saved.baseRevisionId, 'r-b12'); assert.equal(saved.sourceRevisionId, 'r-b12');
@@ -291,6 +612,7 @@ check('merge field selection saves the new basis while retaining independent nam
   assert.equal(saved.params.find(p => p.id === 'p-temp').value, 42);
   assert(saved.parentIds.includes(before.id) && saved.parentIds.includes('r-b12'));
   assert.equal(h.M.state.reviews.length, reviews);
+  checkRevisionEvidence(h, saved, '采用最新节拍基线，同时保留机台已校准的显示名称和保持值');
 });
 
 check('historical machine restore uses actual UI save and retains the old software/basis and history', async h => {
@@ -301,6 +623,8 @@ check('historical machine restore uses actual UI save and retains the old softwa
   assert.equal(b.headId, before); assert.equal(h.S.edit.restoreRevisionId, old.id);
   assert.equal(h.S.edit.headId, before); assert.equal(h.S.edit.sourceRevisionId, old.id);
   assert(h.query('[data-action="commit-edit"]', 'dialog')); assert(h.query('[data-action="submit-review"]', 'dialog'));
+  assert.equal(h.query('#save-message').value, '', 'Generated restore description must not satisfy the reason requirement');
+  explain(h, '现场复验要求恢复此前稳定配置，并保留恢复前版本供追溯', evidenceLinks);
   await h.action('commit-edit');
   const saved = record(file(h), b.headId);
   assert.notEqual(saved.id, before); assert.equal(file(h).revisions.length, count + 1);
@@ -309,6 +633,7 @@ check('historical machine restore uses actual UI save and retains the old softwa
   assert.equal(JSON.stringify(saved.params), JSON.stringify(old.params));
   assert.equal(JSON.stringify(record(file(h), old.id)), oldSnapshot); assert(record(file(h), before));
   assert.equal(h.M.state.reviews.length, reviews); assert.equal(h.S.edit, null);
+  checkRevisionEvidence(h, saved, '现场复验要求恢复此前稳定配置，并保留恢复前版本供追溯');
 });
 
 check('guest handlers reject editing/saving and leave the model unchanged', async h => {
@@ -322,9 +647,9 @@ check('guest handlers reject editing/saving and leave the model unchanged', asyn
 (async () => {
   let failed = 0;
   console.log('Execution target: ' + (useHtml ? 'built HTML inline scripts (exactly match sources)' : 'prototype source scripts'));
-  for (const [name, run] of checks) {
+  for (const [name, run, options] of checks) {
     let h;
-    try { h = createHarness(); await run(h); h.clean(); console.log('PASS ' + name); }
+    try { h = createHarness(options); await run(h); h.clean(); console.log('PASS ' + name); }
     catch (error) { failed++; console.error('FAIL ' + name + '\n' + error.stack); }
     finally { h?.dispose(); }
   }

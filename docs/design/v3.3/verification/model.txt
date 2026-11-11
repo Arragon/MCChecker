@@ -28,5 +28,13 @@ PASS history reports real rename, unit, attribute and value diffs
 PASS blame distinguishes source origin from application and retains unchanged attribution
 PASS first fork records application separately from source and preserves it after unchanged saves
 PASS blame reports unknown when predecessor evidence is missing
+PASS all configuration-writing entry points reject missing or blank reasons without mutations
+PASS explicit reason/message aliases are trimmed and review titles cannot override an explicit blank reason
+PASS links normalize and deduplicate HTTP(S) URLs while preserving deliberate path, query and fragment distinctions
+PASS unsafe or incomplete links are rejected before any configuration mutation
+PASS saved reasons and links are immutable, copied from inputs and available in events and parameter history
+PASS review metadata is locked and merge propagates the proposal reason/links without changing source attribution
+PASS initialization, version creation and machine creation preserve user metadata separately from system descriptions
+PASS restore uses its own explicit reason and links while original field authors remain historical
 
-30/30 reconstructed model checks passed (fresh run).
+38/38 reconstructed model checks passed (fresh run).

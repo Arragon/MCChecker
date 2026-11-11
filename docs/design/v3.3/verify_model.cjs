@@ -14,8 +14,8 @@ const change = (params, id, update) => params.map(p => Object.assign(clone(p), p
 const throws = (code, run) => assert.throws(run, error => error.code === code, 'expected ' + code);
 const observation = model => JSON.stringify({ head: branch(model).headId, revisions: file(model).revisions, events: model.state.events, reviews: model.state.reviews });
 const proposal = model => model.createReview({ fileId: 'f-machine', branchId: 'base-691', title: '调整温度', params: change(head(model).params, 'p-temp', { value: 44 }) });
-const save = (model, params, extra = {}) => model.save(Object.assign({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: branch(model).headId, params, message: '测试修改' }, extra));
-function tiny(model, params) { return model.initialize({ name: 'MergeFixture.json', format: 'json', releaseId: '691', params: params || [clone(head(model).params[0])] }); }
+const save = (model, params, extra = {}) => model.save(Object.assign({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: branch(model).headId, params, message: '验证本测试场景的参数保存结果' }, extra));
+function tiny(model, params) { return model.initialize({ name: 'MergeFixture.json', format: 'json', releaseId: '691', message: '建立合并与来源归因测试使用的输入配置', params: params || [clone(head(model).params[0])] }); }
 
 test('reconstructed seed preserves file, branch and stable parameter identities', () => {
   const m = Model.create(), f = file(m);
@@ -53,7 +53,7 @@ test('direct save requires one admin and CAS, appends an immutable snapshot with
   assert.equal(old.params.find(p => p.id === 'p-temp').value, 42);
   assert.throws(() => { result.params[0].value = 0; }, TypeError);
   const before = observation(m);
-  throws('HEAD_REQUIRED', () => m.save({ fileId: 'f-machine', branchId: 'base-691', params }));
+  throws('HEAD_REQUIRED', () => m.save({ fileId: 'f-machine', branchId: 'base-691', params, message: '验证缺少当前记录时拒绝保存' }));
   throws('STALE_HEAD', () => save(m, params, { expectedHeadId: old.id }));
   assert.equal(observation(m), before);
 });
@@ -133,8 +133,8 @@ test('guest may propose and comment but cannot save, approve, fork or initialize
   const r = proposal(m); m.addComment(r.id, { body: '请管理员核对' });
   throws('FORBIDDEN', () => save(m, head(m).params));
   throws('FORBIDDEN', () => m.approve(r.id));
-  throws('FORBIDDEN', () => m.fork('f-machine', { machineId: 'asset-02', fromRevisionId: 'r-b12' }));
-  throws('FORBIDDEN', () => m.initialize({ name: 'New.json', format: 'json', releaseId: '692', params: head(m).params }));
+  throws('FORBIDDEN', () => m.fork('f-machine', { machineId: 'asset-02', fromRevisionId: 'r-b12', message: '验证访客不能创建机台配置' }));
+  throws('FORBIDDEN', () => m.initialize({ name: 'New.json', format: 'json', releaseId: '692', params: head(m).params, message: '验证访客不能初始化配置' }));
   assert.equal(branch(m).headId, 'r-b12');
 });
 
@@ -171,16 +171,16 @@ test('numeric strings preserve large integers and exact fractional range boundar
 
 test('new releases are empty until input or source is explicitly supplied', () => {
   const m = Model.create(), f = file(m), count = f.revisions.length;
-  const pending = m.addRelease(f.id, { releaseId: '692' });
+  const pending = m.addRelease(f.id, { releaseId: '692', message: '验证未提供原始输入时版本保持为空' });
   assert.equal(pending.headId, null); assert.equal(pending.initialRevisionId, null); assert.equal(f.revisions.length, count);
-  const copyBranch = m.addRelease(f.id, { releaseId: '693', sourceRevisionId: 'r-b12' });
+  const copyBranch = m.addRelease(f.id, { releaseId: '693', sourceRevisionId: 'r-b12', message: '验证显式选择来源的版本初始化' });
   const baseline = revision(f, copyBranch.headId), initial = revision(f, copyBranch.initialRevisionId);
   assert.equal(initial.kind, 'initial'); assert.equal(initial.sourceRevisionId, 'r-b12');
   assert.deepEqual(baseline.parentIds, [initial.id]); assert.deepEqual(initial.params, revision(f, 'r-b12').params);
 });
 
 test('manual save of a pending release does not invent an initial source snapshot', () => {
-  const m = Model.create(), f = file(m), pending = m.addRelease(f.id, { releaseId: '692' });
+  const m = Model.create(), f = file(m), pending = m.addRelease(f.id, { releaseId: '692', message: '创建待手工填写的测试版本' });
   const next = m.save({ fileId: f.id, branchId: pending.id, expectedHeadId: null, params: revision(f, 'r-b12').params, message: '人工确认的初始参数' });
   assert.equal(pending.initialRevisionId, null); assert.equal(f.initialRevisionId, null);
   assert.equal(next.sourceRevisionId, null); assert.equal(next.kind, undefined); assert.deepEqual(next.parentIds, []);
@@ -198,11 +198,11 @@ test('initialization creates separate frozen original and baseline snapshots', (
 
 test('fork uses an exact baseline and rejects duplicate physical machine association', () => {
   const m = Model.create(); m.state.assets.push({ id: 'asset-03', name: 'MC-003', model: '69X' });
-  const b = m.fork('f-machine', { machineId: 'asset-03', fromRevisionId: 'r-b11' });
+  const b = m.fork('f-machine', { machineId: 'asset-03', fromRevisionId: 'r-b11', message: '验证新机台采用指定而非最新基线' });
   const r = revision(file(m), b.headId);
   assert.equal(b.baseRevisionId, 'r-b11'); assert.equal(r.sourceRevisionId, 'r-b11'); assert.deepEqual(r.parentIds, ['r-b11']);
   assert.deepEqual(r.params, revision(file(m), 'r-b11').params);
-  throws('DUPLICATE_MACHINE', () => m.fork('f-machine', { machineId: 'asset-03', fromRevisionId: 'r-b12' }));
+  throws('DUPLICATE_MACHINE', () => m.fork('f-machine', { machineId: 'asset-03', fromRevisionId: 'r-b12', message: '验证重复机台绑定会被拒绝' }));
 });
 
 test('three-way merge identifies value conflict and preserves pinned values', () => {
@@ -222,18 +222,18 @@ test('source deletion of a pinned machine parameter requires explicit resolution
 });
 
 test('independent name and value changes merge by stable identity', () => {
-  const m = Model.create(), f = tiny(m), base = f.branches[0], original = revision(f, base.headId), machine = m.fork(f.id, { machineId: 'asset-01', fromRevisionId: original.id });
-  const target = m.save({ fileId: f.id, branchId: machine.id, expectedHeadId: machine.headId, params: change(original.params, 'p-speed', { name: '现场显示名称' }) });
-  const source = m.save({ fileId: f.id, branchId: base.id, expectedHeadId: base.headId, params: change(original.params, 'p-speed', { value: 125 }) });
+  const m = Model.create(), f = tiny(m), base = f.branches[0], original = revision(f, base.headId), machine = m.fork(f.id, { machineId: 'asset-01', fromRevisionId: original.id, message: '建立独立更名测试用机台' });
+  const target = m.save({ fileId: f.id, branchId: machine.id, expectedHeadId: machine.headId, params: change(original.params, 'p-speed', { name: '现场显示名称' }), message: '机台仅修改参数显示名称' });
+  const source = m.save({ fileId: f.id, branchId: base.id, expectedHeadId: base.headId, params: change(original.params, 'p-speed', { value: 125 }), message: '基线仅调整送料值以验证独立字段合并' });
   const plan = m.planMerge(f.id, { baseRevisionId: original.id, targetRevisionId: target.id, sourceRevisionId: source.id });
   assert.equal(plan.conflicts.length, 0); assert.equal(plan.params[0].name, '现场显示名称'); assert.equal(plan.params[0].value, 125);
 });
 
 test('unit changes conflict with a custom value instead of silently changing its meaning', () => {
   const m = Model.create(), originalParam = clone(revision(file(m), 'r-b10').params.find(p => p.id === 'p-pressure'));
-  const f = tiny(m, [originalParam]), base = f.branches[0], original = revision(f, base.headId), machine = m.fork(f.id, { machineId: 'asset-01', fromRevisionId: original.id });
-  const target = m.save({ fileId: f.id, branchId: machine.id, expectedHeadId: machine.headId, params: change(original.params, 'p-pressure', { value: 150000, mode: 'override' }) });
-  const source = m.save({ fileId: f.id, branchId: base.id, expectedHeadId: base.headId, params: change(original.params, 'p-pressure', { value: 100, max: 500, unit: 'kPa' }) });
+  const f = tiny(m, [originalParam]), base = f.branches[0], original = revision(f, base.headId), machine = m.fork(f.id, { machineId: 'asset-01', fromRevisionId: original.id, message: '建立单位冲突测试用机台' });
+  const target = m.save({ fileId: f.id, branchId: machine.id, expectedHeadId: machine.headId, params: change(original.params, 'p-pressure', { value: 150000, mode: 'override' }), message: '用 Pa 设置机台压力覆盖值' });
+  const source = m.save({ fileId: f.id, branchId: base.id, expectedHeadId: base.headId, params: change(original.params, 'p-pressure', { value: 100, max: 500, unit: 'kPa' }), message: '把基线压力及范围转换为 kPa' });
   const plan = m.planMerge(f.id, { baseRevisionId: original.id, targetRevisionId: target.id, sourceRevisionId: source.id });
   assert(plan.conflicts[0].conflicts.includes('unit')); assert(plan.conflicts[0].conflicts.includes('value'));
   assert.equal(plan.params[0].unit, 'Pa'); assert.equal(plan.params[0].value, 150000);
@@ -241,9 +241,9 @@ test('unit changes conflict with a custom value instead of silently changing its
 
 test('merge preview detects incompatible combined value and range changes', () => {
   const m = Model.create(), f = tiny(m, [Object.assign(clone(head(m).params[0]), { value: 50, max: 200 })]);
-  const base = f.branches[0], original = revision(f, base.headId), machine = m.fork(f.id, { machineId: 'asset-01', fromRevisionId: original.id });
-  const target = m.save({ fileId: f.id, branchId: machine.id, expectedHeadId: machine.headId, params: change(original.params, 'p-speed', { value: 150, mode: 'override' }) });
-  const source = m.save({ fileId: f.id, branchId: base.id, expectedHeadId: base.headId, params: change(original.params, 'p-speed', { max: 100 }) });
+  const base = f.branches[0], original = revision(f, base.headId), machine = m.fork(f.id, { machineId: 'asset-01', fromRevisionId: original.id, message: '建立值与范围冲突测试用机台' });
+  const target = m.save({ fileId: f.id, branchId: machine.id, expectedHeadId: machine.headId, params: change(original.params, 'p-speed', { value: 150, mode: 'override' }), message: '验证机台值高于后续收紧范围时的冲突' });
+  const source = m.save({ fileId: f.id, branchId: base.id, expectedHeadId: base.headId, params: change(original.params, 'p-speed', { max: 100 }), message: '收紧基线范围以验证组合值校验' });
   const plan = m.planMerge(f.id, { baseRevisionId: original.id, targetRevisionId: target.id, sourceRevisionId: source.id });
   assert.equal(plan.conflicts[0].validationError.code, 'OUT_OF_RANGE');
   assert.equal(plan.params[0].value, 150); assert.equal(plan.params[0].max, 200);
@@ -251,15 +251,15 @@ test('merge preview detects incompatible combined value and range changes', () =
 
 test('inherited machine values cannot diverge from the exact chosen basis', () => {
   const m = Model.create(), b = branch(m, 'machine-01'), original = head(m, b.id), before = clone(b);
-  throws('INHERIT_MISMATCH', () => m.save({ fileId: 'f-machine', branchId: b.id, expectedHeadId: b.headId, params: change(original.params, 'p-temp', { value: 45, mode: 'inherit' }) }));
+  throws('INHERIT_MISMATCH', () => m.save({ fileId: 'f-machine', branchId: b.id, expectedHeadId: b.headId, params: change(original.params, 'p-temp', { value: 45, mode: 'inherit' }), message: '验证继承值不可偏离采用基线' }));
   assert.deepEqual(b, before);
-  const saved = m.save({ fileId: 'f-machine', branchId: b.id, expectedHeadId: b.headId, params: change(original.params, 'p-temp', { value: 45, mode: 'override' }) });
+  const saved = m.save({ fileId: 'f-machine', branchId: b.id, expectedHeadId: b.headId, params: change(original.params, 'p-temp', { value: 45, mode: 'override' }), message: '明确以机台覆盖值改变温度' });
   assert.equal(saved.baseRevisionId, 'r-b11');
 });
 
 test('adopting a new basis can record provenance even when parameter values are unchanged', () => {
   const m = Model.create(), f = file(m), b = branch(m, 'machine-02'), original = head(m, b.id);
-  const newRelease = m.addRelease(f.id, { releaseId: '692', sourceRevisionId: 'r-b12' });
+  const newRelease = m.addRelease(f.id, { releaseId: '692', sourceRevisionId: 'r-b12', message: '验证内容相同但采用来源不同的新版记录' });
   const next = m.save({ fileId: f.id, branchId: b.id, expectedHeadId: b.headId, params: original.params, sourceRevisionId: newRelease.headId, message: '明确采用 692 基线' });
   assert.equal(m.diff(original.params, next.params).length, 0);
   assert.equal(next.releaseId, '692'); assert.equal(b.releaseId, '692');
@@ -277,7 +277,7 @@ test('direct restore preserves historical machine release and basis without mand
 
 test('reviewed restore is an append-only proposal and restores its historical basis', () => {
   const m = Model.create(), f = file(m), b = branch(m, 'machine-01'), before = b.headId;
-  const r = m.revertReview(f.id, b.id, 'r-m11'); assert.equal(b.headId, before);
+  const r = m.revertReview(f.id, b.id, 'r-m11', '验证评审恢复保留历史软件版本与采用基线'); assert.equal(b.headId, before);
   assert.equal(r.restoreRevisionId, 'r-m11'); m.state.actorId = 'wang'; m.approve(r.id); const saved = m.merge(r.id);
   assert.equal(saved.releaseId, '690'); assert.equal(saved.baseRevisionId, 'r-b10'); assert(revision(f, before));
 });
@@ -292,10 +292,10 @@ test('history reports real rename, unit, attribute and value diffs', () => {
 
 test('blame distinguishes source origin from application and retains unchanged attribution', () => {
   const m = Model.create(), f = file(m), b = branch(m, 'machine-01');
-  const saved = m.save({ fileId: f.id, branchId: b.id, expectedHeadId: b.headId, params: revision(f, 'r-b12').params, sourceRevisionId: 'r-b12' });
+  const saved = m.save({ fileId: f.id, branchId: b.id, expectedHeadId: b.headId, params: revision(f, 'r-b12').params, sourceRevisionId: 'r-b12', message: '验证采用基线与原始字段作者分别记录' });
   const provenance = m.blame(f.id, saved.id, 'p-temp').find(x => x.field === 'value');
   assert.equal(provenance.known, true); assert.equal(provenance.originRevisionId, 'r-b12'); assert.equal(provenance.appliedRevisionId, saved.id);
-  const next = m.save({ fileId: f.id, branchId: b.id, expectedHeadId: b.headId, params: change(saved.params, 'p-speed', { value: 123, mode: 'override' }) });
+  const next = m.save({ fileId: f.id, branchId: b.id, expectedHeadId: b.headId, params: change(saved.params, 'p-speed', { value: 123, mode: 'override' }), message: '调整速度并验证未变温度字段保留来源' });
   const unchanged = m.blame(f.id, next.id, 'p-temp').find(x => x.field === 'value');
   assert.equal(unchanged.originRevisionId, provenance.originRevisionId); assert.equal(unchanged.appliedRevisionId, provenance.appliedRevisionId);
 });
@@ -317,6 +317,142 @@ test('blame reports unknown when predecessor evidence is missing', () => {
   f.revisions.push(Object.freeze(incomplete));
   const provenance = m.blame(f.id, incomplete.id, 'p-speed').find(x => x.field === 'value');
   assert.equal(provenance.known, false); assert.equal(provenance.originRevisionId, null); assert.equal(provenance.authorId, null);
+});
+
+const metadataOperations = [
+  ['save', (m, metadata) => m.save({ fileId: 'f-machine', branchId: 'base-691', expectedHeadId: 'r-b12', params: change(head(m).params, 'p-temp', { value: 44 }), ...metadata })],
+  ['review', (m, metadata) => m.createReview({ fileId: 'f-machine', branchId: 'base-691', params: change(head(m).params, 'p-temp', { value: 44 }), ...metadata })],
+  ['initialize', (m, metadata) => m.initialize({ name: 'ReasonFixture.json', format: 'json', releaseId: '692', params: head(m).params, ...metadata })],
+  ['release', (m, metadata) => m.addRelease('f-machine', { releaseId: '692', ...metadata })],
+  ['fork', (m, metadata) => m.fork('f-process', { machineId: 'asset-02', fromRevisionId: 'r-process-b1', ...metadata })],
+  ['direct restore', (m, metadata) => m.save({ fileId: 'f-machine', branchId: 'machine-01', expectedHeadId: 'r-m13', params: revision(file(m), 'r-m11').params, sourceRevisionId: 'r-m11', restoreRevisionId: 'r-m11', ...metadata })],
+  ['reviewed restore', (m, metadata) => m.revertReview('f-machine', 'machine-01', 'r-m11', metadata)]
+];
+
+test('all configuration-writing entry points reject missing or blank reasons without mutations', () => {
+  for (const [name, run] of metadataOperations) {
+    const m = Model.create(), before = JSON.stringify(m.state);
+    for (const metadata of [{}, { reason: ' \n\t ' }, { message: '' }, { message: '\u3000' }]) {
+      throws('REASON_REQUIRED', () => run(m, metadata));
+      assert.equal(JSON.stringify(m.state), before, name + ' must not create a record, branch, review or audit event');
+    }
+    for (const reason of [null, 42, { text: 'not a string' }]) {
+      throws('INVALID_REASON', () => run(m, { reason }));
+      assert.equal(JSON.stringify(m.state), before, name + ' must not coerce a reason');
+    }
+  }
+});
+
+test('explicit reason/message aliases are trimmed and review titles cannot override an explicit blank reason', () => {
+  assert.deepEqual(Model.changeMetadata({ reason: '  采用已核对的温控范围\n', links: [] }), { reason: '采用已核对的温控范围', message: '采用已核对的温控范围', links: [] });
+  assert.deepEqual(Model.changeMetadata({ message: '  核对供气压力后调整  ' }), { reason: '核对供气压力后调整', message: '核对供气压力后调整', links: [] });
+  assert.equal(Model.changeMetadata({ reason: '确认温控范围', message: ' 确认温控范围 ' }).reason, '确认温控范围');
+  throws('REASON_CONFLICT', () => Model.changeMetadata({ reason: '更换传感器', message: '更换电机' }));
+  throws('INVALID_REASON', () => Model.changeMetadata({ reason: '更换传感器', message: null }));
+  const m = Model.create(), before = JSON.stringify(m.state), input = { fileId: 'f-machine', branchId: 'base-691', params: change(head(m).params, 'p-temp', { value: 44 }), title: '  温控复测后调整设定  ' };
+  throws('REASON_REQUIRED', () => m.createReview({ ...input, reason: ' ' }));
+  assert.equal(JSON.stringify(m.state), before);
+  const review = m.createReview(input);
+  assert.equal(review.title, '温控复测后调整设定'); assert.equal(review.reason, review.title); assert.equal(review.message, review.title);
+  assert.equal(Model.changeMetadata({}, ' 明确填写的评审标题 ').reason, '明确填写的评审标题');
+});
+
+test('links normalize and deduplicate HTTP(S) URLs while preserving deliberate path, query and fragment distinctions', () => {
+  const input = [' HTTPS://DOCS.EXAMPLE.INVALID:443/demo/./check#details ', 'https://docs.example.invalid/demo/check#details', 'http://intranet:8080/changes?version=692', 'https://docs.example.invalid/demo/Check#details', 'https://docs.example.invalid/demo/check?phase=2#details', ''];
+  const original = clone(input), expected = ['https://docs.example.invalid/demo/check#details', 'http://intranet:8080/changes?version=692', 'https://docs.example.invalid/demo/Check#details', 'https://docs.example.invalid/demo/check?phase=2#details'];
+  assert.deepEqual(Model.normalizeLinks(input), expected); assert.deepEqual(input, original);
+  assert.deepEqual(Model.normalizeLinks(' HTTPS://DOCS.EXAMPLE.INVALID:443/demo/check#details \r\n\nhttps://docs.example.invalid/demo/check#details\nhttp://intranet:8080/changes?version=692'), expected.slice(0, 2));
+  assert.deepEqual(Model.normalizeLinks(undefined), []); assert.deepEqual(Model.normalizeLinks(' \n '), []);
+  assert.deepEqual(Model.normalizeLinks(['http://127.0.0.1:8080/demo', 'https://[::1]/demo', 'https://docs.example.invalid/%E4%B8%AD%E6%96%87']), ['http://127.0.0.1:8080/demo', 'https://[::1]/demo', 'https://docs.example.invalid/%E4%B8%AD%E6%96%87']);
+});
+
+test('unsafe or incomplete links are rejected before any configuration mutation', () => {
+  const invalid = ['javascript:alert(1)', 'data:text/plain,demo', 'file:///demo/config.xml', 'ftp://files.example.invalid/config', '//docs.example.invalid/demo', '/demo', 'docs.example.invalid/demo', 'https://', 'https:/docs.example.invalid/demo', 'https:///docs.example.invalid/demo', 'https://?path=demo', 'https://.', 'https://docs.example.invalid:', 'https://reader:secret@docs.example.invalid/demo', 'https://reader@docs.example.invalid/demo', 'https://@docs.example.invalid/demo', 'https://docs.example.invalid\\demo', 'https://docs.example.invalid/a b', 'https://docs.example.invalid/\ncheck', '\thttps://docs.example.invalid/demo', 'https://docs.example.invalid/\u007f', 'https://docs.example.invalid/\u0085', 'https://docs.example.invalid/%0Acheck', 'https://docs.example.invalid/%C2%85', 'https://docs.example.invalid/%ZZ', null, 42];
+  const m = Model.create(), before = JSON.stringify(m.state);
+  for (const link of invalid) {
+    throws('INVALID_LINK', () => metadataOperations[0][1](m, { reason: '核对热稳定记录后调整', links: [link] }));
+    assert.equal(JSON.stringify(m.state), before);
+  }
+  for (const links of [null, 17, { url: 'https://docs.example.invalid/demo' }]) throws('INVALID_LINKS', () => Model.normalizeLinks(links));
+  for (const [name, run] of metadataOperations) {
+    throws('INVALID_LINK', () => run(m, { reason: '核对相关记录后修改配置', links: ['javascript:alert(1)'] }));
+    assert.equal(JSON.stringify(m.state), before, name + ' must not write before link validation');
+  }
+});
+
+test('saved reasons and links are immutable, copied from inputs and available in events and parameter history', () => {
+  const m = Model.create(), links = ['HTTPS://DOCS.EXAMPLE.INVALID:443/demo/temperature'], reason = '  温度复测后把设定改为 44 °C  ';
+  const next = metadataOperations[0][1](m, { reason, links });
+  links.push('https://docs.example.invalid/demo/later');
+  assert.equal(next.reason, reason.trim()); assert.equal(next.message, reason.trim());
+  assert.deepEqual(next.links, ['https://docs.example.invalid/demo/temperature']);
+  assert.throws(() => { next.reason = '事后改写'; }, TypeError);
+  assert.throws(() => { next.message = '事后改写'; }, TypeError);
+  assert.throws(() => { next.links = []; }, TypeError);
+  assert.throws(() => { next.links.push('https://docs.example.invalid/demo/other'); }, TypeError);
+  const details = m.state.events[0].details;
+  assert.equal(details.reason, next.reason); assert.equal(details.message, next.message); assert.deepEqual(details.links, next.links);
+  assert.throws(() => { details.links[0] = 'https://docs.example.invalid/demo/changed'; }, TypeError);
+  const history = m.history('f-machine', 'p-temp').find(row => row.revisionId === next.id);
+  assert.equal(history.reason, next.reason); assert.deepEqual(history.links, next.links);
+  history.links.length = 0; assert.equal(next.links.length, 1);
+  assert.equal(revision(file(m), 'r-b12').reason, null);
+  assert.equal(revision(file(m), 'r-b12').message, '提高送料速度并优化通信等待');
+});
+
+test('review metadata is locked and merge propagates the proposal reason/links without changing source attribution', () => {
+  const m = Model.create(), links = ['https://docs.example.invalid/demo/adoption', 'https://config.example.invalid/demo/thermal'];
+  const review = m.createReview({ fileId: 'f-machine', branchId: 'machine-01', title: '核对后采用 B12', reason: '热稳定复核通过后采用已保存标准', links, params: revision(file(m), 'r-b12').params, sourceRevisionId: 'r-b12' });
+  links.length = 0;
+  for (const key of ['title', 'description', 'reason', 'message', 'links']) assert.throws(() => { review[key] = key === 'links' ? [] : '改变批准的内容'; }, TypeError);
+  assert.throws(() => review.links.push('https://docs.example.invalid/demo/unapproved'), TypeError);
+  assert.equal(review.links.length, 2); assert.equal(review.authorId, 'lin');
+  m.state.actorId = 'wang'; m.approve(review.id); const next = m.merge(review.id);
+  assert.equal(next.reason, review.reason); assert.equal(next.message, review.reason); assert.notEqual(next.message, review.title); assert.deepEqual(next.links, review.links);
+  assert.equal(next.authorId, 'lin'); assert.equal(next.mergedBy, 'wang');
+  assert.equal(next.sourceRevisionId, 'r-b12');
+  const provenance = m.blame('f-machine', next.id, 'p-temp').find(row => row.field === 'value');
+  assert.equal(provenance.authorId, 'wang'); assert.equal(provenance.originRevisionId, 'r-b12'); assert.equal(provenance.appliedRevisionId, next.id);
+  for (const action of ['review_created', 'review_approved', 'review_merged']) {
+    const details = m.state.events.find(event => event.reviewId === review.id && event.action === action).details;
+    assert.equal(details.reason, review.reason); assert.deepEqual(details.links, review.links); assert(Object.isFrozen(details.links));
+  }
+});
+
+test('initialization, version creation and machine creation preserve user metadata separately from system descriptions', () => {
+  const m = Model.create(), metadata = { reason: '首次核对设备输入后纳入配置管理', links: ['https://docs.example.invalid/demo/commissioning'] };
+  const initialized = m.initialize({ name: 'Commissioning.json', format: 'json', releaseId: '692', params: head(m).params, ...metadata });
+  assert.equal(initialized.revisions.length, 2);
+  for (const saved of initialized.revisions) {
+    assert.equal(saved.reason, metadata.reason); assert.equal(saved.message, metadata.reason); assert.deepEqual(saved.links, metadata.links);
+    assert(saved.systemDescription); assert.notEqual(saved.systemDescription, saved.reason);
+  }
+  assert.equal(m.state.events[0].details.reason, metadata.reason);
+  const pending = m.addRelease('f-machine', { releaseId: '692', message: '为新软件适配预留未填写版本', links: metadata.links });
+  assert.equal(pending.headId, null); assert.equal(pending.creationReason, '为新软件适配预留未填写版本'); assert.deepEqual(pending.links, metadata.links);
+  assert.equal(m.state.events[0].details.reason, pending.creationReason);
+  const copied = m.addRelease('f-machine', { releaseId: '693', sourceRevisionId: 'r-b12', reason: '以已复核标准建立兼容性验证版本', links: metadata.links });
+  for (const id of [copied.initialRevisionId, copied.headId]) {
+    const saved = revision(file(m), id); assert.equal(saved.reason, copied.creationReason); assert.deepEqual(saved.links, metadata.links);
+  }
+  const machine = m.fork(initialized.id, { machineId: 'asset-01', fromRevisionId: initialized.branches[0].headId, reason: '登记机台的首次现场核对配置', links: metadata.links });
+  const saved = revision(initialized, machine.headId);
+  assert.equal(saved.reason, machine.creationReason); assert.equal(saved.message, '登记机台的首次现场核对配置'); assert.deepEqual(saved.links, metadata.links);
+  assert.equal(saved.sourceRevisionId, initialized.branches[0].headId); assert(saved.systemDescription.includes('MC-001'));
+  assert.equal(m.state.events[0].details.reason, saved.reason); assert.deepEqual(m.state.events[0].details.links, metadata.links);
+});
+
+test('restore uses its own explicit reason and links while original field authors remain historical', () => {
+  const m = Model.create(), historical = revision(file(m), 'r-m11'); m.state.actorId = 'wang';
+  const restored = m.save({ fileId: 'f-machine', branchId: 'machine-01', expectedHeadId: 'r-m13', params: historical.params, sourceRevisionId: historical.id, restoreRevisionId: historical.id, message: '复核旧版兼容性后恢复现场参数', links: 'https://docs.example.invalid/demo/rollback-check\nhttps://config.example.invalid/demo/previous-version' });
+  assert.equal(restored.authorId, 'wang'); assert.equal(restored.reason, '复核旧版兼容性后恢复现场参数'); assert.equal(restored.links.length, 2);
+  assert.equal(restored.restoreRevisionId, historical.id); assert.equal(historical.authorId, 'lin'); assert.equal(historical.reason, null);
+  const provenance = m.blame('f-machine', restored.id, 'p-temp').find(row => row.field === 'value');
+  assert.equal(provenance.originRevisionId, 'r-b10'); assert.equal(provenance.authorId, 'lin'); assert.equal(provenance.appliedRevisionId, restored.id);
+  const reviewed = Model.create(), proposal = reviewed.revertReview('f-machine', 'machine-01', 'r-m11', { reason: '需要另一位管理员复核旧版回退', links: ['https://docs.example.invalid/demo/reviewed-rollback'] });
+  reviewed.state.actorId = 'wang'; reviewed.approve(proposal.id); const merged = reviewed.merge(proposal.id);
+  assert.equal(merged.reason, proposal.reason); assert.deepEqual(merged.links, proposal.links); assert.equal(merged.restoreRevisionId, 'r-m11');
+  assert.equal(reviewed.state.events[0].details.restoreRevisionId, 'r-m11');
 });
 
 let failed = 0;

@@ -1,0 +1,11 @@
+PASS seed records have unique positions, one baseline lane and separate machine lanes
+PASS every connector is an actual parent edge and child order survives clock skew
+PASS software initialization stays on the main lane without inventing root ancestry
+PASS fork and historical restore preserve explicit provenance and current adoption
+PASS all long-history records remain reachable with bounded 30/50/100-row pages
+PASS query filtering marks omitted endpoints and focus preserves canonical full data
+PASS machine focus compresses 81 tracks to the selected machine and actual source tracks
+PASS every visible record provides selectable and detail buttons with readable names
+PASS untrusted names, IDs, reasons, actor names and search text are escaped
+PASS missing ancestry is explicit; malformed or cyclic identities fail without fake nodes
+10/10 roadmap data/HTML checks passed (not browser QA)

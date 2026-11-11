@@ -4,8 +4,10 @@ ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "prototype"
 parts = {
     "/* STYLES */": "style.css",
+    "/* ROADMAP_STYLES */": "roadmap.css",
     "/* MODEL */": "model.js",
     "/* SOURCES */": "sources.js",
+    "/* ROADMAP */": "roadmap.js",
     "/* APP */": "app.js",
 }
 html = (SOURCE / "shell.html").read_text(encoding="utf-8")

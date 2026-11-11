@@ -25,6 +25,42 @@
     if (details) Object.assign(error, details);
     throw error;
   }
+  function normalizeLinks(value) {
+    if (value === undefined) return [];
+    const entries = typeof value === 'string' ? value.split(/\r\n?|\n/) : value;
+    if (!Array.isArray(entries)) fail('INVALID_LINKS', '关联链接请逐行填写，或提供链接列表', { field: 'links' });
+    const result = [], seen = new Set();
+    entries.forEach((entry, linkIndex) => {
+      const reject = () => fail('INVALID_LINK', '第 ' + (linkIndex + 1) + ' 个关联链接无效，请填写完整的 HTTP(S) 地址，不含账号密码或控制字符', { field: 'links', linkIndex });
+      if (typeof entry !== 'string' || /[\u0000-\u001f\u007f-\u009f]/.test(entry)) reject();
+      const text = entry.trim();
+      if (!text) return;
+      const authority = /^https?:\/\/([^/?#\\\s]+)/i.exec(text);
+      if (!authority || /[\s\\]/u.test(text) || /@|:$/.test(authority[1]) || /%(?![0-9a-f]{2})/i.test(text) || /%(?:0[0-9a-f]|1[0-9a-f]|7f)|%c2%(?:8[0-9a-f]|9[0-9a-f])/i.test(text)) reject();
+      let url;
+      try { url = new URL(text); } catch (_) { reject(); }
+      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || /^\.+$/.test(url.hostname) || url.username || url.password) reject();
+      const normalized = url.href;
+      if (!seen.has(normalized)) { seen.add(normalized); result.push(normalized); }
+    });
+    return result;
+  }
+  // Only an explicitly supplied review title may be used as fallbackTitle.
+  // Automatic operation descriptions must never fill in a missing reason.
+  function changeMetadata(input, fallbackTitle) {
+    input = input || {};
+    const hasReason = own(input, 'reason'), hasMessage = own(input, 'message');
+    const raw = hasReason ? input.reason : hasMessage ? input.message : fallbackTitle;
+    if (raw === undefined) fail('REASON_REQUIRED', '请填写修改原因', { field: 'reason' });
+    if (typeof raw !== 'string') fail('INVALID_REASON', '修改原因必须是文字', { field: 'reason' });
+    const reason = raw.trim();
+    if (!reason) fail('REASON_REQUIRED', '请填写修改原因', { field: 'reason' });
+    if (hasReason && hasMessage) {
+      if (typeof input.message !== 'string') fail('INVALID_REASON', '修改原因必须是文字', { field: 'reason' });
+      if (input.message.trim() !== reason) fail('REASON_CONFLICT', '修改原因与兼容说明字段不一致，请保留一份明确原因', { field: 'reason' });
+    }
+    return { reason, message: reason, links: normalizeLinks(input.links) };
+  }
   const numericPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
   // Compare decimal meaning without converting integer strings or fractional
   // text to binary floating point. Number() is only a finite-value guard.
@@ -91,7 +127,10 @@
   }
   const p = (id, name, path, value, unit, min, max, type) => ({ id, name, path, type: type || 'number', unit: unit || '', min: min ?? null, max: max ?? null, value, mode: 'inherit' });
   function changed(params, updates) { return params.map(param => Object.assign(copy(param), updates[param.id] || {})); }
-  function revision(input) { return frozen(Object.assign({ sourceRevisionId: null, restoreRevisionId: null, reviewId: null }, input, { params: validated(input.params) })); }
+  function revision(input, historical) {
+    const metadata = historical ? { reason: null, message: input.message, links: normalizeLinks(input.links) } : changeMetadata(input);
+    return frozen(Object.assign({ sourceRevisionId: null, restoreRevisionId: null, reviewId: null }, input, metadata, { params: validated(input.params) }));
+  }
   function machineFile(lab) {
     const parameters = [
       p('p-speed', '传送速度', '/Motion/FeedSpeed', 100, 'mm/s', 0, 250),
@@ -118,7 +157,7 @@
     const b12 = changed(b11, { 'p-speed': { value: lab ? 80 : 120 }, 'p-temp': { value: lab ? 35 : 42 }, 'p-timeout': { value: 6000 } });
     const m12 = changed(b11, { 'p-speed': { value: lab ? 72 : 115, mode: 'override' }, 'p-offset': { value: 0.15, mode: 'pin' } });
     const m13 = changed(m12, { 'p-speed': { value: lab ? 78 : 118 } });
-    const make = (id, label, branchId, releaseId, parents, baseId, params, authorId, at, message, sourceId) => revision({ id, label, branchId, releaseId, parentIds: parents, baseRevisionId: baseId, sourceRevisionId: sourceId || null, authorId, at, message, reviewId: id === 'r-b12' && !lab ? 'CR-025' : null, params });
+    const make = (id, label, branchId, releaseId, parents, baseId, params, authorId, at, message, sourceId) => revision({ id, label, branchId, releaseId, parentIds: parents, baseRevisionId: baseId, sourceRevisionId: sourceId || null, authorId, at, message, links: id === 'r-b12' && !lab ? ['https://docs.example.invalid/demo/feed-speed'] : [], reviewId: id === 'r-b12' && !lab ? 'CR-025' : null, params }, true);
     return { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
       branches: [
         { id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: 'r-b12', machineId: null, baseRevisionId: null, initialRevisionId: null },
@@ -138,8 +177,8 @@
       ] };
   }
   function smallFile(key, name, description, params, overrides) {
-    const baseline = revision({ id: 'r-' + key + '-b1', label: 'B1', branchId: 'base-691', releaseId: '691', parentIds: [], baseRevisionId: null, authorId: 'wang', at: '2026-11-01T01:00:00Z', message: '建立 691 版本基线', params });
-    const machine = revision({ id: 'r-' + key + '-m1', label: 'r1', branchId: 'machine-01', releaseId: '691', parentIds: [baseline.id], baseRevisionId: baseline.id, sourceRevisionId: baseline.id, authorId: 'lin', at: '2026-11-03T02:30:00Z', message: 'MC-001 现场校准', params: changed(params, overrides) });
+    const baseline = revision({ id: 'r-' + key + '-b1', label: 'B1', branchId: 'base-691', releaseId: '691', parentIds: [], baseRevisionId: null, authorId: 'wang', at: '2026-11-01T01:00:00Z', message: '建立 691 版本基线', params }, true);
+    const machine = revision({ id: 'r-' + key + '-m1', label: 'r1', branchId: 'machine-01', releaseId: '691', parentIds: [baseline.id], baseRevisionId: baseline.id, sourceRevisionId: baseline.id, authorId: 'lin', at: '2026-11-03T02:30:00Z', message: 'MC-001 现场校准', params: changed(params, overrides) }, true);
     return { id: 'f-' + key, name, format: 'json', description, initialRevisionId: null,
       branches: [{ id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: baseline.id, machineId: null, baseRevisionId: null, initialRevisionId: null }, { id: 'machine-01', label: 'MC-001', kind: 'machine', releaseId: '691', headId: machine.id, machineId: 'asset-01', baseRevisionId: baseline.id }], revisions: [baseline, machine] };
   }
@@ -196,29 +235,34 @@
       admin(); const file = getFile(input.fileId), branch = getBranch(file, input.branchId);
       if (!own(input, 'expectedHeadId') || input.expectedHeadId === undefined) fail('HEAD_REQUIRED', '保存前必须明确当前记录');
       cas(branch, input.expectedHeadId);
+      const metadata = changeMetadata(input);
       const head = branch.headId ? getRevision(file, branch.headId) : null, params = validated(input.params), context = sourceContext(file, branch, input);
       inheritance(file, branch, params, context);
       if (!hasChanges(head, params, context)) fail('NO_CHANGES', '没有需要保存的修改');
       const parents = head ? [head.id] : []; if (context.source && !parents.includes(context.source.id)) parents.push(context.source.id);
-      const next = revision({ id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId: context.releaseId, parentIds: parents, baseRevisionId: context.baseRevisionId, sourceRevisionId: context.source?.id || null, restoreRevisionId: context.restore?.id || null, authorId: actor().id, at: stamp(), message: String(input.message || '保存配置'), params });
+      const next = revision({ ...metadata, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId: context.releaseId, parentIds: parents, baseRevisionId: context.baseRevisionId, sourceRevisionId: context.source?.id || null, restoreRevisionId: context.restore?.id || null, authorId: actor().id, at: stamp(), params });
       file.revisions.push(next); branch.headId = next.id; branch.baseRevisionId = context.baseRevisionId; branch.releaseId = context.releaseId;
-      event('configuration_saved', { fileId: file.id, branchId: branch.id, revisionId: next.id, details: { before: head?.id || null, after: next.id, message: next.message, changed: diff(head?.params || [], params).length, sourceRevisionId: next.sourceRevisionId, restoreRevisionId: next.restoreRevisionId } });
+      event('configuration_saved', { fileId: file.id, branchId: branch.id, revisionId: next.id, details: { ...metadata, before: head?.id || null, after: next.id, changed: diff(head?.params || [], params).length, sourceRevisionId: next.sourceRevisionId, restoreRevisionId: next.restoreRevisionId } });
       return next;
     }
     function protectReview(review) {
+      Object.assign(review, changeMetadata(review, review.title));
       review.proposedParams = frozen(copy(review.proposedParams));
-      for (const key of ['id', 'workspaceId', 'fileId', 'branchId', 'authorId', 'baseRevisionId', 'sourceRevisionId', 'restoreRevisionId', 'proposedParams', 'at']) Object.defineProperty(review, key, { value: review[key], enumerable: true, writable: false, configurable: false });
+      review.links = frozen(review.links);
+      for (const key of ['id', 'workspaceId', 'fileId', 'branchId', 'title', 'description', 'systemDescription', 'reason', 'message', 'links', 'authorId', 'baseRevisionId', 'sourceRevisionId', 'restoreRevisionId', 'proposedParams', 'at']) Object.defineProperty(review, key, { value: review[key], enumerable: true, writable: false, configurable: false });
       return review;
     }
     function createReview(input) {
       actor(); const file = getFile(input.fileId), branch = getBranch(file, input.branchId);
       if (!branch.headId) fail('NOT_INITIALIZED', '请先保存初始配置，再提交修改评审');
-      if (typeof input.title !== 'string' || !input.title.trim()) fail('INVALID_TITLE', '请填写修改说明');
+      const metadata = changeMetadata(input, input.title);
+      if (own(input, 'title') && (typeof input.title !== 'string' || !input.title.trim())) fail('INVALID_TITLE', '请填写评审标题');
+      const title = own(input, 'title') ? input.title.trim() : metadata.reason;
       const head = getRevision(file, branch.headId), params = validated(input.params), context = sourceContext(file, branch, input);
       inheritance(file, branch, params, context);
       if (!hasChanges(head, params, context)) fail('NO_CHANGES', '没有需要评审的修改');
-      const r = protectReview({ id: 'CR-' + String(++reviewSequence).padStart(3, '0'), workspaceId: state.workspaceId, fileId: file.id, branchId: branch.id, title: input.title.trim(), description: String(input.description || ''), authorId: actor().id, baseRevisionId: head.id, sourceRevisionId: context.source?.id || null, restoreRevisionId: context.restore?.id || null, proposedParams: params, status: 'open', comments: [], approvals: [], at: stamp(), mergedRevisionId: null });
-      state.reviews.push(r); event('review_created', { fileId: file.id, branchId: branch.id, reviewId: r.id, details: { title: r.title, baseRevisionId: head.id } }); return r;
+      const r = protectReview({ ...metadata, id: 'CR-' + String(++reviewSequence).padStart(3, '0'), workspaceId: state.workspaceId, fileId: file.id, branchId: branch.id, title, description: String(input.description || ''), systemDescription: context.restore ? '从 ' + context.restore.label + ' 创建历史恢复提案' : '', authorId: actor().id, baseRevisionId: head.id, sourceRevisionId: context.source?.id || null, restoreRevisionId: context.restore?.id || null, proposedParams: params, status: 'open', comments: [], approvals: [], at: stamp(), mergedRevisionId: null });
+      state.reviews.push(r); event('review_created', { fileId: file.id, branchId: branch.id, reviewId: r.id, details: { ...metadata, title: r.title, baseRevisionId: head.id } }); return r;
     }
     function addComment(reviewId, input) {
       const a = actor(), r = getReview(reviewId); if (r.status === 'merged') fail('REVIEW_CLOSED', '已合并评审不能再添加评论');
@@ -227,7 +271,7 @@
       if (input.field && !fields.includes(input.field)) fail('INVALID_FIELD', '评论字段无效');
       const comment = { id: uid('comment-'), authorId: a.id, paramId: input.paramId || null, field: input.field || null, body: input.body.trim(), at: stamp(), resolved: false, resolvedBy: null, resolvedAt: null, baseRevisionId: r.baseRevisionId };
       r.comments.push(comment); if (r.status === 'approved') { r.status = 'open'; r.approvals = []; }
-      event('comment_added', { fileId: r.fileId, branchId: r.branchId, reviewId: r.id, details: { commentId: comment.id, paramId: comment.paramId } }); return comment;
+      event('comment_added', { fileId: r.fileId, branchId: r.branchId, reviewId: r.id, details: { reason: r.reason, message: r.message, links: r.links, commentId: comment.id, paramId: comment.paramId } }); return comment;
     }
     function resolveComment(reviewId, commentId) {
       const r = getReview(reviewId), a = actor(), c = r.comments.find(c => c.id === commentId); if (!c) fail('COMMENT_NOT_FOUND', '评论不存在');
@@ -235,7 +279,7 @@
       if (c.resolved) return c;
       if (r.status === 'merged') fail('REVIEW_CLOSED', '评审已经合并');
       c.resolved = true; c.resolvedBy = a.id; c.resolvedAt = stamp();
-      event('comment_resolved', { fileId: r.fileId, branchId: r.branchId, reviewId: r.id, details: { commentId: c.id } }); return c;
+      event('comment_resolved', { fileId: r.fileId, branchId: r.branchId, reviewId: r.id, details: { reason: r.reason, message: r.message, links: r.links, commentId: c.id } }); return c;
     }
     function reviewReady(r) { if (r.comments.some(c => !c.resolved)) fail('UNRESOLVED', '仍有未解决的讨论'); cas(getBranch(getFile(r.fileId), r.branchId), r.baseRevisionId); }
     function approve(reviewId) {
@@ -244,7 +288,7 @@
       reviewReady(r);
       if (!r.approvals.some(a => a.actorId === actor().id)) {
         r.approvals.push(frozen({ actorId: actor().id, at: stamp(), baseRevisionId: r.baseRevisionId }));
-        event('review_approved', { fileId: r.fileId, branchId: r.branchId, reviewId: r.id, details: { title: r.title } });
+        event('review_approved', { fileId: r.fileId, branchId: r.branchId, reviewId: r.id, details: { title: r.title, reason: r.reason, message: r.message, links: r.links } });
       }
       r.status = 'approved'; return r;
     }
@@ -255,19 +299,20 @@
       if (r.status !== 'approved' || !r.approvals.some(a => a.actorId !== r.authorId && a.baseRevisionId === r.baseRevisionId && state.actors.some(actor => actor.id === a.actorId && actor.role === 'admin'))) fail('APPROVAL_REQUIRED', '请先由另一位管理员通过评审');
       const params = validated(r.proposedParams), context = sourceContext(file, branch, r); inheritance(file, branch, params, context);
       const parents = [r.baseRevisionId]; if (context.source && !parents.includes(context.source.id)) parents.push(context.source.id);
-      const next = revision({ id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId: context.releaseId, parentIds: parents, baseRevisionId: context.baseRevisionId, sourceRevisionId: context.source?.id || null, restoreRevisionId: context.restore?.id || null, authorId: r.authorId, mergedBy: actor().id, at: stamp(), message: r.title, reviewId: r.id, params });
+      const next = revision({ reason: r.reason, message: r.message, links: r.links, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId: context.releaseId, parentIds: parents, baseRevisionId: context.baseRevisionId, sourceRevisionId: context.source?.id || null, restoreRevisionId: context.restore?.id || null, authorId: r.authorId, mergedBy: actor().id, at: stamp(), reviewId: r.id, params });
       file.revisions.push(next); branch.headId = next.id; branch.baseRevisionId = context.baseRevisionId; branch.releaseId = context.releaseId; r.status = 'merged'; r.mergedRevisionId = next.id;
-      event('review_merged', { fileId: file.id, branchId: branch.id, revisionId: next.id, reviewId: r.id, details: { title: r.title, before: r.baseRevisionId, after: next.id, sourceRevisionId: next.sourceRevisionId } }); return next;
+      event('review_merged', { fileId: file.id, branchId: branch.id, revisionId: next.id, reviewId: r.id, details: { title: r.title, reason: r.reason, message: r.message, links: r.links, before: r.baseRevisionId, after: next.id, sourceRevisionId: next.sourceRevisionId, restoreRevisionId: next.restoreRevisionId } }); return next;
     }
     function fork(fileId, input) {
       admin(); const file = getFile(fileId), source = getRevision(file, input.fromRevisionId), asset = state.assets.find(a => a.id === input.machineId);
       if (!asset) fail('ASSET_NOT_FOUND', '请先登记机台');
       if (file.branches.some(b => b.machineId === asset.id)) fail('DUPLICATE_MACHINE', '此机台已经关联该配置文件');
       if (getBranch(file, source.branchId).kind !== 'baseline') fail('INVALID_SOURCE', '请选择一个明确的版本基线作为机台起点');
-      const branch = { id: uid('machine-'), label: asset.name, kind: 'machine', releaseId: source.releaseId, headId: null, machineId: asset.id, baseRevisionId: source.id };
-      const next = revision({ id: uid('rev-'), label: 'r1', branchId: branch.id, releaseId: source.releaseId, parentIds: [source.id], baseRevisionId: source.id, sourceRevisionId: source.id, authorId: actor().id, at: stamp(), message: '从 ' + source.label + ' 初始化 ' + asset.name, params: source.params });
+      const metadata = changeMetadata(input);
+      const branch = { id: uid('machine-'), label: asset.name, kind: 'machine', releaseId: source.releaseId, headId: null, machineId: asset.id, baseRevisionId: source.id, creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
+      const next = revision({ ...metadata, id: uid('rev-'), label: 'r1', branchId: branch.id, releaseId: source.releaseId, parentIds: [source.id], baseRevisionId: source.id, sourceRevisionId: source.id, authorId: actor().id, at: stamp(), systemDescription: '从 ' + source.label + ' 初始化 ' + asset.name, params: source.params });
       branch.headId = next.id; file.branches.push(branch); file.revisions.push(next);
-      event('branch_created', { fileId, branchId: branch.id, revisionId: next.id, details: { machineId: asset.id, sourceRevisionId: source.id } }); return branch;
+      event('branch_created', { fileId, branchId: branch.id, revisionId: next.id, details: { ...metadata, machineId: asset.id, sourceRevisionId: source.id } }); return branch;
     }
     function releaseName(value) { if (typeof value !== 'string' || !value.trim() || value.length > 64) fail('INVALID_RELEASE', '请输入软件版本'); return value.trim(); }
     function initialize(input) {
@@ -275,32 +320,36 @@
       if (typeof input.name !== 'string' || !input.name.trim()) fail('INVALID_NAME', '请输入配置文件名');
       if (!['xml', 'json'].includes(input.format)) fail('INVALID_FORMAT', '原型支持 XML 或 JSON');
       if (w.files.some(file => file.name.toLowerCase() === input.name.trim().toLowerCase())) fail('FILE_EXISTS', '此文件已存在，请打开对应配置或使用新的名称');
+      const metadata = changeMetadata(input);
       const file = { id: uid('f-'), name: input.name.trim(), format: input.format, description: String(input.description || ''), initialRevisionId: null, branches: [], revisions: [] };
-      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null };
-      const initial = revision({ id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: [], baseRevisionId: null, authorId: actor().id, at: stamp(), message: '从确认的输入建立初始快照', params });
-      const baseline = revision({ id: uid('rev-'), label: 'B1', branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), message: '建立 ' + releaseId + ' 首个版本基线', params });
+      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
+      const initial = revision({ ...metadata, id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: [], baseRevisionId: null, authorId: actor().id, at: stamp(), systemDescription: '从确认的输入建立初始快照', params });
+      const baseline = revision({ ...metadata, id: uid('rev-'), label: 'B1', branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + releaseId + ' 首个版本基线', params });
       file.initialRevisionId = initial.id; branch.initialRevisionId = initial.id; branch.baseRevisionId = initial.id; branch.headId = baseline.id;
       file.branches.push(branch); file.revisions.push(initial, baseline); w.files.push(file);
-      event('file_initialized', { fileId: file.id, branchId: branch.id, revisionId: baseline.id, details: { initialRevisionId: initial.id, releaseId } }); return file;
+      event('file_initialized', { fileId: file.id, branchId: branch.id, revisionId: baseline.id, details: { ...metadata, initialRevisionId: initial.id, releaseId } }); return file;
     }
     function addRelease(fileId, input) {
       admin(); const file = getFile(fileId), releaseId = releaseName(input.releaseId);
       if (file.branches.some(b => b.kind === 'baseline' && b.releaseId === releaseId)) fail('RELEASE_EXISTS', '此软件版本已存在');
+      const metadata = changeMetadata(input);
       const source = input.sourceRevisionId ? getRevision(file, input.sourceRevisionId) : null;
       const params = own(input, 'params') && input.params !== undefined ? validated(input.params, true) : source ? copy(source.params) : null;
-      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null };
+      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)), systemDescription: '建立软件版本 ' + releaseId };
       let snapshots = [];
       if (params) {
-        const initial = revision({ id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: source ? [source.id] : [], baseRevisionId: source?.id || null, sourceRevisionId: source?.id || null, authorId: actor().id, at: stamp(), message: source ? '显式采用 ' + source.label + ' 初始化' : '从确认的输入初始化', params });
-        const baseline = revision({ id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), message: '建立 ' + releaseId + ' 首个版本基线', params });
+        const initial = revision({ ...metadata, id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: source ? [source.id] : [], baseRevisionId: source?.id || null, sourceRevisionId: source?.id || null, authorId: actor().id, at: stamp(), systemDescription: source ? '显式采用 ' + source.label + ' 初始化' : '从确认的输入初始化', params });
+        const baseline = revision({ ...metadata, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + releaseId + ' 首个版本基线', params });
         branch.headId = baseline.id; branch.baseRevisionId = initial.id; branch.initialRevisionId = initial.id; snapshots = [initial, baseline];
       }
       file.branches.push(branch); file.revisions.push(...snapshots);
-      event('release_created', { fileId, branchId: branch.id, revisionId: branch.headId, details: { releaseId, sourceRevisionId: source?.id || null, initialized: !!params } }); return branch;
+      event('release_created', { fileId, branchId: branch.id, revisionId: branch.headId, details: { ...metadata, releaseId, sourceRevisionId: source?.id || null, initialized: !!params } }); return branch;
     }
-    function revertReview(fileId, branchId, revisionId, title) {
+    function revertReview(fileId, branchId, revisionId, input) {
       const file = getFile(fileId), target = getRevision(file, revisionId);
-      return createReview({ fileId, branchId, title: title || '恢复到 ' + target.label + ' 的参数快照', description: '按所选历史快照生成完整恢复提案；保存后追加记录，保留所有旧历史。', params: target.params, sourceRevisionId: target.id, restoreRevisionId: target.id });
+      input = typeof input === 'string' ? { message: input } : input || {};
+      const metadata = changeMetadata(input, input.title);
+      return createReview({ ...metadata, fileId, branchId, title: own(input, 'title') ? input.title : metadata.reason, description: input.description || '', params: target.params, sourceRevisionId: target.id, restoreRevisionId: target.id });
     }
     function isAncestor(file, ancestorId, childId) {
       const visited = new Set(), queue = [childId];
@@ -352,7 +401,7 @@
         if (branchId && r.branchId !== branchId) return [];
         const previous = file.revisions.find(p => p.id === r.parentIds[0]);
         const change = diff(previous?.params || [], r.params).find(d => d.paramId === paramId);
-        return change ? [Object.assign(change, { revisionId: r.id, label: r.label, branchId: r.branchId, releaseId: r.releaseId, authorId: r.authorId, at: r.at, message: r.message, reviewId: r.reviewId, parentIds: copy(r.parentIds), knownParent: !r.parentIds.length || !!previous, _index: index })] : [];
+        return change ? [Object.assign(change, { revisionId: r.id, label: r.label, branchId: r.branchId, releaseId: r.releaseId, authorId: r.authorId, at: r.at, reason: r.reason, message: r.message, links: copy(r.links), reviewId: r.reviewId, parentIds: copy(r.parentIds), knownParent: !r.parentIds.length || !!previous, _index: index })] : [];
       }).sort((a, b) => b.at.localeCompare(a.at) || b._index - a._index).map(({ _index, ...row }) => row);
     }
     function blame(fileId, revisionId, paramId) {
@@ -379,11 +428,11 @@
       return fields.map(field => Object.assign({ field, value: copy(param[field]) }, trace(selected, field, new Set())));
     }
     const current = getRevision(machine, 'r-b12');
-    state.reviews.push(protectReview({ id: 'CR-024', workspaceId: 'ws-prod', fileId: 'f-machine', branchId: 'base-691', title: '调整温控设定与报警上限', description: '产线验证后将温控设定调整为 45 °C，并同步提高上限。请核对热稳定与保护阈值。', authorId: 'wang', baseRevisionId: 'r-b12', sourceRevisionId: null, restoreRevisionId: null, proposedParams: changed(current.params, { 'p-temp': { value: 45 }, 'p-temp-max': { value: 65 } }), status: 'open', comments: [{ id: 'comment-024-1', authorId: 'lin', paramId: 'p-temp', field: 'value', body: '请补充 45 °C 下的热稳定验证结果，再合并到基线。', at: '2026-11-10T02:20:00Z', resolved: false, resolvedBy: null, resolvedAt: null, baseRevisionId: 'r-b12' }], approvals: [], at: '2026-11-10T02:00:00Z', mergedRevisionId: null }));
-    state.reviews.push(protectReview({ id: 'CR-025', workspaceId: 'ws-prod', fileId: 'f-machine', branchId: 'base-691', title: '提高送料速度并优化通信等待', description: '经过节拍验证后采用此版本。', authorId: 'wang', baseRevisionId: 'r-b11', sourceRevisionId: null, restoreRevisionId: null, proposedParams: current.params, status: 'merged', comments: [], approvals: [frozen({ actorId: 'lin', at: '2026-11-08T03:40:00Z', baseRevisionId: 'r-b11' })], at: '2026-11-07T08:00:00Z', mergedRevisionId: 'r-b12' }));
-    for (const w of state.workspaces) for (const file of w.files) for (const r of file.revisions) state.events.push(frozen({ id: uid('seed-event-'), workspaceId: w.id, actorId: r.authorId, at: r.at, action: r.reviewId ? 'review_merged' : 'configuration_saved', fileId: file.id, branchId: r.branchId, revisionId: r.id, reviewId: r.reviewId, details: { message: r.message, before: r.parentIds[0] || null, after: r.id } }));
+    state.reviews.push(protectReview({ id: 'CR-024', workspaceId: 'ws-prod', fileId: 'f-machine', branchId: 'base-691', title: '调整温控设定与报警上限', description: '产线验证后将温控设定调整为 45 °C，并同步提高上限。请核对热稳定与保护阈值。', links: ['https://docs.example.invalid/demo/thermal-validation', 'https://config.example.invalid/demo/temperature-limits'], authorId: 'wang', baseRevisionId: 'r-b12', sourceRevisionId: null, restoreRevisionId: null, proposedParams: changed(current.params, { 'p-temp': { value: 45 }, 'p-temp-max': { value: 65 } }), status: 'open', comments: [{ id: 'comment-024-1', authorId: 'lin', paramId: 'p-temp', field: 'value', body: '请补充 45 °C 下的热稳定验证结果，再合并到基线。', at: '2026-11-10T02:20:00Z', resolved: false, resolvedBy: null, resolvedAt: null, baseRevisionId: 'r-b12' }], approvals: [], at: '2026-11-10T02:00:00Z', mergedRevisionId: null }));
+    state.reviews.push(protectReview({ id: 'CR-025', workspaceId: 'ws-prod', fileId: 'f-machine', branchId: 'base-691', title: '提高送料速度并优化通信等待', description: '经过节拍验证后采用此版本。', links: current.links, authorId: 'wang', baseRevisionId: 'r-b11', sourceRevisionId: null, restoreRevisionId: null, proposedParams: current.params, status: 'merged', comments: [], approvals: [frozen({ actorId: 'lin', at: '2026-11-08T03:40:00Z', baseRevisionId: 'r-b11' })], at: '2026-11-07T08:00:00Z', mergedRevisionId: 'r-b12' }));
+    for (const w of state.workspaces) for (const file of w.files) for (const r of file.revisions) state.events.push(frozen({ id: uid('seed-event-'), workspaceId: w.id, actorId: r.authorId, at: r.at, action: r.reviewId ? 'review_merged' : 'configuration_saved', fileId: file.id, branchId: r.branchId, revisionId: r.id, reviewId: r.reviewId, details: { reason: r.reason, message: r.message, links: r.links, before: r.parentIds[0] || null, after: r.id } }));
     state.events.sort((a, b) => b.at.localeCompare(a.at));
     return { state, getFile, diff, save, createReview, addComment, resolveComment, approve, merge, fork, initialize, addRelease, revertReview, planMerge, history, blame };
   }
-  return { create, diff, fields, reconstruction: '2026-11-11', compareDecimal };
+  return { create, diff, fields, reconstruction: '2026-11-11', compareDecimal, normalizeLinks, changeMetadata };
 });
