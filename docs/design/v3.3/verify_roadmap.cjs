@@ -12,6 +12,7 @@ const rev = (f, id) => f.revisions.find(r => r.id === id);
 const branch = (f, id) => f.branches.find(b => b.id === id);
 const edgeIds = list => list.map(e => JSON.stringify([e.childId, e.parentId])).sort();
 const expectedEdges = f => f.revisions.flatMap(r => [...new Set(r.parentIds)].map(id => JSON.stringify([r.id, id]))).sort();
+const unique = values => [...new Set(values)];
 const family = (g, label) => g.families.find(f => f.label === label);
 const plot = (m, options) => R.layout(file(m), Object.assign({ assets: m.state.assets }, options));
 
@@ -31,6 +32,32 @@ function assertActualProjection(graph, f) {
     assert.equal(edge.count, edge.originalEdgeIds.length);
     for (const id of edge.originalEdgeIds) assert(actual.has(id), 'projected connectors only aggregate actual parent edges');
     assert(!/NaN|undefined|Infinity/.test(edge.path));
+  }
+  assertRouteGeometry(graph);
+}
+function assertRouteGeometry(graph) {
+  const visible = new Map(graph.visibleNodes.map(n => [n.id, n])), projected = new Map(graph.projectedNodes.map(n => [n.id, n]));
+  for (const edge of graph.visibleEdges) {
+    const parent = visible.get(edge.parentNodeId), child = visible.get(edge.childNodeId);
+    if (parent) assert.deepEqual(edge.startPort, { x: parent.x + parent.width, y: parent.y + parent.height / 2 }, 'visible parent exits its right edge');
+    if (child) assert.deepEqual(edge.endPort, { x: child.x, y: child.y + child.height / 2 }, 'visible child enters its left edge');
+    if (edge.parentNodeId && edge.childNodeId) assert(projected.get(edge.parentNodeId).columnIndex < projected.get(edge.childNodeId).columnIndex, 'every complete projected dependency moves forward');
+    assert(edge.startPort.x < edge.endPort.x);
+    assert(edge.routeSegments.length > 0);
+    for (const segment of edge.routeSegments) {
+      assert(segment.to.x >= segment.from.x, 'route must not double back horizontally');
+      if (segment.control) assert(segment.control.x >= segment.from.x && segment.control.x <= segment.to.x);
+      const points = [segment.from, ...(segment.control ? [segment.control] : []), segment.to];
+      const xs = points.map(p => p.x), ys = points.map(p => p.y);
+      const box = { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+      // A quadratic stays inside its control-point convex hull. Checking this
+      // bounding box is stricter than sampling routePoints or the curve itself.
+      for (const card of graph.visibleNodes) {
+        if (card.id === edge.parentNodeId || card.id === edge.childNodeId) continue;
+        const overlaps = box.right > card.x + 0.01 && box.left < card.x + card.width - 0.01 && box.bottom > card.y + 0.01 && box.top < card.y + card.height - 0.01;
+        assert(!overlaps, 'actual line/quadratic must not cross card ' + card.id + ' on edge ' + edge.id);
+      }
+    }
   }
 }
 
@@ -55,18 +82,24 @@ test('canonical identities, topology and adopted bases remain immutable across v
   assert.equal(JSON.stringify(f), before, 'neither projection nor grouping mutates model snapshots');
 });
 
-test('families expand in place, releases drill down, and history contains only real records', () => {
+test('families expand in place, minor and patch views drill down, and history contains only real records', () => {
   const m = Model.create(), f = file(m), overview = plot(m);
   assert.equal(overview.level, 'families');
-  assert.deepEqual(overview.columns.map(c => c.label), ['69X', '6AX']);
+  assert.deepEqual(unique(overview.columns.map(c => c.label)), ['69X', '6AX']);
   assert(overview.visibleNodes.every(n => n.kind === 'family-summary'));
   assert.equal(overview.visibleNodes.flatMap(n => n.revisionIds).length, f.revisions.length);
   const id = family(overview, '69X').id;
   const expanded = plot(m, { expandedFamilies: [id] });
-  assert.deepEqual(expanded.columns.map(c => [c.kind, c.label]), [['release', '690'], ['release', '691'], ['family', '6AX']]);
+  assert.deepEqual(unique(expanded.columns.map(c => c.kind + ':' + c.label)), ['release:690', 'release:691', 'family:6AX']);
   const releases = plot(m, { level: 'releases', familyId: id });
-  assert.deepEqual(releases.columns.map(c => c.releaseId), ['690', '691']);
+  assert.deepEqual(unique(releases.columns.map(c => c.minorId)), ['minor-2026-09-690', 'minor-2026-09-691']);
   assert(releases.visibleNodes.every(n => n.kind === 'release-summary'));
+  const patches = plot(m, { level: 'patches', minorId: 'minor-2026-10-6A1' });
+  assert.deepEqual(unique(patches.columns.map(c => c.label)), ['原版', 'SPC001']);
+  assert(patches.visibleNodes.every(n => n.kind === 'patch-summary'));
+  const patchHTML = R.render({ file: f, level: 'patches', minorId: 'minor-2026-10-6A1' });
+  assert(patchHTML.includes('data-action="roadmap-open-history"'));
+  assert(!patchHTML.includes('data-roadmap-record='));
   const history = plot(m, { level: 'history', familyId: id, releaseId: '691' });
   assert(history.visibleNodes.every(n => n.kind === 'revision' && rev(f, n.id)?.releaseId === '691'));
   assert.equal(history.visibleNodes.length, f.revisions.filter(r => r.releaseId === '691').length);
@@ -98,7 +131,7 @@ test('summary connectors preserve exact edge sets and hide only internal real ed
   for (const edge of expanded.visibleEdges) assert.notEqual(edge.childNodeId, edge.parentNodeId);
 });
 
-test('restoring an older machine release creates a truthful backward version connector', () => {
+test('restoring an older machine release repeats that version later and keeps causal edges forward', () => {
   const m = Model.create(), f = file(m), target = rev(f, 'r-m11');
   const saved = m.save({ fileId: f.id, branchId: 'machine-01', expectedHeadId: 'r-m13', params: target.params, sourceRevisionId: target.id, restoreRevisionId: target.id, reason: '恢复旧软件配置以验证当前回归问题' });
   branch(f, 'machine-01').baseRevisionId = 'r-b12'; // Deliberately stale mutable metadata.
@@ -108,7 +141,9 @@ test('restoring an older machine release creates a truthful backward version con
   const back = g.visibleEdges.find(e => e.originalEdges.some(e => e.childId === saved.id && e.parentId === 'r-m13'));
   assert(back);
   const child = g.projectedNodes.find(n => n.id === back.childNodeId), parent = g.projectedNodes.find(n => n.id === back.parentNodeId);
-  assert(child.columnIndex < parent.columnIndex, 'a restore into 690 can connect left from 691');
+  assert(child.columnIndex > parent.columnIndex, 'a restore into 690 follows its 691 parent without changing either software version');
+  assert.equal(child.minorId, 'minor-2026-09-690');
+  assert(g.columns.some(c => c.minorId === child.minorId && c.index < parent.columnIndex), 'the older software label remains visible in its original position as well');
   assertActualProjection(g, f);
   const located = R.locateRevision(f, saved.id, { assets: m.state.assets });
   assert.equal(located.releaseId, '690');
@@ -292,6 +327,71 @@ test('render accepts its prepared graph and emits one shared matrix with semanti
   assert(css.includes('scroll-padding-left:176px') && css.includes('scroll-padding-top:88px'));
   assert(css.includes('.rm-axis{position:sticky;top:0') && css.includes('.rm-lane-head{position:sticky;left:0'));
   // These are static hooks, not proof of scrolling, overlap, focus or visual quality.
+});
+
+test('summary forks followed by merges split into causal cards instead of creating an aggregate cycle', () => {
+  const f = fixture(1, 2);
+  f.revisions.push({ id: 'b2', label: 'B2', branchId: 'base', releaseId: '691', parentIds: ['b1', 'm0'], reason: '采用机台已验证修改', at: '2026-11-03T00:00:00Z' });
+  f.revisions.push({ id: 'm0-next', label: 'r2', branchId: 'machine-0', releaseId: '691', parentIds: ['m0', 'b2'], baseRevisionId: 'b2', reason: '机台采用更新后的基线', at: '2026-11-04T00:00:00Z' });
+  f.revisions.push({ id: 'b3', label: 'B3', branchId: 'base', releaseId: '691', parentIds: ['b2', 'm0-next', 'm1'], reason: '核对多台机台的共同修改', at: '2026-11-05T00:00:00Z' });
+  branch(f, 'base').headId = 'b3'; branch(f, 'machine-0').headId = 'm0-next';
+  const before = JSON.stringify(f), g = R.layout(f);
+  assert(g.projectedNodes.filter(n => n.laneId === 'baseline').length >= 3);
+  assert(g.projectedNodes.filter(n => n.laneId === 'machine-0').length >= 2);
+  assert.deepEqual([...g.hiddenInternalEdgeIds, ...g.visibleEdges.flatMap(e => e.originalEdgeIds)].sort(), expectedEdges(f));
+  assert.deepEqual(g.projectedNodes.flatMap(n => n.revisionIds).sort(), f.revisions.map(r => r.id).sort());
+  assertActualProjection(g, f);
+  assert.equal(JSON.stringify(f), before, 'splitting a displayed summary cannot rewrite original records');
+});
+
+test('dense multi-parent routes and their actual quadratic corners avoid intervening cards in filtered windows', () => {
+  const f = fixture(6, 4);
+  rev(f, 'b6').parentIds.push('b1'); // A true long edge must bypass b2–b5.
+  f.revisions.push({ id: 'm0-next', label: 'r2', branchId: 'machine-0', releaseId: '691', parentIds: ['m0', 'm2'], baseRevisionId: 'b6', reason: '跨机台核对选定参数', at: '2026-11-03T00:00:00Z' });
+  f.revisions.push({ id: 'b7', label: 'B7', branchId: 'base', releaseId: '691', parentIds: ['b6', 'm0-next', 'm1', 'm3'], reason: '采纳多台机台共同验证的修改', at: '2026-11-04T00:00:00Z' });
+  f.revisions.push({ id: 'm3-next', label: 'r2', branchId: 'machine-3', releaseId: '691', parentIds: ['m3', 'b7'], baseRevisionId: 'b7', reason: '应用核对后的基线', at: '2026-11-05T00:00:00Z' });
+  branch(f, 'base').headId = 'b7'; branch(f, 'machine-0').headId = 'm0-next'; branch(f, 'machine-3').headId = 'm3-next';
+  const full = R.layout(f, { level: 'history', releaseId: '691' });
+  assert(full.visibleEdges.some(e => e.routeSegments.some(s => s.kind === 'quadratic')));
+  assertActualProjection(full, f);
+  const long = full.visibleEdges.find(e => e.originalEdges.some(e => e.childId === 'b6' && e.parentId === 'b1'));
+  assert(long.routeSegments.length > 1, 'long edges must use a gap instead of crossing intervening baseline cards');
+  for (const options of [
+    { columnLimit: 3, columnPage: 1, laneLimit: 2, lanePage: 1 },
+    { columnLimit: 3, columnPage: 2, laneLimit: 2, lanePage: 0 },
+    { query: '跨机台核对选定参数' },
+    { branchFilter: 'machine-3', columnLimit: 4, columnPage: 1 }
+  ]) assertActualProjection(R.layout(f, Object.assign({ level: 'history', releaseId: '691' }, options)), f);
+});
+
+test('explicit minor and SPC catalogs keep original/SPC001/SPC002 distinct and disambiguate repeated family names', () => {
+  const f = {
+    id: 'spc-fixture', name: 'Patch.json',
+    releaseFamilies: [{ id: 'f26', label: '69X', year: 2026, month: 9, monthKey: '2026-09', order: 1 }, { id: 'f27', label: '71X', year: 2027, month: 1, monthKey: '2027-01', order: 2 }, { id: 'f36', label: '69X', year: 2036, month: 9, monthKey: '2036-09', order: 3 }],
+    releaseMinors: [{ id: 'minor-uuid', version: '692', familyId: 'f26', order: 1 }, { id: 'minor-future', version: '710', familyId: 'f27', order: 2 }, { id: 'minor-next-decade', version: '692', familyId: 'f36', order: 3 }],
+    releases: [{ id: 'original-uuid', version: '692', label: '692', familyId: 'f26', minorId: 'minor-uuid', patchNumber: null, order: 1 }, { id: 'patch-one-uuid', version: '692SPC001', label: '692SPC001', familyId: 'f26', minorId: 'minor-uuid', patchNumber: 1, order: 2 }, { id: 'patch-two-uuid', version: '692SPC002', label: '692SPC002', familyId: 'f26', minorId: 'minor-uuid', patchNumber: 2, order: 3 }, { id: 'only-patch-uuid', version: '692SPC002', label: '692SPC002', familyId: 'f36', minorId: 'minor-next-decade', patchNumber: 2, order: 4 }],
+    branches: [{ id: 'base0', kind: 'baseline', releaseId: 'original-uuid', headId: 'save12' }, { id: 'base1', kind: 'baseline', releaseId: 'patch-one-uuid', headId: 'save13' }, { id: 'base2', kind: 'baseline', releaseId: 'patch-two-uuid', headId: 'save14' }, { id: 'base-empty', kind: 'baseline', releaseId: 'only-patch-uuid', headId: null }],
+    revisions: [{ id: 'save12', label: 'B12', branchId: 'base0', releaseId: 'original-uuid', parentIds: [], reason: '确认软件原版配置' }, { id: 'save13', label: 'B13', branchId: 'base1', releaseId: 'patch-one-uuid', parentIds: ['save12'], reason: '验证首个补丁参数' }, { id: 'save14', label: 'B14', branchId: 'base2', releaseId: 'patch-two-uuid', parentIds: ['save13'], reason: '验证第二个补丁参数' }]
+  };
+  const overview = R.layout(f);
+  assert.deepEqual(overview.families.map(x => x.displayLabel), ['69X · 2026-09', '71X', '69X · 2036-09']);
+  const patchView = R.layout(f, { level: 'patches', minorId: 'minor-uuid' });
+  assert.deepEqual(patchView.columns.map(c => c.label), ['原版', 'SPC001', 'SPC002']);
+  assert.deepEqual(patchView.patches.map(r => r.id), ['original-uuid', 'patch-one-uuid', 'patch-two-uuid']);
+  assert(patchView.visibleNodes.every(n => n.kind === 'patch-summary'));
+  assertActualProjection(patchView, f);
+  const located = R.locateRevision(f, 'save13');
+  assert.equal(located.minorId, 'minor-uuid'); assert.equal(located.releaseId, 'patch-one-uuid');
+  const html = R.render(Object.assign({ file: f }, located));
+  assert(html.includes('软件 692SPC001 · 保存记录') && html.includes('第13次保存'));
+  assert(!html.includes('SPC013') && !html.includes('软件 patch-one-uuid'));
+  const onlyPatch = R.layout(f, { level: 'patches', minorId: 'minor-next-decade' });
+  assert.equal(onlyPatch.minor.originalReleaseId, null);
+  assert.deepEqual(onlyPatch.columns.map(c => c.label), ['SPC002']);
+  assert.equal(onlyPatch.visibleNodes.length, 0);
+  const pending = R.render({ file: f, level: 'patches', minorId: 'minor-next-decade' });
+  assert(pending.includes('692SPC002 · 尚未初始化') && !pending.includes('SPC000'));
+  assert.equal(f.revisions.length, 3, 'the catalog must not synthesize an original record for a patch-only minor');
 });
 
 let failed = 0;

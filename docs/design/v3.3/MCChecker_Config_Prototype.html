@@ -18,12 +18,20 @@
 /* The roadmap is the file's main work area; keep its surrounding chrome compact. */
 .roadmap-page .heading{min-height:44px;margin-bottom:10px}.roadmap-page .file-icon{height:36px}.roadmap-page .tabs{min-height:32px;margin-bottom:10px}.roadmap-page .roadmap-panel{min-height:0}.roadmap-page .roadmap-selection{padding:8px 12px;min-height:44px}.roadmap-page .roadmap-selection-name strong{overflow-wrap:anywhere}
 @media(max-width:760px){.roadmap-page .heading{margin-bottom:8px}.roadmap-page .roadmap-selection{padding:8px 10px}.roadmap-page .roadmap-selection-name{font-size:11px}}
+/* New software versions reuse the configuration dialog and form controls. */
+.release-form .release-levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.release-form .release-level{min-width:0;border-left:1px solid var(--line);padding-left:14px}.release-form .release-level:first-child{border-left:0;padding-left:0}
+.release-form .release-level .field:last-child{margin-bottom:0}.release-form .release-generated{color:#3b6594;font:13px var(--mono);line-height:20px}
+.release-form .release-preview{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;border:1px solid #d5e3f4;border-radius:6px;background:#f1f6ff;margin-bottom:16px}
+.release-form .release-preview>span{font-size:12px;color:#586b83}.release-form .release-preview>output{font:600 18px/1.5 var(--mono);color:#285b9b;overflow-wrap:anywhere;text-align:right}
+.release-form .release-source{margin-top:18px;margin-bottom:0}.release-form>.help-note{color:#586b83;margin:7px 0 16px}.release-form #release-error{margin:0 0 12px}
+@media(max-width:600px){.release-form .release-levels{grid-template-columns:1fr;gap:14px}.release-form .release-level{padding:0;border:0;border-top:1px solid var(--line);padding-top:14px}.release-form .release-level:first-child{border-top:0;padding-top:0}.release-form .release-preview{gap:9px}.release-form .release-preview>output{font-size:16px}}
 
 /* One scrolling matrix: both header rows and row labels use its coordinates. */
 .rm-view{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;background:var(--surface,#fff);color:var(--ink,#243247)}
 .rm-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:50px;padding:9px 14px;border-bottom:1px solid var(--line,#e3e7ed);flex-shrink:0}
 .rm-spacer{flex:1;min-width:0}
-.rm-breadcrumbs{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;white-space:nowrap;color:#a1aab7}
+.rm-breadcrumbs{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap;font-size:12px;white-space:nowrap;color:#a1aab7}
 .rm-crumb{padding:4px 5px;min-height:28px;border:0;border-radius:4px;background:transparent;font-size:12px;color:#64758a;white-space:nowrap}
 button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}.rm-crumb.is-current{background:#edf4ff;color:#245db5;font-weight:600}.rm-crumb.is-unavailable{color:#9ba4b1}
 .rm-focus-label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted,#687386);white-space:nowrap}
@@ -53,7 +61,7 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
 .rm-column-heading>.rm-history-heading{font-size:11px;font-weight:550;color:#586b83}
 .rm-body{position:relative;min-height:200px}
 .rm-links{position:absolute;left:var(--rm-label-width);top:0;z-index:2;overflow:hidden;pointer-events:none}
-.rm-edge{fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.64}.rm-edge.is-continuation{stroke-dasharray:3 4;opacity:.55}
+.rm-edge{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.86}.rm-edge.is-continuation{stroke-dasharray:3 4;opacity:.65}.rm-edge-port{stroke-width:1.5}
 .rm-matrix-row{height:var(--rm-row-height);position:relative;background:#fff;box-shadow:inset 0 -1px #e7ecf3}
 .rm-matrix-row:nth-of-type(even){background:#fbfcfe}.rm-matrix-row.is-baseline{background:#f0f6ff;box-shadow:inset 0 -1px #d5e3f8}
 .rm-lane-head{position:sticky;left:0;z-index:12;height:var(--rm-row-height);display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:7px;min-width:0;padding:16px;background:#f8fafc;border-right:1px solid #dce4ee;box-shadow:inset 0 -1px #e7ecf3;color:#475c77}
@@ -63,11 +71,11 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
 .rm-lane-icon{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid #dfe7ef;border-radius:6px;background:#fff;color:var(--rm-lane-color)}
 .rm-lane-icon svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
 .rm-lane-focus{min-height:22px;padding:1px 0;border:0;background:transparent;color:#3b6594;font-size:10px;cursor:pointer}.rm-lane-focus:hover{color:#255eb7;text-decoration:underline}
-.rm-cell{position:relative;min-width:0;height:var(--rm-row-height);z-index:3}
-.rm-cell{box-shadow:inset 1px 0 #e3e9f1}.rm-cell.is-group-start{box-shadow:inset 8px 0 #dce5f1,inset 9px 0 #c4d1e2}
-.rm-cell-empty{position:absolute;left:20px;top:18px;width:252px;height:164px;border:1px dashed #ccd9e8;border-radius:7px;background:#f8fbff;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;font-size:12px;color:#586b83}
+.rm-cell{position:relative;min-width:0;height:var(--rm-row-height)}
+.rm-cell{box-shadow:inset 1px 0 #e3e9f1}.rm-cell.is-version-start{box-shadow:inset 3px 0 #e0e7f0}.rm-cell.is-group-start{box-shadow:inset 8px 0 #dce5f1,inset 9px 0 #c4d1e2}
+.rm-cell-empty{position:absolute;z-index:3;left:20px;top:18px;width:252px;height:164px;border:1px dashed #ccd9e8;border-radius:7px;background:#f8fbff;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;font-size:12px;color:#586b83}
 .rm-cell-empty a{font-size:11px;color:#3c6fb3;text-decoration:underline;text-underline-offset:3px}
-.rm-card{position:absolute;left:20px;top:18px;display:flex;flex-direction:column;width:252px;height:164px;overflow:hidden;border:1px solid #d8e2ec;border-radius:7px;background:#fff;color:#394e68;box-shadow:0 1px 2px #273a5410;text-align:left;scroll-margin:12px}
+.rm-card{position:absolute;z-index:3;left:20px;top:18px;display:flex;flex-direction:column;width:252px;height:164px;overflow:hidden;border:1px solid #d8e2ec;border-radius:7px;background:#fff;color:#394e68;box-shadow:0 1px 2px #273a5410;text-align:left;scroll-margin:12px}
 .rm-card.is-baseline{border-color:#bfd1eb}.rm-card.is-selected{border-color:#3779d6;box-shadow:0 0 0 2px #3678d523,0 2px 5px #244d8010}
 .rm-card-head{display:flex;align-items:center;gap:6px;justify-content:space-between;min-height:33px;padding:5px 9px;background:#edf6f1;border-bottom:1px solid #e0ece5;flex:0 0 33px;color:var(--rm-lane-color)}
 .rm-card.is-machine .rm-card-head{background:color-mix(in srgb,var(--rm-lane-color) 10%,white);border-bottom-color:color-mix(in srgb,var(--rm-lane-color) 16%,white)}
@@ -176,6 +184,15 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     }
     return { reason, message: reason, links: normalizeLinks(input.links) };
   }
+  function familyPeriod(year, month) {
+    const integer = value => typeof value === 'number' ? Number.isInteger(value) ? value : NaN : typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+    year = integer(year); month = integer(month);
+    if (year < 1000 || year > 9999 || !Number.isInteger(year) || month < 1 || month > 12 || !Number.isInteger(month)) fail('INVALID_FAMILY_DATE', '请选择完整年份和有效月份', { field: 'family' });
+    return { year, month, monthKey: String(year) + '-' + String(month).padStart(2, '0'), label: String(year % 10) + '123456789ABC'[month - 1] + 'X' };
+  }
+  // The short label repeats every decade. It is never an identity or a date.
+  function formatFamily(year, month) { return familyPeriod(year, month).label; }
+  function patchLabel(number) { return 'SPC' + String(number).padStart(3, '0'); }
   const numericPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
   // Compare decimal meaning without converting integer strings or fractional
   // text to binary floating point. Number() is only a finite-value guard.
@@ -274,10 +291,14 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     const m13 = changed(m12, { 'p-speed': { value: lab ? 78 : 118 } });
     const make = (id, label, branchId, releaseId, parents, baseId, params, authorId, at, message, sourceId) => revision({ id, label, branchId, releaseId, parentIds: parents, baseRevisionId: baseId, sourceRevisionId: sourceId || null, authorId, at, message, links: id === 'r-b12' && !lab ? ['https://docs.example.invalid/demo/feed-speed'] : [], reviewId: id === 'r-b12' && !lab ? 'CR-025' : null, params }, true);
     const file = { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
-      releaseFamilies: [{ id: 'family-69x', label: '69X', order: 1 }],
+      releaseFamilies: [{ id: 'family-69x', label: '69X', year: 2026, month: 9, monthKey: '2026-09', order: 1 }],
+      releaseMinors: [
+        { id: 'minor-2026-09-690', version: '690', familyId: 'family-69x', order: 1 },
+        { id: 'minor-2026-09-691', version: '691', familyId: 'family-69x', order: 2 }
+      ],
       releases: [
-        { id: '690', version: '690', familyId: 'family-69x', order: 1 },
-        { id: '691', version: '691', familyId: 'family-69x', order: 2 }
+        { id: '690', version: '690', label: '690', familyId: 'family-69x', minorId: 'minor-2026-09-690', patchNumber: null, order: 1 },
+        { id: '691', version: '691', label: '691', familyId: 'family-69x', minorId: 'minor-2026-09-691', patchNumber: null, order: 2 }
       ],
       branches: [
         { id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: 'r-b12', machineId: null, baseRevisionId: null, initialRevisionId: null },
@@ -298,10 +319,15 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     if (!lab) {
       // Explicit demonstration metadata groups releases for navigation only.
       // It does not infer parentage or replace immutable revision identities.
-      file.releaseFamilies.push({ id: 'family-6ax', label: '6AX', order: 2 });
+      file.releaseFamilies.push({ id: 'family-6ax', label: '6AX', year: 2026, month: 10, monthKey: '2026-10', order: 2 });
+      file.releaseMinors.push(
+        { id: 'minor-2026-10-6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
+        { id: 'minor-2026-10-6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+      );
       file.releases.push(
-        { id: '6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
-        { id: '6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+        { id: '6A0', version: '6A0', label: '6A0', familyId: 'family-6ax', minorId: 'minor-2026-10-6A0', patchNumber: null, order: 3 },
+        { id: '6A1', version: '6A1', label: '6A1', familyId: 'family-6ax', minorId: 'minor-2026-10-6A1', patchNumber: null, order: 4 },
+        { id: 'release-2026-10-6A1-SPC001', version: '6A1SPC001', label: '6A1SPC001', familyId: 'family-6ax', minorId: 'minor-2026-10-6A1', patchNumber: 1, order: 5 }
       );
       const links = frozen(['https://docs.example.invalid/demo/software-6a']);
       const makeDemo = (id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, sourceRevisionId) => revision({ id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, links, sourceRevisionId: sourceRevisionId || null });
@@ -316,6 +342,9 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
         { id: 'machine-roadmap-03', label: 'MC-003', kind: 'machine', releaseId: '6A1', headId: m32.id, machineId: 'asset-roadmap-03', baseRevisionId: b15.id, initialRevisionId: null, creationReason: m31.reason, links }
       );
       file.revisions.push(b13, b14, b15, m31, m32);
+      const patch = revision({ id: 'r-demo-6a1-spc001', label: 'B16', branchId: 'base-release-2026-10-6A1-SPC001', releaseId: 'release-2026-10-6A1-SPC001', parentIds: [b15.id], baseRevisionId: null, sourceRevisionId: b15.id, authorId: 'wang', at: '2026-11-11T01:00:00Z', reason: '演示：验证 6A1 补丁包的通信重试策略', links: ['https://docs.example.invalid/demo/software-6a-spc001'], params: changed(b15.params, { 'p-retries': { value: 4 } }) });
+      file.branches.push({ id: patch.branchId, label: '版本基线 · 6A1SPC001', kind: 'baseline', releaseId: patch.releaseId, headId: patch.id, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: patch.reason, links: patch.links });
+      file.revisions.push(patch);
     }
     return file;
   }
@@ -323,6 +352,9 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     const baseline = revision({ id: 'r-' + key + '-b1', label: 'B1', branchId: 'base-691', releaseId: '691', parentIds: [], baseRevisionId: null, authorId: 'wang', at: '2026-11-01T01:00:00Z', message: '建立 691 版本基线', params }, true);
     const machine = revision({ id: 'r-' + key + '-m1', label: 'r1', branchId: 'machine-01', releaseId: '691', parentIds: [baseline.id], baseRevisionId: baseline.id, sourceRevisionId: baseline.id, authorId: 'lin', at: '2026-11-03T02:30:00Z', message: 'MC-001 现场校准', params: changed(params, overrides) }, true);
     return { id: 'f-' + key, name, format: 'json', description, initialRevisionId: null,
+      releaseFamilies: [{ id: 'family-69x', label: '69X', year: 2026, month: 9, monthKey: '2026-09', order: 1 }],
+      releaseMinors: [{ id: 'minor-2026-09-691', version: '691', familyId: 'family-69x', order: 1 }],
+      releases: [{ id: '691', version: '691', label: '691', familyId: 'family-69x', minorId: 'minor-2026-09-691', patchNumber: null, order: 1 }],
       branches: [{ id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: baseline.id, machineId: null, baseRevisionId: null, initialRevisionId: null }, { id: 'machine-01', label: 'MC-001', kind: 'machine', releaseId: '691', headId: machine.id, machineId: 'asset-01', baseRevisionId: baseline.id }], revisions: [baseline, machine] };
   }
   function create() {
@@ -458,35 +490,166 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
       event('branch_created', { fileId, branchId: branch.id, revisionId: next.id, details: { ...metadata, machineId: asset.id, sourceRevisionId: source.id } }); return branch;
     }
     function releaseName(value) { if (typeof value !== 'string' || !value.trim() || value.length > 64) fail('INVALID_RELEASE', '请输入软件版本'); return value.trim(); }
+    function readVersionCatalog(file) {
+      const families = (file.releaseFamilies || []).map(copy), minors = (file.releaseMinors || []).map(copy);
+      const releases = (file.releases || []).map(copy), known = new Set(releases.map(r => r.id));
+      // Older files and legacy callers may have arbitrary version names. Keep
+      // them available without guessing a year, a family, or an SPC sequence.
+      for (const row of [...file.branches, ...file.revisions]) if (row.releaseId && !known.has(row.releaseId)) {
+        releases.push({ id: row.releaseId, version: row.releaseId, familyId: null, patchNumber: null, order: releases.length + 1, legacy: true }); known.add(row.releaseId);
+      }
+      const unknownFamilyId = 'family-unknown';
+      function familyFor(id) {
+        let family = families.find(f => f.id === id);
+        if (family) return family;
+        family = families.find(f => f.id === unknownFamilyId);
+        if (!family) { family = { id: unknownFamilyId, label: '未归类', year: null, month: null, monthKey: null, order: families.length + 1, legacy: true }; families.push(family); }
+        return family;
+      }
+      for (const minor of minors) minor.familyId = familyFor(minor.familyId).id;
+      for (const release of releases) {
+        let minor = minors.find(m => m.id === release.minorId);
+        if (!minor) {
+          const id = release.minorId || 'legacy-minor-' + encodeURIComponent(release.id);
+          minor = { id, version: release.minorVersion || release.version || release.id, familyId: familyFor(release.familyId).id, order: minors.length + 1, legacy: true };
+          minors.push(minor);
+        }
+        release.minorId = minor.id; release.familyId = minor.familyId;
+        release.patchNumber = Number.isSafeInteger(release.patchNumber) && release.patchNumber > 0 ? release.patchNumber : null;
+        release.patchLabel = release.patchNumber === null ? null : patchLabel(release.patchNumber);
+        release.kind = release.patchNumber === null ? 'original' : 'patch';
+        release.label = release.label || release.version || minor.version + (release.patchLabel || '');
+        const branch = file.branches.find(b => b.kind === 'baseline' && b.releaseId === release.id);
+        release.branchId = branch?.id || null; release.headId = branch?.headId || null;
+      }
+      for (const minor of minors) {
+        const children = releases.filter(r => r.minorId === minor.id), original = children.find(r => r.patchNumber === null);
+        minor.originalReleaseId = original?.id || null; minor.originalBranchId = original?.branchId || null;
+        minor.nextPatchNumber = Math.max(0, ...children.map(r => r.patchNumber || 0)) + 1;
+        minor.nextPatchLabel = patchLabel(minor.nextPatchNumber);
+      }
+      return { families, minors, releases };
+    }
+    function versionCatalog(fileId) { return readVersionCatalog(getFile(fileId)); }
+    function selectedFamily(catalog, target) {
+      if (target.familyId && target.family) fail('INVALID_TARGET', '请选择现有大版本，或按年月新建一种方式');
+      if (target.familyId) {
+        const family = catalog.families.find(f => f.id === target.familyId);
+        if (!family) fail('FAMILY_NOT_FOUND', '所选大版本不存在', { field: 'family' });
+        return { family, created: false };
+      }
+      if (!target.family || typeof target.family !== 'object') fail('FAMILY_REQUIRED', '请选择大版本，或按年月新建', { field: 'family' });
+      const period = familyPeriod(target.family.year, target.family.month), matches = catalog.families.filter(f => f.year === period.year && f.month === period.month);
+      if (matches.length > 1) fail('FAMILY_CONFLICT', '该年月存在重复的大版本身份，请先核对目录');
+      if (matches.length) return { family: matches[0], created: false };
+      const id = 'family-' + period.monthKey;
+      if (catalog.families.some(f => f.id === id)) fail('FAMILY_CONFLICT', '大版本身份与年月不一致，请核对目录');
+      return { family: { id, ...period, order: Math.max(0, ...catalog.families.map(f => Number(f.order) || 0)) + 1 }, created: true };
+    }
+    function minorName(value, family) {
+      if (typeof value !== 'string') fail('INVALID_MINOR_VERSION', '请输入完整的小版本号', { field: 'minorVersion' });
+      const version = value.trim().toUpperCase();
+      if (!/^[A-Z0-9][A-Z0-9._-]*$/.test(version) || version.length > 64) fail('INVALID_MINOR_VERSION', '小版本号请使用字母、数字、点、短横线或下划线', { field: 'minorVersion' });
+      if (/SPC\d+$/.test(version)) fail('INVALID_MINOR_VERSION', '请在补丁包字段创建 SPC 编号，小版本号不应包含补丁包编号', { field: 'minorVersion' });
+      if (!/^\d[1-9ABC]X$/.test(family.label)) fail('FAMILY_DATE_REQUIRED', '新建小版本前，请选择有明确年月的大版本', { field: 'family' });
+      const prefix = family.label.slice(0, -1);
+      if (!version.startsWith(prefix) || version.length <= prefix.length || version === family.label) fail('MINOR_FAMILY_MISMATCH', '小版本号应以 ' + prefix + ' 开头，例如 ' + prefix + '0；可使用多位尾号', { field: 'minorVersion' });
+      return version;
+    }
+    function suggestMinorVersion(fileId, target) {
+      const catalog = versionCatalog(fileId), { family } = selectedFamily(catalog, target || {});
+      if (!/^\d[1-9ABC]X$/.test(family.label)) return '';
+      const prefix = family.label.slice(0, -1), used = new Set(catalog.minors.filter(m => m.familyId === family.id).map(m => m.version));
+      const suffixes = [...used].filter(v => v.startsWith(prefix) && /^\d+$/.test(v.slice(prefix.length))).map(v => BigInt(v.slice(prefix.length)));
+      let number = suffixes.reduce((max, value) => value > max ? value : max, -1n) + 1n;
+      while (used.has(prefix + number)) number++;
+      return prefix + number;
+    }
+    function nextPatch(fileId, minorId) {
+      const minor = versionCatalog(fileId).minors.find(m => m.id === minorId);
+      if (!minor) fail('MINOR_NOT_FOUND', '所选小版本不存在', { field: 'minorVersion' });
+      return { number: minor.nextPatchNumber, label: minor.nextPatchLabel };
+    }
+    function planRelease(file, input) {
+      const catalog = readVersionCatalog(file), order = Math.max(0, ...catalog.releases.map(r => Number(r.order) || 0)) + 1;
+      if (!own(input, 'target')) {
+        const releaseId = releaseName(input.releaseId);
+        if (catalog.releases.some(r => r.id === releaseId || r.patchNumber === null && r.version === releaseId)) fail('RELEASE_EXISTS', '此软件版本已存在');
+        const minor = { id: 'legacy-minor-' + encodeURIComponent(releaseId), version: releaseId, familyId: null, order: catalog.minors.length + 1, legacy: true };
+        return { family: null, newFamily: false, minor, newMinor: true, release: { id: releaseId, version: releaseId, label: releaseId, familyId: null, minorId: minor.id, patchNumber: null, order, legacy: true } };
+      }
+      if (own(input, 'releaseId')) fail('INVALID_TARGET', '结构化版本与旧版本号请只提供一种');
+      const target = input.target;
+      if (!target || typeof target !== 'object' || Array.isArray(target) || !['original', 'patch'].includes(target.kind)) fail('INVALID_TARGET', '请选择原版或新建补丁包');
+      const { family, created: newFamily } = selectedFamily(catalog, target);
+      if (target.minorId && own(target, 'minorVersion')) fail('INVALID_TARGET', '请选择现有小版本，或填写新版本号');
+      let minor, newMinor = false;
+      if (target.minorId) {
+        minor = catalog.minors.find(m => m.id === target.minorId);
+        if (!minor) fail('MINOR_NOT_FOUND', '所选小版本不存在', { field: 'minorVersion' });
+        if (minor.familyId !== family.id) fail('MINOR_FAMILY_MISMATCH', '所选小版本不属于当前大版本', { field: 'minorVersion' });
+      } else {
+        const version = minorName(target.minorVersion, family);
+        minor = catalog.minors.find(m => m.familyId === family.id && m.version === version);
+        if (!minor) {
+          const id = 'minor-' + (family.monthKey || family.id) + '-' + encodeURIComponent(version);
+          minor = { id, version, familyId: family.id, order: Math.max(0, ...catalog.minors.map(m => Number(m.order) || 0)) + 1, originalReleaseId: null, nextPatchNumber: 1 };
+          newMinor = true;
+        }
+      }
+      const number = target.kind === 'patch' ? minor.nextPatchNumber : null;
+      if (number !== null && !Number.isSafeInteger(number)) fail('PATCH_LIMIT', '补丁序号超出原型支持范围');
+      if (own(input, 'expectedPatchNumber') && input.expectedPatchNumber !== undefined) {
+        if (number === null || !Number.isSafeInteger(input.expectedPatchNumber) || input.expectedPatchNumber < 1) fail('INVALID_PATCH_NUMBER', '补丁预览序号无效', { field: 'patch' });
+        if (input.expectedPatchNumber !== number) fail('PATCH_STALE', '补丁序号已变化，请核对新的补丁编号后再创建', { expectedPatchNumber: input.expectedPatchNumber, actualPatchNumber: number, field: 'patch' });
+      }
+      if (number === null && minor.originalReleaseId) fail('RELEASE_EXISTS', '此小版本的原版已存在');
+      const suffix = number === null ? '' : '-' + patchLabel(number), identity = (family.monthKey || family.id) + '-' + encodeURIComponent(minor.version);
+      const version = minor.version + (number === null ? '' : patchLabel(number));
+      const release = { id: 'release-' + identity + suffix, version, label: version, familyId: family.id, minorId: minor.id, patchNumber: number, order };
+      if (catalog.releases.some(r => r.id === release.id || r.minorId === minor.id && r.patchNumber === number)) fail('RELEASE_EXISTS', '此软件版本已存在');
+      return { family, newFamily, minor, newMinor, release };
+    }
+    function commitCatalog(file, plan, metadata) {
+      const audit = { creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
+      if (plan.newFamily) (file.releaseFamilies || (file.releaseFamilies = [])).push(frozen({ ...copy(plan.family), ...audit }));
+      if (plan.newMinor) {
+        const { originalReleaseId, originalBranchId, nextPatchNumber, nextPatchLabel, ...minor } = plan.minor;
+        (file.releaseMinors || (file.releaseMinors = [])).push(frozen({ ...copy(minor), ...audit }));
+      }
+      (file.releases || (file.releases = [])).push(frozen({ ...copy(plan.release), ...audit }));
+    }
+    function releaseDetails(plan) {
+      return { familyId: plan.family?.id || null, year: plan.family?.year || null, month: plan.family?.month || null, monthKey: plan.family?.monthKey || null, minorId: plan.minor.id, minorVersion: plan.minor.version, patchNumber: plan.release.patchNumber, patchLabel: plan.release.patchNumber === null ? null : patchLabel(plan.release.patchNumber), createdFamily: plan.newFamily, createdMinor: plan.newMinor };
+    }
     function initialize(input) {
-      admin(); const w = workspace(), releaseId = releaseName(input.releaseId), params = validated(input.params, true);
+      admin(); const w = workspace(), params = validated(input.params, true);
       if (typeof input.name !== 'string' || !input.name.trim()) fail('INVALID_NAME', '请输入配置文件名');
       if (!['xml', 'json'].includes(input.format)) fail('INVALID_FORMAT', '原型支持 XML 或 JSON');
       if (w.files.some(file => file.name.toLowerCase() === input.name.trim().toLowerCase())) fail('FILE_EXISTS', '此文件已存在，请打开对应配置或使用新的名称');
       const metadata = changeMetadata(input);
+      const plan = planRelease({ branches: [], revisions: [] }, input), releaseId = plan.release.id;
       const file = { id: uid('f-'), name: input.name.trim(), format: input.format, description: String(input.description || ''), initialRevisionId: null, branches: [], revisions: [] };
-      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
+      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + plan.release.label, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
       const initial = revision({ ...metadata, id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: [], baseRevisionId: null, authorId: actor().id, at: stamp(), systemDescription: '从确认的输入建立初始快照', params });
-      const baseline = revision({ ...metadata, id: uid('rev-'), label: 'B1', branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + releaseId + ' 首个版本基线', params });
+      const baseline = revision({ ...metadata, id: uid('rev-'), label: 'B1', branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + plan.release.label + ' 首个版本基线', params });
       file.initialRevisionId = initial.id; branch.initialRevisionId = initial.id; branch.baseRevisionId = initial.id; branch.headId = baseline.id;
-      file.branches.push(branch); file.revisions.push(initial, baseline); w.files.push(file);
-      event('file_initialized', { fileId: file.id, branchId: branch.id, revisionId: baseline.id, details: { ...metadata, initialRevisionId: initial.id, releaseId } }); return file;
+      commitCatalog(file, plan, metadata); file.branches.push(branch); file.revisions.push(initial, baseline); w.files.push(file);
+      event('file_initialized', { fileId: file.id, branchId: branch.id, revisionId: baseline.id, details: { ...metadata, ...releaseDetails(plan), initialRevisionId: initial.id, releaseId } }); return file;
     }
     function addRelease(fileId, input) {
-      admin(); const file = getFile(fileId), releaseId = releaseName(input.releaseId);
-      if (file.branches.some(b => b.kind === 'baseline' && b.releaseId === releaseId)) fail('RELEASE_EXISTS', '此软件版本已存在');
-      const metadata = changeMetadata(input);
+      admin(); const file = getFile(fileId), metadata = changeMetadata(input), plan = planRelease(file, input), releaseId = plan.release.id;
       const source = input.sourceRevisionId ? getRevision(file, input.sourceRevisionId) : null;
       const params = own(input, 'params') && input.params !== undefined ? validated(input.params, true) : source ? copy(source.params) : null;
-      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)), systemDescription: '建立软件版本 ' + releaseId };
+      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + plan.release.label, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)), systemDescription: '建立软件版本 ' + plan.release.label };
       let snapshots = [];
       if (params) {
         const initial = revision({ ...metadata, id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: source ? [source.id] : [], baseRevisionId: source?.id || null, sourceRevisionId: source?.id || null, authorId: actor().id, at: stamp(), systemDescription: source ? '显式采用 ' + source.label + ' 初始化' : '从确认的输入初始化', params });
-        const baseline = revision({ ...metadata, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + releaseId + ' 首个版本基线', params });
+        const baseline = revision({ ...metadata, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + plan.release.label + ' 首个版本基线', params });
         branch.headId = baseline.id; branch.baseRevisionId = initial.id; branch.initialRevisionId = initial.id; snapshots = [initial, baseline];
       }
-      file.branches.push(branch); file.revisions.push(...snapshots);
-      event('release_created', { fileId, branchId: branch.id, revisionId: branch.headId, details: { ...metadata, releaseId, sourceRevisionId: source?.id || null, initialized: !!params } }); return branch;
+      commitCatalog(file, plan, metadata); file.branches.push(branch); file.revisions.push(...snapshots);
+      event('release_created', { fileId, branchId: branch.id, revisionId: branch.headId, details: { ...metadata, ...releaseDetails(plan), releaseId, sourceRevisionId: source?.id || null, initialized: !!params } }); return branch;
     }
     function revertReview(fileId, branchId, revisionId, input) {
       const file = getFile(fileId), target = getRevision(file, revisionId);
@@ -575,9 +738,9 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     state.reviews.push(protectReview({ id: 'CR-025', workspaceId: 'ws-prod', fileId: 'f-machine', branchId: 'base-691', title: '提高送料速度并优化通信等待', description: '经过节拍验证后采用此版本。', links: current.links, authorId: 'wang', baseRevisionId: 'r-b11', sourceRevisionId: null, restoreRevisionId: null, proposedParams: current.params, status: 'merged', comments: [], approvals: [frozen({ actorId: 'lin', at: '2026-11-08T03:40:00Z', baseRevisionId: 'r-b11' })], at: '2026-11-07T08:00:00Z', mergedRevisionId: 'r-b12' }));
     for (const w of state.workspaces) for (const file of w.files) for (const r of file.revisions) state.events.push(frozen({ id: uid('seed-event-'), workspaceId: w.id, actorId: r.authorId, at: r.at, action: r.reviewId ? 'review_merged' : 'configuration_saved', fileId: file.id, branchId: r.branchId, revisionId: r.id, reviewId: r.reviewId, details: { reason: r.reason, message: r.message, links: r.links, before: r.parentIds[0] || null, after: r.id } }));
     state.events.sort((a, b) => b.at.localeCompare(a.at));
-    return { state, getFile, diff, save, createReview, addComment, resolveComment, approve, merge, fork, initialize, addRelease, revertReview, planMerge, history, blame };
+    return { state, getFile, diff, save, createReview, addComment, resolveComment, approve, merge, fork, initialize, addRelease, versionCatalog, suggestMinorVersion, nextPatch, revertReview, planMerge, history, blame };
   }
-  return { create, diff, fields, reconstruction: '2026-11-11', compareDecimal, normalizeLinks, changeMetadata };
+  return { create, diff, fields, reconstruction: '2026-11-11', compareDecimal, normalizeLinks, changeMetadata, formatFamily };
 });
 </script>
 <script id="prototype-sources">/* MCChecker v3.3 interaction prototype only. In-memory .invalid fixtures.
@@ -1042,40 +1205,71 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     return [];
   }
   function versionMetadata(file) {
-    const familyMap = new Map(), releaseMap = new Map(), familyMembership = new Map();
+    const familyMap = new Map(), minorMap = new Map(), releaseMap = new Map(), familyMembership = new Map();
     inputEntries(file.releaseFamilies).forEach((entry, i) => {
       const id = String(entry.id || entry.familyId || entry.label || '');
       if (!id) return;
-      familyMap.set(id, { id, label: String(entry.label || entry.name || id), order: integer(entry.order, i), releaseIds: [] });
+      familyMap.set(id, { id, label: String(entry.label || entry.name || id), monthKey: entry.monthKey || (Number.isInteger(entry.year) && Number.isInteger(entry.month) && entry.month >= 1 && entry.month <= 12 ? String(entry.year) + '-' + String(entry.month).padStart(2, '0') : null), year: entry.year ?? null, month: entry.month ?? null, order: integer(entry.order, i), releaseIds: [], minorIds: [] });
       const members = entry.releaseIds || entry.releases || [];
       (Array.isArray(members) ? members : Object.keys(members)).forEach(r => familyMembership.set(releaseKey(typeof r === 'object' ? r.id || r.version : r), id));
     });
     function fallbackFamily(id) {
       const known = /^69[0-9a-z]$/i.test(id) ? '69X' : /^6a[0-9a-z]$/i.test(id) ? '6AX' : null;
       if (!known) return UNKNOWN_FAMILY;
-      return [...familyMap.values()].find(f => f.id.toUpperCase() === known || f.label.toUpperCase() === known)?.id || known;
+      const matching = [...familyMap.values()].filter(f => f.id.toUpperCase() === known || f.label.toUpperCase() === known);
+      // A short name cannot identify a decade. Ambiguous legacy versions stay unknown.
+      return matching.length === 1 ? matching[0].id : matching.length ? UNKNOWN_FAMILY : known;
     }
+    function ensureFamily(id) {
+      id = String(id || UNKNOWN_FAMILY);
+      if (!familyMap.has(id)) familyMap.set(id, { id, label: id === UNKNOWN_FAMILY ? '未分组' : id, monthKey: null, year: null, month: null, order: Number.MAX_SAFE_INTEGER, releaseIds: [], minorIds: [] });
+      return id;
+    }
+    function ensureMinor(id, entry) {
+      id = releaseKey(id); entry = entry || {};
+      const previous = minorMap.get(id), version = String(entry.version || entry.label || previous?.version || id);
+      const familyId = ensureFamily(entry.familyId || previous?.familyId || fallbackFamily(version));
+      const result = { id, version, label: String(entry.label || entry.version || previous?.label || id), familyId, order: integer(entry.order, previous?.order ?? Number.MAX_SAFE_INTEGER), releases: [], releaseIds: [], originalReleaseId: null };
+      minorMap.set(id, result); return result;
+    }
+    inputEntries(file.releaseMinors).forEach(entry => ensureMinor(entry.id || entry.minorId || entry.version, entry));
     function ensureRelease(id, entry) {
       id = releaseKey(id); entry = entry || {};
       const previous = releaseMap.get(id);
-      const familyId = String(entry.familyId || familyMembership.get(id) || previous?.familyId || fallbackFamily(id));
-      if (!familyMap.has(familyId)) familyMap.set(familyId, { id: familyId, label: familyId === UNKNOWN_FAMILY ? '未分组' : familyId, order: Number.MAX_SAFE_INTEGER, releaseIds: [] });
-      const r = { id, label: String(entry.label || entry.version || previous?.label || (id === UNKNOWN_RELEASE ? '版本未记录' : id)), familyId, order: integer(entry.order, previous?.order ?? Number.MAX_SAFE_INTEGER) };
-      releaseMap.set(id, r); return r;
+      const minorId = String(entry.minorId || previous?.minorId || id);
+      let minor = minorMap.get(minorId);
+      const familyId = ensureFamily(entry.familyId || familyMembership.get(id) || minor?.familyId || previous?.familyId || fallbackFamily(String(entry.version || id)));
+      if (!minor) minor = ensureMinor(minorId, { version: entry.minorVersion || entry.version || (id === UNKNOWN_RELEASE ? '版本未记录' : id), familyId, order: entry.order });
+      const patch = entry.patchNumber === undefined ? previous?.patchNumber : entry.patchNumber;
+      const patchNumber = Number.isSafeInteger(Number(patch)) && Number(patch) > 0 ? Number(patch) : null;
+      const result = { id, version: String(entry.version || previous?.version || (id === UNKNOWN_RELEASE ? '版本未记录' : id)), label: String(entry.label || entry.version || previous?.label || (id === UNKNOWN_RELEASE ? '版本未记录' : id)), familyId, minorId, patchNumber, patchLabel: patchNumber === null ? '原版' : 'SPC' + String(patchNumber).padStart(3, '0'), order: integer(entry.order, previous?.order ?? Number.MAX_SAFE_INTEGER) };
+      releaseMap.set(id, result); return result;
     }
     inputEntries(file.releases).forEach(entry => ensureRelease(entry.id || entry.releaseId || entry.version, entry));
     familyMembership.forEach((familyId, id) => { if (!releaseMap.has(id)) ensureRelease(id, { familyId }); });
     file.branches.forEach(b => { if (!releaseMap.has(releaseKey(b.releaseId))) ensureRelease(b.releaseId); });
     file.revisions.forEach(r => { if (!releaseMap.has(releaseKey(r.releaseId))) ensureRelease(r.releaseId); });
     const compare = (a, b) => a.order - b.order || a.id.localeCompare(b.id, 'en', { numeric: true, sensitivity: 'base' });
-    const families = [...familyMap.values()].sort(compare);
-    const releases = [];
-    families.forEach((family, familyIndex) => {
-      const members = [...releaseMap.values()].filter(r => r.familyId === family.id).sort(compare);
-      family.index = familyIndex; family.releaseIds = members.map(r => r.id); family.releases = members;
-      members.forEach(r => { r.index = releases.length; releases.push(r); });
+    const families = [...familyMap.values()].sort(compare), minors = [], releases = [];
+    const minorsByFamily = new Map(), releasesByMinor = new Map();
+    minorMap.forEach(m => { const list = minorsByFamily.get(m.familyId) || []; list.push(m); minorsByFamily.set(m.familyId, list); });
+    releaseMap.forEach(r => { const list = releasesByMinor.get(r.minorId) || []; list.push(r); releasesByMinor.set(r.minorId, list); });
+    families.forEach((family, index) => {
+      family.index = index; family.minors = (minorsByFamily.get(family.id) || []).sort(compare);
+      family.minorIds = family.minors.map(m => m.id); family.releases = [];
+      family.minors.forEach(minor => {
+        minor.index = minors.length; minors.push(minor);
+        minor.releases = (releasesByMinor.get(minor.id) || []).sort((a, b) => (a.patchNumber || 0) - (b.patchNumber || 0) || compare(a, b));
+        minor.releaseIds = minor.releases.map(r => r.id);
+        minor.originalReleaseId = minor.releases.find(r => r.patchNumber === null)?.id || null;
+        minor.releases.forEach(r => { r.index = releases.length; releases.push(r); family.releases.push(r); });
+      });
+      family.releaseIds = family.releases.map(r => r.id);
     });
-    return { families, releases, familyMap: new Map(families.map(f => [f.id, f])), releaseMap };
+    const labels = new Map();
+    families.forEach(f => labels.set(f.label, (labels.get(f.label) || 0) + 1));
+    families.forEach(f => { f.displayLabel = labels.get(f.label) > 1 && f.monthKey ? f.label + ' · ' + f.monthKey : f.label; });
+    return { families, minors, releases, familyMap, minorMap, releaseMap };
   }
   function relatedIds(focus, branches, byId, revisions) {
     if (!focus || focus === 'all') return new Set(revisions.map(r => r.id));
@@ -1123,7 +1317,7 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     const focus = String(options.branchFilter || 'all'), related = relatedIds(focus, branches, byId, sorted);
     const nodes = sorted.map((r, row) => {
       const lane = laneByBranch.get(r.branchId), b = branches.get(r.branchId), release = metadata.releaseMap.get(releaseKey(r.releaseId));
-      return { id: r.id, revision: r, branchId: r.branchId, branchLabel: branchName(b), kind: r.kind === 'initial' ? 'initial' : b?.kind || 'unknown', objectKind: b?.kind || 'unknown', laneId: lane.id, laneIndex: lane.index, color: lane.color, row, parentIds: unique(r.parentIds), releaseId: release.id, familyId: release.familyId, isHead: heads.has(r.id), heads: (heads.get(r.id) || []).map(b => ({ id: b.id, label: branchName(b), releaseId: b.releaseId, kind: b.kind })), adoptedBy: adopted.get(r.id) || [], focused: related.has(r.id), selected: options.selectedRevisionId === r.id, title: formatRevision(file, r, { releaseLabel: release.label, objectLabel: branchName(b) }), historyStep: 1 };
+      return { id: r.id, revision: r, branchId: r.branchId, branchLabel: branchName(b), kind: r.kind === 'initial' ? 'initial' : b?.kind || 'unknown', objectKind: b?.kind || 'unknown', laneId: lane.id, laneIndex: lane.index, color: lane.color, row, parentIds: unique(r.parentIds), releaseId: release.id, familyId: release.familyId, minorId: release.minorId, patchNumber: release.patchNumber, isHead: heads.has(r.id), heads: (heads.get(r.id) || []).map(b => ({ id: b.id, label: branchName(b), releaseId: b.releaseId, kind: b.kind })), adoptedBy: adopted.get(r.id) || [], focused: related.has(r.id), selected: options.selectedRevisionId === r.id, title: formatRevision(file, r, { releaseLabel: release.label, objectLabel: branchName(b) }), historyStep: 1 };
     });
     const nodeById = new Map(nodes.map(n => [n.id, n])), lastInLane = new Map();
     // Within a release, parent constraints and lane occupancy define steps.
@@ -1141,150 +1335,199 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     return { nodes, edges, lanes, nodeById, branches, byId, metadata, focus };
   }
   function contextFor(data, options) {
-    const level = ['families', 'releases', 'history'].includes(options.level) ? options.level : 'families';
-    let family = null, release = null;
+    const level = ['families', 'releases', 'patches', 'history'].includes(options.level) ? options.level : 'families';
+    const meta = data.metadata;
+    let family = null, minor = null, release = null;
     if (level === 'releases') {
-      family = options.familyId ? data.metadata.familyMap.get(String(options.familyId)) : data.metadata.families[0] || null;
+      family = options.familyId ? meta.familyMap.get(String(options.familyId)) : meta.families[0] || null;
       if (options.familyId && !family) error('INVALID_FAMILY', '此大版本不存在，请返回大版本选择');
     }
-    if (level === 'history') {
-      release = options.releaseId ? data.metadata.releaseMap.get(String(options.releaseId)) : null;
-      if (options.releaseId && !release) error('INVALID_RELEASE', '此小版本不存在，请返回大版本选择');
-      if (!release) {
-        family = options.familyId ? data.metadata.familyMap.get(String(options.familyId)) : data.metadata.families[0] || null;
-        release = family?.releases[0] || null;
+    if (level === 'patches') {
+      const id = options.minorId || options.releaseId;
+      minor = id ? meta.minorMap.get(String(id)) || meta.minorMap.get(meta.releaseMap.get(String(id))?.minorId) : null;
+      if (id && !minor) error('INVALID_MINOR', '此小版本不存在，请返回小版本选择');
+      if (!minor) {
+        family = options.familyId ? meta.familyMap.get(String(options.familyId)) : meta.families[0] || null;
+        minor = family?.minors[0] || null;
       }
-      family = release ? data.metadata.familyMap.get(release.familyId) : family;
+      family = minor ? meta.familyMap.get(minor.familyId) : family;
     }
-    return { level, familyId: family?.id || null, releaseId: release?.id || null, family, release };
-  }
-  function connector(parent, child) {
-    const py = parent.y + CARD_HEIGHT / 2, cy = child.y + CARD_HEIGHT / 2;
-    if (parent.columnIndex === child.columnIndex) {
-      const x = parent.x + CARD_WIDTH, outer = x + 15;
-      return 'M ' + x + ' ' + py + ' C ' + outer + ' ' + py + ', ' + outer + ' ' + cy + ', ' + (child.x + CARD_WIDTH) + ' ' + cy;
+    if (level === 'history') {
+      release = options.releaseId ? meta.releaseMap.get(String(options.releaseId)) : null;
+      if (options.releaseId && !release) error('INVALID_RELEASE', '此软件版本不存在，请返回补丁包选择');
+      if (!release) {
+        minor = options.minorId ? meta.minorMap.get(String(options.minorId)) : null;
+        family = options.familyId ? meta.familyMap.get(String(options.familyId)) : meta.families[0] || null;
+        minor = minor || family?.minors[0] || null;
+        release = minor?.releases.find(r => r.patchNumber === null) || minor?.releases[0] || null;
+      }
+      minor = release ? meta.minorMap.get(release.minorId) : minor;
+      family = minor ? meta.familyMap.get(minor.familyId) : family;
     }
-    const forward = child.columnIndex > parent.columnIndex;
-    const px = parent.x + (forward ? CARD_WIDTH : 0), cx = child.x + (forward ? 0 : CARD_WIDTH), middle = (px + cx) / 2;
-    return 'M ' + px + ' ' + py + ' C ' + middle + ' ' + py + ', ' + middle + ' ' + cy + ', ' + cx + ' ' + cy;
+    return { level, familyId: family?.id || null, minorId: minor?.id || null, releaseId: release?.id || null, family, minor, release };
   }
-  function boundaryPath(node, direction, incoming) {
-    const y = node.y + CARD_HEIGHT / 2, edge = node.x + (direction === 'right' ? CARD_WIDTH : 0), outside = edge + (direction === 'right' ? 17 : -17);
-    return incoming ? 'M ' + outside + ' ' + y + ' L ' + edge + ' ' + y : 'M ' + edge + ' ' + y + ' L ' + outside + ' ' + y;
+  function roundedRoute(input) {
+    const points = [];
+    input.forEach(point => {
+      const last = points[points.length - 1];
+      if (!last || last.x !== point.x || last.y !== point.y) points.push(point);
+      while (points.length > 2) {
+        const a = points[points.length - 3], b = points[points.length - 2], c = points[points.length - 1];
+        if (a.x === b.x && b.x === c.x || a.y === b.y && b.y === c.y) points.splice(points.length - 2, 1);
+        else break;
+      }
+    });
+    let path = 'M ' + points[0].x + ' ' + points[0].y;
+    const segments = [];
+    let current = points[0];
+    for (let i = 1; i < points.length - 1; i++) {
+      const a = points[i - 1], b = points[i], c = points[i + 1], d1 = Math.abs(b.x - a.x) + Math.abs(b.y - a.y), d2 = Math.abs(c.x - b.x) + Math.abs(c.y - b.y), radius = Math.min(6, d1 / 2, d2 / 2);
+      const before = { x: b.x - Math.sign(b.x - a.x) * radius, y: b.y - Math.sign(b.y - a.y) * radius };
+      const after = { x: b.x + Math.sign(c.x - b.x) * radius, y: b.y + Math.sign(c.y - b.y) * radius };
+      path += ' L ' + before.x + ' ' + before.y + ' Q ' + b.x + ' ' + b.y + ' ' + after.x + ' ' + after.y;
+      segments.push({ kind: 'line', from: current, to: before }, { kind: 'quadratic', from: before, control: b, to: after }); current = after;
+    }
+    const end = points[points.length - 1];
+    path += ' L ' + end.x + ' ' + end.y;
+    segments.push({ kind: 'line', from: current, to: end });
+    return { path, routePoints: points, routeSegments: segments, startPort: points[0], endPort: end };
+  }
+  function connector(parent, child, occupied) {
+    const px = parent.x + CARD_WIDTH, py = parent.y + CARD_HEIGHT / 2, cx = child.x, cy = child.y + CARD_HEIGHT / 2;
+    if (!(px < cx)) error('INVALID_PROJECTION', '保存关系不能压缩到同一横向位置，请核对汇总');
+    const start = { x: px, y: py }, end = { x: cx, y: cy };
+    if (py === cy && !occupied.some(card => card.id !== parent.id && card.id !== child.id && card.y < py && card.y + CARD_HEIGHT > py && card.x < cx && card.x + CARD_WIDTH > px)) return roundedRoute([start, end]);
+    const exitX = px + (COLUMN_WIDTH - CARD_WIDTH) / 2, entryX = cx - (COLUMN_WIDTH - CARD_WIDTH) / 2;
+    if (exitX === entryX) return roundedRoute([start, { x: exitX, y: py }, { x: entryX, y: cy }, end]);
+    const channelY = child.visibleRow >= parent.visibleRow ? (parent.visibleRow + 1) * ROW_HEIGHT - 8 : parent.visibleRow * ROW_HEIGHT + 8;
+    return roundedRoute([start, { x: exitX, y: py }, { x: exitX, y: channelY }, { x: entryX, y: channelY }, { x: entryX, y: cy }, end]);
+  }
+  function boundaryPath(node, incoming) {
+    const y = node.y + CARD_HEIGHT / 2, x = node.x + (incoming ? 0 : CARD_WIDTH);
+    return roundedRoute(incoming ? [{ x: x - 16, y }, { x, y }] : [{ x, y }, { x: x + 16, y }]);
+  }
+  // Split a summary before adding any dependency from its own/right-hand column.
+  // This preserves a DAG when early forks and later merges share the same label.
+  function projectRecords(contextNodes, context, metadata, expandedFamilies, laneMap) {
+    const columns = [], groups = [], representatives = new Map(), lastInLane = new Map(), columnsByCategory = new Map(), expanded = new Set(expandedFamilies);
+    const familyCategory = f => ({ categoryId: 'family:' + f.id, kind: 'family', familyId: f.id, minorId: null, releaseId: null, label: f.displayLabel, familyLabel: f.displayLabel });
+    const minorCategory = m => ({ categoryId: 'minor:' + m.id, kind: 'release', familyId: m.familyId, minorId: m.id, releaseId: null, label: m.label, familyLabel: metadata.familyMap.get(m.familyId).displayLabel });
+    const releaseCategory = (r, history) => ({ categoryId: (history ? 'history:' : 'patch:') + r.id, kind: history ? 'history' : 'patch', familyId: r.familyId, minorId: r.minorId, releaseId: r.id, patchNumber: r.patchNumber, label: history ? '保存记录' : r.patchLabel, familyLabel: metadata.familyMap.get(r.familyId).displayLabel, softwareLabel: r.label });
+    function category(node) {
+      if (context.level === 'history') return releaseCategory(metadata.releaseMap.get(node.releaseId), true);
+      if (context.level === 'patches') return releaseCategory(metadata.releaseMap.get(node.releaseId), false);
+      if (context.level === 'releases' || expanded.has(node.familyId)) return minorCategory(metadata.minorMap.get(node.minorId));
+      return familyCategory(metadata.familyMap.get(node.familyId));
+    }
+    function allocate(descriptor, laneId, floor) {
+      const candidates = columnsByCategory.get(descriptor.categoryId) || [];
+      let lo = 0, hi = candidates.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (candidates[mid].index < floor) lo = mid + 1; else hi = mid; }
+      let column = null;
+      for (let i = lo; i < candidates.length; i++) if (!candidates[i].occupied.has(laneId)) { column = candidates[i]; break; }
+      if (!column) {
+        column = Object.assign({}, descriptor, { id: descriptor.categoryId + ':position:' + candidates.length, index: columns.length, occupied: new Set(), width: COLUMN_WIDTH });
+        columns.push(column); candidates.push(column); columnsByCategory.set(descriptor.categoryId, candidates);
+      }
+      if (laneId) column.occupied.add(laneId);
+      return column;
+    }
+    contextNodes.slice().reverse().forEach(node => {
+      const descriptor = category(node), previous = lastInLane.get(node.laneId), parents = node.parentIds.map(id => representatives.get(id)).filter(Boolean);
+      let group = descriptor.kind !== 'history' && previous?.categoryId === descriptor.categoryId ? previous : null;
+      if (group && (parents.some(parent => parent !== group && parent.columnIndex >= group.columnIndex) || node.parentIds.some(id => !representatives.has(id)))) group = null;
+      if (!group) {
+        const floor = Math.max(previous ? previous.columnIndex + 1 : 0, ...parents.map(p => p.columnIndex + 1), 0), column = allocate(descriptor, node.laneId, floor), lane = laneMap.get(node.laneId);
+        group = { id: descriptor.kind === 'history' ? node.id : JSON.stringify(['summary', descriptor.categoryId, node.laneId, node.id]), kind: descriptor.kind === 'history' ? 'revision' : descriptor.kind === 'family' ? 'family-summary' : descriptor.kind === 'release' ? 'release-summary' : 'patch-summary', categoryId: descriptor.categoryId, columnId: column.id, columnIndex: column.index, laneId: node.laneId, laneIndex: lane.index, objectKind: lane.kind, color: lane.color, familyId: descriptor.familyId, minorId: descriptor.minorId, releaseId: descriptor.releaseId, patchNumber: descriptor.patchNumber, title: descriptor.label, members: [] };
+        groups.push(group); lastInLane.set(node.laneId, group);
+      }
+      group.members.push(node); representatives.set(node.id, group);
+    });
+    const required = context.level === 'families' ? metadata.families.flatMap(f => expanded.has(f.id) && f.minors.length ? f.minors.map(minorCategory) : [familyCategory(f)]) : context.level === 'releases' ? (context.family?.minors || []).map(minorCategory) : context.level === 'patches' ? (context.minor?.releases || []).map(r => releaseCategory(r, false)) : context.release ? [releaseCategory(context.release, true)] : [];
+    required.forEach(descriptor => { if (!columnsByCategory.has(descriptor.categoryId)) allocate(descriptor, null, 0); });
+    return { groups, columns: columns.map(({ occupied, ...column }) => column) };
   }
   function layout(file, options) {
     options = options || {};
     const data = canonical(file, options), context = contextFor(data, options);
     const { nodes, edges, lanes, nodeById, metadata, focus } = data;
     const scoped = focus === 'all' ? nodes : nodes.filter(n => n.focused), scopeIds = new Set(scoped.map(n => n.id));
-    const query = String(options.query || '').trim().toLocaleLowerCase();
-    const laneMap = new Map(lanes.map(l => [l.id, l]));
-    const matches = node => !query || [node.title, node.branchLabel, laneMap.get(node.laneId)?.model, metadata.familyMap.get(node.familyId)?.label, metadata.releaseMap.get(node.releaseId)?.label, reason(node.revision, options), actorLabel(node.revision, options)].filter(Boolean).join(' ').toLocaleLowerCase().includes(query);
-    const searched = scoped.filter(matches);
-    const inContext = n => context.level === 'families' || context.level === 'releases' && n.familyId === context.familyId || context.level === 'history' && n.releaseId === context.releaseId;
-    const matching = searched.filter(inContext), matchingIds = matching.map(n => n.id), matchingSet = new Set(matchingIds);
+    const query = String(options.query || '').trim().toLocaleLowerCase(), laneMap = new Map(lanes.map(l => [l.id, l]));
+    const matches = node => !query || [node.title, node.branchLabel, laneMap.get(node.laneId)?.model, metadata.familyMap.get(node.familyId)?.displayLabel, metadata.minorMap.get(node.minorId)?.label, metadata.releaseMap.get(node.releaseId)?.label, reason(node.revision, options), actorLabel(node.revision, options)].filter(Boolean).join(' ').toLocaleLowerCase().includes(query);
+    const inContext = n => context.level === 'families' || context.level === 'releases' && n.familyId === context.familyId || context.level === 'patches' && n.minorId === context.minorId || context.level === 'history' && n.releaseId === context.releaseId;
+    const contextNodes = scoped.filter(inContext), searched = scoped.filter(matches), matching = contextNodes.filter(matches), matchingIds = matching.map(n => n.id), matchingSet = new Set(matchingIds);
     const expandedFamilies = unique(Array.isArray(options.expandedFamilies) ? options.expandedFamilies.map(String) : []);
-    let columns = [];
-    function familyColumn(f) { return { id: 'family:' + f.id, kind: 'family', familyId: f.id, releaseId: null, label: f.label, familyLabel: f.label }; }
-    function releaseColumn(r) { return { id: 'release:' + r.id, kind: 'release', familyId: r.familyId, releaseId: r.id, label: r.label, familyLabel: metadata.familyMap.get(r.familyId).label }; }
-    if (context.level === 'families') {
-      metadata.families.forEach(family => {
-        if (expandedFamilies.includes(family.id) && family.releases.length) columns.push(...family.releases.map(releaseColumn));
-        else columns.push(familyColumn(family));
-      });
-    } else if (context.level === 'releases') columns = (context.family?.releases || []).map(releaseColumn);
-    else if (context.release) {
-      const steps = unique(scoped.filter(n => n.releaseId === context.releaseId).map(n => n.historyStep)).sort((a, b) => a - b);
-      columns = (steps.length ? steps : [null]).map(step => ({ id: 'history:' + context.releaseId + ':' + (step || 'empty'), kind: 'history', familyId: context.familyId, releaseId: context.releaseId, familyLabel: context.family.label, label: '保存记录', step }));
-    }
-    const membersByColumn = new Map(), columnIds = new Set(columns.map(c => c.id)), expandedSet = new Set(expandedFamilies);
-    matching.forEach(node => {
-      const id = context.level === 'history' ? 'history:' + node.releaseId + ':' + node.historyStep : context.level === 'releases' || expandedSet.has(node.familyId) ? 'release:' + node.releaseId : 'family:' + node.familyId;
-      if (!columnIds.has(id)) return;
-      const members = membersByColumn.get(id) || []; members.push(node); membersByColumn.set(id, members);
+    const projection = projectRecords(contextNodes, context, metadata, expandedFamilies, laneMap);
+    const selectedGroups = projection.groups.map(group => Object.assign({}, group, { members: group.members.filter(n => matchingSet.has(n.id)) })).filter(group => group.members.length);
+    const occupiedColumns = new Set(selectedGroups.map(group => group.columnId));
+    const columns = projection.columns.filter(column => !query || occupiedColumns.has(column.id)).map((column, index) => Object.assign({}, column, { index, x: index * COLUMN_WIDTH, step: column.kind === 'history' && occupiedColumns.has(column.id) ? index + 1 : null }));
+    const columnMap = new Map(columns.map(c => [c.id, c])), representatives = new Map();
+    const projectedNodes = selectedGroups.map(group => {
+      const members = group.members, column = columnMap.get(group.columnId);
+      let projected;
+      if (group.kind === 'revision') {
+        const node = members[0];
+        projected = Object.assign({}, node, { kind: 'revision', recordKind: node.kind, revisionIds: [node.id], categoryId: group.categoryId, columnId: column.id, columnIndex: column.index });
+      } else {
+        const newest = members[members.length - 1];
+        projected = { id: group.id, kind: group.kind, objectKind: group.objectKind, laneId: group.laneId, laneIndex: group.laneIndex, color: group.color, familyId: group.familyId, minorId: group.minorId, releaseId: group.releaseId, patchNumber: group.patchNumber, categoryId: group.categoryId, columnId: column.id, columnIndex: column.index, revisionIds: members.map(n => n.id).reverse(), releaseIds: unique(members.map(n => n.releaseId)).sort((a, b) => metadata.releaseMap.get(a).index - metadata.releaseMap.get(b).index), minorIds: unique(members.map(n => n.minorId)), newestRevisionId: newest.id, headRevisionIds: members.filter(n => n.isHead).map(n => n.id), title: group.title, selected: false, hiddenInternalEdgeIds: [] };
+      }
+      members.forEach(node => representatives.set(node.id, projected));
+      return projected;
     });
-    if (query) columns = columns.filter(column => membersByColumn.has(column.id));
-    columns = columns.map((c, index) => Object.assign({}, c, { index, x: index * COLUMN_WIDTH, width: COLUMN_WIDTH }));
     const scopedLaneIds = new Set((query ? searched : scoped).map(n => n.laneId));
     const projectedLanes = lanes.filter(l => l.id === 'baseline' || !query && focus === 'all' || scopedLaneIds.has(l.id) || !query && l.id === focus).map((lane, index) => Object.assign({}, lane, { projectedIndex: index }));
     const machines = projectedLanes.filter(l => l.id !== 'baseline');
     const columnLimit = limit(options.columnLimit, context.level === 'history' ? limit(options.pageSize, 12) : 12), laneLimit = limit(options.laneLimit, 12);
     const columnPageCount = Math.max(1, Math.ceil(columns.length / columnLimit)), lanePageCount = Math.max(1, Math.ceil(machines.length / laneLimit));
-    const columnPage = Math.max(0, Math.min(integer(options.columnPage, context.level === 'history' ? integer(options.page, 0) : 0), columnPageCount - 1));
-    const lanePage = Math.max(0, Math.min(integer(options.lanePage, 0), lanePageCount - 1));
+    const columnPage = Math.max(0, Math.min(integer(options.columnPage, context.level === 'history' ? integer(options.page, 0) : 0), columnPageCount - 1)), lanePage = Math.max(0, Math.min(integer(options.lanePage, 0), lanePageCount - 1));
     const columnOffset = columnPage * columnLimit, laneOffset = lanePage * laneLimit;
     const visibleColumns = columns.slice(columnOffset, columnOffset + columnLimit).map((c, i) => Object.assign({}, c, { visibleIndex: i, x: i * COLUMN_WIDTH }));
     const visibleLanes = [projectedLanes.find(l => l.id === 'baseline'), ...machines.slice(laneOffset, laneOffset + laneLimit)].filter(Boolean).map((lane, i) => Object.assign({}, lane, { visibleIndex: i, y: i * ROW_HEIGHT }));
-    const visibleColumnIds = new Set(visibleColumns.map(c => c.id)), visibleLaneIds = new Set(visibleLanes.map(l => l.id));
-    const machineIndices = new Map(machines.map((l, i) => [l.id, i]));
-    const projectedNodes = [], representatives = new Map();
-    for (const column of columns) {
-      const members = membersByColumn.get(column.id) || [];
-      if (column.kind === 'history') {
-        members.forEach(node => {
-          const projected = Object.assign({}, node, { kind: 'revision', recordKind: node.kind, revisionIds: [node.id], columnId: column.id, columnIndex: column.index });
-          projectedNodes.push(projected); representatives.set(node.id, projected);
-        });
-      } else {
-        const groups = new Map();
-        members.forEach(node => { const group = groups.get(node.laneId) || []; group.push(node); groups.set(node.laneId, group); });
-        groups.forEach((group, laneId) => {
-          const lane = laneMap.get(laneId), newest = group[0];
-          const projected = { id: JSON.stringify(['summary', column.id, laneId]), kind: column.kind === 'family' ? 'family-summary' : 'release-summary', objectKind: lane.kind, laneId, laneIndex: lane.index, color: lane.color, familyId: column.familyId, releaseId: column.releaseId, columnId: column.id, columnIndex: column.index, revisionIds: group.map(n => n.id), releaseIds: unique(group.map(n => n.releaseId)).sort((a, b) => metadata.releaseMap.get(a).index - metadata.releaseMap.get(b).index), newestRevisionId: newest.id, headRevisionIds: group.filter(n => n.isHead).map(n => n.id), title: column.label, selected: false, hiddenInternalEdgeIds: [] };
-          projectedNodes.push(projected); group.forEach(node => representatives.set(node.id, projected));
-        });
-      }
-    }
+    const visibleColumnIds = new Set(visibleColumns.map(c => c.id)), visibleLaneIds = new Set(visibleLanes.map(l => l.id)), machineIndices = new Map(machines.map((l, i) => [l.id, i]));
     function position(node) {
       const row = node.laneId === 'baseline' ? 0 : machineIndices.get(node.laneId) - laneOffset + 1;
       return Object.assign({}, node, { x: (node.columnIndex - columnOffset) * COLUMN_WIDTH + (COLUMN_WIDTH - CARD_WIDTH) / 2, y: row * ROW_HEIGHT + (ROW_HEIGHT - CARD_HEIGHT) / 2, width: CARD_WIDTH, height: CARD_HEIGHT, visibleRow: row });
     }
-    const visibleNodes = projectedNodes.filter(n => visibleColumnIds.has(n.columnId) && visibleLaneIds.has(n.laneId)).map(position);
-    const visibleNodeMap = new Map(visibleNodes.map(n => [n.id, n]));
-    const aggregate = new Map(), hiddenInternalEdgeIds = [];
-    const relevantEdges = edges.filter(edge => scopeIds.has(edge.childId));
+    const visibleNodes = projectedNodes.filter(n => visibleColumnIds.has(n.columnId) && visibleLaneIds.has(n.laneId)).map(position), visibleNodeMap = new Map(visibleNodes.map(n => [n.id, n]));
+    const aggregate = new Map(), hiddenInternalEdgeIds = [], relevantEdges = edges.filter(edge => scopeIds.has(edge.childId));
     relevantEdges.forEach(edge => {
       const child = representatives.get(edge.childId), parent = representatives.get(edge.parentId);
-      if (child && parent && child.id === parent.id) {
-        hiddenInternalEdgeIds.push(edge.id); child.hiddenInternalEdgeIds?.push(edge.id); return;
-      }
+      if (child && parent && child.id === parent.id) { hiddenInternalEdgeIds.push(edge.id); child.hiddenInternalEdgeIds?.push(edge.id); return; }
       const childVisible = child && visibleNodeMap.has(child.id), parentVisible = parent && visibleNodeMap.has(parent.id);
       if (!childVisible && !parentVisible) return;
-      let boundary = null, direction = 'left', path;
+      let boundary = null, route;
       if (child && parent) {
-        const a = position(parent), b = position(child);
-        path = connector(a, b);
+        route = connector(position(parent), position(child), visibleNodes);
         if (!parentVisible || !childVisible) {
-          const missing = !parentVisible ? parent : child;
-          boundary = (!visibleLaneIds.has(missing.laneId) ? 'lane-page-' : 'column-page-') + (!parentVisible ? 'parent' : 'child');
+          const omitted = !parentVisible ? parent : child;
+          boundary = (!visibleLaneIds.has(omitted.laneId) ? 'lane-page-' : 'column-page-') + (!parentVisible ? 'parent' : 'child');
         }
       } else {
-        const childNode = nodeById.get(edge.childId), parentNode = nodeById.get(edge.parentId);
-        const absent = child ? parentNode : childNode, visible = child ? visibleNodeMap.get(child.id) : visibleNodeMap.get(parent.id);
-        const side = child ? 'parent' : 'child';
+        const absent = nodeById.get(child ? edge.parentId : edge.childId), visible = child ? visibleNodeMap.get(child.id) : visibleNodeMap.get(parent.id), side = child ? 'parent' : 'child';
         boundary = !absent ? 'missing-' + side : !scopeIds.has(absent.id) ? 'outside-scope-' + side : !inContext(absent) ? 'outside-level-' + side : 'filtered-' + side;
-        const absentRelease = absent && metadata.releaseMap.get(absent.releaseId), currentRelease = child ? metadata.releaseMap.get(childNode.releaseId) : metadata.releaseMap.get(parentNode.releaseId);
-        direction = absentRelease && currentRelease && absentRelease.index > currentRelease.index ? 'right' : 'left';
-        path = boundaryPath(visible, direction, !!child);
+        route = boundaryPath(visible, !!child);
       }
-      const key = JSON.stringify([child?.id || null, parent?.id || null, boundary, child ? null : nodeById.get(edge.childId)?.releaseId, parent ? null : nodeById.get(edge.parentId)?.releaseId, direction]);
+      const key = JSON.stringify([child?.id || null, parent?.id || null, boundary, child ? null : nodeById.get(edge.childId)?.releaseId, parent ? null : nodeById.get(edge.parentId)?.releaseId]);
       let group = aggregate.get(key);
       if (!group) {
-        group = { id: key, childNodeId: child?.id || null, parentNodeId: parent?.id || null, childId: edge.childId, parentId: edge.parentId, childVisible: !!childVisible, parentVisible: !!parentVisible, boundary, direction, path, color: edge.color, kind: edge.kind, originalEdgeIds: [], originalEdges: [] };
+        group = Object.assign({ id: key, childNodeId: child?.id || null, parentNodeId: parent?.id || null, childId: edge.childId, parentId: edge.parentId, childVisible: !!childVisible, parentVisible: !!parentVisible, boundary, direction: 'right', color: edge.color, kind: edge.kind, originalEdgeIds: [], originalEdges: [] }, route);
         aggregate.set(key, group);
       }
       group.originalEdgeIds.push(edge.id); group.originalEdges.push(edge);
     });
     const visibleEdges = [...aggregate.values()].map(e => Object.assign(e, { count: e.originalEdgeIds.length }));
-    const pendingBranches = file.branches.filter(b => !b.headId && (focus === 'all' || focus === 'baseline' && b.kind === 'baseline' || b.id === focus)).map(b => ({ id: b.id, label: branchName(b), releaseId: releaseKey(b.releaseId), familyId: metadata.releaseMap.get(releaseKey(b.releaseId)).familyId }));
+    const pendingBranches = file.branches.filter(b => !b.headId && (focus === 'all' || focus === 'baseline' && b.kind === 'baseline' || b.id === focus)).map(b => {
+      const release = metadata.releaseMap.get(releaseKey(b.releaseId));
+      return { id: b.id, label: branchName(b), releaseId: release.id, familyId: release.familyId, minorId: release.minorId, patchNumber: release.patchNumber };
+    });
     return Object.assign({}, context, {
-      nodes, edges, lanes, families: metadata.families, releases: metadata.releases, visibleNodes, visibleEdges, projectedNodes, projectedLanes, columns, visibleColumns, visibleLanes, matchingIds, hiddenInternalEdgeIds, expandedFamilies,
+      nodes, edges, lanes, families: metadata.families, minors: metadata.minors, releases: metadata.releases, patches: context.minor?.releases || [], visibleNodes, visibleEdges, projectedNodes, projectedLanes, columns, visibleColumns, visibleLanes, matchingIds, hiddenInternalEdgeIds, expandedFamilies,
       columnPage, columnLimit, columnPageCount, columnCount: columns.length, columnOffset, lanePage, laneLimit, lanePageCount, laneCount: machines.length, laneOffset,
       total: matching.length, totalRecords: nodes.length, scopeTotal: scoped.length, query, branchFilter: focus, pendingBranches,
       unknownParents: relevantEdges.filter(e => !e.parentExists).map(e => ({ childId: e.childId, parentId: e.parentId })),
       graphWidth: Math.max(1, visibleColumns.length) * COLUMN_WIDTH, canvasHeight: visibleLanes.length * ROW_HEIGHT, matrixWidth: LABEL_WIDTH + Math.max(1, visibleColumns.length) * COLUMN_WIDTH,
       rowHeight: ROW_HEIGHT, columnWidth: COLUMN_WIDTH, labelWidth: LABEL_WIDTH, headerHeight: HEADER_HEIGHT,
-      // Read-only compatibility for callers transitioning from one-axis history.
       page: columnPage, pageSize: columnLimit, pageCount: columnPageCount
     });
   }
@@ -1293,11 +1536,10 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     const data = canonical(file, options), node = data.nodeById.get(id);
     if (!node) error('REVISION_NOT_FOUND', '此保存记录不存在或尚未载入');
     const branchFilter = data.focus === 'all' || node.focused ? data.focus : 'all';
-    const target = { level: 'history', familyId: node.familyId, releaseId: node.releaseId, branchFilter, query: '', columnPage: 0, lanePage: 0, columnLimit: limit(options.columnLimit, 12), laneLimit: limit(options.laneLimit, 12), selectedRevisionId: node.id };
-    const graph = layout(file, Object.assign({}, options, target));
-    const column = graph.columns.find(c => c.kind === 'history' && c.step === node.historyStep);
+    const target = { level: 'history', familyId: node.familyId, minorId: node.minorId, releaseId: node.releaseId, branchFilter, query: '', columnPage: 0, lanePage: 0, columnLimit: limit(options.columnLimit, 12), laneLimit: limit(options.laneLimit, 12), selectedRevisionId: node.id };
+    const graph = layout(file, Object.assign({}, options, target)), projected = graph.projectedNodes.find(n => n.id === node.id);
     const machineIndex = graph.projectedLanes.filter(l => l.id !== 'baseline').findIndex(l => l.id === node.laneId);
-    target.columnPage = Math.floor((column?.index || 0) / graph.columnLimit);
+    target.columnPage = Math.floor((projected?.columnIndex || 0) / graph.columnLimit);
     target.lanePage = node.laneId === 'baseline' ? Math.max(0, Math.min(integer(options.lanePage, 0), graph.lanePageCount - 1)) : Math.floor(Math.max(0, machineIndex) / graph.laneLimit);
     return target;
   }
@@ -1322,12 +1564,14 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
   function releaseLabel(graph, id) { return graph.releases.find(r => r.id === id)?.label || (id === UNKNOWN_RELEASE ? '版本未记录' : id); }
   function summaryCard(node, graph, file, options) {
     const latest = graph.nodes.find(n => n.id === node.newestRevisionId)?.revision, lane = graph.lanes.find(l => l.id === node.laneId);
-    const action = node.kind === 'family-summary' ? 'roadmap-open-family' : 'roadmap-open-release';
-    const attrs = 'data-family="' + escape(node.familyId) + '"' + (node.releaseId ? ' data-release="' + escape(node.releaseId) + '"' : '');
-    const versions = node.releaseIds.map(id => releaseLabel(graph, id));
-    const range = versions.length > 1 ? versions[0] + ' – ' + versions[versions.length - 1] : versions[0] || '尚无小版本';
+    const kind = node.kind === 'family-summary' ? 'family' : node.kind === 'release-summary' ? 'release' : 'patch';
+    const action = kind === 'family' ? 'roadmap-open-family' : kind === 'release' ? 'roadmap-open-release' : 'roadmap-open-history';
+    const next = kind === 'family' ? '小版本' : kind === 'release' ? '补丁包' : '保存记录';
+    const attrs = 'data-family="' + escape(node.familyId) + '"' + (node.minorId ? ' data-minor="' + escape(node.minorId) + '"' : '') + (node.releaseId ? ' data-release="' + escape(node.releaseId) + '"' : '');
+    const versions = kind === 'family' ? node.minorIds.map(id => graph.minors.find(m => m.id === id)?.label || id) : node.releaseIds.map(id => releaseLabel(graph, id));
+    const range = versions.length > 1 ? versions[0] + ' – ' + versions[versions.length - 1] : versions[0] || '尚无保存记录';
     const head = node.headRevisionIds.length ? tag(node.objectKind === 'baseline' ? '含当前基线' : '含当前配置', 'is-head') : '';
-    return '<button type="button" class="rm-card rm-summary ' + (node.objectKind === 'baseline' ? 'is-baseline' : 'is-machine') + '" data-action="' + action + '" ' + attrs + ' data-roadmap-summary="' + (node.kind === 'family-summary' ? 'family' : 'release') + '" data-summary-id="' + escape(node.id) + '" style="--rm-lane-color:' + node.color + '" aria-label="' + escape(lane.label + ' · ' + node.title + ' · ' + node.revisionIds.length + ' 条保存记录，查看' + (node.kind === 'family-summary' ? '小版本' : '保存记录')) + '"><span class="rm-card-head"><span class="rm-card-object">' + icon(node.objectKind) + '<strong>' + escape(node.title) + '</strong></span>' + head + '</span><span class="rm-card-body"><span class="rm-summary-range">' + escape(range) + '<span>' + node.revisionIds.length + ' 条记录</span></span><span class="rm-reason" title="' + escape(reason(latest, options)) + '">' + escape(reason(latest, options) || '未填写修改原因') + '</span><span class="rm-card-meta">' + escape(actorLabel(latest, options)) + '<time datetime="' + escape(latest.at || '') + '">' + escape(timeLabel(latest, options.timeZone)) + '</time></span><span class="rm-summary-open">查看' + (node.kind === 'family-summary' ? '小版本' : '保存记录') + '<span aria-hidden="true">→</span></span></span></button>';
+    return '<button type="button" class="rm-card rm-summary ' + (node.objectKind === 'baseline' ? 'is-baseline' : 'is-machine') + '" data-action="' + action + '" ' + attrs + ' data-roadmap-summary="' + kind + '" data-summary-id="' + escape(node.id) + '" style="--rm-lane-color:' + node.color + '" aria-label="' + escape(lane.label + ' · ' + node.title + ' · ' + range + ' · ' + node.revisionIds.length + ' 条保存记录，查看' + next) + '"><span class="rm-card-head"><span class="rm-card-object">' + icon(node.objectKind) + '<strong>' + escape(node.title) + '</strong></span>' + head + '</span><span class="rm-card-body"><span class="rm-summary-range">' + escape(range) + '<span>' + node.revisionIds.length + ' 条记录</span></span><span class="rm-reason" title="' + escape(reason(latest, options)) + '">' + escape(reason(latest, options) || '未填写修改原因') + '</span><span class="rm-card-meta">' + escape(actorLabel(latest, options)) + '<time datetime="' + escape(latest.at || '') + '">' + escape(timeLabel(latest, options.timeZone)) + '</time></span><span class="rm-summary-open">查看' + next + '<span aria-hidden="true">→</span></span></span></button>';
   }
   function recordCard(node, graph, file, options) {
     const r = node.revision, attrs = recordAttrs(r.id), links = safeLinks(r);
@@ -1344,31 +1588,34 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
   }
   function breadcrumbs(graph) {
     const first = button('roadmap-overview', '大版本', graph.level === 'families' ? 'aria-current="page"' : '', 'rm-crumb' + (graph.level === 'families' ? ' is-current' : ''));
-    const second = graph.family ? button('roadmap-open-family', escape(graph.family.label) + ' · 小版本', 'data-family="' + escape(graph.familyId) + '"' + (graph.level === 'releases' ? ' aria-current="page"' : ''), 'rm-crumb' + (graph.level === 'releases' ? ' is-current' : '')) : '<span class="rm-crumb is-unavailable">小版本</span>';
-    const third = graph.release ? '<span class="rm-crumb is-current" aria-current="page">' + escape(graph.release.label) + ' · 保存记录</span>' : '<span class="rm-crumb is-unavailable">保存记录</span>';
-    return '<nav class="rm-breadcrumbs" aria-label="路线图层级">' + first + '<span aria-hidden="true">/</span>' + second + '<span aria-hidden="true">/</span>' + third + '</nav>';
+    const second = graph.family ? button('roadmap-open-family', escape(graph.family.displayLabel) + ' · 小版本', 'data-family="' + escape(graph.familyId) + '"' + (graph.level === 'releases' ? ' aria-current="page"' : ''), 'rm-crumb' + (graph.level === 'releases' ? ' is-current' : '')) : '<span class="rm-crumb is-unavailable">小版本</span>';
+    const third = graph.minor ? button('roadmap-open-release', escape(graph.minor.label) + ' · 补丁包', 'data-family="' + escape(graph.familyId) + '" data-minor="' + escape(graph.minorId) + '"' + (graph.level === 'patches' ? ' aria-current="page"' : ''), 'rm-crumb' + (graph.level === 'patches' ? ' is-current' : '')) : '<span class="rm-crumb is-unavailable">补丁包</span>';
+    const fourth = graph.release ? '<span class="rm-crumb is-current" aria-current="page">' + escape(graph.release.patchLabel) + ' · 保存记录</span>' : '<span class="rm-crumb is-unavailable">保存记录</span>';
+    return '<nav class="rm-breadcrumbs" aria-label="路线图层级">' + [first, second, third, fourth].join('<span aria-hidden="true">/</span>') + '</nav>';
   }
   function matrixHeader(graph, matrixId) {
-    const groups = [];
+    const groups = [], lowerGroups = [];
     graph.visibleColumns.forEach((column, index) => {
-      const previous = groups[groups.length - 1];
+      const previous = groups[groups.length - 1], lower = lowerGroups[lowerGroups.length - 1];
       if (previous && previous.familyId === column.familyId) previous.span++;
       else groups.push({ familyId: column.familyId, label: column.familyLabel, start: index, span: 1 });
+      if (lower && lower.column.categoryId === column.categoryId) lower.span++;
+      else lowerGroups.push({ column, start: index, span: 1 });
     });
-    if (!groups.length && graph.family) groups.push({ familyId: graph.family.id, label: graph.family.label, start: 0, span: 1 });
+    if (!groups.length && graph.family) groups.push({ familyId: graph.family.id, label: graph.family.displayLabel, start: 0, span: 1 });
     const corner = '<div class="rm-axis-corner" data-roadmap-corner role="columnheader" aria-colindex="1" aria-rowspan="2"><strong>配置对象</strong><span>软件版本 →</span></div>';
     const familyHeads = groups.map(group => {
       const family = graph.families.find(f => f.id === group.familyId), expanded = graph.expandedFamilies.includes(group.familyId);
       const title = graph.level === 'families' ? button('roadmap-open-family', escape(group.label), 'data-family="' + escape(group.familyId) + '"', 'rm-family-name') : '<strong>' + escape(group.label) + '</strong>';
-      const toggle = graph.level === 'families' && family.releaseIds.length ? button('roadmap-toggle-family', expanded ? '收起' : '展开小版本', 'data-family="' + escape(group.familyId) + '" aria-expanded="' + expanded + '" aria-controls="' + matrixId + '"', 'rm-expand') : '';
+      const toggle = graph.level === 'families' && family.minorIds.length ? button('roadmap-toggle-family', expanded ? '收起' : '展开小版本', 'data-family="' + escape(group.familyId) + '" aria-expanded="' + expanded + '" aria-controls="' + matrixId + '"', 'rm-expand') : '';
       return '<div class="rm-family-heading" data-roadmap-family="' + escape(group.familyId) + '" role="columnheader" aria-colindex="' + (group.start + 2) + '" aria-colspan="' + group.span + '" style="grid-column:' + (group.start + 2) + ' / span ' + group.span + '">' + title + toggle + '</div>';
     }).join('');
-    const lower = graph.level === 'history' && graph.release ? '<div class="rm-column-heading is-group-start" data-roadmap-release="' + escape(graph.releaseId) + '" role="columnheader" aria-colindex="2" aria-colspan="' + Math.max(1, graph.visibleColumns.length) + '" style="grid-column:2 / span ' + Math.max(1, graph.visibleColumns.length) + '"><span class="rm-history-heading">软件 ' + escape(graph.release.label) + ' · 保存记录</span></div>' : graph.visibleColumns.map((column, index) => {
+    const lower = graph.level === 'history' && graph.release ? '<div class="rm-column-heading is-group-start" data-roadmap-release="' + escape(graph.releaseId) + '" data-roadmap-minor="' + escape(graph.minorId) + '" role="columnheader" aria-colindex="2" aria-colspan="' + Math.max(1, graph.visibleColumns.length) + '" style="grid-column:2 / span ' + Math.max(1, graph.visibleColumns.length) + '"><span class="rm-history-heading">软件 ' + escape(graph.release.label) + ' · 保存记录</span></div>' : lowerGroups.map(({ column, start, span }) => {
       let content = escape(column.kind === 'family' ? '全部小版本' : column.label);
-      if (column.kind === 'release') content = button('roadmap-open-release', escape(column.label), 'data-family="' + escape(column.familyId) + '" data-release="' + escape(column.releaseId) + '"', 'rm-release-heading-link');
-      const releaseAttr = column.releaseId ? ' data-roadmap-release="' + escape(column.releaseId) + '"' : '';
-      const previous = graph.visibleColumns[index - 1];
-      return '<div class="rm-column-heading' + (!previous || previous.familyId !== column.familyId ? ' is-group-start' : '') + '" data-roadmap-column="' + escape(column.id) + '"' + releaseAttr + ' role="columnheader" aria-colindex="' + (index + 2) + '" style="grid-column:' + (index + 2) + '">' + content + (column.kind === 'history' ? '<span>' + escape(releaseLabel(graph, column.releaseId)) + '</span>' : '') + '</div>';
+      if (column.kind === 'release') content = button('roadmap-open-release', escape(column.label), 'data-family="' + escape(column.familyId) + '" data-minor="' + escape(column.minorId) + '"', 'rm-release-heading-link');
+      if (column.kind === 'patch') content = button('roadmap-open-history', escape(column.label), 'data-family="' + escape(column.familyId) + '" data-minor="' + escape(column.minorId) + '" data-release="' + escape(column.releaseId) + '"', 'rm-release-heading-link');
+      const versionAttrs = (column.releaseId ? ' data-roadmap-release="' + escape(column.releaseId) + '"' : '') + (column.minorId ? ' data-roadmap-minor="' + escape(column.minorId) + '"' : '');
+      return '<div class="rm-column-heading is-version-start' + (start === 0 || graph.visibleColumns[start - 1].familyId !== column.familyId ? ' is-group-start' : '') + '" data-roadmap-column="' + escape(column.id) + '"' + versionAttrs + ' role="columnheader" aria-colindex="' + (start + 2) + '" aria-colspan="' + span + '" style="grid-column:' + (start + 2) + ' / span ' + span + '">' + content + (column.kind === 'patch' ? '<span>' + escape(graph.minors.find(m => m.id === column.minorId)?.label || '') + '</span>' : '') + '</div>';
     }).join('');
     return '<div class="rm-axis" data-roadmap-axis role="rowgroup"><div class="rm-axis-row" role="row" aria-rowindex="1">' + corner + familyHeads + '</div><div class="rm-axis-row" role="row" aria-rowindex="2">' + lower + '</div></div>';
   }
@@ -1383,28 +1630,30 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
     options = options || {}; const file = options.file; let graph = preparedGraph;
     try { if (!graph) graph = layout(file, options); }
     catch (err) { return '<section class="rm-view" data-roadmap-level="error"><div class="rm-empty" role="alert"><strong>保存关系需要核对</strong><p>' + escape(err.message) + '</p>' + button('roadmap-overview', '返回大版本', '', 'rm-page-button') + '</div></section>'; }
-    const matrixId = domId(file.id + ':matrix'), arrowId = domId(file.id + ':arrow'), marker = 'url(#' + arrowId + ')';
+    const matrixId = domId(file.id + ':matrix'), arrowId = color => domId(file.id + ':arrow:' + color);
     const focusOptions = [['all', '全部配置'], ['baseline', '版本基线'], ...graph.lanes.filter(l => l.kind === 'machine').map(l => [l.id, l.label])];
     const toolbar = '<div class="rm-toolbar">' + breadcrumbs(graph) + '<span class="rm-spacer"></span><label class="rm-focus-label">聚焦 <select id="roadmap-focus" aria-label="聚焦配置">' + focusOptions.map(([id, name]) => '<option value="' + escape(id) + '" ' + (graph.branchFilter === id ? 'selected' : '') + '>' + escape(name) + '</option>').join('') + '</select></label><label class="rm-search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0"/></svg><input id="roadmap-search" type="search" data-search="roadmap" aria-label="搜索路线图" placeholder="搜索机台、版本或修改原因" value="' + escape(options.query || '') + '"></label></div>';
-    const pending = graph.pendingBranches.filter(b => graph.level === 'families' || graph.level === 'releases' && b.familyId === graph.familyId || graph.level === 'history' && b.releaseId === graph.releaseId);
+    const pending = graph.pendingBranches.filter(b => graph.level === 'families' || graph.level === 'releases' && b.familyId === graph.familyId || graph.level === 'patches' && b.minorId === graph.minorId || graph.level === 'history' && b.releaseId === graph.releaseId);
     const pendingBar = pending.length ? '<div class="rm-pending"><span>待初始化</span>' + pending.map(b => '<a href="#/files/' + encodeURIComponent(file.id) + '/parameters?branch=' + encodeURIComponent(b.id) + '">软件 ' + escape(releaseLabel(graph, b.releaseId)) + '</a>').join('') + '</div>' : '';
     const paths = graph.visibleEdges.map(edge => {
       const description = edge.originalEdges.slice(0, 3).map(e => {
         const child = graph.nodes.find(n => n.id === e.childId), parent = graph.nodes.find(n => n.id === e.parentId);
         return (parent?.title || '来源记录未载入') + ' → ' + child.title;
       }).join('；');
-      return '<path class="rm-edge' + (edge.boundary ? ' is-continuation' : '') + '" data-child-node="' + escape(edge.childNodeId || '') + '" data-parent-node="' + escape(edge.parentNodeId || '') + '" data-original-edge-count="' + edge.count + '"' + (edge.boundary ? ' data-boundary="' + edge.boundary + '"' : '') + ' d="' + edge.path + '" stroke="' + edge.color + '" marker-end="' + marker + '"><title>' + escape(description + (edge.count > 3 ? '；共 ' + edge.count + ' 条来源关系' : '')) + '</title></path>';
+      const port = edge.parentVisible ? '<circle class="rm-edge-port" cx="' + edge.startPort.x + '" cy="' + edge.startPort.y + '" r="2.5" fill="white" stroke="' + edge.color + '"/>' : '';
+      return '<path class="rm-edge' + (edge.boundary ? ' is-continuation' : '') + '" data-child-node="' + escape(edge.childNodeId || '') + '" data-parent-node="' + escape(edge.parentNodeId || '') + '" data-original-edge-count="' + edge.count + '"' + (edge.boundary ? ' data-boundary="' + edge.boundary + '"' : '') + ' d="' + edge.path + '" stroke="' + edge.color + '" marker-end="url(#' + arrowId(edge.color) + ')"><title>' + escape(description + (edge.count > 3 ? '；共 ' + edge.count + ' 条来源关系' : '')) + '</title></path>' + port;
     }).join('');
-    const svg = '<svg class="rm-links" width="' + graph.graphWidth + '" height="' + graph.canvasHeight + '" viewBox="0 0 ' + graph.graphWidth + ' ' + Math.max(1, graph.canvasHeight) + '" aria-hidden="true" focusable="false"><defs><marker id="' + arrowId + '" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1l6 3-6 3" fill="none" stroke="#7f92aa" stroke-width="1.4"/></marker></defs>' + paths + '</svg>';
-    const nodeByCell = new Map(graph.visibleNodes.map(n => [JSON.stringify([n.laneId, n.columnId]), n]));
+    const markers = unique(graph.visibleEdges.map(edge => edge.color)).map(color => '<marker id="' + arrowId(color) + '" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L8 4L0 8Z" fill="' + color + '"/></marker>').join('');
+    const svg = '<svg class="rm-links" width="' + graph.graphWidth + '" height="' + graph.canvasHeight + '" viewBox="0 0 ' + graph.graphWidth + ' ' + Math.max(1, graph.canvasHeight) + '" aria-hidden="true" focusable="false"><defs>' + markers + '</defs>' + paths + '</svg>';
+    const nodeByCell = new Map(graph.visibleNodes.map(n => [JSON.stringify([n.laneId, n.columnId]), n])), occupiedCategories = new Set(graph.projectedNodes.map(n => n.categoryId));
     const rows = graph.visibleLanes.map(lane => {
       const head = '<div class="rm-lane-head" data-roadmap-lane-header="' + escape(lane.id) + '" role="rowheader"><span class="rm-lane-icon">' + icon(lane.kind) + '</span><strong title="' + escape(lane.label) + '">' + escape(lane.label) + '</strong><span>' + escape(lane.kind === 'baseline' ? '软件配置主线' : lane.model || '型号未记录') + '</span>' + (lane.kind === 'machine' ? button('roadmap-focus', '聚焦', 'data-branch="' + escape(lane.id) + '"', 'rm-lane-focus') : '') + '</div>';
       const cells = graph.visibleColumns.map((column, index) => {
         const node = nodeByCell.get(JSON.stringify([lane.id, column.id])), previous = graph.visibleColumns[index - 1];
         let content = node ? node.kind === 'revision' ? recordCard(node, graph, file, options) : summaryCard(node, graph, file, options) : '';
-        const pendingHere = lane.id === 'baseline' ? pending.find(b => column.kind === 'family' ? b.familyId === column.familyId : b.releaseId === column.releaseId) : null;
-        if (!content && pendingHere) content = '<div class="rm-cell-empty"><span>尚未初始化</span><a href="#/files/' + encodeURIComponent(file.id) + '/parameters?branch=' + encodeURIComponent(pendingHere.id) + '">设置初始配置</a></div>';
-        return '<div class="rm-cell' + (!previous || previous.familyId !== column.familyId ? ' is-group-start' : '') + '" role="cell" data-roadmap-cell="' + escape(column.id) + '">' + content + '</div>';
+        const pendingHere = lane.id === 'baseline' && !occupiedCategories.has(column.categoryId) ? pending.find(b => column.kind === 'family' ? b.familyId === column.familyId : column.kind === 'release' ? b.minorId === column.minorId : b.releaseId === column.releaseId) : null;
+        if (!content && pendingHere) content = '<div class="rm-cell-empty"><span>' + escape(releaseLabel(graph, pendingHere.releaseId)) + ' · 尚未初始化</span><a href="#/files/' + encodeURIComponent(file.id) + '/parameters?branch=' + encodeURIComponent(pendingHere.id) + '">设置初始配置</a></div>';
+        return '<div class="rm-cell' + (!previous || previous.categoryId !== column.categoryId ? ' is-version-start' : '') + (!previous || previous.familyId !== column.familyId ? ' is-group-start' : '') + '" role="cell" data-roadmap-cell="' + escape(column.id) + '">' + content + '</div>';
       }).join('');
       return '<div class="rm-matrix-row' + (lane.kind === 'baseline' ? ' is-baseline' : '') + '" data-roadmap-lane="' + escape(lane.id) + '" role="row" style="--rm-lane-color:' + lane.color + '">' + head + cells + '</div>';
     }).join('');
@@ -1415,7 +1664,7 @@ button.rm-crumb{cursor:pointer}.rm-crumb:hover{background:#f0f4fa;color:#245cb1}
   return { layout, render, locateRevision, formatRevision, colors: COLORS, rowHeight: ROW_HEIGHT, columnWidth: COLUMN_WIDTH, labelWidth: LABEL_WIDTH, headerHeight: HEADER_HEIGHT };
 });
 </script>
-<script id="prototype-ui">/* Rebuilt 2026-11-11. Offline design demonstration; no production APIs. */
+<script id="prototype-ui">/* Rebuilt 2026-11-12. Offline design demonstration; no production APIs. */
 (function () {
 'use strict';
 const M = MCPrototypeModel.create();
@@ -1449,8 +1698,9 @@ const fmt=(v,field)=>e(field==='mode'?(modes[v]||v):val(v));
 const draftKey=(fileId,branchId)=>M.state.workspaceId+'/'+fileId+'/'+branchId;
 const recordTitle=(file,r)=>r?MCPrototypeRoadmap.formatRevision(file,r):'尚未保存';
 const recordShort=(file,r)=>r?MCPrototypeRoadmap.formatRevision(file,r,{compact:true}):'尚未保存';
+const softwareName=(file,id)=>{const release=Array.isArray(file.releases)?file.releases.find(r=>r.id===id):file.releases?.[id];return release?.version||release?.label||id||'—';};
 const recordDescription=r=>r?.reason||String(r?.message||'').replace(/\bB(\d+)\b/g,'基线第 $1 次保存').replace(/\br(\d+)\b/g,'机台第 $1 次保存');
-const newRoadmapState=()=>({level:'families',familyId:null,releaseId:null,expandedFamilies:[],columnPage:0,columnLimit:12,lanePage:0,laneLimit:12});
+const newRoadmapState=()=>({level:'families',familyId:null,minorId:null,releaseId:null,expandedFamilies:[],columnPage:0,columnLimit:12,lanePage:0,laneLimit:12});
 Object.assign(S,{roadmapSelected:null,roadmapBranch:'all',roadmap:newRoadmapState(),roadmapScroll:{},roadmapLocate:null,selectionScope:null,tracePickScope:null,sourceWriteMeta:null});
 function modificationFields(prefix,meta){
   const reason=meta?.reason??meta?.message??'',raw=meta?.linksText??(meta?.links||[]).join('\n');
@@ -1516,14 +1766,14 @@ function fileTabs(file,active){return '<nav class="tabs" aria-label="文件视�
 function shell(body,crumbs,fill){const area=['files','machines','parameters'].includes(S.route[0])?S.route[0]:S.route[0]==='review'?'reviews':S.route[0];document.getElementById('app').innerHTML='<header class="appbar"><a class="brand" href="#/files"><span class="brand-mark">MC</span>MCChecker</a><label class="context">'+ic('grid')+'<span class="small muted">工作区</span><select id="workspace" aria-label="全局工作区">'+options(M.state.workspaces,M.state.workspaceId)+'</select></label><span class="context profile-context">'+ic('machine')+'<span class="small muted">配置集</span><span class="small profile-value">69X</span></span><div class="appbar-right">'+btn('交互原型','demo','info','quiet')+'<span class="avatar">'+e(actor(M.state.actorId).name.slice(0,1))+'</span><span class="small">'+e(actor(M.state.actorId).name)+'</span>'+badge(admin()?'管理员':'访客',admin()?'blue':'')+'</div></header><aside class="sidebar" aria-label="应用导航"><span class="nav-link muted">'+ic('grid')+'速览</span><span class="nav-link muted">'+ic('search')+'全局搜索</span><a class="nav-link '+(area==='reviews'?'active':'')+'" href="#/reviews">'+ic('review')+'审阅修改<span class="spacer"></span><span class="count">'+reviews().filter(r=>r.status!=='merged').length+'</span></a><span class="nav-link muted">'+ic('params')+'DL 计算</span><a class="nav-link '+(['files','machines','parameters'].includes(area)?'active':'')+'" href="#/files">'+ic('list')+'配置管理</a>'+[['files','配置文件'],['machines','机台'],['parameters','参数']].map(([key,label])=>'<a class="nav-link nav-sub '+(area===key?'active':'')+'" href="#/'+key+'">'+label+'</a>').join('')+'<a class="nav-link '+(area==='sources'?'active':'')+'" href="#/sources">'+ic('update')+'更新管理</a><a class="nav-link '+(area==='records'?'active':'')+'" href="#/records">'+ic('history')+'操作记录</a><div class="nav-divider"></div><div class="nav-label">最近配置文件</div>'+files().slice(0,4).map(file=>'<a class="nav-link" href="'+fileUrl(file)+'">'+ic('file')+'<span class="nav-recent">'+e(file.name)+'</span></a>').join('')+'<div class="sidebar-footer">设计预览 · 示例数据<br>刷新后还原</div></aside><nav class="mobile-nav" aria-label="主要导航">'+[['files','文件'],['machines','机台'],['parameters','参数'],['reviews','评审'],['sources','更新'],['records','记录']].map(([key,label])=>'<a class="'+(area===key?'active':'')+'" href="#/'+key+'">'+label+'</a>').join('')+'</nav><main class="app-main" id="main-content" tabindex="-1"><div class="breadcrumb"><a href="#/files">配置管理</a>'+(crumbs||[]).map(c=>ic('chevron')+(c.url?'<a href="'+e(c.url)+'">'+e(c.label)+'</a>':'<span>'+e(c.label)+'</span>')).join('')+'</div><div class="page '+(fill?'fill':'')+'">'+body+'</div></main>';}
 function paginate(total){S.page=Math.max(0,Math.min(S.page,Math.max(0,Math.ceil(total/S.limit)-1)));return '<div class="footer"><span>共 '+total+' 项'+(total?' · 第 '+(S.page*S.limit+1)+'–'+Math.min((S.page+1)*S.limit,total)+' 项':'')+'</span><span class="spacer"></span><label>每页 <select id="page-limit" aria-label="每页数量">'+[30,50,100].map(n=>'<option '+(S.limit===n?'selected':'')+'>'+n+'</option>').join('')+'</select></label>'+btn('上一页','prev',null,'sm',S.page?'':'disabled')+btn('下一页','next',null,'sm',(S.page+1)*S.limit<total?'':'disabled')+'</div>';}
 function pageRows(items){const last=Math.max(0,Math.ceil(items.length/S.limit)-1);S.page=Math.min(S.page,last);return items.slice(S.page*S.limit,(S.page+1)*S.limit);}
-function fileList(){const q=S.search.toLowerCase(),list=files().filter(file=>(file.name+' '+file.description).toLowerCase().includes(q));const visible=pageRows(list),selectHead=selectionHeader('files',list,visible);const rows=visible.map(file=>{const b=file.branches.find(b=>b.kind==='baseline'&&b.headId),r=rev(file,b?.headId);return '<tr><td class="check-cell"><input type="checkbox" data-select-file="'+e(file.id)+'" aria-label="选择 '+e(file.name)+'" '+(S.selected.has(file.id)?'checked':'')+'></td><td><div class="file-cell">'+ic('file')+'<div><a class="name" href="'+fileUrl(file)+'">'+e(file.name)+'</a><div class="sub">'+e(file.description||'未填写说明')+'</div></div></div></td><td>'+badge(file.format.toUpperCase())+'</td><td>'+e(b?.releaseId||'—')+'<div class="sub">'+file.branches.filter(b=>b.kind==='baseline').length+' 个版本</div></td><td class="mono">'+e(r?recordShort(file,r):'尚未初始化')+'</td><td>'+file.branches.filter(b=>b.kind==='machine').length+' 台</td><td>'+ (reviews(file.id).some(r=>r.status!=='merged')?badge('有待评审','amber'):badge('已保存','green'))+'</td><td class="small muted">'+date(r?.at)+'</td><td>'+link('打开',fileUrl(file),'chevron','sm quiet')+'</td></tr>';}).join('');shell(heading('配置文件',files().length+' 个文件',link('初始化文件','#/initialize','plus','primary'))+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索文件名或说明')+'<span class="spacer"></span>'+(S.selected.size?'<span class="small muted">已选 '+S.selected.size+' 个</span>'+btn('导出所选','export-set','download'):'<span class="small muted">版本基线与机台配置</span>')+'</div>'+selectionBar('files',list)+'<div class="table-wrap"><table class="table"><thead><tr><th class="check-cell">'+selectHead+'</th><th>配置文件</th><th>格式</th><th>软件版本</th><th>当前基线</th><th>机台</th><th>状态</th><th>最近保存</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配的配置文件','调整搜索条件，或初始化一个配置文件。',btn('清除搜索','clear-search')):'')+'</div>'+paginate(list.length)+'</section>',[{label:'配置文件'}],true);}
-function branchControls(file){const b=branch(file),r=current(file),edit=S.edit?.fileId===file.id&&S.edit.branchId===b.id?S.edit:null,base=reference(file,b,r,edit);return '<div class="branchbar">'+ic(b.kind==='machine'?'branch':'file')+'<label class="visually-hidden" for="branch">当前配置</label><select class="control" id="branch">'+options(file.branches,b.id,x=>(x.kind==='baseline'?'版本基线':x.label)+' · 软件 '+x.releaseId)+'</select><label class="visually-hidden" for="revision">保存记录</label><select class="control" id="revision"><option value="">'+(b.headId?'当前 · '+e(recordShort(file,rev(file,b.headId))):'尚未保存')+'</option>'+options(file.revisions.filter(x=>x.branchId===b.id&&(x.id!==b.headId||S.revisionId===x.id)).slice().reverse(),S.revisionId,x=>recordShort(file,x)+' · '+date(x.at))+'</select>'+(r?badge(S.revisionId?'历史只读 · 软件 '+r.releaseId:edit?'编辑中':'已保存',S.revisionId?'':edit?'amber':'green'):'')+'<span class="spacer"></span>'+(b.kind==='machine'?'<span class="muted">'+(edit&&base?.id!==r?.baseRevisionId?'保存后采用基线 ':'采用基线 ')+(base?'<button class="link-button mono" data-action="snapshot" data-revision="'+e(base.id)+'">'+e(recordTitle(file,base))+'</button>':'未记录')+'</span>':'<span class="muted">基线更新后，机台需单独确认采用</span>')+'</div>';}
+function fileList(){const q=S.search.toLowerCase(),list=files().filter(file=>(file.name+' '+file.description).toLowerCase().includes(q));const visible=pageRows(list),selectHead=selectionHeader('files',list,visible);const rows=visible.map(file=>{const b=file.branches.find(b=>b.kind==='baseline'&&b.headId),r=rev(file,b?.headId);return '<tr><td class="check-cell"><input type="checkbox" data-select-file="'+e(file.id)+'" aria-label="选择 '+e(file.name)+'" '+(S.selected.has(file.id)?'checked':'')+'></td><td><div class="file-cell">'+ic('file')+'<div><a class="name" href="'+fileUrl(file)+'">'+e(file.name)+'</a><div class="sub">'+e(file.description||'未填写说明')+'</div></div></div></td><td>'+badge(file.format.toUpperCase())+'</td><td>'+e(softwareName(file,b?.releaseId))+'<div class="sub">'+file.branches.filter(b=>b.kind==='baseline').length+' 个版本</div></td><td class="mono">'+e(r?recordShort(file,r):'尚未初始化')+'</td><td>'+file.branches.filter(b=>b.kind==='machine').length+' 台</td><td>'+ (reviews(file.id).some(r=>r.status!=='merged')?badge('有待评审','amber'):badge('已保存','green'))+'</td><td class="small muted">'+date(r?.at)+'</td><td>'+link('打开',fileUrl(file),'chevron','sm quiet')+'</td></tr>';}).join('');shell(heading('配置文件',files().length+' 个文件',link('初始化文件','#/initialize','plus','primary'))+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索文件名或说明')+'<span class="spacer"></span>'+(S.selected.size?'<span class="small muted">已选 '+S.selected.size+' 个</span>'+btn('导出所选','export-set','download'):'<span class="small muted">版本基线与机台配置</span>')+'</div>'+selectionBar('files',list)+'<div class="table-wrap"><table class="table"><thead><tr><th class="check-cell">'+selectHead+'</th><th>配置文件</th><th>格式</th><th>软件版本</th><th>当前基线</th><th>机台</th><th>状态</th><th>最近保存</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配的配置文件','调整搜索条件，或初始化一个配置文件。',btn('清除搜索','clear-search')):'')+'</div>'+paginate(list.length)+'</section>',[{label:'配置文件'}],true);}
+function branchControls(file){const b=branch(file),r=current(file),edit=S.edit?.fileId===file.id&&S.edit.branchId===b.id?S.edit:null,base=reference(file,b,r,edit);return '<div class="branchbar">'+ic(b.kind==='machine'?'branch':'file')+'<label class="visually-hidden" for="branch">当前配置</label><select class="control" id="branch">'+options(file.branches,b.id,x=>(x.kind==='baseline'?'版本基线':x.label)+' · 软件 '+softwareName(file,x.releaseId))+'</select><label class="visually-hidden" for="revision">保存记录</label><select class="control" id="revision"><option value="">'+(b.headId?'当前 · '+e(recordShort(file,rev(file,b.headId))):'尚未保存')+'</option>'+options(file.revisions.filter(x=>x.branchId===b.id&&(x.id!==b.headId||S.revisionId===x.id)).slice().reverse(),S.revisionId,x=>recordShort(file,x)+' · '+date(x.at))+'</select>'+(r?badge(S.revisionId?'历史只读 · 软件 '+softwareName(file,r.releaseId):edit?'编辑中':'已保存',S.revisionId?'':edit?'amber':'green'):'')+'<span class="spacer"></span>'+(b.kind==='machine'?'<span class="muted">'+(edit&&base?.id!==r?.baseRevisionId?'保存后采用基线 ':'采用基线 ')+(base?'<button class="link-button mono" data-action="snapshot" data-revision="'+e(base.id)+'">'+e(recordTitle(file,base))+'</button>':'未记录')+'</span>':'<span class="muted">基线更新后，机台需单独确认采用</span>')+'</div>';}
 function paramInput(p){if(p.type==='boolean')return '<select data-edit-value="'+e(p.id)+'" aria-label="'+e(p.name)+' 值"><option value="true" '+(p.value===true?'selected':'')+'>true</option><option value="false" '+(p.value===false?'selected':'')+'>false</option></select>';return '<input '+(p.type==='number'?'inputmode="decimal"':'')+' data-edit-value="'+e(p.id)+'" aria-label="'+e(p.name)+' 值" value="'+e(p.value)+'">';}
 function parameterPage(file){const b=branch(file),r=current(file),edit=S.edit&&S.edit.fileId===file.id&&S.edit.branchId===b.id?S.edit:null;const params=edit?.params||r?.params||[],base=reference(file,b,r,edit),baseMap=new Map((base?.params||[]).map(p=>[p.id,p])),modified=new Set(edit?M.diff(rev(file,edit.headId)?.params||[],params).map(x=>x.paramId):[]),q=S.search.toLowerCase();const list=params.filter(p=>(p.name+' '+p.path+' '+val(p.value)).toLowerCase().includes(q)&&(S.category==='all'||p.path.split('/')[1]===S.category)&&(S.filter!=='different'||val(p.value)!==val(baseMap.get(p.id)?.value))&&(S.filter!=='modified'||modified.has(p.id)));const cats=[...new Set(params.map(p=>p.path.split('/')[1]))];const actions=edit?'':link('比较',contextUrl(file,'compare',r),'compare')+link('导出',contextUrl(file,'export',r),'download')+btn(S.drafts[draftKey(file.id,b.id)]?'继续草稿':'编辑参数','edit','edit','primary',admin()&&!S.revisionId&&r?'':'disabled');const visible=pageRows(list),selectHead=selectionHeader('params',list,visible);const rows=visible.map(p=>{const origin=S.blame&&r?.params.some(x=>x.id===p.id)?M.blame(file.id,r.id,p.id).find(x=>x.field==='value'):null;return '<tr><td class="check-cell"><input type="checkbox" data-select-param="'+e(p.id)+'" aria-label="选择 '+e(p.name)+'" '+(S.selected.has(p.id)?'checked':'')+'></td><td class="param-name"><button class="link-button name" data-action="parameter-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono" title="'+e(p.path)+'">'+e(p.path)+'</div></td><td class="number muted">'+e(val(baseMap.get(p.id)?.value))+'</td><td class="number '+(modified.has(p.id)?'changed':'')+'">'+(edit?paramInput(p):e(val(p.value)))+'</td><td class="small muted">'+e(p.unit||'—')+'</td><td>'+(edit&&b.kind==='machine'?'<select data-edit-mode="'+e(p.id)+'" aria-label="'+e(p.name)+' 取值方式">'+['inherit','override','pin'].map(key=>'<option value="'+key+'" '+(p.mode===key?'selected':'')+'>'+modes[key]+'</option>').join('')+'</select>':b.kind==='baseline'?'<span class="muted small">基线值</span>':p.mode==='pin'?badge('保持此值','purple'):p.mode==='override'?badge('单独设置','amber'):'<span class="muted small">采用基线</span>')+'</td>'+(S.blame?'<td class="small">'+e(origin?.known?actor(origin.authorId).name:modified.has(p.id)?'尚未保存':'未记录')+'<div class="sub">'+e(origin?.known?recordShort(file,rev(file,origin.originRevisionId)):'—')+'</div></td>':'')+'<td>'+btn('追溯','parameter-detail','history','sm quiet','data-param="'+e(p.id)+'"')+'</td></tr>';}).join('');shell(fileHeading(file,actions)+fileTabs(file,'parameters')+'<section class="panel work-panel">'+branchControls(file)+(S.revisionId?'<div class="info-line">'+ic('history')+'正在查看 '+e(recordTitle(file,r))+' 的完整保存内容。'+btn('返回当前配置','return-current',null,'sm quiet')+btn('恢复此快照','restore',null,'sm quiet','data-revision="'+e(r?.id)+'" '+disabled())+'</div>':'')+'<div class="toolbar">'+search(S.search,'搜索参数名、字段或值')+'<select class="control" id="param-filter" aria-label="参数筛选">'+[['all','全部参数'],['different','与参考不同'],...(edit?[['modified','本次修改']]:[])].map(([key,label])=>'<option value="'+key+'" '+(S.filter===key?'selected':'')+'>'+label+'</option>').join('')+'</select><span class="spacer"></span>'+(S.selected.size?btn('跟踪所选 '+S.selected.size+' 项','trace-selected','params'):btn(S.blame?'隐藏修改人':'显示修改人','toggle-blame','eye','quiet'))+btn('显示','display','settings','quiet')+'</div>'+selectionBar('params',list)+(r||edit?'<div class="workspace"><aside class="directories" aria-label="参数目录" '+(S.directories?'':'hidden')+'><div class="nav-label">参数目录</div><button class="directory '+(S.category==='all'?'active':'')+'" data-action="category" data-category="all">全部参数<span>'+params.length+'</span></button>'+cats.map(cat=>'<button class="directory '+(S.category===cat?'active':'')+'" data-action="category" data-category="'+e(cat)+'">'+e(categories[cat]||cat)+'<span>'+params.filter(p=>p.path.split('/')[1]===cat).length+'</span></button>').join('')+'</aside><div class="table-wrap"><table class="table '+(S.compact?'compact':'')+'"><thead><tr><th class="check-cell">'+selectHead+'</th><th>参数 / 文件字段</th><th>'+e(b.kind==='machine'?'采用的基线':'上一保存记录')+'</th><th>'+ (edit?'修改后的值':'当前值')+'</th><th>单位</th><th>取值方式</th>'+(S.blame?'<th>最后改值</th>':'')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配的参数','调整搜索或筛选条件。',btn('清除筛选','clear-search')):'')+'</div></div>':empty('这个版本尚未初始化','导入本版本的配置文件，核对后建立保存记录。',btn('导入初始文件','initialize-branch','upload','primary',disabled())))+paginate(list.length)+(edit?'<div class="editbar"><span class="edit-summary"><span class="draft-dot"></span><span id="edit-count">'+modified.size+'</span> 项修改 <span class="muted">· 尚未保存到 '+e(b.label)+'</span></span><span class="spacer"></span>'+btn('取消','cancel-edit',null,'quiet')+btn('暂存','stash')+btn('核对保存','review-save','check','primary')+'</div>':'')+'</section>',[{label:'配置文件',url:'#/files'},{label:file.name}],true);}
 function roadmapPage(file){
   const opts=roadmapOptions(file);let graph;
   try{graph=MCPrototypeRoadmap.layout(file,opts);}catch(_){/* The isolated view renders its recoverable error state. */}
-  if(graph)Object.assign(S.roadmap,{level:graph.level,familyId:graph.familyId,releaseId:graph.releaseId,columnPage:graph.columnPage,lanePage:graph.lanePage});
+  if(graph)Object.assign(S.roadmap,{level:graph.level,familyId:graph.familyId,minorId:graph.minorId||null,releaseId:graph.releaseId,columnPage:graph.columnPage,lanePage:graph.lanePage});
   const selected=rev(file,S.roadmapSelected),visible=graph?.visibleNodes.some(n=>n.kind==='revision'&&n.id===selected?.id);
   const r=visible?selected:null,b=r&&branch(file,r.branchId),head=r&&b.headId===r.id;
   const body=MCPrototypeRoadmap.render(opts,graph);
@@ -1537,7 +1787,7 @@ function roadmapOptions(file){
 }
 function roadmapScrollKey(){
   const v=S.roadmap;
-  return JSON.stringify([M.state.workspaceId,S.fileId,v.level,v.familyId,v.releaseId,v.expandedFamilies.slice().sort(),v.columnPage,v.columnLimit,v.lanePage,v.laneLimit,S.roadmapBranch,S.search]);
+  return JSON.stringify([M.state.workspaceId,S.fileId,v.level,v.familyId,v.minorId,v.releaseId,v.expandedFamilies.slice().sort(),v.columnPage,v.columnLimit,v.lanePage,v.laneLimit,S.roadmapBranch,S.search]);
 }
 function rememberRoadmapScroll(){
   const scroll=document.querySelector('.rm-scroll'),key=scroll?.dataset.roadmapScrollKey;
@@ -1563,12 +1813,13 @@ function applyRoadmapLocation(location){
 function roadmapUrl(revisionId){
   const v=S.roadmap,q=new URLSearchParams({view:v.level});
   if(v.familyId&&v.level!=='families')q.set('family',v.familyId);
+  if(v.minorId&&['patches','history'].includes(v.level))q.set('minor',v.minorId);
   if(v.releaseId&&v.level==='history')q.set('release',v.releaseId);
   if(revisionId)q.set('revision',revisionId);
   return fileUrl(f(),'roadmap')+'?'+q.toString();
 }
-function openRoadmapLevel(level,familyId,releaseId){
-  rememberRoadmapScroll();Object.assign(S.roadmap,{level,familyId:familyId||null,releaseId:releaseId||null,columnPage:0,lanePage:0});
+function openRoadmapLevel(level,familyId,releaseId,minorId){
+  rememberRoadmapScroll();Object.assign(S.roadmap,{level,familyId:familyId||null,minorId:minorId||null,releaseId:releaseId||null,columnPage:0,lanePage:0});
   S.search='';S.roadmapLocate=null;go(roadmapUrl());
 }
 function locateRoadmapRecord(id,force){
@@ -1586,18 +1837,18 @@ function pageRoadmap(axis,page){
 }
 function revisionDetail(id){
   const file=f(),r=rev(file,id);if(!r)throw new Error('保存记录不存在');const b=branch(file,r.branchId),before=rev(file,r.parentIds[0]),base=rev(file,r.baseRevisionId),currentHead=rev(file,b.headId),adopted=file.branches.filter(x=>x.kind==='machine'&&rev(file,x.headId)?.baseRevisionId===r.id);
-  showDrawer(recordTitle(file,r),'<div class="side-stat"><span>配置对象</span><strong>'+e(b.label)+'</strong></div><div class="side-stat"><span>软件版本</span><strong>'+e(r.releaseId)+'</strong></div><div class="side-stat"><span>保存时间 / 人员</span><strong>'+date(r.at)+' · '+e(actor(r.authorId).name)+'</strong></div>'+changeContext(r,true)+(base?'<div class="section-head space-top"><h3>采用的基线</h3></div><button class="link-button" data-action="roadmap-jump" data-revision="'+e(base.id)+'">'+e(recordTitle(file,base))+'</button>':'')+'<div class="section-head space-top"><h3>来源记录</h3></div>'+(r.parentIds.length?'<div class="stack">'+r.parentIds.map(parentId=>{const parent=rev(file,parentId);return parent?'<button class="link-button" data-action="roadmap-jump" data-revision="'+e(parent.id)+'">'+e(recordTitle(file,parent))+'</button>':'<span class="muted">部分来源未记录</span>';}).join('')+'</div>':'<p class="small muted">此记录是已知历史的起点。</p>')+(adopted.length?'<div class="section-head space-top"><h3>当前采用此基线的机台</h3></div><div class="row wrap">'+adopted.map(m=>btn(m.label,'roadmap-jump','machine','sm','data-revision="'+e(m.headId)+'"')).join('')+'</div>':'')+(before?'<div class="section-head space-top"><h3>与上次保存的变化</h3></div>'+pagedDiffTable(M.diff(before.params,r.params),recordShort(file,before),recordShort(file,r)):'')+(r.reviewId?'<div class="space-top">'+link('查看关联评审','#/review/'+encodeURIComponent(r.reviewId),'review')+'</div>':''),btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('导出','roadmap-export','download',null,'data-revision="'+e(r.id)+'"')+(r.kind==='initial'?'':btn('恢复此记录','restore','history',null,'data-revision="'+e(r.id)+'" '+disabled()))+btn('比较','roadmap-compare','compare','primary','data-revision="'+e(r.id)+'"'));
+  showDrawer(recordTitle(file,r),'<div class="side-stat"><span>配置对象</span><strong>'+e(b.label)+'</strong></div><div class="side-stat"><span>软件版本</span><strong>'+e(softwareName(file,r.releaseId))+'</strong></div><div class="side-stat"><span>保存时间 / 人员</span><strong>'+date(r.at)+' · '+e(actor(r.authorId).name)+'</strong></div>'+changeContext(r,true)+(base?'<div class="section-head space-top"><h3>采用的基线</h3></div><button class="link-button" data-action="roadmap-jump" data-revision="'+e(base.id)+'">'+e(recordTitle(file,base))+'</button>':'')+'<div class="section-head space-top"><h3>来源记录</h3></div>'+(r.parentIds.length?'<div class="stack">'+r.parentIds.map(parentId=>{const parent=rev(file,parentId);return parent?'<button class="link-button" data-action="roadmap-jump" data-revision="'+e(parent.id)+'">'+e(recordTitle(file,parent))+'</button>':'<span class="muted">部分来源未记录</span>';}).join('')+'</div>':'<p class="small muted">此记录是已知历史的起点。</p>')+(adopted.length?'<div class="section-head space-top"><h3>当前采用此基线的机台</h3></div><div class="row wrap">'+adopted.map(m=>btn(m.label,'roadmap-jump','machine','sm','data-revision="'+e(m.headId)+'"')).join('')+'</div>':'')+(before?'<div class="section-head space-top"><h3>与上次保存的变化</h3></div>'+pagedDiffTable(M.diff(before.params,r.params),recordShort(file,before),recordShort(file,r)):'')+(r.reviewId?'<div class="space-top">'+link('查看关联评审','#/review/'+encodeURIComponent(r.reviewId),'review')+'</div>':''),btn('查看参数','roadmap-parameters','params',null,'data-revision="'+e(r.id)+'"')+btn('导出','roadmap-export','download',null,'data-revision="'+e(r.id)+'"')+(r.kind==='initial'?'':btn('恢复此记录','restore','history',null,'data-revision="'+e(r.id)+'" '+disabled()))+btn('比较','roadmap-compare','compare','primary','data-revision="'+e(r.id)+'"'));
 }
 function focusRoadmap(id){
   const file=f();if(id&&!['all','baseline'].includes(id)&&!file.branches.some(b=>b.id===id))throw new Error('此配置对象不存在');
   S.roadmapBranch=id||'all';S.roadmap.columnPage=0;S.roadmap.lanePage=0;render();
 }
-function machinePage(){const selected=S.route[1]&&M.state.assets.find(a=>a.id===S.route[1]);if(S.route[1]&&!selected){shell(empty('未找到机台','返回机台列表选择。',link('机台列表','#/machines')),[{label:'机台'}]);return;}if(selected){const bindings=files().flatMap(file=>file.branches.filter(b=>b.machineId===selected.id).map(b=>({file,b,r:rev(file,b.headId)})));shell(heading(selected.name,'<span>机型 '+e(selected.model||'69X')+'</span><span>·</span>'+bindings.length+' 个配置文件',btn('导出文件集','export-machine','download','primary','data-machine="'+e(selected.id)+'"'))+'<section class="panel work-panel"><div class="info-line">'+ic('info')+'以下为管理系统已保存配置；尚无设备回读证据。</div><div class="table-wrap"><table class="table"><thead><tr><th>配置文件</th><th>软件版本</th><th>机台记录</th><th>采用基线</th><th>与基线差异</th><th>最近保存</th><th></th></tr></thead><tbody>'+pageRows(bindings).map(({file,b,r})=>{const base=rev(file,r?.baseRevisionId);return '<tr><td><a class="name" href="'+fileUrl(file)+'?branch='+e(b.id)+'">'+e(file.name)+'</a><div class="sub">'+e(file.description)+'</div></td><td>'+e(r?.releaseId||b.releaseId)+'</td><td class="mono">'+e(r?recordShort(file,r):'—')+'</td><td class="mono">'+e(base?recordTitle(file,base):'未记录')+'</td><td>'+ (r?M.diff(base?.params||[],r.params).length:0)+' 项</td><td class="muted small">'+date(r?.at)+'</td><td>'+link('打开',fileUrl(file)+'?branch='+e(b.id),'eye','sm quiet')+' '+link('合并更新',fileUrl(file,'merge')+'?target='+e(b.id),'branch','sm')+'</td></tr>';}).join('')+'</tbody></table>'+(!bindings.length?empty('此机台没有关联配置文件','先在配置文件中添加机台配置。',link('查看文件','#/files')):'')+'</div>'+paginate(bindings.length)+'</section>',[{label:'机台',url:'#/machines'},{label:selected.name}],true);return;}const q=S.search.toLowerCase(),list=M.state.assets.filter(a=>files().some(file=>file.branches.some(b=>b.machineId===a.id))&&(a.name+' '+a.model).toLowerCase().includes(q));shell(heading('机台','查看一台机台使用的全部配置文件','')+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索机台编号或机型')+'</div><div class="table-wrap"><table class="table"><thead><tr><th>机台</th><th>机型</th><th>配置文件</th><th>管理状态</th><th>设备回读</th><th></th></tr></thead><tbody>'+pageRows(list).map(a=>'<tr><td><div class="file-cell">'+ic('machine')+'<a class="name" href="#/machines/'+e(a.id)+'">'+e(a.name)+'</a></div></td><td>'+e(a.model||'69X')+'</td><td>'+files().filter(file=>file.branches.some(b=>b.machineId===a.id)).length+' 个</td><td>'+badge('已保存','green')+'</td><td class="muted">未采集</td><td>'+link('查看配置','#/machines/'+e(a.id),'chevron','sm quiet')+'</td></tr>').join('')+'</tbody></table></div>'+paginate(list.length)+'</section>',[{label:'机台'}],true);}
-function tracePage(){const file=f(),all=file.revisions,latest=rev(file,file.branches.find(b=>b.kind==='baseline'&&b.headId)?.headId);if(!S.traceRevs.length)S.traceRevs=all.filter(r=>r.kind!=='initial').slice().sort((a,b)=>new Date(a.at)-new Date(b.at)).slice(-4).map(r=>r.id);const records=S.traceRevs.map(id=>rev(file,id)).filter(Boolean),identities=new Map();all.forEach(r=>r.params.forEach(p=>identities.set(p.id,p)));if(!S.traceIds.size)S.traceIds=new Set(latest?.params.slice(0,3).map(p=>p.id));const items=[...S.traceIds].map(id=>identities.get(id)).filter(Boolean).filter(p=>(p.name+' '+p.path).toLowerCase().includes(S.search.toLowerCase()));const rows=pageRows(items).map(p=>{let before,seen=false;return '<tr><td class="fixed-name"><button class="link-button name" data-action="trace-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono">'+e(p.path)+'</div></td>'+records.map(r=>{const current=r.params.find(x=>x.id===p.id),diff=seen?M.diff(before?[before]:[],current?[current]:[]):[];const changed=diff.length>0;before=current;seen=true;return '<td class="'+(changed?'trace-changed':'')+'">'+(current?'<div class="trace-value">'+e(val(current.value))+' <span class="muted small">'+e(current.unit)+'</span></div><div class="small">'+e(current.name)+'</div><div class="trace-meta">'+e(current.type)+' · '+e(val(current.min))+'–'+e(val(current.max))+'</div>'+(changed?'<div class="space-sm">'+diff.flatMap(x=>x.fields).map(x=>badge(fields[x.field]||x.field)).join(' ')+'</div>':''):'<span class="muted">此记录不存在</span>'+(changed?'<div class="space-sm">'+badge('已移除','amber')+'</div>':''))+'</td>';}).join('')+'</tr>';}).join('');shell(heading('参数变化','更名、属性和值按同一参数身份连续查看',btn('选择参数','choose-parameters','params')+btn('选择记录','trace-versions','history'))+'<section class="panel work-panel"><div class="toolbar"><label class="small">配置文件 <select class="control" id="trace-file">'+options(files(),file.id)+'</select></label>'+search(S.search,'搜索所选参数')+'<span class="spacer"></span><span class="small muted">'+S.traceIds.size+' 个参数 · '+records.length+' 条记录</span></div><div class="table-wrap"><table class="table trace-table"><thead><tr><th class="fixed-name">参数 / 文件字段</th>'+records.map(r=>'<th>'+e(recordShort(file,r))+' · 软件 '+e(r.releaseId)+'<div class="sub">'+e(branch(file,r.branchId).label)+'</div></th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配参数','可从文件参数表搜索、勾选后跟踪。',link('打开参数表',fileUrl(file,'parameters'))):'')+'</div>'+paginate(items.length)+'</section>',[{label:'参数'}],true);}
+function machinePage(){const selected=S.route[1]&&M.state.assets.find(a=>a.id===S.route[1]);if(S.route[1]&&!selected){shell(empty('未找到机台','返回机台列表选择。',link('机台列表','#/machines')),[{label:'机台'}]);return;}if(selected){const bindings=files().flatMap(file=>file.branches.filter(b=>b.machineId===selected.id).map(b=>({file,b,r:rev(file,b.headId)})));shell(heading(selected.name,'<span>机型 '+e(selected.model||'69X')+'</span><span>·</span>'+bindings.length+' 个配置文件',btn('导出文件集','export-machine','download','primary','data-machine="'+e(selected.id)+'"'))+'<section class="panel work-panel"><div class="info-line">'+ic('info')+'以下为管理系统已保存配置；尚无设备回读证据。</div><div class="table-wrap"><table class="table"><thead><tr><th>配置文件</th><th>软件版本</th><th>机台记录</th><th>采用基线</th><th>与基线差异</th><th>最近保存</th><th></th></tr></thead><tbody>'+pageRows(bindings).map(({file,b,r})=>{const base=rev(file,r?.baseRevisionId);return '<tr><td><a class="name" href="'+fileUrl(file)+'?branch='+e(b.id)+'">'+e(file.name)+'</a><div class="sub">'+e(file.description)+'</div></td><td>'+e(softwareName(file,r?.releaseId||b.releaseId))+'</td><td class="mono">'+e(r?recordShort(file,r):'—')+'</td><td class="mono">'+e(base?recordTitle(file,base):'未记录')+'</td><td>'+ (r?M.diff(base?.params||[],r.params).length:0)+' 项</td><td class="muted small">'+date(r?.at)+'</td><td>'+link('打开',fileUrl(file)+'?branch='+e(b.id),'eye','sm quiet')+' '+link('合并更新',fileUrl(file,'merge')+'?target='+e(b.id),'branch','sm')+'</td></tr>';}).join('')+'</tbody></table>'+(!bindings.length?empty('此机台没有关联配置文件','先在配置文件中添加机台配置。',link('查看文件','#/files')):'')+'</div>'+paginate(bindings.length)+'</section>',[{label:'机台',url:'#/machines'},{label:selected.name}],true);return;}const q=S.search.toLowerCase(),list=M.state.assets.filter(a=>files().some(file=>file.branches.some(b=>b.machineId===a.id))&&(a.name+' '+a.model).toLowerCase().includes(q));shell(heading('机台','查看一台机台使用的全部配置文件','')+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索机台编号或机型')+'</div><div class="table-wrap"><table class="table"><thead><tr><th>机台</th><th>机型</th><th>配置文件</th><th>管理状态</th><th>设备回读</th><th></th></tr></thead><tbody>'+pageRows(list).map(a=>'<tr><td><div class="file-cell">'+ic('machine')+'<a class="name" href="#/machines/'+e(a.id)+'">'+e(a.name)+'</a></div></td><td>'+e(a.model||'69X')+'</td><td>'+files().filter(file=>file.branches.some(b=>b.machineId===a.id)).length+' 个</td><td>'+badge('已保存','green')+'</td><td class="muted">未采集</td><td>'+link('查看配置','#/machines/'+e(a.id),'chevron','sm quiet')+'</td></tr>').join('')+'</tbody></table></div>'+paginate(list.length)+'</section>',[{label:'机台'}],true);}
+function tracePage(){const file=f(),all=file.revisions,latest=rev(file,file.branches.find(b=>b.kind==='baseline'&&b.headId)?.headId);if(!S.traceRevs.length)S.traceRevs=all.filter(r=>r.kind!=='initial').slice().sort((a,b)=>new Date(a.at)-new Date(b.at)).slice(-4).map(r=>r.id);const records=S.traceRevs.map(id=>rev(file,id)).filter(Boolean),identities=new Map();all.forEach(r=>r.params.forEach(p=>identities.set(p.id,p)));if(!S.traceIds.size)S.traceIds=new Set(latest?.params.slice(0,3).map(p=>p.id));const items=[...S.traceIds].map(id=>identities.get(id)).filter(Boolean).filter(p=>(p.name+' '+p.path).toLowerCase().includes(S.search.toLowerCase()));const rows=pageRows(items).map(p=>{let before,seen=false;return '<tr><td class="fixed-name"><button class="link-button name" data-action="trace-detail" data-param="'+e(p.id)+'">'+e(p.name)+'</button><div class="sub mono">'+e(p.path)+'</div></td>'+records.map(r=>{const current=r.params.find(x=>x.id===p.id),diff=seen?M.diff(before?[before]:[],current?[current]:[]):[];const changed=diff.length>0;before=current;seen=true;return '<td class="'+(changed?'trace-changed':'')+'">'+(current?'<div class="trace-value">'+e(val(current.value))+' <span class="muted small">'+e(current.unit)+'</span></div><div class="small">'+e(current.name)+'</div><div class="trace-meta">'+e(current.type)+' · '+e(val(current.min))+'–'+e(val(current.max))+'</div>'+(changed?'<div class="space-sm">'+diff.flatMap(x=>x.fields).map(x=>badge(fields[x.field]||x.field)).join(' ')+'</div>':''):'<span class="muted">此记录不存在</span>'+(changed?'<div class="space-sm">'+badge('已移除','amber')+'</div>':''))+'</td>';}).join('')+'</tr>';}).join('');shell(heading('参数变化','更名、属性和值按同一参数身份连续查看',btn('选择参数','choose-parameters','params')+btn('选择记录','trace-versions','history'))+'<section class="panel work-panel"><div class="toolbar"><label class="small">配置文件 <select class="control" id="trace-file">'+options(files(),file.id)+'</select></label>'+search(S.search,'搜索所选参数')+'<span class="spacer"></span><span class="small muted">'+S.traceIds.size+' 个参数 · '+records.length+' 条记录</span></div><div class="table-wrap"><table class="table trace-table"><thead><tr><th class="fixed-name">参数 / 文件字段</th>'+records.map(r=>'<th>'+e(recordShort(file,r))+' · 软件 '+e(softwareName(file,r.releaseId))+'<div class="sub">'+e(branch(file,r.branchId).label)+'</div></th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>'+(!rows?empty('没有匹配参数','可从文件参数表搜索、勾选后跟踪。',link('打开参数表',fileUrl(file,'parameters'))):'')+'</div>'+paginate(items.length)+'</section>',[{label:'参数'}],true);}
 function diffTable(changes,left,right,comment){return '<div class="table-wrap"><table class="table"><thead><tr><th>参数 / 变化</th><th>'+e(left)+'</th><th>'+e(right)+'</th>'+(comment?'<th></th>':'')+'</tr></thead><tbody>'+changes.map(d=>'<tr><td class="param-name"><strong>'+e(d.name)+'</strong><div class="sub mono">'+e((d.after||d.before)?.path)+'</div><div class="space-sm">'+(d.kind==='added'?badge('新增','green'):d.kind==='removed'?badge('移除','red'):d.fields.map(x=>badge(fields[x.field]||x.field)).join(' '))+'</div></td><td class="diff-detail">'+d.fields.map(x=>'<div class="field-change"><span class="muted">'+e(fields[x.field]||x.field)+'</span><span class="mono">'+fmt(x.before,x.field)+'</span></div>').join('')+'</td><td class="diff-detail">'+d.fields.map(x=>'<div class="field-change"><span class="muted">'+e(fields[x.field]||x.field)+'</span><span class="mono new">'+fmt(x.after,x.field)+'</span></div>').join('')+'</td>'+(comment?'<td>'+btn('评论','comment-param','comment','sm quiet','data-param="'+e(d.paramId)+'"')+'</td>':'')+'</tr>').join('')+'</tbody></table></div>';}
 function reviewBadge(r){return badge(({open:'待评审',approved:'已通过',merged:'已合并'})[r.status]||r.status,r.status==='merged'?'green':r.status==='approved'?'blue':'amber');}
 function reviewsPage(file){const list=reviews(file?.id).filter(r=>S.reviewFilter==='all'||(S.reviewFilter==='open'?r.status!=='merged':r.status==='merged'));shell((file?fileHeading(file,'')+fileTabs(file,'reviews'):heading('待评审修改','普通保存留在文件历史中；需要协作的修改在此处理。',''))+'<section class="panel work-panel"><div class="toolbar"><div class="pill-filter">'+[['open','待处理'],['merged','已合并'],['all','全部']].map(([key,label])=>'<button data-action="review-filter" data-filter="'+key+'" class="'+(S.reviewFilter===key?'active':'')+'">'+label+'</button>').join('')+'</div><span class="spacer"></span><span class="small muted">'+list.length+' 项</span></div><div class="table-wrap">'+(list.length?'<table class="table"><thead><tr><th>修改内容</th><th>状态</th><th>变化</th><th>提交人</th><th>讨论</th><th>提交时间</th><th></th></tr></thead><tbody>'+pageRows(list).map(r=>{const file=f(r.fileId),base=rev(file,r.baseRevisionId);return '<tr><td><a class="name" href="#/review/'+e(r.id)+'">'+e(r.title)+'</a><div class="sub">'+e(r.id)+' · '+e(file.name)+' · '+e(branch(file,r.branchId).label)+'</div></td><td>'+reviewBadge(r)+'</td><td>'+M.diff(base?.params||[],r.proposedParams).length+' 项</td><td>'+e(actor(r.authorId).name)+'</td><td>'+r.comments.filter(c=>!c.resolved).length+' 未解决</td><td class="muted small">'+date(r.at)+'</td><td>'+link('核对','#/review/'+e(r.id),'review','sm quiet')+'</td></tr>';}).join('')+'</tbody></table>':empty('没有待处理的评审','需要他人确认时，可在核对保存中选择提交评审。',link('查看文件','#/files')))+'</div>'+paginate(list.length)+'</section>',file?[{label:file.name,url:fileUrl(file)},{label:'评审'}]:[{label:'审阅修改'}],true);}
-function reviewPage(id){const r=reviews().find(x=>x.id===id);if(!r){shell(empty('当前工作区没有此评审','返回列表选择可查看的评审。',link('返回评审','#/reviews')),[{label:'评审'}]);return;}const file=f(r.fileId),b=branch(file,r.branchId),base=rev(file,r.baseRevisionId),changes=M.diff(base.params,r.proposedParams),unresolved=r.comments.filter(c=>!c.resolved).length,stale=r.status!=='merged'&&b.headId!==r.baseRevisionId,canApprove=admin()&&r.authorId!==M.state.actorId&&!unresolved&&!stale&&r.status==='open',canMerge=admin()&&r.status==='approved'&&!unresolved&&!stale;const check=(ok,label)=>'<div class="check '+(ok?'ok':'bad')+'">'+ic(ok?'check':'clock')+'<span>'+e(label)+'</span></div>';shell(heading(r.title,'<span class="mono">'+e(r.id)+'</span>'+reviewBadge(r)+'<span>'+e(actor(r.authorId).name)+' · '+date(r.at)+'</span>',link('返回文件',fileUrl(file),'file'))+'<div class="split"><div><section class="panel"><div class="toolbar"><span class="small">'+e(file.name)+' / '+e(b.label)+'</span><span class="spacer"></span><span class="small muted">'+changes.length+' 项变化</span></div><div class="section-pad">'+changeContext(r)+(r.description?'<p class="small muted space-sm">'+textWithLinks(r.description)+'</p>':'')+'</div>'+pagedDiffTable(changes,recordShort(file,base),'建议内容',r.status!=='merged')+'</section><section class="panel section-space"><div class="toolbar"><h3>讨论</h3><span class="count">'+r.comments.length+'</span></div>'+r.comments.map(c=>'<article class="thread"><div class="thread-head"><span class="avatar">'+e(actor(c.authorId).name[0])+'</span><strong>'+e(actor(c.authorId).name)+'</strong><span class="muted">'+date(c.at)+'</span><span class="spacer"></span>'+badge(c.resolved?'已解决':'待回复',c.resolved?'green':'amber')+'</div>'+(c.paramId?'<div class="thread-anchor">'+e(r.proposedParams.find(p=>p.id===c.paramId)?.name||c.paramId)+' · '+e(fields[c.field]||'参数')+'</div>':'')+'<p>'+textWithLinks(c.body)+'</p>'+(!c.resolved&&r.status!=='merged'?'<div class="pane-actions">'+btn('标记已解决','resolve-comment','check','sm quiet','data-review="'+e(r.id)+'" data-comment="'+e(c.id)+'"')+'</div>':'')+'</article>').join('')+(r.status!=='merged'?'<form id="comment-form" class="comment-form"><label class="field"><span class="label">评审意见或补充说明</span><textarea id="comment-body" required placeholder="说明需要核对的内容或验证结果"></textarea></label><div class="row"><select class="control" id="comment-param" aria-label="评论关联参数"><option value="">整个修改</option>'+options(r.proposedParams,'',p=>p.name)+'</select><span class="spacer"></span><button class="btn" type="submit">'+ic('comment')+'添加评论</button></div></form>':'')+'</section></div><aside><section class="panel"><div class="side-section"><h3>合并前核对</h3>'+check(!stale,stale?'目标已有新记录，需重新核对':'目标与提交时一致')+check(!unresolved,unresolved?unresolved+' 条讨论尚未解决':'讨论已解决')+check(r.approvals.length>0,r.approvals.length?'已由 '+actor(r.approvals[0].actorId).name+' 审阅':'等待另一位管理员审阅')+(stale?'<p class="error-text">原建议已保留，请与最新配置重新核对。</p>' + btn('重新核对','rebase-review','compare',null,'data-review="'+e(r.id)+'" '+disabled()) + '':'')+'<div class="pane-actions">'+(r.status==='merged'?link('查看保存结果',fileUrl(file,'parameters')+'?branch='+e(b.id)+'&revision='+e(r.mergedRevisionId),'check','primary'):r.status==='approved'?btn('合并到配置','merge-review','branch','primary','data-review="'+e(r.id)+'" '+(canMerge?'':'disabled')):btn('通过评审','approve-review','check','primary','data-review="'+e(r.id)+'" '+(canApprove?'':'disabled')))+'</div>'+(r.status!=='merged'&&r.authorId===M.state.actorId?'<p class="help-note">此评审需另一位管理员确认，可在右上角切换示例操作人。</p>':'')+'</div><div class="side-section"><div class="side-stat"><span>目标</span><strong>'+e(b.label)+'</strong></div><div class="side-stat"><span>提交时记录</span><strong>'+e(recordTitle(file,base))+'</strong></div><div class="side-stat"><span>软件版本</span><strong>'+e(base.releaseId)+'</strong></div><p class="side-note">合并更新管理系统中的配置，已有机台需单独采用。</p></div></section></aside></div>',[{label:file.name,url:fileUrl(file)},{label:r.id}]);}
+function reviewPage(id){const r=reviews().find(x=>x.id===id);if(!r){shell(empty('当前工作区没有此评审','返回列表选择可查看的评审。',link('返回评审','#/reviews')),[{label:'评审'}]);return;}const file=f(r.fileId),b=branch(file,r.branchId),base=rev(file,r.baseRevisionId),changes=M.diff(base.params,r.proposedParams),unresolved=r.comments.filter(c=>!c.resolved).length,stale=r.status!=='merged'&&b.headId!==r.baseRevisionId,canApprove=admin()&&r.authorId!==M.state.actorId&&!unresolved&&!stale&&r.status==='open',canMerge=admin()&&r.status==='approved'&&!unresolved&&!stale;const check=(ok,label)=>'<div class="check '+(ok?'ok':'bad')+'">'+ic(ok?'check':'clock')+'<span>'+e(label)+'</span></div>';shell(heading(r.title,'<span class="mono">'+e(r.id)+'</span>'+reviewBadge(r)+'<span>'+e(actor(r.authorId).name)+' · '+date(r.at)+'</span>',link('返回文件',fileUrl(file),'file'))+'<div class="split"><div><section class="panel"><div class="toolbar"><span class="small">'+e(file.name)+' / '+e(b.label)+'</span><span class="spacer"></span><span class="small muted">'+changes.length+' 项变化</span></div><div class="section-pad">'+changeContext(r)+(r.description?'<p class="small muted space-sm">'+textWithLinks(r.description)+'</p>':'')+'</div>'+pagedDiffTable(changes,recordShort(file,base),'建议内容',r.status!=='merged')+'</section><section class="panel section-space"><div class="toolbar"><h3>讨论</h3><span class="count">'+r.comments.length+'</span></div>'+r.comments.map(c=>'<article class="thread"><div class="thread-head"><span class="avatar">'+e(actor(c.authorId).name[0])+'</span><strong>'+e(actor(c.authorId).name)+'</strong><span class="muted">'+date(c.at)+'</span><span class="spacer"></span>'+badge(c.resolved?'已解决':'待回复',c.resolved?'green':'amber')+'</div>'+(c.paramId?'<div class="thread-anchor">'+e(r.proposedParams.find(p=>p.id===c.paramId)?.name||c.paramId)+' · '+e(fields[c.field]||'参数')+'</div>':'')+'<p>'+textWithLinks(c.body)+'</p>'+(!c.resolved&&r.status!=='merged'?'<div class="pane-actions">'+btn('标记已解决','resolve-comment','check','sm quiet','data-review="'+e(r.id)+'" data-comment="'+e(c.id)+'"')+'</div>':'')+'</article>').join('')+(r.status!=='merged'?'<form id="comment-form" class="comment-form"><label class="field"><span class="label">评审意见或补充说明</span><textarea id="comment-body" required placeholder="说明需要核对的内容或验证结果"></textarea></label><div class="row"><select class="control" id="comment-param" aria-label="评论关联参数"><option value="">整个修改</option>'+options(r.proposedParams,'',p=>p.name)+'</select><span class="spacer"></span><button class="btn" type="submit">'+ic('comment')+'添加评论</button></div></form>':'')+'</section></div><aside><section class="panel"><div class="side-section"><h3>合并前核对</h3>'+check(!stale,stale?'目标已有新记录，需重新核对':'目标与提交时一致')+check(!unresolved,unresolved?unresolved+' 条讨论尚未解决':'讨论已解决')+check(r.approvals.length>0,r.approvals.length?'已由 '+actor(r.approvals[0].actorId).name+' 审阅':'等待另一位管理员审阅')+(stale?'<p class="error-text">原建议已保留，请与最新配置重新核对。</p>' + btn('重新核对','rebase-review','compare',null,'data-review="'+e(r.id)+'" '+disabled()) + '':'')+'<div class="pane-actions">'+(r.status==='merged'?link('查看保存结果',fileUrl(file,'parameters')+'?branch='+e(b.id)+'&revision='+e(r.mergedRevisionId),'check','primary'):r.status==='approved'?btn('合并到配置','merge-review','branch','primary','data-review="'+e(r.id)+'" '+(canMerge?'':'disabled')):btn('通过评审','approve-review','check','primary','data-review="'+e(r.id)+'" '+(canApprove?'':'disabled')))+'</div>'+(r.status!=='merged'&&r.authorId===M.state.actorId?'<p class="help-note">此评审需另一位管理员确认，可在右上角切换示例操作人。</p>':'')+'</div><div class="side-section"><div class="side-stat"><span>目标</span><strong>'+e(b.label)+'</strong></div><div class="side-stat"><span>提交时记录</span><strong>'+e(recordTitle(file,base))+'</strong></div><div class="side-stat"><span>软件版本</span><strong>'+e(softwareName(file,base.releaseId))+'</strong></div><p class="side-note">合并更新管理系统中的配置，已有机台需单独采用。</p></div></section></aside></div>',[{label:file.name,url:fileUrl(file)},{label:r.id}]);}
 function comparePage(file){const b=branch(file),a=rev(file,S.compareA||S.query.left)||rev(file,b.headId);if(!a){shell(empty('没有可比较的保存记录','先初始化文件。',link('返回文件',fileUrl(file))),[{label:file.name}]);return;}const rightRecord=rev(file,S.compareB)||rev(file,a.parentIds[0])||a;S.compareA=a.id;S.compareB=rightRecord.id;const changes=M.diff(a.params,S.external?.params||rightRecord.params);shell(fileHeading(file,link('返回参数',fileUrl(file,'parameters'),'chevron'))+fileTabs(file,'parameters')+'<section class="panel work-panel"><div class="toolbar"><label class="small">左侧 <select class="control" id="compare-left">'+options(file.revisions.slice().reverse(),a.id,r=>recordTitle(file,r))+'</select></label>'+ic('compare')+'<label class="small">右侧 <select class="control" id="compare-right" '+(S.external?'disabled':'')+'>'+options(file.revisions.slice().reverse(),rightRecord.id,r=>recordTitle(file,r))+'</select></label><span class="spacer"></span><label class="btn">'+ic('upload')+'与文件比较<input class="visually-hidden" type="file" id="compare-upload" accept=".json,.xml"></label>'+(S.external?btn('清除文件','clear-external',null,'quiet'):'')+'</div>'+(S.external?'<div class="info-line">'+ic('file')+e(S.external.name)+' · 按完整字段路径对应；未知字段只在本次比较显示，不创建正式参数。</div>':'')+'<div class="diff-summary"><strong>'+changes.length+' 项变化</strong><span class="muted">'+changes.filter(x=>x.kind==='added').length+' 新增 · '+changes.filter(x=>x.kind==='removed').length+' 移除 · '+changes.filter(x=>x.fields.some(v=>v.field==='name')).length+' 更名</span><span class="spacer"></span>'+btn('交换左右','swap-compare','compare','sm quiet',S.external?'disabled':'')+'</div><div class="grow scroll-region">'+(changes.length?diffTable(pageRows(changes),recordTitle(file,a),S.external?.name||recordTitle(file,rightRecord)):empty('两份配置一致','名称、属性、取值方式和值均没有差异。'))+'</div>'+paginate(changes.length)+'</section>',[{label:file.name,url:fileUrl(file)},{label:'比较'}],true);}
 function commonBase(file,target,source){if(!target||!source)return null;const cache=new Map();function ancestors(id){if(cache.has(id))return cache.get(id);const found=new Set(),queue=[id];for(let i=0;i<queue.length;i++){const id=queue[i];if(found.has(id))continue;const r=rev(file,id);if(!r)continue;found.add(id);queue.push(...r.parentIds);}cache.set(id,found);return found;}const a=ancestors(target.id),b=ancestors(source.id),common=[...a].filter(id=>b.has(id)),nearest=common.filter(id=>!common.some(other=>other!==id&&ancestors(other).has(id)));return nearest.length===1?nearest[0]:null;}
 function conflictFields(row){const list=(row.conflicts||[]).map(x=>typeof x==='string'?x:x.field).filter(Boolean);return list.map(x=>fields[x]?x:'record').filter((x,i,a)=>a.indexOf(x)===i);}
@@ -1611,7 +1862,7 @@ const eventNames={revision_saved:'保存配置',configuration_saved:'保存配�
 function recordsPage(file){const q=S.search.toLowerCase(),list=M.state.events.filter(ev=>ev.workspaceId===M.state.workspaceId&&(!file||ev.fileId===file.id||ev.details?.fileIds?.includes(file.id))).filter(ev=>[eventNames[ev.action],actor(ev.actorId).name,ev.details?.reason,ev.details?.message,ev.details?.title,ev.fileId,ev.id].join(' ').toLowerCase().includes(q));shell((file?fileHeading(file,'')+fileTabs(file,'records'):heading('操作记录','查看谁在何时做了什么，以及当时的内容。',''))+'<section class="panel work-panel"><div class="toolbar">'+search(S.search,'搜索操作、人员或说明')+'<span class="spacer"></span>'+btn('导出记录','export-audit','download','quiet')+'</div><div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>操作</th><th>配置与说明</th><th>操作人</th><th>结果</th><th></th></tr></thead><tbody>'+pageRows(list).map(ev=>{const file=files().find(x=>x.id===ev.fileId),r=file&&rev(file,ev.revisionId);return '<tr><td class="small muted nowrap">'+date(ev.at)+'</td><td>'+e(eventNames[ev.action]||ev.action)+'</td><td>'+(file?'<a class="name" href="'+fileUrl(file)+'">'+e(file.name)+'</a>':'更新管理')+'<div class="sub">'+e(ev.details?.reason||ev.details?.message||ev.details?.title||recordDescription(r)||'')+'</div></td><td>'+e(actor(ev.actorId).name)+'</td><td>'+badge(eventResult(ev).label,eventResult(ev).color)+'</td><td>'+btn('详情','event-detail','eye','sm quiet','data-event="'+e(ev.id)+'"')+'</td></tr>';}).join('')+'</tbody></table>'+(!list.length?empty('没有匹配的记录','修改搜索条件，或清除筛选。',btn('清除筛选','clear-search')):'')+'</div>'+paginate(list.length)+'</section>',file?[{label:file.name,url:fileUrl(file)},{label:'操作记录'}]:[{label:'操作记录'}],true);}
 function sourceList(file){const all=Sources.list(M.state.workspaceId).filter(s=>!file||s.mappings.some(m=>m.selected&&m.target===file.id)),q=S.search.toLowerCase(),list=all.filter(s=>(s.name+' '+s.url).toLowerCase().includes(q));let content;if(S.sourceFilter==='runs'){const runs=Sources.listRuns(M.state.workspaceId).filter(r=>all.some(s=>s.id===r.sourceId));content='<table class="table"><thead><tr><th>时间</th><th>来源</th><th>结果</th><th>文件数</th><th>说明</th><th></th></tr></thead><tbody>'+pageRows(runs).map(r=>'<tr><td class="small muted">'+date(r.at)+'</td><td>'+e(r.name)+'</td><td>'+badge(({changed:'有更新待核对',unchanged:'无变化',partial:'部分完成',error:'获取失败',cancelled:'已取消'})[r.status]||r.status,r.status==='error'?'red':r.status==='changed'||r.status==='partial'?'amber':'green')+'</td><td>'+r.files+'</td><td class="small muted">'+e(r.message)+'</td><td>'+(r.status==='error'?btn('重试','run-source','update','sm','data-source="'+e(r.sourceId)+'" '+disabled()):'')+'</td></tr>').join('')+'</tbody></table>'+(!runs.length?empty('尚无获取记录','执行更新后在这里查看逐次结果。'):'');S.sourceTotal=runs.length;}else if(S.sourceFilter==='pending'){const candidates=all.flatMap(s=>Sources.candidates(M.state.workspaceId,s.id).map(c=>({s,c}))).filter(({c})=>!file||c.fileId===file.id);content='<table class="table"><thead><tr><th>配置文件 / 来源</th><th>接收配置</th><th>变化</th><th>获取时间</th><th></th></tr></thead><tbody>'+pageRows(candidates).map(({s,c})=>'<tr><td><strong>'+e(f(c.fileId).name)+'</strong><div class="sub">'+e(s.name)+'</div></td><td>'+e(branch(f(c.fileId),c.branchId).label)+'</td><td>'+badge(c.changed+' 项','amber')+'</td><td class="small muted">'+date(c.createdAt)+'</td><td>'+btn('核对更新','candidate','compare','sm','data-source="'+e(s.id)+'" data-candidate="'+e(c.id)+'"')+'</td></tr>').join('')+'</tbody></table>'+(!candidates.length?empty('没有待核对的更新','获取到的变化会先列在这里，不会自动保存配置。',btn('获取更新','run-all','update',null,disabled())):'');S.sourceTotal=candidates.length;}else{content='<table class="table"><thead><tr><th>更新来源</th><th>内容</th><th>状态</th><th>自动更新</th><th>最近获取</th><th></th></tr></thead><tbody>'+pageRows(list).map(s=>'<tr><td><strong>'+e(s.name)+'</strong><span class="source-url" title="'+e(s.url)+'">'+e(s.url)+'</span></td><td>'+e(({file:'单文件',html:'网页列表',zip:'压缩包',json:'JSON 列表',xml:'XML 列表'})[s.kind]||s.kind)+'<div class="sub">'+s.mappings.filter(m=>m.selected).length+' 个文件</div></td><td>'+badge(s.status==='running'?'正在获取':s.status==='error'?'获取失败':s.pending?'有更新待核对':'可用',s.status==='error'?'red':s.pending?'amber':'green')+'</td><td class="small">'+e(s.schedule||'仅手动')+'</td><td class="small muted">'+date(s.last)+'</td><td class="nowrap">'+btn(s.status==='running'?'正在获取':'更新','run-source','update','sm','data-source="'+e(s.id)+'" '+(admin()&&s.status!=='running'?'':'disabled'))+' '+link('设置','#/sources/new?source='+e(s.id),'settings','sm quiet')+'</td></tr>').join('')+'</tbody></table>'+(!list.length?empty(file?'此文件尚未配置更新来源':'还没有更新来源','添加网页地址或下载地址，先预览再保存。',link('添加来源','#/sources/new'+(file?'?file='+e(file.id):''),'plus','primary')):'');S.sourceTotal=list.length;}shell((file?fileHeading(file,link('添加来源','#/sources/new?file='+e(file.id),'plus','primary'))+fileTabs(file,'updates'):heading('更新管理','',btn('获取全部','run-all','update',null,disabled())+link('添加来源','#/sources/new','plus','primary')))+'<section class="panel work-panel"><div class="toolbar"><div class="pill-filter">'+[['all','更新来源'],['pending','待核对'],['runs','获取记录']].map(([key,label])=>'<button data-action="source-filter" data-filter="'+key+'" class="'+(S.sourceFilter===key?'active':'')+'">'+label+'</button>').join('')+'</div><span class="spacer"></span>'+(S.sourceFilter==='all'?search(S.search,'搜索名称或地址'):'')+'</div><div class="table-wrap">'+content+'</div>'+paginate(S.sourceTotal)+'</section>',file?[{label:file.name,url:fileUrl(file)},{label:'更新来源'}]:[{label:'更新管理'}],true);}
 function sourceDraft(){if(!S.sourceDraft){S.sourceDraft=Sources.draft(M.state.workspaceId,S.query.source||undefined,S.query.file||undefined);if(!S.query.source)S.sourceDraft.kind='auto';S.sourceDraft.reason='';S.sourceDraft.message='';S.sourceDraft.links=[];S.sourceDraft.linksText='';}return S.sourceDraft;}
-function sourceForm(){const d=sourceDraft(),p=S.sourcePreview;const values=Object.assign({kind:'auto',path:'a[href]',urlField:'href',nameField:'text',include:'*.xml;*.json',archive:'**/*.xml;**/*.json',connection:'无',schedule:'仅手动更新',template:'',model:'69X',version:'691'},d);let preview='';if(S.sourceBusy)preview='<div class="section-pad" role="status"><h3>正在读取示例并检查文件…</h3><div class="skeleton"></div><div class="skeleton" style="width:45%"></div></div>';else if(p)preview='<div class="source-result"><h3>'+e(p.title)+' '+badge('演示结果','blue')+'</h3><div class="info-line">'+ic('check')+'识别到 '+p.files.length+' 个文件，请核对接收位置。</div><div class="table-wrap"><table class="table"><thead><tr><th class="check-cell"><input type="checkbox" data-select-preview-all aria-label="全选来源文件"></th><th>来源文件</th><th>格式 / 参数</th><th>接收文件与版本</th></tr></thead><tbody>'+p.files.map((x,i)=>'<tr><td class="check-cell"><input type="checkbox" data-preview-select="'+i+'" aria-label="选择 '+e(x.name)+'" '+(x.selected?'checked':'')+'></td><td>'+e(x.name)+'<div class="sub mono">'+e(x.path)+'</div></td><td>'+e(x.format)+' · '+x.count+' 项</td><td><select data-preview-target="'+i+'" aria-label="'+e(x.name)+' 接收文件"><option value="">请选择接收位置</option>'+options(files(),x.target)+'</select>'+(x.target?'<div class="space-sm"><select data-preview-branch="'+i+'" aria-label="'+e(x.name)+' 接收版本">'+options(f(x.target).branches.filter(b=>b.kind==='baseline'),x.branchId,b=>(b.kind==='baseline'?'版本基线':b.label)+' · 软件 '+b.releaseId)+'</select></div>':'')+'</td></tr>').join('')+'</tbody></table></div><div class="footer">仅演示所列文件；正式测试将报告已检查与未检查范围。</div></div>';shell(heading(d.id?'编辑更新来源':'添加更新来源','',link('返回更新管理','#/sources','chevron'))+'<section class="panel"><div class="form-body"><div class="field"><label for="source-url">网页或下载地址</label><div class="row"><input id="source-url" value="'+e(values.url||'')+'" placeholder="https://…" autocomplete="off">'+btn(S.sourceBusy?'正在识别':'识别并预览','detect-source','search','primary',S.sourceBusy?'disabled':'')+'</div><small>原型使用下方样例，不访问真实网址。</small></div><div class="row wrap space-sm" style="margin-bottom:20px"><span class="small muted">载入样例</span>'+[['html','网页列表'],['zip','ZIP 压缩包'],['json','JSON 列表'],['xml','XML 列表'],['file','单文件']].map(([key,label])=>btn(label,'source-sample',null,'sm quiet','data-kind="'+key+'"')).join('')+'</div><div class="form-grid"><div class="field"><label for="source-name">来源名称</label><input id="source-name" value="'+e(values.name||'')+'" placeholder="例如：设备参数中心"></div><div class="field"><label for="source-connection">登录连接</label><select id="source-connection">'+['无','参数中心'].map(x=>'<option '+(values.connection===x?'selected':'')+'>'+x+'</option>').join('')+'</select><small>需要登录时复用已有连接和保活设置。</small></div></div><details><summary>手动设置提取规则</summary><div class="form-grid"><div class="field"><label for="source-kind">内容类型</label><select id="source-kind">'+[['auto','自动识别'],['file','单文件'],['html','网页列表'],['zip','压缩包'],['json','JSON 列表'],['xml','XML 列表']].map(([key,label])=>'<option value="'+key+'" '+(values.kind===key?'selected':'')+'>'+label+'</option>').join('')+'</select></div><div class="field"><label for="source-path">列表位置</label><input id="source-path" value="'+e(values.path)+'"><small>网页 a[href]；JSON /files；XML ./files/file。</small></div><div class="field"><label for="source-url-field">下载链接字段</label><input id="source-url-field" value="'+e(values.urlField)+'"></div><div class="field"><label for="source-name-field">文件名字段</label><input id="source-name-field" value="'+e(values.nameField)+'"></div><div class="field"><label for="source-include">保留的文件</label><input id="source-include" value="'+e(values.include)+'"></div><div class="field"><label for="source-archive">包内文件</label><input id="source-archive" value="'+e(values.archive)+'"></div></div></details><details><summary>通过要素组成地址</summary><div class="form-grid"><div class="field full"><label for="url-template">地址模板</label><input id="url-template" value="'+e(values.template)+'" placeholder="https://config.example.invalid/{model}/{version}/files.json"></div><div class="field"><label for="url-model">机型</label><input id="url-model" value="'+e(values.model)+'"></div><div class="field"><label for="url-version">软件版本</label><input id="url-version" value="'+e(values.version)+'"></div></div>'+btn('组成地址','compose-url','link')+'</details><details><summary>自动更新设置</summary><div class="field"><label for="source-schedule">更新频率</label><select id="source-schedule">'+['仅手动更新','每天 09:00','每 6 小时'].map(x=>'<option '+(values.schedule===x?'selected':'')+'>'+x+'</option>').join('')+'</select><small>自动获取只产生待核对内容，不自动保存配置。</small></div></details>'+modificationFields('source',d)+'<div id="source-error" class="error-text" role="alert"></div><div id="source-preview">'+preview+'</div></div><div class="footer"><span id="preview-hint">'+(p?'已载入示例清单；真实网址与提取规则尚未测试。':'识别并核对文件后保存。')+'</span><span class="spacer"></span>'+link('取消','#/sources',null,'quiet')+btn('保存来源','save-source','check','primary','id="save-source" '+(p&&admin()?'':'disabled'))+'</div></section>',[{label:'更新管理',url:'#/sources'},{label:d.id?'编辑来源':'添加来源'}]);}
+function sourceForm(){const d=sourceDraft(),p=S.sourcePreview;const values=Object.assign({kind:'auto',path:'a[href]',urlField:'href',nameField:'text',include:'*.xml;*.json',archive:'**/*.xml;**/*.json',connection:'无',schedule:'仅手动更新',template:'',model:'69X',version:'691'},d);let preview='';if(S.sourceBusy)preview='<div class="section-pad" role="status"><h3>正在读取示例并检查文件…</h3><div class="skeleton"></div><div class="skeleton" style="width:45%"></div></div>';else if(p)preview='<div class="source-result"><h3>'+e(p.title)+' '+badge('演示结果','blue')+'</h3><div class="info-line">'+ic('check')+'识别到 '+p.files.length+' 个文件，请核对接收位置。</div><div class="table-wrap"><table class="table"><thead><tr><th class="check-cell"><input type="checkbox" data-select-preview-all aria-label="全选来源文件"></th><th>来源文件</th><th>格式 / 参数</th><th>接收文件与版本</th></tr></thead><tbody>'+p.files.map((x,i)=>'<tr><td class="check-cell"><input type="checkbox" data-preview-select="'+i+'" aria-label="选择 '+e(x.name)+'" '+(x.selected?'checked':'')+'></td><td>'+e(x.name)+'<div class="sub mono">'+e(x.path)+'</div></td><td>'+e(x.format)+' · '+x.count+' 项</td><td><select data-preview-target="'+i+'" aria-label="'+e(x.name)+' 接收文件"><option value="">请选择接收位置</option>'+options(files(),x.target)+'</select>'+(x.target?'<div class="space-sm"><select data-preview-branch="'+i+'" aria-label="'+e(x.name)+' 接收版本">'+options(f(x.target).branches.filter(b=>b.kind==='baseline'),x.branchId,b=>(b.kind==='baseline'?'版本基线':b.label)+' · 软件 '+softwareName(f(x.target),b.releaseId))+'</select></div>':'')+'</td></tr>').join('')+'</tbody></table></div><div class="footer">仅演示所列文件；正式测试将报告已检查与未检查范围。</div></div>';shell(heading(d.id?'编辑更新来源':'添加更新来源','',link('返回更新管理','#/sources','chevron'))+'<section class="panel"><div class="form-body"><div class="field"><label for="source-url">网页或下载地址</label><div class="row"><input id="source-url" value="'+e(values.url||'')+'" placeholder="https://…" autocomplete="off">'+btn(S.sourceBusy?'正在识别':'识别并预览','detect-source','search','primary',S.sourceBusy?'disabled':'')+'</div><small>原型使用下方样例，不访问真实网址。</small></div><div class="row wrap space-sm" style="margin-bottom:20px"><span class="small muted">载入样例</span>'+[['html','网页列表'],['zip','ZIP 压缩包'],['json','JSON 列表'],['xml','XML 列表'],['file','单文件']].map(([key,label])=>btn(label,'source-sample',null,'sm quiet','data-kind="'+key+'"')).join('')+'</div><div class="form-grid"><div class="field"><label for="source-name">来源名称</label><input id="source-name" value="'+e(values.name||'')+'" placeholder="例如：设备参数中心"></div><div class="field"><label for="source-connection">登录连接</label><select id="source-connection">'+['无','参数中心'].map(x=>'<option '+(values.connection===x?'selected':'')+'>'+x+'</option>').join('')+'</select><small>需要登录时复用已有连接和保活设置。</small></div></div><details><summary>手动设置提取规则</summary><div class="form-grid"><div class="field"><label for="source-kind">内容类型</label><select id="source-kind">'+[['auto','自动识别'],['file','单文件'],['html','网页列表'],['zip','压缩包'],['json','JSON 列表'],['xml','XML 列表']].map(([key,label])=>'<option value="'+key+'" '+(values.kind===key?'selected':'')+'>'+label+'</option>').join('')+'</select></div><div class="field"><label for="source-path">列表位置</label><input id="source-path" value="'+e(values.path)+'"><small>网页 a[href]；JSON /files；XML ./files/file。</small></div><div class="field"><label for="source-url-field">下载链接字段</label><input id="source-url-field" value="'+e(values.urlField)+'"></div><div class="field"><label for="source-name-field">文件名字段</label><input id="source-name-field" value="'+e(values.nameField)+'"></div><div class="field"><label for="source-include">保留的文件</label><input id="source-include" value="'+e(values.include)+'"></div><div class="field"><label for="source-archive">包内文件</label><input id="source-archive" value="'+e(values.archive)+'"></div></div></details><details><summary>通过要素组成地址</summary><div class="form-grid"><div class="field full"><label for="url-template">地址模板</label><input id="url-template" value="'+e(values.template)+'" placeholder="https://config.example.invalid/{model}/{version}/files.json"></div><div class="field"><label for="url-model">机型</label><input id="url-model" value="'+e(values.model)+'"></div><div class="field"><label for="url-version">软件版本</label><input id="url-version" value="'+e(values.version)+'"></div></div>'+btn('组成地址','compose-url','link')+'</details><details><summary>自动更新设置</summary><div class="field"><label for="source-schedule">更新频率</label><select id="source-schedule">'+['仅手动更新','每天 09:00','每 6 小时'].map(x=>'<option '+(values.schedule===x?'selected':'')+'>'+x+'</option>').join('')+'</select><small>自动获取只产生待核对内容，不自动保存配置。</small></div></details>'+modificationFields('source',d)+'<div id="source-error" class="error-text" role="alert"></div><div id="source-preview">'+preview+'</div></div><div class="footer"><span id="preview-hint">'+(p?'已载入示例清单；真实网址与提取规则尚未测试。':'识别并核对文件后保存。')+'</span><span class="spacer"></span>'+link('取消','#/sources',null,'quiet')+btn('保存来源','save-source','check','primary','id="save-source" '+(p&&admin()?'':'disabled'))+'</div></section>',[{label:'更新管理',url:'#/sources'},{label:d.id?'编辑来源':'添加来源'}]);}
 function captureSource(){const d=sourceDraft();[['source-url','url'],['source-name','name'],['source-kind','kind'],['source-path','path'],['source-url-field','urlField'],['source-name-field','nameField'],['source-include','include'],['source-archive','archive'],['source-connection','connection'],['source-schedule','schedule'],['source-reason','reason'],['source-links','linksText'],['url-template','template'],['url-model','model'],['url-version','version']].forEach(([id,key])=>{const el=document.getElementById(id);if(el)d[key]=el.value;});return d;}
 function invalidateSource(){S.sourceSeq++;S.sourceBusy=false;S.sourcePreview=null;Sources.invalidate('source-form');const preview=document.getElementById('source-preview');if(preview)preview.innerHTML='';const save=document.getElementById('save-source');if(save)save.disabled=true;const hint=document.getElementById('preview-hint');if(hint)hint.textContent='提取设置已改变，请重新识别。';const detect=document.querySelector('[data-action="detect-source"]');if(detect){detect.disabled=false;detect.innerHTML=ic('search')+'识别并预览';}}
 async function detectSource(){const d=copy(captureSource()),wid=M.state.workspaceId,seq=++S.sourceSeq;S.sourceBusy=true;S.sourcePreview=null;render();try{const p=await Sources.detect(wid,d,{contextKey:'source-form'});if(seq!==S.sourceSeq||wid!==M.state.workspaceId||S.route.join('/')!=='sources/new')return;if(Sources.fingerprint(wid,captureSource())!==p.fingerprint){invalidateSource();return;}S.sourcePreview=p;S.sourceBusy=false;render();}catch(err){if(seq===S.sourceSeq){S.sourceBusy=false;render();throw err;}}}
@@ -1619,7 +1870,7 @@ function initializePage(){if(!S.init)S.init={name:'',releaseId:'691',description
 function toast(message){const el=document.getElementById('toast');el.textContent=message;el.hidden=false;clearTimeout(S.toastTimer);S.toastTimer=setTimeout(()=>{el.hidden=true;},4500);}
 function showDialog(title,body,footer,wide){const d=document.getElementById('dialog');S.restoreFocus=document.activeElement;d.className=wide?'wide':'';d.innerHTML='<div class="dialog-header"><h2 id="dialog-title" tabindex="-1">'+e(title)+'</h2>'+btn('','close-dialog','close','quiet icon-only','aria-label="关闭"')+'</div><div class="dialog-body">'+body+'</div><div class="dialog-footer">'+(footer||btn('关闭','close-dialog'))+'</div>';if(!d.open)d.showModal();(d.querySelector('[autofocus]')||d.querySelector('h2')).focus();}
 function showDrawer(title,body,footer){const d=document.getElementById('drawer');S.restoreFocus=document.activeElement;d.innerHTML='<div class="dialog-header"><h2 id="drawer-title" tabindex="-1">'+e(title)+'</h2>'+btn('','close-drawer','close','quiet icon-only','aria-label="关闭详情"')+'</div><div class="dialog-body">'+body+'</div><div class="dialog-footer">'+(footer||btn('关闭','close-drawer'))+'</div>';if(!d.open)d.showModal();d.querySelector('h2').focus();}
-function closeDialog(id){document.getElementById(id||'dialog').close();if(S.restoreFocus?.isConnected)S.restoreFocus.focus();}
+function closeDialog(id){document.getElementById(id||'dialog').close();if(!id||id==='dialog')S.releaseDraft=null;if(S.restoreFocus?.isConnected)S.restoreFocus.focus();}
 function errorMessage(err){const message=err.message||String(err),d=document.querySelector('dialog[open]');if(d){let alert=d.querySelector('[role="alert"]');if(!alert){alert=document.createElement('p');alert.className='error-text';alert.setAttribute('role','alert');d.querySelector('.dialog-body').append(alert);}alert.textContent=message;}else if(S.route.join('/')==='sources/new'){const node=document.getElementById('source-error');if(node)node.textContent=message;else toast(message);}else toast(message);}
 function go(url){if(location.hash===url){navigate();return;}location.hash=url;}
 function ensureAdmin(){if(!admin())throw new Error('此操作需要管理员。访客可查看、比较和导出。');}
@@ -1628,14 +1879,14 @@ function download(text,name,mime){const url=URL.createObjectURL(new Blob([text],
 async function readFile(input,reference){const file=input.files?.[0];if(!file)return null;if(file.size>5*1024*1024)throw new Error('此原型限制单文件 5 MB，请选择较小样本。');return MCPrototypeSources.parseText(await file.text(),file.name,reference||[]);}
 function beginEdit(){ensureAdmin();const file=f(),b=branch(file),r=rev(file,b.headId);S.revisionId=null;S.edit=copy(S.drafts[draftKey(file.id,b.id)])||{fileId:file.id,branchId:b.id,headId:r?.id||null,params:copy(r?.params||[]),message:'',links:[],linksText:''};render();}
 function validateEdit(){if(!S.edit)throw new Error('没有正在编辑的内容');for(const p of S.edit.params){if(!String(p.name||'').trim())throw new Error('参数名不能为空');if(p.type==='number'&&(p.value===null||p.value===undefined))throw new Error(p.name+'：请输入有效数值');if(p.type==='boolean'&&typeof p.value!=='boolean')throw new Error(p.name+'：请选择 true 或 false');}return S.edit;}
-function reviewEdit(){const edit=validateEdit(),file=f(edit.fileId),b=branch(file,edit.branchId),before=rev(file,edit.headId),changes=M.diff(before?.params||[],edit.params),nextBase=reference(file,b,before,edit),basisChanged=b.kind==='machine'&&nextBase?.id!==before?.baseRevisionId;if(!changes.length&&!basisChanged){toast('没有需要保存的修改');return;}showDialog('核对本次修改','<p>'+e(b.label)+' · '+changes.length+' 项变化，保存会生成新记录。</p>'+(basisChanged?'<div class="notice">采用基线由 '+e(before?.baseRevisionId?recordTitle(file,rev(file,before.baseRevisionId)):'未记录')+' 变更为 '+e(nextBase?recordTitle(file,nextBase):'未记录')+' · 软件 '+e(nextBase?.releaseId||b.releaseId)+'</div>':'')+pagedDiffTable(changes,'保存前','保存后')+(edit.operationDescription?'<div class="notice">'+e(edit.operationDescription)+'</div>':'')+modificationFields('save',edit)+'<p class="help-note">需要他人确认时选择提交评审；普通修改可直接保存。</p>',btn('返回编辑','close-dialog',null,'quiet')+btn('提交评审','submit-review','review')+btn('保存配置','commit-edit','check','primary'),true);}
+function reviewEdit(){const edit=validateEdit(),file=f(edit.fileId),b=branch(file,edit.branchId),before=rev(file,edit.headId),changes=M.diff(before?.params||[],edit.params),nextBase=reference(file,b,before,edit),basisChanged=b.kind==='machine'&&nextBase?.id!==before?.baseRevisionId;if(!changes.length&&!basisChanged){toast('没有需要保存的修改');return;}showDialog('核对本次修改','<p>'+e(b.label)+' · '+changes.length+' 项变化，保存会生成新记录。</p>'+(basisChanged?'<div class="notice">采用基线由 '+e(before?.baseRevisionId?recordTitle(file,rev(file,before.baseRevisionId)):'未记录')+' 变更为 '+e(nextBase?recordTitle(file,nextBase):'未记录')+' · 软件 '+e(softwareName(file,nextBase?.releaseId||b.releaseId))+'</div>':'')+pagedDiffTable(changes,'保存前','保存后')+(edit.operationDescription?'<div class="notice">'+e(edit.operationDescription)+'</div>':'')+modificationFields('save',edit)+'<p class="help-note">需要他人确认时选择提交评审；普通修改可直接保存。</p>',btn('返回编辑','close-dialog',null,'quiet')+btn('提交评审','submit-review','review')+btn('保存配置','commit-edit','check','primary'),true);}
 function preserveHead(edit){const b=branch(f(edit.fileId),edit.branchId);if(b.headId!==edit.headId){const err=new Error('配置已有新的保存记录，请保留输入并重新核对');err.code='STALE_HEAD';throw err;}}
 function finishEdit(result){const edit=S.edit,file=f(edit.fileId),bid=edit.branchId;let sourcePending=false;if(edit.sourceId&&edit.candidateId){const state=Sources.markApplied(M.state.workspaceId,edit.sourceId,edit.candidateId,result.id);sourcePending=!state.applied;}delete S.drafts[draftKey(file.id,bid)];S.roadmapSelected=result.id;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(file,result.id,roadmapOptions(file)));S.roadmapLocate=result.id;S.edit=null;S.revisionId=null;S.mergePlan=null;S.decisions={};S.branchId=bid;closeDialog();go(fileUrl(file,'parameters')+'?branch='+encodeURIComponent(bid));toast('已保存为 '+recordTitle(file,result)+'。'+(sourcePending?'尚未完全采用的来源内容仍待核对。':'历史记录已保留。'));}
 function stash(){if(S.edit)S.drafts[draftKey(S.edit.fileId,S.edit.branchId)]=copy(S.edit);}
 function leaveDialog(callback){S.leaveCallback=callback;showDialog('保留本次修改？','<p>当前编辑尚未保存。暂存后可继续编辑；放弃本次修改不会删除已保存记录。</p>',btn('继续编辑','close-dialog',null,'quiet')+btn('放弃本次修改','discard-leave')+btn('暂存并离开','stash-leave','check','primary'));}
 function staleDialog(){const edit=S.edit,file=f(edit.fileId),old=rev(file,edit.headId),latest=rev(file,branch(file,edit.branchId).headId);const merged=copy(latest.params),changes=M.diff(old?.params||[],edit.params),conflicts=[],equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);for(const change of changes){const original=old?.params.find(p=>p.id===change.paramId),server=latest.params.find(p=>p.id===change.paramId),local=edit.params.find(p=>p.id===change.paramId),at=merged.findIndex(p=>p.id===change.paramId);if(original&&server&&local){for(const field of change.fields){if(!equal(server[field.field],original[field.field])&&!equal(server[field.field],local[field.field]))conflicts.push({paramId:change.paramId,name:change.name,field:field.field,original:original[field.field],server:server[field.field],local:local[field.field]});else merged[at][field.field]=copy(local[field.field]);}}else if(!original&&!server&&local)merged.push(copy(local));else if(original&&server&&!local&&M.diff([original],[server]).length===0)merged.splice(at,1);else if(!server&&!local){}else if(server&&local&&equal(server,local)){}else conflicts.push({paramId:change.paramId,name:change.name,field:'membership',original,server,local});}S.stale={headId:latest.id,params:merged,conflicts};function display(v,field){if(field!=='membership')return fmt(v,field);return v?['name','type','unit','min','max','value','mode'].map(key=>'<div class="field-change"><span class="muted">'+fields[key]+'</span>'+fmt(v[key],key)+'</div>').join(''):'已移除';}showDialog('重新核对最新配置','<p>同一字段的冲突逐项选择，其余独立修改已保留。参数新增或移除需整体确认。</p><div class="table-wrap"><table class="table"><thead><tr><th>参数 / 字段</th><th>编辑前</th><th>最新保存</th><th>本次输入</th><th>采用</th></tr></thead><tbody>'+conflicts.map((c,i)=>'<tr><td>'+e(c.name)+'<div class="sub">'+e(fields[c.field])+'</div></td><td class="diff-detail">'+display(c.original,c.field)+'</td><td class="diff-detail">'+display(c.server,c.field)+'</td><td class="diff-detail">'+display(c.local,c.field)+'</td><td><select data-stale-choice="'+i+'" aria-label="'+e(c.name+' '+fields[c.field])+' 冲突处理"><option value="">请选择</option><option value="server">最新保存</option><option value="local">本次输入</option></select></td></tr>').join('')+'</tbody></table></div>'+(!conflicts.length?'<div class="notice">没有同一字段的冲突，请核对组合后的值和属性。</div>':''),btn('返回编辑','close-dialog')+btn('采用并继续核对','apply-stale','check','primary'),true);}
 function detailParam(id){const file=f(),r=current(file)||rev(file,file.branches.find(b=>b.headId)?.headId),p=(S.edit?.params||r?.params||[]).find(p=>p.id===id);if(!p)throw new Error('当前记录没有此参数，请选择包含它的记录');const history=M.history(file.id,id),origins=r?.params.some(x=>x.id===id)?M.blame(file.id,r.id,id):[];showDrawer(p.name,'<div class="side-stat"><span>文件字段</span></div><p class="mono long">'+e(p.path)+'</p><div class="side-stat"><span>当前值</span><strong class="mono">'+e(val(p.value))+' '+e(p.unit)+'</strong></div><div class="side-stat"><span>类型 / 范围</span><strong>'+e(p.type)+' · '+e(val(p.min))+'–'+e(val(p.max))+'</strong></div><div class="section-head space-top"><h3>各字段的最后修改</h3>'+badge(r?recordShort(file,r):'草稿')+'</div><table class="table"><thead><tr><th>字段</th><th>来源记录</th><th>修改人</th></tr></thead><tbody>'+origins.map(x=>'<tr><td>'+e(fields[x.field])+'</td><td>'+(x.known?'<button class="link-button mono" data-action="roadmap-detail" data-revision="'+e(x.originRevisionId)+'">'+e(rev(file,x.originRevisionId)?recordTitle(file,rev(file,x.originRevisionId)):'未记录')+'</button>':'未记录')+(x.known&&x.appliedRevisionId!==x.originRevisionId?'<div class="sub">采用于 '+e(rev(file,x.appliedRevisionId)?recordShort(file,rev(file,x.appliedRevisionId)):'未记录')+'</div>':'')+'</td><td>'+e(x.known?actor(x.authorId).name:'作者未知')+'</td></tr>').join('')+'</tbody></table><div class="section-head space-top"><h3>参数历史</h3><span class="small muted">'+history.length+' 次变化</span></div><div class="timeline">'+history.slice(0,15).map(x=>'<div class="timeline-item"><span class="timeline-dot">'+ic('history')+'</span><div class="timeline-body"><button class="link-button" data-action="roadmap-detail" data-revision="'+e(x.revisionId)+'">'+e(recordTitle(file,rev(file,x.revisionId)))+'</button><div class="muted">'+e(actor(x.authorId).name)+' · '+date(x.at)+'</div><div class="history-reason">'+textWithLinks(recordDescription(rev(file,x.revisionId)))+'</div>'+relatedLinks(rev(file,x.revisionId)?.links)+x.fields.map(field=>'<div class="field-change"><span class="muted">'+e(fields[field.field])+'</span><span class="mono">'+fmt(field.before,field.field)+'</span>'+ic('arrow')+'<span class="mono">'+fmt(field.after,field.field)+'</span></div>').join('')+'</div></div>').join('')+'</div>'+(history.length>15?'<p class="help-note">当前预览最近 15 次变化，生产历史将完整分页。</p>':''),(S.edit?btn('修改名称与属性','edit-definition','edit',null,'data-param="'+e(id)+'"'):'')+btn('跨版本查看','trace-one','params','primary','data-param="'+e(id)+'"'));}
-function exportSet(machineId){const selected=machineId?files().filter(file=>file.branches.some(b=>b.machineId===machineId)):files().filter(file=>S.selected.has(file.id));if(!selected.length)throw new Error('请先选择配置文件');const bundle=selected.map(file=>{const b=machineId?file.branches.find(b=>b.machineId===machineId):file.branches.find(b=>b.kind==='baseline'&&b.headId),r=rev(file,b?.headId);if(!r)throw new Error(file.name+' 尚未保存，不能导出');return {fileId:file.id,fileName:file.name,revisionId:r.id,label:recordTitle(file,r),reason:r.reason,links:r.links||[],releaseId:r.releaseId,baseRevisionId:r.baseRevisionId,content:MCPrototypeSources.serialize(r.params,file.format)};});S.bundle={workspaceId:M.state.workspaceId,files:bundle};showDialog('导出文件集','<p>'+bundle.length+' 个文件，各自固定到所列记录。原型下载 JSON 文件集，正式实现导出 ZIP 和清单。</p><div class="table-wrap"><table class="table" style="min-width:0"><thead><tr><th>文件</th><th>记录</th><th>软件版本</th></tr></thead><tbody>'+bundle.map(x=>'<tr><td>'+e(x.fileName)+'</td><td>'+e(x.label)+'</td><td>'+e(x.releaseId)+'</td></tr>').join('')+'</tbody></table></div>',btn('取消','close-dialog')+btn('下载文件集','download-set','download','primary'));}
+function exportSet(machineId){const selected=machineId?files().filter(file=>file.branches.some(b=>b.machineId===machineId)):files().filter(file=>S.selected.has(file.id));if(!selected.length)throw new Error('请先选择配置文件');const bundle=selected.map(file=>{const b=machineId?file.branches.find(b=>b.machineId===machineId):file.branches.find(b=>b.kind==='baseline'&&b.headId),r=rev(file,b?.headId);if(!r)throw new Error(file.name+' 尚未保存，不能导出');return {fileId:file.id,fileName:file.name,revisionId:r.id,label:recordTitle(file,r),reason:r.reason,links:r.links||[],releaseId:r.releaseId,baseRevisionId:r.baseRevisionId,content:MCPrototypeSources.serialize(r.params,file.format)};});S.bundle={workspaceId:M.state.workspaceId,files:bundle};showDialog('导出文件集','<p>'+bundle.length+' 个文件，各自固定到所列记录。原型下载 JSON 文件集，正式实现导出 ZIP 和清单。</p><div class="table-wrap"><table class="table" style="min-width:0"><thead><tr><th>文件</th><th>记录</th><th>软件版本</th></tr></thead><tbody>'+bundle.map(x=>'<tr><td>'+e(x.fileName)+'</td><td>'+e(x.label)+'</td><td>'+e(softwareName(f(x.fileId),x.releaseId))+'</td></tr>').join('')+'</tbody></table></div>',btn('取消','close-dialog')+btn('下载文件集','download-set','download','primary'));}
 function chooseParams(query){
   const file=f(),identities=new Map();file.revisions.forEach(r=>r.params.forEach(p=>identities.set(p.id,p)));
   const list=[...identities.values()].filter(p=>(p.name+' '+p.path).toLowerCase().includes((query||'').toLowerCase())),visible=list.slice(0,100);
@@ -1657,7 +1908,7 @@ function pagedDiffTable(changes,left,right,comments){
   while(diffViews.size>8)diffViews.delete(diffViews.keys().next().value);
   return '<div id="'+id+'" aria-label="逐页核对差异">'+diffViewContent(view)+'</div>';
 }
-function closeOverlays(){for(const id of ['dialog','drawer']){const node=document.getElementById(id);if(node.open)node.close();}}
+function closeOverlays(){S.releaseDraft=null;for(const id of ['dialog','drawer']){const node=document.getElementById(id);if(node.open)node.close();}}
 function setContext(file,bid,rid){S.fileId=file.id;S.branchId=bid||file.branches[0].id;S.revisionId=rid||null;}
 function editCount(){if(!S.edit)return;const node=document.getElementById('edit-count');if(node)node.textContent=M.diff(rev(f(S.edit.fileId),S.edit.headId)?.params||[],S.edit.params).length;}
 function guardedChange(callback){if(S.edit){render();leaveDialog(callback);}else callback();}
@@ -1667,7 +1918,113 @@ function openEditDraft(file,b,draft){setContext(file,b.id);S.edit=draft;S.allowN
 function sourceAdoption(result,fileId,bid){for(const source of Sources.list(M.state.workspaceId))for(const c of Sources.candidates(M.state.workspaceId,source.id)){if(c.fileId===fileId&&c.branchId===bid)Sources.markApplied(M.state.workspaceId,source.id,c.id,result.id);}}
 async function runSource(id,opts){ensureAdmin();const wid=M.state.workspaceId,promise=Sources.run(wid,id,opts);render();const result=await promise;if(M.state.workspaceId===wid){render();toast(result.message);}return result;}
 function restoreDraft(id){ensureAdmin();const file=f(),r=rev(file,id);if(!r)throw new Error('保存记录不存在');const b=branch(file,r.branchId);ensureNoDraft(file.id,b.id);openEditDraft(file,b,makeDraft(file,b,r.params,{sourceRevisionId:r.id,restoreRevisionId:r.id,message:'',operationDescription:'恢复 '+recordTitle(file,r)+' 的完整快照'}));reviewEdit();}
-function newReleaseDialog(){ensureAdmin();const file=f();showDialog('新建软件版本','<label class="field"><span class="label">软件版本</span><input id="release-name" placeholder="例如：692" autofocus></label><label class="field"><span class="label">初始内容</span><select id="release-source"><option value="">稍后导入本版本文件</option>'+options(file.revisions.filter(r=>branch(file,r.branchId).kind==='baseline'&&r.kind!=='initial').slice().reverse(),'',r=>recordTitle(file,r))+'</select></label><p class="help-note">只有明确选择来源，才采用该记录作为新版本起点。未选择时保留为待初始化。</p>'+modificationFields('release'),btn('取消','close-dialog')+btn('创建版本','create-release','plus','primary'));}
+function releaseFormContext(){
+  const d=S.releaseDraft;
+  if(!d||d.workspaceId!==M.state.workspaceId||d.fileId!==S.fileId)throw new Error('文件已切换，请重新打开新建软件版本');
+  const catalog=M.versionCatalog(d.fileId);let family=null,target={},error='',field='release-family';
+  if(d.familyChoice==='new'){
+    const match=/^(\d{4})-(\d{2})$/.exec(d.monthKey||'');
+    if(match){
+      try{const year=Number(match[1]),month=Number(match[2]),label=MCPrototypeModel.formatFamily(year,month);family=catalog.families.find(x=>x.year===year&&x.month===month)||{id:null,label,year,month,monthKey:d.monthKey};target.family={year,month};}
+      catch(err){error=err.message;field='release-month';}
+    }else{error='请选择大版本的年月';field='release-month';}
+  }else{
+    family=catalog.families.find(x=>x.id===d.familyChoice)||null;
+    if(family)target.familyId=family.id;else error='请选择大版本';
+  }
+  const minors=family?catalog.minors.filter(x=>x.familyId===family.id):[];
+  let minor=d.minorChoice==='new'?null:minors.find(x=>x.id===d.minorChoice);
+  const minorVersion=minor?.version||String(d.minorVersion||'').trim().toUpperCase();
+  if(minor)target.minorId=minor.id;else{
+    target.minorVersion=minorVersion;
+    minor=minors.find(x=>x.version.toUpperCase()===minorVersion)||null;
+    if(!error&&!minorVersion){error='请填写小版本号';field='release-name';}
+  }
+  const nextPatchNumber=minor?.nextPatchNumber||1;
+  target.kind=d.kind==='patch'?'patch':'original';
+  const signature=JSON.stringify(target);
+  const patchNumber=d.previewTarget===signature&&d.expectedPatchNumber?d.expectedPatchNumber:nextPatchNumber;
+  const version=minorVersion?(target.kind==='patch'?minorVersion+'SPC'+String(patchNumber).padStart(3,'0'):minorVersion):'';
+  if(!error&&target.kind==='original'&&minor?.originalReleaseId){error='该小版本的原版已存在，请选择新建补丁包';field='release-kind';}
+  return {catalog,family,minors,minor,minorVersion,target,signature,nextPatchNumber,patchNumber,version,error,field};
+}
+function captureReleaseForm(){
+  const d=S.releaseDraft;if(!d)return;
+  const fields={'release-family':'familyChoice','release-month':'monthKey','release-minor':'minorChoice','release-name':'minorVersion','release-kind':'kind','release-source':'sourceRevisionId','release-reason':'reason','release-links':'linksText'};
+  for(const [id,key]of Object.entries(fields)){const node=document.getElementById(id);if(node)d[key]=node.value;}
+}
+function releaseKindOptions(context){
+  const d=S.releaseDraft,number=d.expectedPatchNumber||context.nextPatchNumber;
+  return '<option value="original" '+(d.kind==='original'?'selected ':'')+(context.minor?.originalReleaseId?'disabled':'')+'>原版'+(context.minor?.originalReleaseId?' · 已存在':'（不含补丁）')+'</option><option value="patch" '+(d.kind==='patch'?'selected':'')+'>新建补丁包 · SPC'+String(number).padStart(3,'0')+'</option>';
+}
+function updateReleasePreview(refreshNumber){
+  const d=S.releaseDraft;let c=releaseFormContext();
+  if(refreshNumber||d.previewTarget!==c.signature){d.expectedPatchNumber=c.nextPatchNumber;d.previewTarget=c.signature;c=releaseFormContext();}
+  const preview=document.getElementById('release-preview'),error=document.getElementById('release-error'),kind=document.getElementById('release-kind'),create=document.querySelector('[data-action="create-release"]');
+  if(preview)preview.textContent=c.version||'待选择';
+  if(error){error.textContent=d.error||c.error;error.hidden=!(d.error||c.error);}
+  if(kind){kind.innerHTML=releaseKindOptions(c);kind.value=d.kind;}
+  if(create)create.disabled=!!c.error;
+  return c;
+}
+function defaultReleaseMinor(){
+  const d=S.releaseDraft;
+  d.minorChoice='new';d.kind='original';d.sourceRevisionId='';d.expectedPatchNumber=null;d.previewTarget=null;d.error='';
+  try{const c=releaseFormContext();d.minorVersion=c.family?M.suggestMinorVersion(d.fileId,d.familyChoice==='new'?{family:{year:c.family.year,month:c.family.month}}:{familyId:c.family.id}):'';}
+  catch(_){d.minorVersion='';}
+}
+function renderReleaseDialog(focusId){
+  const d=S.releaseDraft;let c=releaseFormContext();d.expectedPatchNumber=c.nextPatchNumber;d.previewTarget=c.signature;c=releaseFormContext();
+  const familyOptions=options(c.catalog.families,d.familyChoice,x=>x.label+(x.monthKey?' · '+x.monthKey:''))+'<option value="new" '+(d.familyChoice==='new'?'selected':'')+'>按年月新建…</option>';
+  const minorOptions=options(c.minors,d.minorChoice,x=>x.version)+'<option value="new" '+(d.minorChoice==='new'?'selected':'')+'>新建小版本…</option>';
+  const sourceRecords=f(d.fileId).revisions.filter(r=>branch(f(d.fileId),r.branchId).kind==='baseline'&&r.kind!=='initial').slice().reverse();
+  const body='<div class="release-form"><div class="release-levels"><section class="release-level"><label class="field"><span class="label">大版本</span><select id="release-family" autofocus>'+familyOptions+'</select></label>'+(d.familyChoice==='new'?'<label class="field"><span class="label">发布年月</span><input id="release-month" type="month" value="'+e(d.monthKey)+'" aria-describedby="release-error"><span class="release-generated">'+e(c.family?.label||'选择年月后生成')+'</span></label>':'')+'</section><section class="release-level"><label class="field"><span class="label">小版本</span><select id="release-minor" '+(!c.family?'disabled':'')+'>'+minorOptions+'</select></label>'+(d.minorChoice==='new'?'<label class="field"><span class="label">小版本号</span><input id="release-name" maxlength="64" value="'+e(d.minorVersion)+'" placeholder="例如：692" aria-describedby="release-error" '+(!c.family?'disabled':'')+'></label>':'')+'</section><section class="release-level"><label class="field"><span class="label">补丁包</span><select id="release-kind" '+(!c.family?'disabled':'')+'>'+releaseKindOptions(c)+'</select></label></section></div><div class="release-preview"><span>待创建版本</span><output id="release-preview" aria-live="polite">'+e(c.version||'待选择')+'</output></div><p id="release-error" class="error-text" role="alert" '+(!(d.error||c.error)?'hidden':'')+'>'+e(d.error||c.error)+'</p><label class="field release-source"><span class="label">初始内容</span><select id="release-source"><option value="">稍后导入本版本文件</option>'+options(sourceRecords,d.sourceRevisionId,r=>recordTitle(f(d.fileId),r))+'</select></label><p class="help-note">选择来源会采用该条保存记录；未选择时，创建后导入本版本文件。</p>'+modificationFields('release',d)+'</div>';
+  const wasOpen=document.getElementById('dialog').open,restoreFocus=S.restoreFocus;
+  showDialog('新建软件版本',body,btn('取消','close-dialog')+btn('创建版本','create-release','plus','primary',c.error?'disabled':''));
+  if(wasOpen)S.restoreFocus=restoreFocus;
+  if(focusId)document.getElementById(focusId)?.focus();
+}
+function newReleaseDialog(){
+  ensureAdmin();const file=f(),catalog=M.versionCatalog(file.id),now=new Date(),onRoadmap=['roadmap','versions'].includes(S.route[2]);
+  const selected=catalog.releases.find(r=>r.id===((onRoadmap?S.roadmap.releaseId:null)||current(file)?.releaseId||branch(file).releaseId));
+  const available=catalog.families.filter(x=>/^\d[1-9ABC]X$/.test(x.label));
+  const family=available.find(x=>x.id===((onRoadmap?S.roadmap.familyId:null)||selected?.familyId))||available[0];
+  S.releaseDraft={workspaceId:M.state.workspaceId,fileId:file.id,familyChoice:family?.id||'new',monthKey:now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'),minorChoice:'new',minorVersion:'',kind:'original',sourceRevisionId:'',reason:'',linksText:'',expectedPatchNumber:null,previewTarget:null,error:''};
+  defaultReleaseMinor();
+  const contextMinor=onRoadmap&&['patches','history'].includes(S.roadmap.level)?catalog.minors.find(x=>x.id===S.roadmap.minorId&&x.familyId===family?.id):null;
+  if(contextMinor)Object.assign(S.releaseDraft,{minorChoice:contextMinor.id,minorVersion:contextMinor.version,kind:'patch'});
+  renderReleaseDialog();
+}
+function changeReleaseTarget(target){
+  captureReleaseForm();const d=S.releaseDraft;d.error='';d.sourceRevisionId='';d.expectedPatchNumber=null;d.previewTarget=null;
+  if(target.id==='release-family'||target.id==='release-month')defaultReleaseMinor();
+  else if(target.id==='release-minor'){
+    if(d.minorChoice==='new')defaultReleaseMinor();
+    else{const minor=releaseFormContext().minor;d.minorVersion=minor?.version||'';d.kind='patch';}
+  }
+  renderReleaseDialog(target.id);
+}
+function createRelease(){
+  ensureAdmin();captureReleaseForm();const d=S.releaseDraft,c=releaseFormContext();
+  if(c.error){d.error=c.error;updateReleasePreview(false);document.getElementById(c.field)?.focus();throw new Error(c.error);}
+  const meta=readModification('release');maybeFail();let b;
+  const input=Object.assign({target:c.target,sourceRevisionId:d.sourceRevisionId||undefined},meta);
+  if(c.target.kind==='patch')input.expectedPatchNumber=d.expectedPatchNumber;
+  try{b=M.addRelease(d.fileId,input);}
+  catch(err){
+    if(err.code==='PATCH_STALE'){d.error='已有新的补丁包，编号已更新。请核对后再次创建。';renderReleaseDialog('release-kind');}
+    else{
+      d.error=err.message;updateReleasePreview(false);
+      const field=err.field==='minorVersion'?(d.minorChoice==='new'?'release-name':'release-minor'):err.field==='family'?(d.familyChoice==='new'?'release-month':'release-family'):err.field==='patch'?'release-kind':null;
+      if(field){const node=document.getElementById(field);node?.setAttribute('aria-invalid','true');node?.focus();}
+    }
+    throw err;
+  }
+  const file=f(d.fileId);closeDialog();S.releaseDraft=null;S.roadmapSelected=b.headId||null;
+  if(b.headId){applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(file,b.headId,roadmapOptions(file)));S.roadmapLocate=b.headId;go(roadmapUrl(b.headId));}
+  else go(fileUrl(file,'parameters')+'?branch='+encodeURIComponent(b.id));
+  toast('已创建 '+softwareName(file,b.releaseId)+(b.headId?'':'，可导入初始文件。'));
+}
 function forkDialog(){ensureAdmin();const file=f(),available=M.state.assets.filter(a=>!file.branches.some(b=>b.machineId===a.id)),bases=file.revisions.filter(r=>branch(file,r.branchId).kind==='baseline'&&r.kind!=='initial').slice().reverse();if(!bases.length)throw new Error('请先建立版本基线');showDialog('添加机台配置','<label class="field"><span class="label">机台</span><select id="fork-asset">'+options(available,available[0]?.id)+'<option value="new">登记新机台…</option></select></label><label class="field"><span class="label">新机台名称</span><input id="fork-name" placeholder="仅登记新机台时填写，例如 MC-003"></label><label class="field"><span class="label">采用的版本基线</span><select id="fork-source">'+options(bases,bases[0].id,r=>recordTitle(file,r))+'</select></label><p class="help-note">机台从所选记录开始独立保存。已有文件通过同一机台身份关联。</p>'+modificationFields('fork'),btn('取消','close-dialog')+btn('添加机台','create-fork','machine','primary'));}
 function definitionDialog(id){ensureAdmin();if(!S.edit)throw new Error('先进入编辑模式');const p=S.edit.params.find(p=>p.id===id);if(!p)throw new Error('参数不存在');S.definitionId=id;closeDialog('drawer');showDialog('修改参数名称与属性','<div class="form-grid"><label class="field full"><span class="label">参数名</span><input id="definition-name" value="'+e(p.name)+'"></label><label class="field"><span class="label">单位</span><input id="definition-unit" value="'+e(p.unit)+'"></label><label class="field"><span class="label">类型</span><input value="'+e(p.type)+'" readonly></label><label class="field"><span class="label">最小值</span><input id="definition-min" inputmode="decimal" value="'+e(p.min??'')+'" '+(p.type==='number'?'':'disabled')+'></label><label class="field"><span class="label">最大值</span><input id="definition-max" inputmode="decimal" value="'+e(p.max??'')+'" '+(p.type==='number'?'':'disabled')+'></label></div><p class="help-note">参数身份保持不变，更名和属性变化会单独记录。类型迁移需在正式版本中核对转换规则。</p>',btn('取消','close-dialog')+btn('应用到草稿','apply-definition','check','primary'));}
 function eventResult(ev){const result=ev.result||ev.details?.status||ev.status;return result==='failed'||result==='error'?{label:'失败',color:'red'}:result==='partial'?{label:'部分完成',color:'amber'}:result==='cancelled'?{label:'已取消',color:''}:result==='changed'?{label:'有更新待核对',color:'amber'}:{label:'成功',color:'green'};}
@@ -1690,7 +2047,8 @@ async function handleAction(action,el){
     case 'roadmap-focus':focusRoadmap(data.branch);return;
     case 'roadmap-overview':openRoadmapLevel('families');return;
     case 'roadmap-open-family':openRoadmapLevel('releases',data.family);return;
-    case 'roadmap-open-release':openRoadmapLevel('history',data.family,data.release);return;
+    case 'roadmap-open-release':openRoadmapLevel('patches',data.family,null,data.minor||data.release);return;
+    case 'roadmap-open-history':openRoadmapLevel('history',data.family,data.release,data.minor);return;
     case 'roadmap-toggle-family':{
       const expanded=new Set(S.roadmap.expandedFamilies);
       if(expanded.has(data.family))expanded.delete(data.family);else expanded.add(data.family);
@@ -1804,9 +2162,7 @@ async function handleAction(action,el){
     case 'approve-review':M.approve(data.review);render();toast('评审已通过，可合并到当前配置。');return;
     case 'merge-review':{maybeFail();const result=M.merge(data.review),review=reviews().find(r=>r.id===data.review);sourceAdoption(result,review.fileId,review.branchId);S.roadmapSelected=result.id;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(f(review.fileId),result.id,roadmapOptions(f(review.fileId))));S.roadmapLocate=result.id;render();toast('已合并为 '+recordTitle(f(review.fileId),result)+'。机台可单独核对采用。');return;}
     case 'new-release':newReleaseDialog();return;
-    case 'create-release':{
-      ensureAdmin();const meta=readModification('release');maybeFail();const file=f(),b=M.addRelease(file.id,Object.assign({releaseId:inputValue('release-name').trim(),sourceRevisionId:inputValue('release-source')||undefined},meta));closeDialog();go(fileUrl(file,b.headId?'roadmap':'parameters')+'?branch='+encodeURIComponent(b.id));return;
-    }
+    case 'create-release':createRelease();return;
     case 'fork':forkDialog();return;
     case 'create-fork':{
       ensureAdmin();const meta=readModification('fork');maybeFail();const file=f();let machineId=inputValue('fork-asset'),added=null;
@@ -1819,7 +2175,7 @@ async function handleAction(action,el){
     }
     case 'restore':{
       const file=f(),r=rev(file,data.revision);if(!r)throw new Error('记录不存在');S.restoreId=r.id;
-      showDialog('恢复历史快照','<p>将 '+e(branch(f(),r.branchId).label)+' 恢复为 '+e(recordShort(file,r))+' 的完整参数内容，包括软件版本 '+e(r.releaseId)+' 与当时采用的基线。核对后保存会追加一条记录，保留现有历史。</p>',btn('取消','close-dialog')+btn('载入恢复内容','confirm-restore','history','primary',disabled()));return;
+      showDialog('恢复历史快照','<p>将 '+e(branch(f(),r.branchId).label)+' 恢复为 '+e(recordShort(file,r))+' 的完整参数内容，包括软件版本 '+e(softwareName(f(),r.releaseId))+' 与当时采用的基线。核对后保存会追加一条记录，保留现有历史。</p>',btn('取消','close-dialog')+btn('载入恢复内容','confirm-restore','history','primary',disabled()));return;
     }
     case 'confirm-restore':restoreDraft(S.restoreId);return;
     case 'merge-save':case 'merge-propose':{
@@ -1831,7 +2187,7 @@ async function handleAction(action,el){
       openEditDraft(file,b,draft);reviewEdit();if(action==='merge-propose')toast('核对后选择“提交评审”，当前配置尚未改变。');return;
     }
     case 'download-export':{
-      const file=f(),r=current(file),output=MCPrototypeSources.serialize(r.params,S.exportFormat);download(output,file.name.replace(/\.[^.]+$/,'')+'-'+r.releaseId+'-'+branch(file,r.branchId).label.replace(/[\/\\:]/g,'_')+'-'+recordShort(file,r)+'.'+S.exportFormat,S.exportFormat==='xml'?'application/xml;charset=utf-8':'application/json;charset=utf-8');event('configuration_exported',{fileId:file.id,branchId:r.branchId,revisionId:r.id,details:{format:S.exportFormat,sample:true}});toast('已生成示例文件。');return;
+      const file=f(),r=current(file),output=MCPrototypeSources.serialize(r.params,S.exportFormat);download(output,file.name.replace(/\.[^.]+$/,'')+'-'+softwareName(file,r.releaseId)+'-'+branch(file,r.branchId).label.replace(/[\/\\:]/g,'_')+'-'+recordShort(file,r)+'.'+S.exportFormat,S.exportFormat==='xml'?'application/xml;charset=utf-8':'application/json;charset=utf-8');event('configuration_exported',{fileId:file.id,branchId:r.branchId,revisionId:r.id,details:{format:S.exportFormat,sample:true}});toast('已生成示例文件。');return;
     }
     case 'export-set':exportSet();return;
     case 'export-machine':exportSet(data.machine);return;
@@ -1868,7 +2224,7 @@ async function handleAction(action,el){
       ensureAdmin();if(!S.init?.params)throw new Error('请先读取文件');Object.assign(S.init,{name:inputValue('init-name').trim(),releaseId:inputValue('init-release').trim(),description:inputValue('init-description')},readModification('init'));maybeFail();const file=M.initialize(S.init);S.init=null;go(fileUrl(file));toast('已建立初始快照和首个版本基线。');return;
     }
     case 'initialize-branch':{
-      ensureAdmin();const file=f(),b=branch(file);if(b.headId)throw new Error('此版本已经初始化');showDialog('导入此版本的初始文件','<p>'+e(file.name)+' · 软件 '+e(b.releaseId)+'</p><label class="btn primary">'+ic('upload')+'选择 XML / JSON 文件<input class="visually-hidden" type="file" id="branch-upload" accept=".xml,.json"></label><p class="help-note">原型仅接收 5 MB 内的简单结构。读取后进入参数草稿，核对保存；此操作不会伪造未知的原始来源。</p>',btn('取消','close-dialog'));return;
+      ensureAdmin();const file=f(),b=branch(file);if(b.headId)throw new Error('此版本已经初始化');showDialog('导入此版本的初始文件','<p>'+e(file.name)+' · 软件 '+e(softwareName(file,b.releaseId))+'</p><label class="btn primary">'+ic('upload')+'选择 XML / JSON 文件<input class="visually-hidden" type="file" id="branch-upload" accept=".xml,.json"></label><p class="help-note">原型仅接收 5 MB 内的简单结构。读取后进入参数草稿，核对保存；此操作不会伪造未知的原始来源。</p>',btn('取消','close-dialog'));return;
     }
     case 'demo-large':{
       ensureAdmin();if(S.edit)throw new Error('请先处理当前草稿');const file=f(),b=file.branches.find(b=>b.kind==='baseline'&&b.headId),r=rev(file,b?.headId);if(!r)throw new Error('先初始化配置');if(r.params.length>=3248){closeDialog();go(fileUrl(file,'parameters')+'?branch='+b.id);return;}
@@ -1923,6 +2279,13 @@ function handleInput(target){
   }
   if(target.id==='save-message'&&S.edit){S.edit.reason=S.edit.message=target.value;return;}
   if(target.id==='save-links'&&S.edit){S.edit.linksText=target.value;return;}
+  if(S.releaseDraft&&target.id?.startsWith('release-')){
+    const d=S.releaseDraft;
+    if(target.id==='release-name'){d.minorVersion=target.value;d.sourceRevisionId='';d.error='';target.removeAttribute('aria-invalid');const source=document.getElementById('release-source');if(source)source.value='';updateReleasePreview(true);}
+    else if(target.id==='release-reason')d.reason=target.value;
+    else if(target.id==='release-links')d.linksText=target.value;
+    return;
+  }
   if(target.id?.startsWith('init-')&&S.init){const map={'init-name':'name','init-release':'releaseId','init-description':'description','init-reason':'reason','init-links':'linksText'};if(map[target.id])S.init[map[target.id]]=target.value;return;}
   if(S.route.join('/')==='sources/new'&&(target.id?.startsWith('source-')||target.id?.startsWith('url-'))){
     captureSource();if(!['source-name','source-schedule','source-reason','source-links'].includes(target.id))invalidateSource();
@@ -1956,6 +2319,8 @@ async function handleChange(target){
   }
   if(data.previewBranch!==undefined){if(S.sourcePreview)S.sourcePreview.files[Number(data.previewBranch)].branchId=target.value;return;}
   switch(target.id){
+    case 'release-family':case 'release-month':case 'release-minor':case 'release-kind':changeReleaseTarget(target);return;
+    case 'release-source':if(S.releaseDraft)S.releaseDraft.sourceRevisionId=target.value;return;
     case 'workspace':{
       const id=target.value;if(!M.state.workspaces.some(w=>w.id===id))throw new Error('工作区不存在');
       guardedChange(()=>{
@@ -2050,9 +2415,9 @@ function navigate(){
   S.revisionId=q.revision&&rev(f(),q.revision)?q.revision:null;
   if(S.revisionId)S.branchId=rev(f(),S.revisionId).branchId;
   if(changed&&route[2]==='roadmap'){
-    if(['families','releases','history'].includes(q.view)){
-      const level=q.view,familyId=level==='families'?null:q.family||null,releaseId=level==='history'?q.release||null:null;
-      if(level!==S.roadmap.level||familyId!==S.roadmap.familyId||releaseId!==S.roadmap.releaseId){Object.assign(S.roadmap,{level,familyId,releaseId,columnPage:0,lanePage:0});}
+    if(['families','releases','patches','history'].includes(q.view)){
+      const level=q.view,familyId=level==='families'?null:q.family||null,minorId=['patches','history'].includes(level)?q.minor||null:null,releaseId=level==='history'?q.release||null:null;
+      if(level!==S.roadmap.level||familyId!==S.roadmap.familyId||minorId!==S.roadmap.minorId||releaseId!==S.roadmap.releaseId){Object.assign(S.roadmap,{level,familyId,minorId,releaseId,columnPage:0,lanePage:0});}
     }
     const requested=S.revisionId||(!q.view&&q.branch?branch(f(),S.branchId).headId:null);
     if(requested){S.roadmapSelected=requested;applyRoadmapLocation(MCPrototypeRoadmap.locateRevision(f(),requested,roadmapOptions(f())));S.roadmapLocate=requested;}
@@ -2083,7 +2448,7 @@ document.addEventListener('keydown',ev=>{
 window.addEventListener('hashchange',navigate);
 window.addEventListener('popstate',()=>{if(location.hash!==S.lastHash)navigate();});
 window.addEventListener('beforeunload',ev=>{if(S.edit||Object.keys(S.drafts).length){ev.preventDefault();ev.returnValue='';}});
-for(const id of ['dialog','drawer'])document.getElementById(id).addEventListener('cancel',()=>{S.leaveCallback=null;});
+for(const id of ['dialog','drawer'])document.getElementById(id).addEventListener('cancel',()=>{S.leaveCallback=null;if(id==='dialog')S.releaseDraft=null;});
 window.MCPrototypeApp={model:M,state:S,sources:Sources,render,navigate,handleAction,handleChange,handleInput,go,beginEdit,reviewEdit,mergedParams,commonBase,detailParam,sourceAdoption,restoreDraft};
 navigate();
 })();

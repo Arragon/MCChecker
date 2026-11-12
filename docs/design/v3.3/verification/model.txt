@@ -13,6 +13,14 @@ PASS guest may propose and comment but cannot save, approve, fork or initialize
 PASS invalid typed values and numeric bounds leave head, history and audit untouched
 PASS numeric strings preserve large integers and exact fractional range boundaries
 PASS new releases are empty until input or source is explicitly supplied
+PASS family labels use calendar months while full year remains an independent identity
+PASS catalog is detached, workspace scoped and never infers a date or patch from unknown legacy names
+PASS minor versions accept multi-digit suffixes, suggest unused defaults and validate family membership
+PASS a new minor may start with SPC001 and later create its real original without invented saves
+PASS patch allocation is per minor and stale previews fail without occupying a number
+PASS structured creation validates reason, links, source, parameters and identity before changing any state
+PASS patch copies only an explicit saved source and preserves immutable authorship and reasons
+PASS structured initialization can create an original or patch from real input without inventing an original package
 PASS manual save of a pending release does not invent an initial source snapshot
 PASS initialization creates separate frozen original and baseline snapshots
 PASS fork uses an exact baseline and rejects duplicate physical machine association
@@ -38,4 +46,4 @@ PASS review metadata is locked and merge propagates the proposal reason/links wi
 PASS initialization, version creation and machine creation preserve user metadata separately from system descriptions
 PASS restore uses its own explicit reason and links while original field authors remain historical
 
-39/39 reconstructed model checks passed (fresh run).
+47/47 reconstructed model checks passed (fresh run).

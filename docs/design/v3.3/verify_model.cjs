@@ -24,7 +24,7 @@ test('reconstructed seed preserves file, branch and stable parameter identities'
   assert.equal(head(m).params.length, 18);
   assert.equal(m.getFile('f-process').revisions[0].params.length, 6);
   assert.equal(m.getFile('f-coeff').revisions[0].params.length, 6);
-  assert.deepEqual(f.branches.map(b => b.id), ['base-691', 'base-690', 'machine-01', 'machine-02', 'base-6A0', 'base-6A1', 'machine-roadmap-03']);
+  assert.deepEqual(f.branches.map(b => b.id), ['base-691', 'base-690', 'machine-01', 'machine-02', 'base-6A0', 'base-6A1', 'machine-roadmap-03', 'base-release-2026-10-6A1-SPC001']);
   assert.equal(branch(m, 'machine-01').headId, 'r-m13');
   assert.equal(branch(m, 'machine-01').baseRevisionId, 'r-b11');
   assert.equal(revision(f, 'r-m11').releaseId, '690');
@@ -35,12 +35,19 @@ test('reconstructed seed preserves file, branch and stable parameter identities'
 
 test('release families group real saved records without replacing identity, parentage or historical evidence', () => {
   const m = Model.create(), f = file(m), lab = m.state.workspaces.find(w => w.id === 'ws-lab').files.find(f => f.id === 'f-machine');
-  assert.deepEqual(f.releaseFamilies, [{ id: 'family-69x', label: '69X', order: 1 }, { id: 'family-6ax', label: '6AX', order: 2 }]);
+  assert.deepEqual(f.releaseFamilies, [{ id: 'family-69x', label: '69X', year: 2026, month: 9, monthKey: '2026-09', order: 1 }, { id: 'family-6ax', label: '6AX', year: 2026, month: 10, monthKey: '2026-10', order: 2 }]);
+  assert.deepEqual(f.releaseMinors, [
+    { id: 'minor-2026-09-690', version: '690', familyId: 'family-69x', order: 1 },
+    { id: 'minor-2026-09-691', version: '691', familyId: 'family-69x', order: 2 },
+    { id: 'minor-2026-10-6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
+    { id: 'minor-2026-10-6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+  ]);
   assert.deepEqual(f.releases, [
-    { id: '690', version: '690', familyId: 'family-69x', order: 1 },
-    { id: '691', version: '691', familyId: 'family-69x', order: 2 },
-    { id: '6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
-    { id: '6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+    { id: '690', version: '690', label: '690', familyId: 'family-69x', minorId: 'minor-2026-09-690', patchNumber: null, order: 1 },
+    { id: '691', version: '691', label: '691', familyId: 'family-69x', minorId: 'minor-2026-09-691', patchNumber: null, order: 2 },
+    { id: '6A0', version: '6A0', label: '6A0', familyId: 'family-6ax', minorId: 'minor-2026-10-6A0', patchNumber: null, order: 3 },
+    { id: '6A1', version: '6A1', label: '6A1', familyId: 'family-6ax', minorId: 'minor-2026-10-6A1', patchNumber: null, order: 4 },
+    { id: 'release-2026-10-6A1-SPC001', version: '6A1SPC001', label: '6A1SPC001', familyId: 'family-6ax', minorId: 'minor-2026-10-6A1', patchNumber: 1, order: 5 }
   ]);
   const releases = new Set(f.releases.map(r => r.id)), records = new Map(f.revisions.map(r => [r.id, r]));
   assert.equal(records.size, f.revisions.length);
@@ -82,6 +89,13 @@ test('release families group real saved records without replacing identity, pare
   assert.deepEqual(lab.releases.map(r => r.id), ['690', '691']);
   assert.equal(lab.revisions.length, 8); assert.equal(lab.branches.length, 4);
   assert(!lab.branches.some(b => b.machineId === asset.id));
+  const patch = records.get('r-demo-6a1-spc001');
+  assert.deepEqual(patch.parentIds, ['r-b15']); assert.equal(patch.sourceRevisionId, 'r-b15');
+  assert.equal(patch.params.find(p => p.id === 'p-retries').value, 4);
+  assert.equal(branch(m, 'base-6A1').headId, 'r-b15', 'a patch has its own baseline and does not advance the original');
+  assert.deepEqual(patch.links, ['https://docs.example.invalid/demo/software-6a-spc001']);
+  assert.equal(m.versionCatalog(f.id).releases.find(r => r.id === '6A1').patchNumber, null);
+  assert.equal(m.versionCatalog(f.id).releases.find(r => r.id === patch.releaseId).patchNumber, 1);
 });
 
 test('pressure unit history converts both value and bound exactly', () => {
@@ -228,6 +242,162 @@ test('new releases are empty until input or source is explicitly supplied', () =
   const baseline = revision(f, copyBranch.headId), initial = revision(f, copyBranch.initialRevisionId);
   assert.equal(initial.kind, 'initial'); assert.equal(initial.sourceRevisionId, 'r-b12');
   assert.deepEqual(baseline.parentIds, [initial.id]); assert.deepEqual(initial.params, revision(f, 'r-b12').params);
+});
+
+test('family labels use calendar months while full year remains an independent identity', () => {
+  assert.equal(Model.formatFamily(2026, 9), '69X'); assert.equal(Model.formatFamily('2026', '10'), '6AX');
+  assert.equal(Model.formatFamily(2026, 11), '6BX'); assert.equal(Model.formatFamily(2026, 12), '6CX');
+  assert.equal(Model.formatFamily(2027, 1), '71X'); assert.equal(Model.formatFamily(2036, 9), '69X');
+  for (const [year, month] of [[26, 9], [2026, 0], [2026, 13], [2026, 1.5], [null, 9], ['2026x', 9], [2026, ''], [Infinity, 1]]) throws('INVALID_FAMILY_DATE', () => Model.formatFamily(year, month));
+  const m = Model.create(), previous = clone(file(m).revisions);
+  const b = m.addRelease('f-machine', { target: { family: { year: 2036, month: 9 }, minorVersion: '691', kind: 'original' }, reason: '验证十年后同短名仍使用独立年月身份' });
+  const catalog = m.versionCatalog('f-machine'), families = catalog.families.filter(f => f.label === '69X');
+  assert.deepEqual(families.map(f => f.monthKey), ['2026-09', '2036-09']);
+  assert.equal(new Set(families.map(f => f.id)).size, 2); assert.equal(b.releaseId, 'release-2036-09-691');
+  assert.equal(catalog.releases.find(r => r.id === b.releaseId).minorId, 'minor-2036-09-691');
+  assert.equal(branch(m).headId, 'r-b12'); assert.deepEqual(clone(file(m).revisions), previous);
+});
+
+test('catalog is detached, workspace scoped and never infers a date or patch from unknown legacy names', () => {
+  const m = Model.create(), before = JSON.stringify(m.state), catalog = m.versionCatalog('f-machine');
+  const original = catalog.releases.find(r => r.id === '691');
+  assert.equal(original.branchId, 'base-691'); assert.equal(original.headId, 'r-b12'); assert.equal(original.patchNumber, null);
+  assert.equal(catalog.minors.find(m => m.id === original.minorId).originalReleaseId, '691');
+  catalog.families[0].year = 2036; catalog.minors[0].version = 'changed'; catalog.releases.pop();
+  assert.equal(JSON.stringify(m.state), before);
+  const b = m.addRelease('f-machine', { releaseId: 'Vendor.v2+SPC001', reason: '保留未知格式的既有软件版本入口' });
+  const legacy = m.versionCatalog('f-machine'), row = legacy.releases.find(r => r.id === b.releaseId);
+  assert.equal(row.version, 'Vendor.v2+SPC001'); assert.equal(row.patchNumber, null); assert.equal(row.kind, 'original');
+  const family = legacy.families.find(f => f.id === row.familyId);
+  assert.equal(family.year, null); assert.equal(family.monthKey, null);
+  throws('RELEASE_EXISTS', () => m.addRelease('f-machine', { releaseId: b.releaseId, reason: '重复旧版本应被拒绝' }));
+  m.state.workspaceId = 'ws-lab';
+  assert(!m.versionCatalog('f-machine').releases.some(r => r.id === b.releaseId));
+  throws('FILE_NOT_FOUND', () => m.versionCatalog('f-process'));
+});
+
+test('minor versions accept multi-digit suffixes, suggest unused defaults and validate family membership', () => {
+  const m = Model.create();
+  assert.equal(m.suggestMinorVersion('f-machine', { familyId: 'family-69x' }), '692');
+  assert.equal(m.suggestMinorVersion('f-machine', { family: { year: 2027, month: 1 } }), '710');
+  const b = m.addRelease('f-machine', { target: { familyId: 'family-69x', minorVersion: ' 6910 ', kind: 'original' }, reason: '允许已确认的多位小版本尾号' });
+  const minor = m.versionCatalog('f-machine').minors.find(r => r.originalReleaseId === b.releaseId);
+  assert.equal(minor.version, '6910'); assert.equal(minor.familyId, 'family-69x');
+  assert.equal(m.suggestMinorVersion('f-machine', { familyId: 'family-69x' }), '6911');
+  const before = JSON.stringify(m.state);
+  for (const minorVersion of ['6A2', '69', '69X']) {
+    throws('MINOR_FAMILY_MISMATCH', () => m.addRelease('f-machine', { target: { familyId: 'family-69x', minorVersion, kind: 'original' }, reason: '拒绝不属于所选大版本的编号' }));
+    assert.equal(JSON.stringify(m.state), before);
+  }
+  throws('MINOR_FAMILY_MISMATCH', () => m.addRelease('f-machine', { target: { familyId: 'family-6ax', minorId: minor.id, kind: 'patch' }, reason: '拒绝错误的父层归属' }));
+  assert.equal(JSON.stringify(m.state), before);
+  for (const minorVersion of ['692SPC001', '692spc001', '6910SPC000']) {
+    assert.throws(() => m.addRelease('f-machine', { target: { familyId: 'family-69x', minorVersion, kind: 'patch' }, reason: '补丁编号应只通过独立补丁字段创建' }), error => error.code === 'INVALID_MINOR_VERSION' && error.message.includes('补丁包字段'));
+    assert.equal(JSON.stringify(m.state), before);
+  }
+});
+
+test('a new minor may start with SPC001 and later create its real original without invented saves', () => {
+  const m = Model.create(), f = file(m), previous = clone(f.revisions), links = ['HTTPS://Docs.Example.invalid:443/new-minor', 'https://docs.example.invalid/new-minor'];
+  const b = m.addRelease(f.id, { target: { family: { year: 2027, month: 1 }, minorVersion: '710', kind: 'patch' }, expectedPatchNumber: 1, reason: '  先登记补丁交付，再等待原始文件  ', links });
+  assert.equal(b.headId, null); assert.equal(b.initialRevisionId, null); assert.deepEqual(clone(f.revisions), previous);
+  let catalog = m.versionCatalog(f.id), release = catalog.releases.find(r => r.id === b.releaseId), minor = catalog.minors.find(r => r.id === release.minorId);
+  assert.equal(release.version, '710SPC001'); assert.equal(release.patchNumber, 1);
+  assert.equal(minor.originalReleaseId, null); assert.equal(minor.originalBranchId, null);
+  assert.deepEqual(m.nextPatch(f.id, minor.id), { number: 2, label: 'SPC002' });
+  assert.equal(catalog.releases.filter(r => r.minorId === minor.id).length, 1);
+  const ev = m.state.events[0];
+  assert.equal(ev.details.year, 2027); assert.equal(ev.details.monthKey, '2027-01'); assert.equal(ev.details.patchNumber, 1);
+  assert.equal(ev.details.reason, '先登记补丁交付，再等待原始文件'); assert.equal(ev.details.createdFamily, true);
+  assert.deepEqual(ev.details.links, ['https://docs.example.invalid/new-minor']);
+  links.push('https://docs.example.invalid/late');
+  assert(Object.isFrozen(f.releases.at(-1)) && Object.isFrozen(f.releases.at(-1).links));
+  const original = m.addRelease(f.id, { target: { familyId: release.familyId, minorId: minor.id, kind: 'original' }, sourceRevisionId: 'r-b15', reason: '显式采用已核对来源补齐此小版本原版' });
+  catalog = m.versionCatalog(f.id); minor = catalog.minors.find(r => r.id === minor.id);
+  assert.equal(minor.originalReleaseId, original.releaseId); assert.notEqual(original.id, b.id);
+  assert.equal(b.headId, null); assert.equal(catalog.releases.find(r => r.id === original.releaseId).patchNumber, null);
+  assert(!catalog.releases.some(r => r.version.includes('SPC000')));
+  assert.equal(revision(f, original.initialRevisionId).sourceRevisionId, 'r-b15');
+  assert.deepEqual(clone(f.revisions.slice(0, previous.length)), previous);
+  const afterOriginal = JSON.stringify(m.state);
+  throws('RELEASE_EXISTS', () => m.addRelease(f.id, { target: { familyId: release.familyId, minorId: minor.id, kind: 'original' }, reason: '已存在原版不能再次创建或覆盖' }));
+  assert.equal(JSON.stringify(m.state), afterOriginal);
+});
+
+test('patch allocation is per minor and stale previews fail without occupying a number', () => {
+  const m = Model.create(), f = file(m), minorId = 'minor-2026-09-691';
+  const input = { target: { familyId: 'family-69x', minorId, kind: 'patch' }, expectedPatchNumber: 1, reason: '登记第一份明确交付的补丁包' };
+  const first = m.addRelease(f.id, input);
+  assert.deepEqual(m.nextPatch(f.id, minorId), { number: 2, label: 'SPC002' });
+  assert.deepEqual(m.nextPatch(f.id, 'minor-2026-09-690'), { number: 1, label: 'SPC001' });
+  const before = JSON.stringify(m.state);
+  assert.throws(() => m.addRelease(f.id, input), error => error.code === 'PATCH_STALE' && error.actualPatchNumber === 2);
+  assert.equal(JSON.stringify(m.state), before);
+  const second = m.addRelease(f.id, { ...input, expectedPatchNumber: 2, reason: '核对新序号后登记第二份补丁包' });
+  assert.notEqual(first.releaseId, second.releaseId); assert.equal(second.releaseId, 'release-2026-09-691-SPC002');
+  const version = m.versionCatalog(f.id).releases.find(r => r.id === second.releaseId);
+  assert.equal(version.version, '691SPC002'); assert.equal(version.label, '691SPC002');
+  assert.deepEqual(m.nextPatch(f.id, minorId), { number: 3, label: 'SPC003' });
+  const noPreview = m.addRelease(f.id, { target: input.target, reason: '兼容无需预览的同步调用' });
+  assert.equal(m.versionCatalog(f.id).releases.find(r => r.id === noPreview.releaseId).patchNumber, 3);
+  assert.equal(new Set(f.branches.map(b => b.releaseId).filter(Boolean)).size, f.branches.filter(b => b.kind === 'baseline').length);
+});
+
+test('structured creation validates reason, links, source, parameters and identity before changing any state', () => {
+  const m = Model.create(), target = { family: { year: 2027, month: 2 }, minorVersion: '720', kind: 'patch' };
+  const base = { target, expectedPatchNumber: 1, reason: '核对新大版本补丁的原始输入' }, before = JSON.stringify(m.state);
+  const cases = [
+    ['REASON_REQUIRED', { reason: '  ' }], ['INVALID_LINK', { links: ['javascript:alert(1)'] }],
+    ['REVISION_NOT_FOUND', { sourceRevisionId: 'missing-source' }], ['INVALID_PARAMS', { params: [] }],
+    ['OUT_OF_RANGE', { params: change(head(m).params, 'p-speed', { value: 1000 }) }],
+    ['INVALID_FAMILY_DATE', { target: { ...target, family: { year: 2027, month: 13 } } }],
+    ['MINOR_FAMILY_MISMATCH', { target: { ...target, minorVersion: '710' } }],
+    ['INVALID_MINOR_VERSION', { target: { ...target, minorVersion: '720\nInjected' } }],
+    ['INVALID_TARGET', { releaseId: '720' }], ['INVALID_PATCH_NUMBER', { expectedPatchNumber: 0 }],
+    ['PATCH_STALE', { expectedPatchNumber: 2 }], ['FAMILY_NOT_FOUND', { target: { familyId: 'not-a-family', minorVersion: '720', kind: 'patch' } }]
+  ];
+  for (const [code, update] of cases) {
+    throws(code, () => m.addRelease('f-machine', { ...base, ...update })); assert.equal(JSON.stringify(m.state), before, code);
+  }
+  m.state.actorId = 'guest'; const forbidden = JSON.stringify(m.state);
+  throws('FORBIDDEN', () => m.addRelease('f-machine', base)); assert.equal(JSON.stringify(m.state), forbidden);
+  m.state.actorId = 'lin'; const b = m.addRelease('f-machine', base);
+  assert.equal(m.versionCatalog('f-machine').releases.find(r => r.id === b.releaseId).patchNumber, 1);
+  assert.equal(m.state.events[0].details.createdFamily, true);
+});
+
+test('patch copies only an explicit saved source and preserves immutable authorship and reasons', () => {
+  const m = Model.create(), f = file(m), oldRecords = clone(f.revisions), oldHead = branch(m).headId;
+  const input = { target: { familyId: 'family-69x', minorId: 'minor-2026-09-691', kind: 'patch' }, expectedPatchNumber: 1, sourceRevisionId: 'r-b11', reason: '仅采用指定的旧基线验证补丁兼容性', links: 'https://docs.example.invalid/patch-check' };
+  const b = m.addRelease(f.id, input), initial = revision(f, b.initialRevisionId), saved = revision(f, b.headId);
+  assert.deepEqual(initial.parentIds, ['r-b11']); assert.equal(initial.sourceRevisionId, 'r-b11');
+  assert.deepEqual(initial.params, revision(f, 'r-b11').params);
+  assert.equal(initial.params.find(p => p.id === 'p-speed').value, 105, 'must not silently copy the latest original');
+  assert.deepEqual(saved.parentIds, [initial.id]); assert.equal(saved.reason, input.reason);
+  assert.deepEqual(saved.links, ['https://docs.example.invalid/patch-check']);
+  assert(Object.isFrozen(saved) && Object.isFrozen(saved.links) && Object.isFrozen(saved.params));
+  assert.equal(m.blame(f.id, saved.id, 'p-speed').find(r => r.field === 'value').authorId, 'wang');
+  assert.deepEqual(clone(f.revisions.slice(0, oldRecords.length)), oldRecords); assert.equal(branch(m).headId, oldHead);
+  const pending = m.addRelease(f.id, { target: input.target, expectedPatchNumber: 2, reason: '仅登记补丁身份，稍后提供准确文件' });
+  assert.equal(pending.headId, null); assert.equal(pending.initialRevisionId, null);
+  const count = f.revisions.length, result = m.save({ fileId: f.id, branchId: pending.id, expectedHeadId: null, params: saved.params, reason: '手工确认补丁的第一份真实配置输入' });
+  assert.equal(f.revisions.length, count + 1); assert.deepEqual(result.parentIds, []); assert.equal(result.sourceRevisionId, null);
+});
+
+test('structured initialization can create an original or patch from real input without inventing an original package', () => {
+  const m = Model.create(), params = clone(head(m).params.slice(0, 2)), before = JSON.stringify(m.state);
+  const input = { name: 'PatchInput.json', format: 'json', target: { family: { year: 2027, month: 1 }, minorVersion: '7110', kind: 'patch' }, expectedPatchNumber: 1, params, reason: '从交付文件初始化指定小版本补丁', links: ['https://docs.example.invalid/patch-input'] };
+  throws('REASON_REQUIRED', () => m.initialize({ ...input, reason: '' })); assert.equal(JSON.stringify(m.state), before);
+  throws('INVALID_FAMILY_DATE', () => m.initialize({ ...input, target: { ...input.target, family: { year: 27, month: 1 } } })); assert.equal(JSON.stringify(m.state), before);
+  const f = m.initialize(input), catalog = m.versionCatalog(f.id), initial = revision(f, f.initialRevisionId), saved = revision(f, f.branches[0].headId);
+  assert.equal(catalog.minors.length, 1); assert.equal(catalog.minors[0].originalReleaseId, null);
+  assert.equal(catalog.releases.length, 1); assert.equal(catalog.releases[0].patchNumber, 1);
+  assert.equal(initial.releaseId, saved.releaseId); assert.deepEqual(initial.parentIds, []); assert.deepEqual(saved.parentIds, [initial.id]);
+  assert.equal(saved.reason, input.reason); assert.deepEqual(saved.links, input.links);
+  assert.equal(m.state.events[0].details.monthKey, '2027-01'); assert.equal(m.state.events[0].details.patchLabel, 'SPC001');
+  params[0].value = 0; assert.equal(initial.params[0].value, 120);
+  const original = m.initialize({ ...input, name: 'OriginalInput.json', target: { ...input.target, kind: 'original' }, expectedPatchNumber: undefined });
+  assert.equal(m.versionCatalog(original.id).releases[0].patchNumber, null);
 });
 
 test('manual save of a pending release does not invent an initial source snapshot', () => {

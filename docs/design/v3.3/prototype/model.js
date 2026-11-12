@@ -61,6 +61,15 @@
     }
     return { reason, message: reason, links: normalizeLinks(input.links) };
   }
+  function familyPeriod(year, month) {
+    const integer = value => typeof value === 'number' ? Number.isInteger(value) ? value : NaN : typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+    year = integer(year); month = integer(month);
+    if (year < 1000 || year > 9999 || !Number.isInteger(year) || month < 1 || month > 12 || !Number.isInteger(month)) fail('INVALID_FAMILY_DATE', '请选择完整年份和有效月份', { field: 'family' });
+    return { year, month, monthKey: String(year) + '-' + String(month).padStart(2, '0'), label: String(year % 10) + '123456789ABC'[month - 1] + 'X' };
+  }
+  // The short label repeats every decade. It is never an identity or a date.
+  function formatFamily(year, month) { return familyPeriod(year, month).label; }
+  function patchLabel(number) { return 'SPC' + String(number).padStart(3, '0'); }
   const numericPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
   // Compare decimal meaning without converting integer strings or fractional
   // text to binary floating point. Number() is only a finite-value guard.
@@ -159,10 +168,14 @@
     const m13 = changed(m12, { 'p-speed': { value: lab ? 78 : 118 } });
     const make = (id, label, branchId, releaseId, parents, baseId, params, authorId, at, message, sourceId) => revision({ id, label, branchId, releaseId, parentIds: parents, baseRevisionId: baseId, sourceRevisionId: sourceId || null, authorId, at, message, links: id === 'r-b12' && !lab ? ['https://docs.example.invalid/demo/feed-speed'] : [], reviewId: id === 'r-b12' && !lab ? 'CR-025' : null, params }, true);
     const file = { id: 'f-machine', name: 'MachineConfig.xml', format: 'xml', description: lab ? '验证机台运动、温控与安全参数' : '设备运动、温控与安全参数', initialRevisionId: null,
-      releaseFamilies: [{ id: 'family-69x', label: '69X', order: 1 }],
+      releaseFamilies: [{ id: 'family-69x', label: '69X', year: 2026, month: 9, monthKey: '2026-09', order: 1 }],
+      releaseMinors: [
+        { id: 'minor-2026-09-690', version: '690', familyId: 'family-69x', order: 1 },
+        { id: 'minor-2026-09-691', version: '691', familyId: 'family-69x', order: 2 }
+      ],
       releases: [
-        { id: '690', version: '690', familyId: 'family-69x', order: 1 },
-        { id: '691', version: '691', familyId: 'family-69x', order: 2 }
+        { id: '690', version: '690', label: '690', familyId: 'family-69x', minorId: 'minor-2026-09-690', patchNumber: null, order: 1 },
+        { id: '691', version: '691', label: '691', familyId: 'family-69x', minorId: 'minor-2026-09-691', patchNumber: null, order: 2 }
       ],
       branches: [
         { id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: 'r-b12', machineId: null, baseRevisionId: null, initialRevisionId: null },
@@ -183,10 +196,15 @@
     if (!lab) {
       // Explicit demonstration metadata groups releases for navigation only.
       // It does not infer parentage or replace immutable revision identities.
-      file.releaseFamilies.push({ id: 'family-6ax', label: '6AX', order: 2 });
+      file.releaseFamilies.push({ id: 'family-6ax', label: '6AX', year: 2026, month: 10, monthKey: '2026-10', order: 2 });
+      file.releaseMinors.push(
+        { id: 'minor-2026-10-6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
+        { id: 'minor-2026-10-6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+      );
       file.releases.push(
-        { id: '6A0', version: '6A0', familyId: 'family-6ax', order: 3 },
-        { id: '6A1', version: '6A1', familyId: 'family-6ax', order: 4 }
+        { id: '6A0', version: '6A0', label: '6A0', familyId: 'family-6ax', minorId: 'minor-2026-10-6A0', patchNumber: null, order: 3 },
+        { id: '6A1', version: '6A1', label: '6A1', familyId: 'family-6ax', minorId: 'minor-2026-10-6A1', patchNumber: null, order: 4 },
+        { id: 'release-2026-10-6A1-SPC001', version: '6A1SPC001', label: '6A1SPC001', familyId: 'family-6ax', minorId: 'minor-2026-10-6A1', patchNumber: 1, order: 5 }
       );
       const links = frozen(['https://docs.example.invalid/demo/software-6a']);
       const makeDemo = (id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, sourceRevisionId) => revision({ id, label, branchId, releaseId, parentIds, baseRevisionId, params, authorId, at, reason, links, sourceRevisionId: sourceRevisionId || null });
@@ -201,6 +219,9 @@
         { id: 'machine-roadmap-03', label: 'MC-003', kind: 'machine', releaseId: '6A1', headId: m32.id, machineId: 'asset-roadmap-03', baseRevisionId: b15.id, initialRevisionId: null, creationReason: m31.reason, links }
       );
       file.revisions.push(b13, b14, b15, m31, m32);
+      const patch = revision({ id: 'r-demo-6a1-spc001', label: 'B16', branchId: 'base-release-2026-10-6A1-SPC001', releaseId: 'release-2026-10-6A1-SPC001', parentIds: [b15.id], baseRevisionId: null, sourceRevisionId: b15.id, authorId: 'wang', at: '2026-11-11T01:00:00Z', reason: '演示：验证 6A1 补丁包的通信重试策略', links: ['https://docs.example.invalid/demo/software-6a-spc001'], params: changed(b15.params, { 'p-retries': { value: 4 } }) });
+      file.branches.push({ id: patch.branchId, label: '版本基线 · 6A1SPC001', kind: 'baseline', releaseId: patch.releaseId, headId: patch.id, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: patch.reason, links: patch.links });
+      file.revisions.push(patch);
     }
     return file;
   }
@@ -208,6 +229,9 @@
     const baseline = revision({ id: 'r-' + key + '-b1', label: 'B1', branchId: 'base-691', releaseId: '691', parentIds: [], baseRevisionId: null, authorId: 'wang', at: '2026-11-01T01:00:00Z', message: '建立 691 版本基线', params }, true);
     const machine = revision({ id: 'r-' + key + '-m1', label: 'r1', branchId: 'machine-01', releaseId: '691', parentIds: [baseline.id], baseRevisionId: baseline.id, sourceRevisionId: baseline.id, authorId: 'lin', at: '2026-11-03T02:30:00Z', message: 'MC-001 现场校准', params: changed(params, overrides) }, true);
     return { id: 'f-' + key, name, format: 'json', description, initialRevisionId: null,
+      releaseFamilies: [{ id: 'family-69x', label: '69X', year: 2026, month: 9, monthKey: '2026-09', order: 1 }],
+      releaseMinors: [{ id: 'minor-2026-09-691', version: '691', familyId: 'family-69x', order: 1 }],
+      releases: [{ id: '691', version: '691', label: '691', familyId: 'family-69x', minorId: 'minor-2026-09-691', patchNumber: null, order: 1 }],
       branches: [{ id: 'base-691', label: '版本基线 · 691', kind: 'baseline', releaseId: '691', headId: baseline.id, machineId: null, baseRevisionId: null, initialRevisionId: null }, { id: 'machine-01', label: 'MC-001', kind: 'machine', releaseId: '691', headId: machine.id, machineId: 'asset-01', baseRevisionId: baseline.id }], revisions: [baseline, machine] };
   }
   function create() {
@@ -343,35 +367,166 @@
       event('branch_created', { fileId, branchId: branch.id, revisionId: next.id, details: { ...metadata, machineId: asset.id, sourceRevisionId: source.id } }); return branch;
     }
     function releaseName(value) { if (typeof value !== 'string' || !value.trim() || value.length > 64) fail('INVALID_RELEASE', '请输入软件版本'); return value.trim(); }
+    function readVersionCatalog(file) {
+      const families = (file.releaseFamilies || []).map(copy), minors = (file.releaseMinors || []).map(copy);
+      const releases = (file.releases || []).map(copy), known = new Set(releases.map(r => r.id));
+      // Older files and legacy callers may have arbitrary version names. Keep
+      // them available without guessing a year, a family, or an SPC sequence.
+      for (const row of [...file.branches, ...file.revisions]) if (row.releaseId && !known.has(row.releaseId)) {
+        releases.push({ id: row.releaseId, version: row.releaseId, familyId: null, patchNumber: null, order: releases.length + 1, legacy: true }); known.add(row.releaseId);
+      }
+      const unknownFamilyId = 'family-unknown';
+      function familyFor(id) {
+        let family = families.find(f => f.id === id);
+        if (family) return family;
+        family = families.find(f => f.id === unknownFamilyId);
+        if (!family) { family = { id: unknownFamilyId, label: '未归类', year: null, month: null, monthKey: null, order: families.length + 1, legacy: true }; families.push(family); }
+        return family;
+      }
+      for (const minor of minors) minor.familyId = familyFor(minor.familyId).id;
+      for (const release of releases) {
+        let minor = minors.find(m => m.id === release.minorId);
+        if (!minor) {
+          const id = release.minorId || 'legacy-minor-' + encodeURIComponent(release.id);
+          minor = { id, version: release.minorVersion || release.version || release.id, familyId: familyFor(release.familyId).id, order: minors.length + 1, legacy: true };
+          minors.push(minor);
+        }
+        release.minorId = minor.id; release.familyId = minor.familyId;
+        release.patchNumber = Number.isSafeInteger(release.patchNumber) && release.patchNumber > 0 ? release.patchNumber : null;
+        release.patchLabel = release.patchNumber === null ? null : patchLabel(release.patchNumber);
+        release.kind = release.patchNumber === null ? 'original' : 'patch';
+        release.label = release.label || release.version || minor.version + (release.patchLabel || '');
+        const branch = file.branches.find(b => b.kind === 'baseline' && b.releaseId === release.id);
+        release.branchId = branch?.id || null; release.headId = branch?.headId || null;
+      }
+      for (const minor of minors) {
+        const children = releases.filter(r => r.minorId === minor.id), original = children.find(r => r.patchNumber === null);
+        minor.originalReleaseId = original?.id || null; minor.originalBranchId = original?.branchId || null;
+        minor.nextPatchNumber = Math.max(0, ...children.map(r => r.patchNumber || 0)) + 1;
+        minor.nextPatchLabel = patchLabel(minor.nextPatchNumber);
+      }
+      return { families, minors, releases };
+    }
+    function versionCatalog(fileId) { return readVersionCatalog(getFile(fileId)); }
+    function selectedFamily(catalog, target) {
+      if (target.familyId && target.family) fail('INVALID_TARGET', '请选择现有大版本，或按年月新建一种方式');
+      if (target.familyId) {
+        const family = catalog.families.find(f => f.id === target.familyId);
+        if (!family) fail('FAMILY_NOT_FOUND', '所选大版本不存在', { field: 'family' });
+        return { family, created: false };
+      }
+      if (!target.family || typeof target.family !== 'object') fail('FAMILY_REQUIRED', '请选择大版本，或按年月新建', { field: 'family' });
+      const period = familyPeriod(target.family.year, target.family.month), matches = catalog.families.filter(f => f.year === period.year && f.month === period.month);
+      if (matches.length > 1) fail('FAMILY_CONFLICT', '该年月存在重复的大版本身份，请先核对目录');
+      if (matches.length) return { family: matches[0], created: false };
+      const id = 'family-' + period.monthKey;
+      if (catalog.families.some(f => f.id === id)) fail('FAMILY_CONFLICT', '大版本身份与年月不一致，请核对目录');
+      return { family: { id, ...period, order: Math.max(0, ...catalog.families.map(f => Number(f.order) || 0)) + 1 }, created: true };
+    }
+    function minorName(value, family) {
+      if (typeof value !== 'string') fail('INVALID_MINOR_VERSION', '请输入完整的小版本号', { field: 'minorVersion' });
+      const version = value.trim().toUpperCase();
+      if (!/^[A-Z0-9][A-Z0-9._-]*$/.test(version) || version.length > 64) fail('INVALID_MINOR_VERSION', '小版本号请使用字母、数字、点、短横线或下划线', { field: 'minorVersion' });
+      if (/SPC\d+$/.test(version)) fail('INVALID_MINOR_VERSION', '请在补丁包字段创建 SPC 编号，小版本号不应包含补丁包编号', { field: 'minorVersion' });
+      if (!/^\d[1-9ABC]X$/.test(family.label)) fail('FAMILY_DATE_REQUIRED', '新建小版本前，请选择有明确年月的大版本', { field: 'family' });
+      const prefix = family.label.slice(0, -1);
+      if (!version.startsWith(prefix) || version.length <= prefix.length || version === family.label) fail('MINOR_FAMILY_MISMATCH', '小版本号应以 ' + prefix + ' 开头，例如 ' + prefix + '0；可使用多位尾号', { field: 'minorVersion' });
+      return version;
+    }
+    function suggestMinorVersion(fileId, target) {
+      const catalog = versionCatalog(fileId), { family } = selectedFamily(catalog, target || {});
+      if (!/^\d[1-9ABC]X$/.test(family.label)) return '';
+      const prefix = family.label.slice(0, -1), used = new Set(catalog.minors.filter(m => m.familyId === family.id).map(m => m.version));
+      const suffixes = [...used].filter(v => v.startsWith(prefix) && /^\d+$/.test(v.slice(prefix.length))).map(v => BigInt(v.slice(prefix.length)));
+      let number = suffixes.reduce((max, value) => value > max ? value : max, -1n) + 1n;
+      while (used.has(prefix + number)) number++;
+      return prefix + number;
+    }
+    function nextPatch(fileId, minorId) {
+      const minor = versionCatalog(fileId).minors.find(m => m.id === minorId);
+      if (!minor) fail('MINOR_NOT_FOUND', '所选小版本不存在', { field: 'minorVersion' });
+      return { number: minor.nextPatchNumber, label: minor.nextPatchLabel };
+    }
+    function planRelease(file, input) {
+      const catalog = readVersionCatalog(file), order = Math.max(0, ...catalog.releases.map(r => Number(r.order) || 0)) + 1;
+      if (!own(input, 'target')) {
+        const releaseId = releaseName(input.releaseId);
+        if (catalog.releases.some(r => r.id === releaseId || r.patchNumber === null && r.version === releaseId)) fail('RELEASE_EXISTS', '此软件版本已存在');
+        const minor = { id: 'legacy-minor-' + encodeURIComponent(releaseId), version: releaseId, familyId: null, order: catalog.minors.length + 1, legacy: true };
+        return { family: null, newFamily: false, minor, newMinor: true, release: { id: releaseId, version: releaseId, label: releaseId, familyId: null, minorId: minor.id, patchNumber: null, order, legacy: true } };
+      }
+      if (own(input, 'releaseId')) fail('INVALID_TARGET', '结构化版本与旧版本号请只提供一种');
+      const target = input.target;
+      if (!target || typeof target !== 'object' || Array.isArray(target) || !['original', 'patch'].includes(target.kind)) fail('INVALID_TARGET', '请选择原版或新建补丁包');
+      const { family, created: newFamily } = selectedFamily(catalog, target);
+      if (target.minorId && own(target, 'minorVersion')) fail('INVALID_TARGET', '请选择现有小版本，或填写新版本号');
+      let minor, newMinor = false;
+      if (target.minorId) {
+        minor = catalog.minors.find(m => m.id === target.minorId);
+        if (!minor) fail('MINOR_NOT_FOUND', '所选小版本不存在', { field: 'minorVersion' });
+        if (minor.familyId !== family.id) fail('MINOR_FAMILY_MISMATCH', '所选小版本不属于当前大版本', { field: 'minorVersion' });
+      } else {
+        const version = minorName(target.minorVersion, family);
+        minor = catalog.minors.find(m => m.familyId === family.id && m.version === version);
+        if (!minor) {
+          const id = 'minor-' + (family.monthKey || family.id) + '-' + encodeURIComponent(version);
+          minor = { id, version, familyId: family.id, order: Math.max(0, ...catalog.minors.map(m => Number(m.order) || 0)) + 1, originalReleaseId: null, nextPatchNumber: 1 };
+          newMinor = true;
+        }
+      }
+      const number = target.kind === 'patch' ? minor.nextPatchNumber : null;
+      if (number !== null && !Number.isSafeInteger(number)) fail('PATCH_LIMIT', '补丁序号超出原型支持范围');
+      if (own(input, 'expectedPatchNumber') && input.expectedPatchNumber !== undefined) {
+        if (number === null || !Number.isSafeInteger(input.expectedPatchNumber) || input.expectedPatchNumber < 1) fail('INVALID_PATCH_NUMBER', '补丁预览序号无效', { field: 'patch' });
+        if (input.expectedPatchNumber !== number) fail('PATCH_STALE', '补丁序号已变化，请核对新的补丁编号后再创建', { expectedPatchNumber: input.expectedPatchNumber, actualPatchNumber: number, field: 'patch' });
+      }
+      if (number === null && minor.originalReleaseId) fail('RELEASE_EXISTS', '此小版本的原版已存在');
+      const suffix = number === null ? '' : '-' + patchLabel(number), identity = (family.monthKey || family.id) + '-' + encodeURIComponent(minor.version);
+      const version = minor.version + (number === null ? '' : patchLabel(number));
+      const release = { id: 'release-' + identity + suffix, version, label: version, familyId: family.id, minorId: minor.id, patchNumber: number, order };
+      if (catalog.releases.some(r => r.id === release.id || r.minorId === minor.id && r.patchNumber === number)) fail('RELEASE_EXISTS', '此软件版本已存在');
+      return { family, newFamily, minor, newMinor, release };
+    }
+    function commitCatalog(file, plan, metadata) {
+      const audit = { creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
+      if (plan.newFamily) (file.releaseFamilies || (file.releaseFamilies = [])).push(frozen({ ...copy(plan.family), ...audit }));
+      if (plan.newMinor) {
+        const { originalReleaseId, originalBranchId, nextPatchNumber, nextPatchLabel, ...minor } = plan.minor;
+        (file.releaseMinors || (file.releaseMinors = [])).push(frozen({ ...copy(minor), ...audit }));
+      }
+      (file.releases || (file.releases = [])).push(frozen({ ...copy(plan.release), ...audit }));
+    }
+    function releaseDetails(plan) {
+      return { familyId: plan.family?.id || null, year: plan.family?.year || null, month: plan.family?.month || null, monthKey: plan.family?.monthKey || null, minorId: plan.minor.id, minorVersion: plan.minor.version, patchNumber: plan.release.patchNumber, patchLabel: plan.release.patchNumber === null ? null : patchLabel(plan.release.patchNumber), createdFamily: plan.newFamily, createdMinor: plan.newMinor };
+    }
     function initialize(input) {
-      admin(); const w = workspace(), releaseId = releaseName(input.releaseId), params = validated(input.params, true);
+      admin(); const w = workspace(), params = validated(input.params, true);
       if (typeof input.name !== 'string' || !input.name.trim()) fail('INVALID_NAME', '请输入配置文件名');
       if (!['xml', 'json'].includes(input.format)) fail('INVALID_FORMAT', '原型支持 XML 或 JSON');
       if (w.files.some(file => file.name.toLowerCase() === input.name.trim().toLowerCase())) fail('FILE_EXISTS', '此文件已存在，请打开对应配置或使用新的名称');
       const metadata = changeMetadata(input);
+      const plan = planRelease({ branches: [], revisions: [] }, input), releaseId = plan.release.id;
       const file = { id: uid('f-'), name: input.name.trim(), format: input.format, description: String(input.description || ''), initialRevisionId: null, branches: [], revisions: [] };
-      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
+      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + plan.release.label, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)) };
       const initial = revision({ ...metadata, id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: [], baseRevisionId: null, authorId: actor().id, at: stamp(), systemDescription: '从确认的输入建立初始快照', params });
-      const baseline = revision({ ...metadata, id: uid('rev-'), label: 'B1', branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + releaseId + ' 首个版本基线', params });
+      const baseline = revision({ ...metadata, id: uid('rev-'), label: 'B1', branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + plan.release.label + ' 首个版本基线', params });
       file.initialRevisionId = initial.id; branch.initialRevisionId = initial.id; branch.baseRevisionId = initial.id; branch.headId = baseline.id;
-      file.branches.push(branch); file.revisions.push(initial, baseline); w.files.push(file);
-      event('file_initialized', { fileId: file.id, branchId: branch.id, revisionId: baseline.id, details: { ...metadata, initialRevisionId: initial.id, releaseId } }); return file;
+      commitCatalog(file, plan, metadata); file.branches.push(branch); file.revisions.push(initial, baseline); w.files.push(file);
+      event('file_initialized', { fileId: file.id, branchId: branch.id, revisionId: baseline.id, details: { ...metadata, ...releaseDetails(plan), initialRevisionId: initial.id, releaseId } }); return file;
     }
     function addRelease(fileId, input) {
-      admin(); const file = getFile(fileId), releaseId = releaseName(input.releaseId);
-      if (file.branches.some(b => b.kind === 'baseline' && b.releaseId === releaseId)) fail('RELEASE_EXISTS', '此软件版本已存在');
-      const metadata = changeMetadata(input);
+      admin(); const file = getFile(fileId), metadata = changeMetadata(input), plan = planRelease(file, input), releaseId = plan.release.id;
       const source = input.sourceRevisionId ? getRevision(file, input.sourceRevisionId) : null;
       const params = own(input, 'params') && input.params !== undefined ? validated(input.params, true) : source ? copy(source.params) : null;
-      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + releaseId, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)), systemDescription: '建立软件版本 ' + releaseId };
+      const branch = { id: 'base-' + releaseId, label: '版本基线 · ' + plan.release.label, kind: 'baseline', releaseId, headId: null, machineId: null, baseRevisionId: null, initialRevisionId: null, creationReason: metadata.reason, links: frozen(copy(metadata.links)), systemDescription: '建立软件版本 ' + plan.release.label };
       let snapshots = [];
       if (params) {
         const initial = revision({ ...metadata, id: uid('rev-initial-'), label: '初始快照', kind: 'initial', branchId: branch.id, releaseId, parentIds: source ? [source.id] : [], baseRevisionId: source?.id || null, sourceRevisionId: source?.id || null, authorId: actor().id, at: stamp(), systemDescription: source ? '显式采用 ' + source.label + ' 初始化' : '从确认的输入初始化', params });
-        const baseline = revision({ ...metadata, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + releaseId + ' 首个版本基线', params });
+        const baseline = revision({ ...metadata, id: uid('rev-'), label: nextLabel(file, branch), branchId: branch.id, releaseId, parentIds: [initial.id], baseRevisionId: initial.id, sourceRevisionId: initial.id, authorId: actor().id, at: stamp(), systemDescription: '建立 ' + plan.release.label + ' 首个版本基线', params });
         branch.headId = baseline.id; branch.baseRevisionId = initial.id; branch.initialRevisionId = initial.id; snapshots = [initial, baseline];
       }
-      file.branches.push(branch); file.revisions.push(...snapshots);
-      event('release_created', { fileId, branchId: branch.id, revisionId: branch.headId, details: { ...metadata, releaseId, sourceRevisionId: source?.id || null, initialized: !!params } }); return branch;
+      commitCatalog(file, plan, metadata); file.branches.push(branch); file.revisions.push(...snapshots);
+      event('release_created', { fileId, branchId: branch.id, revisionId: branch.headId, details: { ...metadata, ...releaseDetails(plan), releaseId, sourceRevisionId: source?.id || null, initialized: !!params } }); return branch;
     }
     function revertReview(fileId, branchId, revisionId, input) {
       const file = getFile(fileId), target = getRevision(file, revisionId);
@@ -460,7 +615,7 @@
     state.reviews.push(protectReview({ id: 'CR-025', workspaceId: 'ws-prod', fileId: 'f-machine', branchId: 'base-691', title: '提高送料速度并优化通信等待', description: '经过节拍验证后采用此版本。', links: current.links, authorId: 'wang', baseRevisionId: 'r-b11', sourceRevisionId: null, restoreRevisionId: null, proposedParams: current.params, status: 'merged', comments: [], approvals: [frozen({ actorId: 'lin', at: '2026-11-08T03:40:00Z', baseRevisionId: 'r-b11' })], at: '2026-11-07T08:00:00Z', mergedRevisionId: 'r-b12' }));
     for (const w of state.workspaces) for (const file of w.files) for (const r of file.revisions) state.events.push(frozen({ id: uid('seed-event-'), workspaceId: w.id, actorId: r.authorId, at: r.at, action: r.reviewId ? 'review_merged' : 'configuration_saved', fileId: file.id, branchId: r.branchId, revisionId: r.id, reviewId: r.reviewId, details: { reason: r.reason, message: r.message, links: r.links, before: r.parentIds[0] || null, after: r.id } }));
     state.events.sort((a, b) => b.at.localeCompare(a.at));
-    return { state, getFile, diff, save, createReview, addComment, resolveComment, approve, merge, fork, initialize, addRelease, revertReview, planMerge, history, blame };
+    return { state, getFile, diff, save, createReview, addComment, resolveComment, approve, merge, fork, initialize, addRelease, versionCatalog, suggestMinorVersion, nextPatch, revertReview, planMerge, history, blame };
   }
-  return { create, diff, fields, reconstruction: '2026-11-11', compareDecimal, normalizeLinks, changeMetadata };
+  return { create, diff, fields, reconstruction: '2026-11-11', compareDecimal, normalizeLinks, changeMetadata, formatFamily };
 });

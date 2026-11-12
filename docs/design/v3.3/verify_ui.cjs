@@ -160,6 +160,13 @@ const branch = (h, id = 'base-691') => file(h).branches.find(b => b.id === id);
 const record = (f, id) => f.revisions.find(r => r.id === id);
 const current = (h, id = 'base-691') => record(file(h), branch(h, id).headId);
 const snapshot = h => JSON.stringify({ head: branch(h).headId, revisions: file(h).revisions, events: h.M.state.events });
+const versionSnapshot = h => JSON.stringify({ file: file(h), events: h.M.state.events });
+const versionCatalog = h => h.M.versionCatalog('f-machine');
+const minorForRelease = (h, releaseId) => {
+  const catalog = versionCatalog(h), release = catalog.releases.find(r => r.id === releaseId); assert(release);
+  const minor = catalog.minors.find(m => m.id === release.minorId); assert(minor); return minor;
+};
+const releasePreview = h => h.query('#release-preview', 'dialog').textContent.replace(/\s+/g, '');
 const evidenceLinks = ['https://quality.example.invalid/tickets/QA-219', 'http://intranet.example.invalid/validation/691?run=42'];
 const explain = (h, reason, links = []) => {
   h.input('#save-message', reason);
@@ -182,7 +189,7 @@ const roadmapOptions = h => Object.assign({}, clone(h.S.roadmap), {
 const roadmapGraph = h => h.context.MCPrototypeRoadmap.layout(file(h), roadmapOptions(h));
 const roadmapDestination = (h, id) => clone(h.context.MCPrototypeRoadmap.locateRevision(file(h), id, roadmapOptions(h)));
 const assertLocatedRevision = (h, id, expected) => {
-  for (const key of ['level', 'familyId', 'releaseId', 'columnPage', 'lanePage']) assert.equal(h.S.roadmap[key], expected[key], 'Incorrect roadmap destination: ' + key);
+  for (const key of ['level', 'familyId', 'minorId', 'releaseId', 'columnPage', 'lanePage']) assert.equal(h.S.roadmap[key], expected[key], 'Incorrect roadmap destination: ' + key);
   assert.equal(h.S.roadmapBranch || 'all', expected.branchFilter);
   assert.equal(h.S.roadmapSelected, id);
   assert(roadmapGraph(h).visibleNodes.some(n => n.kind === 'revision' && n.id === id), 'Selected revision must be inside the displayed history window');
@@ -200,7 +207,7 @@ const extendBaselineHistory = (h, count = 35) => {
 };
 const assertRoadmapReset = h => {
   assert.equal(h.S.roadmap.level, 'families');
-  assert.equal(h.S.roadmap.familyId, null); assert.equal(h.S.roadmap.releaseId, null);
+  assert.equal(h.S.roadmap.familyId, null); assert.equal(h.S.roadmap.minorId, null); assert.equal(h.S.roadmap.releaseId, null);
   assert.deepEqual(clone(h.S.roadmap.expandedFamilies), []);
   assert.equal(h.S.roadmap.columnPage, 0); assert.equal(h.S.roadmap.lanePage, 0);
   assert.equal(h.S.roadmapSelected, null); assert.equal(h.S.roadmapBranch, 'all');
@@ -296,7 +303,7 @@ check('roadmap selection and details locate the exact adopted baseline across hi
   assert.equal(h.query('[data-action="edit"]', 'app').disabled, true);
 });
 
-check('roadmap family expansion and three-level navigation preserve real records and expose the frozen axes', async h => {
+check('roadmap family expansion and patch navigation preserve real records and expose the frozen axes', async h => {
   h.route('#/files/f-machine/roadmap');
   const before = snapshot(h), overview = roadmapGraph(h);
   assert.equal(overview.families.length, 2);
@@ -317,15 +324,26 @@ check('roadmap family expansion and three-level navigation preserve real records
   await h.action('roadmap-open-family', { family: familyId });
   assert.equal(h.S.roadmap.level, 'releases'); assert.equal(h.S.roadmap.familyId, familyId);
   assert(roadmapGraph(h).visibleNodes.every(n => n.kind === 'release-summary'));
-  const releaseButton = h.query('[data-action="roadmap-open-release"]', 'app'), releaseId = releaseButton.dataset.release;
-  await h.action('roadmap-open-release', { family: familyId, release: releaseId });
-  assert.equal(h.S.roadmap.level, 'history'); assert.equal(h.S.roadmap.releaseId, releaseId);
+  const minorButton = h.query('[data-action="roadmap-open-release"]', 'app'), minorId = minorButton.dataset.minor;
+  assert(minorId);
+  await h.action('roadmap-open-release', { family: familyId, minor: minorId });
+  assert.equal(h.S.roadmap.level, 'patches'); assert.equal(h.S.roadmap.minorId, minorId);
+  assert(roadmapGraph(h).visibleNodes.length > 0);
+  assert(roadmapGraph(h).visibleNodes.every(n => n.kind === 'patch-summary'));
+  assert.equal(h.all('[data-action="roadmap-parameters"]', 'app').length, 0);
+  assert.equal(h.all('[data-action="roadmap-export"]', 'app').length, 0, 'A patch summary must not export an implicit snapshot');
+  const buildButton = h.query('[data-action="roadmap-open-history"]', 'app'), releaseId = buildButton.dataset.release;
+  assert(releaseId);
+  await h.action('roadmap-open-history', { family: familyId, minor: minorId, release: releaseId });
+  assert.equal(h.S.roadmap.level, 'history'); assert.equal(h.S.roadmap.minorId, minorId); assert.equal(h.S.roadmap.releaseId, releaseId);
   assert(roadmapGraph(h).visibleNodes.every(n => n.kind === 'revision'));
   const scroll = h.query('[data-roadmap-scroll]', 'app');
   for (const selector of ['[data-roadmap-corner]', '[data-roadmap-family]', '[data-roadmap-release]', '[data-roadmap-lane-header]']) {
     const node = h.query(selector, 'app');
     assert.equal(node.closest('[data-roadmap-scroll]'), scroll, 'Frozen axes and records must share the declared scrolling region');
   }
+  assert(h.query('[data-action="roadmap-open-release"][data-minor="' + minorId + '"]', 'app'));
+  await h.action('roadmap-open-release', { family: familyId, minor: minorId }); assert.equal(h.S.roadmap.level, 'patches');
   assert(h.query('[data-action="roadmap-open-family"][data-family="' + familyId + '"]', 'app'));
   await h.action('roadmap-open-family', { family: familyId }); assert.equal(h.S.roadmap.level, 'releases');
   assert(h.query('[data-action="roadmap-overview"]', 'app'));
@@ -728,15 +746,143 @@ check('new-machine creation validates its reason before creating an asset or bra
 });
 
 check('new software version keeps a separate required reason and associated links', async h => {
-  await h.action('new-release'); h.input('#release-name', '692'); h.input('#release-reason', '');
-  const before = JSON.stringify(file(h).branches), events = h.M.state.events.length;
+  const parent = minorForRelease(h, '691');
+  await h.action('new-release'); await h.change('#release-family', parent.familyId); await h.change('#release-minor', 'new');
+  h.input('#release-name', '692'); h.input('#release-reason', '');
+  assert.equal(h.query('#release-kind').value, 'original'); assert.equal(h.query('#release-source').value, '');
+  const before = versionSnapshot(h), recordCount = file(h).revisions.length;
   await assert.rejects(h.action('create-release'), error => error.code === 'REASON_REQUIRED' || /原因|说明/.test(error.message));
-  assert.equal(JSON.stringify(file(h).branches), before); assert.equal(h.M.state.events.length, events);
+  assert.equal(versionSnapshot(h), before, 'A rejected form must not leave a family, minor, build or audit event behind');
+  assert.equal(h.query('#release-name').value, '692');
   h.input('#release-reason', '为软件 692 建立独立参数版本，等待对应版本文件'); h.input('#release-links', evidenceLinks.join('\n')); await h.action('create-release');
-  const created = file(h).branches.find(b => b.releaseId === '692'); assert(created);
+  const catalog = versionCatalog(h), minor = catalog.minors.find(m => m.familyId === parent.familyId && m.version === '692'); assert(minor);
+  const release = catalog.releases.find(r => r.minorId === minor.id && r.patchNumber === null); assert(release);
+  const created = file(h).branches.find(b => b.id === release.branchId); assert(created);
+  assert.equal(created.headId, null); assert.equal(file(h).revisions.length, recordCount);
+  assert.equal(h.S.route[2], 'parameters'); assert.equal(h.S.branchId, created.id);
+  assert(h.query('[data-action="initialize-branch"]', 'app'));
   assert.equal(created.creationReason, '为软件 692 建立独立参数版本，等待对应版本文件'); assert.deepEqual(clone(created.links), evidenceLinks);
   const event = h.M.state.events.find(ev => ev.action === 'release_created' && ev.branchId === created.id); assert(event);
   assert.equal(event.details.reason, created.creationReason); assert.deepEqual(clone(event.details.links), evidenceLinks);
+});
+
+check('version form resets dependent choices and source while preserving evidence and previewing explicit months', async h => {
+  const first = minorForRelease(h, '691'), second = minorForRelease(h, '6A1'), sibling = minorForRelease(h, '6A0');
+  const before = versionSnapshot(h), reason = '根据发布计划确认目标版本，保留验证资料供复核';
+  await h.action('new-release');
+  h.input('#release-reason', reason); h.input('#release-links', evidenceLinks.join('\n'));
+  await h.change('#release-family', first.familyId); await h.change('#release-minor', first.id);
+  assert.equal(h.query('#release-kind').value, 'patch');
+  assert.equal(h.query('#release-kind').querySelector('[value="original"]').disabled, true);
+  assert.equal(releasePreview(h), '691SPC001');
+  await h.change('#release-source', 'r-b12');
+  await h.change('#release-family', second.familyId);
+  assert.equal(h.query('#release-minor').value, 'new'); assert.equal(h.query('#release-kind').value, 'original');
+  assert.equal(h.query('#release-source').value, '');
+  assert.equal(h.query('#release-reason').value, reason); assert.equal(h.query('#release-links').value, evidenceLinks.join('\n'));
+  await h.change('#release-minor', second.id);
+  assert.equal(releasePreview(h), '6A1SPC002');
+  await h.change('#release-source', 'r-b15');
+  await h.change('#release-minor', sibling.id);
+  assert.equal(h.query('#release-source').value, ''); assert.equal(releasePreview(h), '6A0SPC001');
+  assert.equal(h.query('#release-reason').value, reason); assert.equal(h.query('#release-links').value, evidenceLinks.join('\n'));
+  await h.change('#release-family', 'new');
+  for (const [month, label] of [['2026-09', '69X'], ['2026-10', '6AX'], ['2027-01', '71X']]) {
+    await h.change('#release-month', month);
+    assert.equal(h.query('.release-generated', 'dialog').textContent, label);
+    assert.equal(h.query('#release-minor').value, 'new'); assert.equal(h.query('#release-source').value, '');
+    assert.equal(h.query('#release-reason').value, reason); assert.equal(h.query('#release-links').value, evidenceLinks.join('\n'));
+  }
+  h.input('#release-name', '   ');
+  assert.equal(h.query('[data-action="create-release"]', 'dialog').disabled, true);
+  await assert.rejects(h.action('create-release'), /小版本/);
+  assert(h.query('#release-error', 'dialog').textContent.includes('小版本'));
+  assert.equal(versionSnapshot(h), before);
+  await h.change('#release-family', first.familyId); await h.change('#release-minor', 'new');
+  h.input('#release-name', '691');
+  await assert.rejects(h.action('create-release'), /原版.*存在|版本.*存在/);
+  assert.equal(versionSnapshot(h), before); assert.equal(h.query('#release-name').value, '691');
+  h.input('#release-name', '692SPC001');
+  await assert.rejects(h.action('create-release'), error => error.code === 'INVALID_MINOR_VERSION');
+  assert.match(h.query('#release-error', 'dialog').textContent, /补丁/);
+  assert.equal(versionSnapshot(h), before); assert.equal(h.query('#release-name').value, '692SPC001');
+  assert.equal(h.query('#release-reason').value, reason); assert.equal(h.query('#release-links').value, evidenceLinks.join('\n'));
+  await h.action('close-dialog'); assert.equal(h.S.releaseDraft, null);
+  await h.action('new-release');
+  assert.equal(h.query('#release-reason').value, ''); assert.equal(h.query('#release-links').value, '');
+  assert.equal(h.query('#release-source').value, ''); assert.equal(versionSnapshot(h), before);
+  await h.action('close-dialog');
+});
+
+check('a new minor can start with a pending patch and later inherit an explicitly selected snapshot without inventing an original', async h => {
+  const originalFamily = versionCatalog(h).families.find(f => f.monthKey === '2026-09'); assert(originalFamily);
+  const originalHead = branch(h).headId, originalSnapshot = JSON.stringify(record(file(h), 'r-b12'));
+  const initialRecordCount = file(h).revisions.length;
+  await h.action('new-release'); await h.change('#release-family', 'new'); await h.change('#release-month', '2036-09');
+  h.input('#release-name', '699'); await h.change('#release-kind', 'patch');
+  assert.equal(releasePreview(h), '699SPC001'); assert.equal(h.query('#release-source').value, '');
+  const pendingReason = '为新年月版本登记首个补丁包，等待该补丁的配置文件';
+  h.input('#release-reason', pendingReason); h.input('#release-links', evidenceLinks.join('\n')); await h.action('create-release');
+  let catalog = versionCatalog(h);
+  const family = catalog.families.find(f => f.monthKey === '2036-09'); assert(family);
+  assert.equal(family.label, '69X'); assert.notEqual(family.id, originalFamily.id, 'The repeated short code must not merge different full years');
+  const minor = catalog.minors.find(m => m.familyId === family.id && m.version === '699'); assert(minor);
+  assert.equal(minor.originalReleaseId, null);
+  const pending = catalog.releases.find(r => r.minorId === minor.id && r.patchNumber === 1); assert(pending);
+  assert.equal(pending.headId, null); assert.equal(file(h).revisions.length, initialRecordCount);
+  assert.equal(h.S.route[2], 'parameters'); assert.equal(h.S.branchId, pending.branchId);
+  assert(h.query('[data-action="initialize-branch"]', 'app'));
+  const pendingEvent = h.M.state.events.find(ev => ev.action === 'release_created' && ev.branchId === pending.branchId); assert(pendingEvent);
+  assert.equal(pendingEvent.details.reason, pendingReason); assert.deepEqual(clone(pendingEvent.details.links), evidenceLinks);
+  assert.equal(pendingEvent.details.sourceRevisionId, null); assert.equal(pendingEvent.details.initialized, false);
+  await h.action('new-release');
+  const familySelect = h.query('#release-family');
+  assert(familySelect.querySelector('[value="' + originalFamily.id + '"]').textContent.includes('2026-09'));
+  assert(familySelect.querySelector('[value="' + family.id + '"]').textContent.includes('2036-09'));
+  await h.change('#release-family', family.id); await h.change('#release-minor', minor.id); await h.change('#release-kind', 'patch');
+  assert.equal(releasePreview(h), '699SPC002'); assert.equal(h.query('#release-source').value, '');
+  await h.change('#release-source', 'r-b12');
+  const reason = '第二个补丁明确采用已核对的保存记录作为配置起点';
+  h.input('#release-reason', reason); h.input('#release-links', evidenceLinks.join('\n')); await h.action('create-release');
+  catalog = versionCatalog(h);
+  const initialized = catalog.releases.find(r => r.minorId === minor.id && r.patchNumber === 2); assert(initialized?.headId);
+  const createdBranch = file(h).branches.find(b => b.id === initialized.branchId), head = record(file(h), initialized.headId), initial = record(file(h), createdBranch.initialRevisionId);
+  assert(initial); assert.deepEqual(clone(initial.parentIds), ['r-b12']); assert.equal(initial.sourceRevisionId, 'r-b12');
+  assert.deepEqual(clone(head.parentIds), [initial.id]); assert.deepEqual(clone(head.params), clone(record(file(h), 'r-b12').params));
+  assert.equal(initial.releaseId, initialized.id); assert.equal(head.releaseId, initialized.id);
+  assert.equal(catalog.minors.find(m => m.id === minor.id).originalReleaseId, null);
+  assert(catalog.releases.filter(r => r.minorId === minor.id).every(r => r.patchNumber !== null));
+  assert.equal(JSON.stringify(record(file(h), 'r-b12')), originalSnapshot); assert.equal(branch(h).headId, originalHead);
+  assertLocatedRevision(h, head.id, roadmapDestination(h, head.id));
+  assert.equal(h.S.roadmap.familyId, family.id); assert.equal(h.S.roadmap.minorId, minor.id); assert.equal(h.S.roadmap.releaseId, initialized.id);
+  checkRevisionEvidence(h, head, reason);
+  assert.equal(h.S.releaseDraft, null);
+});
+
+check('stale patch numbering rejects atomically and requires a second explicit submission with the refreshed number', async h => {
+  const minor = minorForRelease(h, '691'), originalHead = branch(h).headId;
+  await h.action('new-release'); await h.change('#release-family', minor.familyId); await h.change('#release-minor', minor.id);
+  assert.equal(releasePreview(h), '691SPC001'); await h.change('#release-source', 'r-b12');
+  const reason = '补丁发布前再次确认编号，并按验证记录建立配置';
+  h.input('#release-reason', reason); h.input('#release-links', evidenceLinks.join('\n'));
+  const competing = h.M.addRelease('f-machine', { target: { familyId: minor.familyId, minorId: minor.id, kind: 'patch' }, expectedPatchNumber: 1, reason: '并发样本：另一位维护者已登记首个补丁包' });
+  const before = versionSnapshot(h);
+  await assert.rejects(h.action('create-release'), error => error.code === 'PATCH_STALE');
+  assert.equal(versionSnapshot(h), before, 'A stale preview must not write a replacement number silently');
+  assert.equal(h.query('#dialog').open, true); assert.equal(releasePreview(h), '691SPC002');
+  assert.match(h.query('#release-error', 'dialog').textContent, /再次创建|重新.*创建/);
+  assert.equal(h.query('#release-reason').value, reason); assert.equal(h.query('#release-links').value, evidenceLinks.join('\n'));
+  assert.equal(h.query('#release-source').value, 'r-b12');
+  assert.equal(h.M.nextPatch('f-machine', minor.id).number, 2);
+  await h.action('create-release');
+  const catalog = versionCatalog(h), created = catalog.releases.find(r => r.minorId === minor.id && r.patchNumber === 2); assert(created?.headId);
+  assert.equal(catalog.releases.filter(r => r.minorId === minor.id && r.patchNumber !== null).length, 2);
+  assert(file(h).branches.some(b => b.id === competing.id)); assert.equal(branch(h).headId, originalHead);
+  assert.equal(h.query('#dialog').open, false); assert.equal(h.S.releaseDraft, null);
+  const head = record(file(h), created.headId);
+  assertLocatedRevision(h, head.id, roadmapDestination(h, head.id));
+  assert.equal(h.S.roadmap.releaseId, created.id); assert.equal(h.S.roadmap.minorId, minor.id);
+  checkRevisionEvidence(h, head, reason);
 });
 
 check('explicit head snapshot exits read-only and historical machine shows its own basis', async h => {

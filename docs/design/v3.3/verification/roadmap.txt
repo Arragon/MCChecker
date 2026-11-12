@@ -1,7 +1,12 @@
+MCChecker roadmap verification — 2026-11-12
+Command: node docs/design/v3.3/verify_roadmap.cjs
+Scope: pure Node data/HTML and conservative line/quadratic geometry checks.
+This is not browser, visual, scrolling, or accessibility acceptance.
+
 PASS canonical identities, topology and adopted bases remain immutable across views
-PASS families expand in place, releases drill down, and history contains only real records
+PASS families expand in place, minor and patch views drill down, and history contains only real records
 PASS summary connectors preserve exact edge sets and hide only internal real edges
-PASS restoring an older machine release creates a truthful backward version connector
+PASS restoring an older machine release repeats that version later and keeps causal edges forward
 PASS pending releases keep empty headers and initialization never invents saved ancestry
 PASS both window axes are bounded, baseline repeats, and all saved records remain reachable
 PASS locate opens exact history context and resolves both pages without changing all scope
@@ -11,4 +16,7 @@ PASS HTML escapes metadata and identifiers and only safe related URLs become lin
 PASS legacy descriptions remain visibly distinct from explicit change reasons
 PASS unknown ancestry and malformed DAGs remain explicit without phantom records
 PASS render accepts its prepared graph and emits one shared matrix with semantic header rows
-13/13 roadmap data/HTML checks passed (not browser QA)
+PASS summary forks followed by merges split into causal cards instead of creating an aggregate cycle
+PASS dense multi-parent routes and their actual quadratic corners avoid intervening cards in filtered windows
+PASS explicit minor and SPC catalogs keep original/SPC001/SPC002 distinct and disambiguate repeated family names
+16/16 roadmap data/HTML checks passed (not browser QA)

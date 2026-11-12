@@ -11,3 +11,11 @@
 /* The roadmap is the file's main work area; keep its surrounding chrome compact. */
 .roadmap-page .heading{min-height:44px;margin-bottom:10px}.roadmap-page .file-icon{height:36px}.roadmap-page .tabs{min-height:32px;margin-bottom:10px}.roadmap-page .roadmap-panel{min-height:0}.roadmap-page .roadmap-selection{padding:8px 12px;min-height:44px}.roadmap-page .roadmap-selection-name strong{overflow-wrap:anywhere}
 @media(max-width:760px){.roadmap-page .heading{margin-bottom:8px}.roadmap-page .roadmap-selection{padding:8px 10px}.roadmap-page .roadmap-selection-name{font-size:11px}}
+/* New software versions reuse the configuration dialog and form controls. */
+.release-form .release-levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.release-form .release-level{min-width:0;border-left:1px solid var(--line);padding-left:14px}.release-form .release-level:first-child{border-left:0;padding-left:0}
+.release-form .release-level .field:last-child{margin-bottom:0}.release-form .release-generated{color:#3b6594;font:13px var(--mono);line-height:20px}
+.release-form .release-preview{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;border:1px solid #d5e3f4;border-radius:6px;background:#f1f6ff;margin-bottom:16px}
+.release-form .release-preview>span{font-size:12px;color:#586b83}.release-form .release-preview>output{font:600 18px/1.5 var(--mono);color:#285b9b;overflow-wrap:anywhere;text-align:right}
+.release-form .release-source{margin-top:18px;margin-bottom:0}.release-form>.help-note{color:#586b83;margin:7px 0 16px}.release-form #release-error{margin:0 0 12px}
+@media(max-width:600px){.release-form .release-levels{grid-template-columns:1fr;gap:14px}.release-form .release-level{padding:0;border:0;border-top:1px solid var(--line);padding-top:14px}.release-form .release-level:first-child{border-top:0;padding-top:0}.release-form .release-preview{gap:9px}.release-form .release-preview>output{font-size:16px}}
